@@ -1863,7 +1863,7 @@ assert.equal(
 const versionConfig = JSON.parse(await fs.readFile("app.json", "utf8")).expo;
 assert.equal(
   await page.getByLabel("App version", { exact: true }).innerText(),
-  `Version ${versionConfig.version} · Build ${versionConfig.ios.buildNumber}`,
+  `Version ${versionConfig.version} · Update ${versionConfig.ios.buildNumber}`,
 );
 await page.reload();
 await page.getByRole("tab", { name: "记录", exact: true }).click();

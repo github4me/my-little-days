@@ -27,7 +27,7 @@ const english: Record<string, string> = {
   "无法保存视图设置，请重试。":
     "Could not save the view preference. Please try again.",
   应用版本: "App version",
-  "版本 {version} · 构建 {build}": "Version {version} · Build {build}",
+  "版本 {version} · 更新 {build}": "Version {version} · Update {build}",
   日: "Day",
   周: "Week",
   回到今天: "Today",

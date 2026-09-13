@@ -10,7 +10,7 @@ export default function AppVersion() {
       accessibilityLabel={t("应用版本")}
       style={{ fontSize: 11, color: c.muted, textAlign: "center" }}
     >
-      {t("版本 {version} · 构建 {build}", {
+      {t("版本 {version} · 更新 {build}", {
         version: app.expo.version,
         build: app.expo.ios.buildNumber,
       })}
