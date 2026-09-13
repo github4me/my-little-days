@@ -123,21 +123,119 @@ type RecordsProps = {
   onEdit: (e: Entry) => void;
   onDelete: (e: Entry) => void;
 };
+function ViewToggle({
+  value,
+  onChange,
+}: {
+  value: RecordView;
+  onChange: (value: RecordView) => void;
+}) {
+  const c = useContext(Theme);
+  return (
+    <View
+      style={{
+        flexDirection: "row",
+        flexShrink: 0,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: c.line,
+        overflow: "hidden",
+      }}
+    >
+      {(["calendar", "bars"] as const).map((option) => (
+        <Pressable
+          key={option}
+          accessibilityRole="button"
+          accessibilityLabel={t(option === "calendar" ? "日历视图" : "柱状图")}
+          accessibilityState={{ selected: value === option }}
+          aria-selected={value === option}
+          onPress={() => onChange(option)}
+          style={({ pressed }) => ({
+            width: 44,
+            height: 44,
+            alignItems: "center",
+            justifyContent: "center",
+            backgroundColor: value === option ? c.soft : c.card,
+            opacity: pressed ? 0.65 : 1,
+          })}
+        >
+          <Svg width={22} height={22} viewBox="0 0 24 24" aria-hidden>
+            {option === "calendar" ? (
+              <>
+                <Rect
+                  x={3}
+                  y={5}
+                  width={18}
+                  height={16}
+                  rx={3}
+                  fill="none"
+                  stroke={value === option ? c.primary : c.muted}
+                  strokeWidth={1.8}
+                />
+                <Line
+                  x1={3}
+                  y1={10}
+                  x2={21}
+                  y2={10}
+                  stroke={value === option ? c.primary : c.muted}
+                  strokeWidth={1.8}
+                />
+                <Line
+                  x1={8}
+                  y1={2}
+                  x2={8}
+                  y2={7}
+                  stroke={value === option ? c.primary : c.muted}
+                  strokeWidth={1.8}
+                />
+                <Line
+                  x1={16}
+                  y1={2}
+                  x2={16}
+                  y2={7}
+                  stroke={value === option ? c.primary : c.muted}
+                  strokeWidth={1.8}
+                />
+                {[7, 11, 15].map((x) => (
+                  <Rect
+                    key={x}
+                    x={x}
+                    y={14}
+                    width={2}
+                    height={2}
+                    fill={value === option ? c.primary : c.muted}
+                  />
+                ))}
+              </>
+            ) : (
+              <>
+                {[8, 16, 12].map((height, index) => (
+                  <Rect
+                    key={index}
+                    x={4 + index * 6}
+                    y={21 - height}
+                    width={4}
+                    height={height}
+                    rx={1}
+                    fill={value === option ? c.primary : c.muted}
+                  />
+                ))}
+              </>
+            )}
+          </Svg>
+        </Pressable>
+      ))}
+    </View>
+  );
+}
 export default function Records({
   defaultView,
   ...props
 }: RecordsProps & { defaultView: RecordView }) {
   const [view, setView] = useState(defaultView);
+  const viewToggle = <ViewToggle value={view} onChange={setView} />;
   return (
     <View style={{ gap: 16 }}>
-      <Chips
-        value={view}
-        options={[
-          { label: "日历视图", value: "calendar" },
-          { label: "柱状图", value: "bars" },
-        ]}
-        onChange={(value) => setView(value as RecordView)}
-      />
       <View
         style={{ display: view === "calendar" ? "flex" : "none" }}
         accessibilityElementsHidden={view !== "calendar"}
@@ -145,15 +243,16 @@ export default function Records({
           view !== "calendar" ? "no-hide-descendants" : "auto"
         }
       >
-        <RecordsCalendar {...props} />
+        <RecordsCalendar {...props} viewToggle={viewToggle} />
       </View>
       <View
-        style={{ display: view === "bars" ? "flex" : "none" }}
+        style={{ display: view === "bars" ? "flex" : "none", gap: 16 }}
         accessibilityElementsHidden={view !== "bars"}
         importantForAccessibility={
           view !== "bars" ? "no-hide-descendants" : "auto"
         }
       >
+        <View style={{ alignItems: "flex-end" }}>{viewToggle}</View>
         <BarRecords {...props} />
       </View>
     </View>

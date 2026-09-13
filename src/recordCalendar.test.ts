@@ -185,7 +185,8 @@ test("calendar date navigation validates dates and weeks across year boundaries"
   assert.equal(week[0].getDay(), 1);
   assert.equal(week[0].getFullYear(), 2025);
   assert.equal(week[6].getDay(), 0);
-  assert.equal(parseRecordView(undefined), "calendar");
+  assert.equal(parseRecordView(undefined), "bars");
   assert.equal(parseRecordView("bars"), "bars");
-  assert.equal(parseRecordView("broken"), "calendar");
+  assert.equal(parseRecordView("broken"), "bars");
+  assert.equal(parseRecordView("calendar"), "calendar");
 });

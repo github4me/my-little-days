@@ -3,7 +3,7 @@ import type { Entry } from "./domain";
 export type RecordView = "bars" | "calendar";
 export type CalendarKind = "all" | "feed" | "diaper" | "sleep";
 export function parseRecordView(value: unknown): RecordView {
-  return value === "bars" ? "bars" : "calendar";
+  return value === "calendar" ? "calendar" : "bars";
 }
 export const calendarDayKey = (date: Date) =>
   `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;

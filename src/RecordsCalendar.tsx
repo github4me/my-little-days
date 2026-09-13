@@ -44,11 +44,13 @@ export default function RecordsCalendar({
   now,
   onEdit,
   onDelete,
+  viewToggle,
 }: {
   entries: Entry[];
   now: number;
   onEdit: (entry: Entry) => void;
   onDelete: (entry: Entry) => void;
+  viewToggle: React.ReactNode;
 }) {
   const c = useContext(Theme);
   const [chosenDay, setChosenDay] = useState<string | null>(null);
@@ -132,26 +134,55 @@ export default function RecordsCalendar({
   }
   return (
     <View style={{ gap: 16 }}>
-      <View style={row}>
-        <Chips
-          value={mode}
-          options={[
-            { label: "日", value: "day" },
-            { label: "周", value: "week" },
-          ]}
-          onChange={(value) => {
-            setMode(value);
-            setExpandedList(false);
-          }}
-        />
-        <Button
-          secondary
-          label="回到今天"
-          onPress={() => {
-            setChosenDay(null);
-            setExpandedList(false);
-          }}
-        />
+      <View
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 8,
+        }}
+      >
+        <View style={{ flexDirection: "row", alignItems: "center" }}>
+          {(["day", "week", "today"] as const).map((option) => (
+            <Pressable
+              key={option}
+              accessibilityRole="button"
+              accessibilityLabel={t(
+                option === "day" ? "日" : option === "week" ? "周" : "回到今天",
+              )}
+              accessibilityState={{
+                selected: option !== "today" && mode === option,
+              }}
+              aria-selected={option !== "today" && mode === option}
+              onPress={() => {
+                if (option === "today") setChosenDay(null);
+                else setMode(option);
+                setExpandedList(false);
+              }}
+              style={({ pressed }) => ({
+                minWidth: 44,
+                minHeight: 44,
+                paddingHorizontal: 8,
+                alignItems: "center",
+                justifyContent: "center",
+                borderRadius: 10,
+                backgroundColor: mode === option ? c.soft : "transparent",
+                opacity: pressed ? 0.65 : 1,
+              })}
+            >
+              <T
+                style={{
+                  fontSize: 13,
+                  fontWeight: mode === option ? "700" : "400",
+                  color: mode === option ? c.primary : c.muted,
+                }}
+              >
+                {option === "day" ? "日" : option === "week" ? "周" : "今天"}
+              </T>
+            </Pressable>
+          ))}
+        </View>
+        {viewToggle}
       </View>
       <View style={[row, { gap: 6 }]}>
         <Pressable

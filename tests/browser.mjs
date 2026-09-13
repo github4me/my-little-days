@@ -507,6 +507,13 @@ assert.equal(
   1,
 );
 await assertNoUntranslatedChinese("Privacy & support");
+await page.getByText("Credits", { exact: true }).waitFor();
+await page
+  .getByText(
+    "Thank you to Trista (FPH), Mia, Violet, Bill, and everyone who supports My Little Days. We look forward to welcoming more people to help make it even better.",
+    { exact: true },
+  )
+  .waitFor();
 await page.getByRole("button", { name: "Back to More", exact: true }).click();
 await page.getByText("Care reminders", { exact: true }).waitFor();
 await page.screenshot({
@@ -1683,9 +1690,43 @@ await chooseEnglish();
 await page.getByRole("tab", { name: "Records", exact: true }).click();
 assert.equal(
   await page
-    .getByRole("button", { name: "Calendar", exact: true })
+    .getByRole("button", { name: "Bar chart", exact: true })
     .getAttribute("aria-selected"),
   "true",
+);
+await page.getByRole("button", { name: "Calendar", exact: true }).click();
+async function assertCompactCalendarToolbar(labels) {
+  const boxes = await Promise.all(
+    labels.map((name) =>
+      page.getByRole("button", { name, exact: true }).boundingBox(),
+    ),
+  );
+  assert.ok(boxes.every((box) => box && box.width >= 44 && box.height >= 44));
+  assert.ok(
+    boxes.every((box) => Math.abs(box.y - boxes[0].y) <= 2),
+    "calendar controls should share one row",
+  );
+  assert.ok(
+    boxes.every(
+      (box, index) =>
+        index === 0 || box.x >= boxes[index - 1].x + boxes[index - 1].width,
+    ),
+    "calendar tools left, view icons right",
+  );
+  assert.ok(
+    boxes.at(-1).x + boxes.at(-1).width <= page.viewportSize().width - 18,
+  );
+}
+await assertCompactCalendarToolbar([
+  "Day",
+  "Week",
+  "Today",
+  "Calendar",
+  "Bar chart",
+]);
+assert.equal(
+  await page.getByRole("button", { name: "Calendar", exact: true }).innerText(),
+  "",
 );
 await page
   .getByRole("button", { name: "Choose calendar date", exact: true })
@@ -1818,6 +1859,13 @@ assert.equal(
   "true",
 );
 await page.getByRole("button", { name: "日历视图", exact: true }).click();
+await assertCompactCalendarToolbar([
+  "日",
+  "周",
+  "回到今天",
+  "日历视图",
+  "柱状图",
+]);
 await page.getByRole("button", { name: "选择日历日期", exact: true }).click();
 await page.getByLabel("日历日期", { exact: true }).fill(calendarDate);
 await page.getByRole("button", { name: "前往日期", exact: true }).click();

@@ -17,6 +17,9 @@ const english: Record<string, string> = {
   今天: "Today",
   记录: "Records",
   日历视图: "Calendar",
+  致谢: "Credits",
+  "感谢 Trista (FPH)、Mia、Violet、Bill，以及每一位支持小日子的人。期待更多人加入，一起让小日子更好。":
+    "Thank you to Trista (FPH), Mia, Violet, Bill, and everyone who supports My Little Days. We look forward to welcoming more people to help make it even better.",
   柱状图: "Bar chart",
   记录默认视图: "Default Records view",
   "选择后立即保存；每次进入记录页时使用，也可在记录页临时切换。":

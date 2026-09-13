@@ -144,7 +144,7 @@ function BabyApp({
   const compactTitle = useWindowDimensions().width < 360;
   const systemTheme = useColorScheme();
   const [themePreference, setThemePreference] = useState<boolean | null>(null);
-  const [recordView, setRecordView] = useState<RecordView>("calendar");
+  const [recordView, setRecordView] = useState<RecordView>("bars");
   const darkMode = themePreference ?? systemTheme === "dark";
   const c = darkMode ? dark : light;
   const [state, setState] = useState<State | null>(null),
