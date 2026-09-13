@@ -4,6 +4,7 @@ import {
   type ReminderSettings,
 } from "./reminderSettings";
 import type { LanguagePreference } from "./i18n";
+import { parseRecordView, type RecordView } from "./recordCalendar";
 import {
   parsePlayFavorites,
   playCheckinKey,
@@ -11,6 +12,12 @@ import {
   type PlaySelection,
 } from "./learning";
 const KEY = "little-days-v1";
+export async function loadRecordView(): Promise<RecordView> {
+  return parseRecordView(localStorage.getItem(KEY + "-record-view"));
+}
+export async function saveRecordView(value: RecordView): Promise<void> {
+  localStorage.setItem(KEY + "-record-view", parseRecordView(value));
+}
 export async function loadPlaySelection(): Promise<PlaySelection> {
   return parsePlaySelection(localStorage.getItem(KEY + "-play-selection"));
 }

@@ -4,6 +4,8 @@ import Svg, { Rect, Line, Text as Label } from "react-native-svg";
 import { Entry, summarize } from "./domain";
 import { Theme, T, Card, Chips, row } from "./ui";
 import { elapsed, formatDate, formatTime, t } from "./i18n";
+import RecordsCalendar from "./RecordsCalendar";
+import type { RecordView } from "./recordCalendar";
 import {
   recordRangeStart,
   recordChartBuckets,
@@ -115,7 +117,49 @@ function Bars({
     </Svg>
   );
 }
+type RecordsProps = {
+  entries: Entry[];
+  now: number;
+  onEdit: (e: Entry) => void;
+  onDelete: (e: Entry) => void;
+};
 export default function Records({
+  defaultView,
+  ...props
+}: RecordsProps & { defaultView: RecordView }) {
+  const [view, setView] = useState(defaultView);
+  return (
+    <View style={{ gap: 16 }}>
+      <Chips
+        value={view}
+        options={[
+          { label: "日历视图", value: "calendar" },
+          { label: "柱状图", value: "bars" },
+        ]}
+        onChange={(value) => setView(value as RecordView)}
+      />
+      <View
+        style={{ display: view === "calendar" ? "flex" : "none" }}
+        accessibilityElementsHidden={view !== "calendar"}
+        importantForAccessibility={
+          view !== "calendar" ? "no-hide-descendants" : "auto"
+        }
+      >
+        <RecordsCalendar {...props} />
+      </View>
+      <View
+        style={{ display: view === "bars" ? "flex" : "none" }}
+        accessibilityElementsHidden={view !== "bars"}
+        importantForAccessibility={
+          view !== "bars" ? "no-hide-descendants" : "auto"
+        }
+      >
+        <BarRecords {...props} />
+      </View>
+    </View>
+  );
+}
+function BarRecords({
   entries,
   now,
   onEdit,

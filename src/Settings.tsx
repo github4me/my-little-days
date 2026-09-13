@@ -20,6 +20,7 @@ import {
 import { type ReminderMode, type ReminderSettings } from "./reminderSettings";
 import { copyAvatarFile, deleteAvatarFile } from "./avatar";
 import { t, type LanguagePreference } from "./i18n";
+import type { RecordView } from "./recordCalendar";
 
 const reminderKindLabels = {
   feed: "喂养",
@@ -70,6 +71,8 @@ export default function Settings({
   onAvatarChange,
   onCommit,
   themePreference,
+  recordView,
+  onRecordViewChange,
   onDarkMode,
   language,
   onLanguageChange,
@@ -81,6 +84,8 @@ export default function Settings({
   onAvatarChange: (uri: string | null) => Promise<void>;
   onCommit: (next: State, recovery?: boolean) => Promise<void>;
   themePreference: boolean | null;
+  recordView: RecordView;
+  onRecordViewChange: (value: RecordView) => Promise<void>;
   onDarkMode: (v: boolean | null) => Promise<void>;
   language: LanguagePreference;
   onLanguageChange: (language: LanguagePreference) => Promise<void>;
@@ -519,6 +524,54 @@ export default function Settings({
         </View>
         <T style={{ color: c.muted, fontSize: 13 }}>
           自动跟随设备的系统外观，选择后立即保存。
+        </T>
+      </SettingsSection>
+      <SettingsSection title="记录默认视图" busy={busy}>
+        <View
+          accessibilityRole="radiogroup"
+          accessibilityLabel={t("记录默认视图")}
+        >
+          {(
+            [
+              ["calendar", "日历视图", "▦"],
+              ["bars", "柱状图", "▥"],
+            ] as const
+          ).map(([value, label, icon]) => (
+            <Pressable
+              key={value}
+              accessibilityRole="radio"
+              accessibilityLabel={t(label)}
+              accessibilityState={{
+                checked: recordView === value,
+                disabled: busy,
+              }}
+              disabled={busy}
+              style={[row, { minHeight: 52 }]}
+              onPress={async () => {
+                if (lock.current) return;
+                lock.current = true;
+                setBusy(true);
+                setError("");
+                try {
+                  await onRecordViewChange(value);
+                } catch {
+                  setError(t("无法保存视图设置，请重试。"));
+                } finally {
+                  lock.current = false;
+                  if (mounted.current) setBusy(false);
+                }
+              }}
+            >
+              <T style={{ fontSize: 24, width: 30 }}>{icon}</T>
+              <T style={{ flex: 1 }}>{label}</T>
+              <T style={{ color: c.primary, fontSize: 22 }}>
+                {recordView === value ? "✓" : "○"}
+              </T>
+            </Pressable>
+          ))}
+        </View>
+        <T style={{ fontSize: 13, color: c.muted }}>
+          选择后立即保存；每次进入记录页时使用，也可在记录页临时切换。
         </T>
       </SettingsSection>
       <SettingsSection title="照护提醒" busy={busy}>

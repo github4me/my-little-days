@@ -75,6 +75,12 @@ await page.route("http://little-days.test/**", async (route) => {
 });
 
 await page.goto("http://little-days.test/");
+// Run existing chart regressions with the explicit Bar preference. Calendar
+// defaults and preference round trips are covered at the end of this suite.
+await page.evaluate(() =>
+  localStorage.setItem("little-days-v1-record-view", "bars"),
+);
+await page.reload();
 await page.getByText("Baby的小日子", { exact: true }).waitFor();
 await page.getByRole("button", { name: "打开宝宝档案", exact: true }).click();
 await page.getByRole("button", { name: "收起宝宝档案", exact: true }).waitFor();
@@ -1590,6 +1596,247 @@ assert.equal(
 );
 assert.equal(await page.getByText(/按喂养当天日龄/).count(), 0);
 await page.getByLabel("关闭记录编辑", { exact: true }).click();
+// Calendar is the initial view; all types share a timeline and real edit/delete flows.
+const calendarDate = await page.evaluate(() => {
+  const day = new Date();
+  day.setDate(day.getDate() - 1);
+  day.setHours(0, 0, 0, 0);
+  const at = (hour, minute = 0) =>
+    new Date(
+      day.getFullYear(),
+      day.getMonth(),
+      day.getDate(),
+      hour,
+      minute,
+    ).toISOString();
+  const previous = new Date(day);
+  previous.setHours(-1);
+  localStorage.removeItem("little-days-v1-record-view");
+  localStorage.setItem("little-days-v1-dark", "true");
+  localStorage.setItem(
+    "little-days-v1",
+    JSON.stringify({
+      schemaVersion: 1,
+      profile: { name: "Baby", birthDate: "", sex: "unspecified" },
+      entries: [
+        {
+          id: "calendar-feed-60",
+          type: "feed",
+          feedKind: "formula",
+          amount: 60,
+          start: at(9),
+          end: at(9, 20),
+          note: "Calendar feed note",
+        },
+        {
+          id: "calendar-feed-90",
+          type: "feed",
+          feedKind: "expressed",
+          amount: 90,
+          start: at(9),
+          end: at(9, 30),
+          note: "",
+        },
+        {
+          id: "calendar-nappy",
+          type: "diaper",
+          diaperKind: "wet",
+          start: at(9),
+          note: "",
+        },
+        {
+          id: "calendar-nappy-2",
+          type: "diaper",
+          diaperKind: "dirty",
+          start: at(11),
+          note: "",
+        },
+        {
+          id: "calendar-nappy-3",
+          type: "diaper",
+          diaperKind: "mixed",
+          start: at(18),
+          note: "",
+        },
+        {
+          id: "calendar-night",
+          type: "sleep",
+          start: previous.toISOString(),
+          end: at(2),
+          note: "Crosses midnight",
+        },
+        {
+          id: "calendar-nap",
+          type: "sleep",
+          start: at(14),
+          end: at(15),
+          note: "",
+        },
+      ],
+    }),
+  );
+  return `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`;
+});
+await page.reload();
+await page.getByRole("tab", { name: "我的", exact: true }).click();
+await chooseEnglish();
+await page.getByRole("tab", { name: "Records", exact: true }).click();
+assert.equal(
+  await page
+    .getByRole("button", { name: "Calendar", exact: true })
+    .getAttribute("aria-selected"),
+  "true",
+);
+await page
+  .getByRole("button", { name: "Choose calendar date", exact: true })
+  .click();
+await page.getByLabel("Calendar date", { exact: true }).fill(calendarDate);
+await page.getByRole("button", { name: "Go to date", exact: true }).click();
+assert.equal(
+  await page.getByRole("button", { name: /^View record:/ }).count(),
+  7,
+);
+await page
+  .getByText("150 mL · 3 nappies · Sleep 3h 0m", { exact: true })
+  .waitFor();
+await page
+  .getByRole("button", { name: "Show all calendar records", exact: true })
+  .click();
+assert.equal(
+  await page.getByRole("button", { name: /^Open calendar record:/ }).count(),
+  7,
+);
+await page
+  .getByRole("button", { name: "View record: Feed 60 mL · 09:00", exact: true })
+  .click();
+await page.getByText("Calendar feed note", { exact: true }).waitFor();
+await page.getByRole("button", { name: "Edit record", exact: true }).click();
+await waitForFeedEditor("Close editor");
+await page.getByLabel("Amount fed", { exact: true }).fill("75");
+await page.getByRole("button", { name: "Save record", exact: true }).click();
+await page
+  .getByLabel("Close editor", { exact: true })
+  .waitFor({ state: "detached" });
+await page
+  .getByRole("button", { name: "View record: Feed 75 mL · 09:00", exact: true })
+  .waitFor();
+await page
+  .getByRole("button", { name: "View record: Pee · 09:00", exact: true })
+  .click();
+await page.getByRole("button", { name: "Delete record", exact: true }).click();
+await page.getByRole("button", { name: "Cancel", exact: true }).click();
+assert.equal(
+  await page.getByRole("button", { name: /^View record:/ }).count(),
+  7,
+);
+await page
+  .getByRole("button", { name: "View record: Pee · 09:00", exact: true })
+  .click();
+await page.getByRole("button", { name: "Delete record", exact: true }).click();
+await page.getByRole("button", { name: "Delete record", exact: true }).click();
+await page
+  .getByRole("button", { name: "View record: Pee · 09:00", exact: true })
+  .waitFor({ state: "detached" });
+assert.equal(
+  await page.evaluate(
+    () => JSON.parse(localStorage.getItem("little-days-v1")).entries.length,
+  ),
+  6,
+);
+await page.getByRole("button", { name: "Week", exact: true }).click();
+assert.ok(
+  (await page.getByRole("button", { name: /^View record:/ }).count()) >= 6,
+);
+await assertNoUntranslatedChinese("calendar week and details");
+await page.getByRole("button", { name: "Day", exact: true }).click();
+await page
+  .getByRole("button", { name: "Choose calendar date", exact: true })
+  .scrollIntoViewIfNeeded();
+await page.screenshot({
+  path: path.join(
+    process.env.TEMP ?? "docs",
+    "little-days-calendar-en-dark.png",
+  ),
+});
+await page.getByRole("button", { name: "Bar chart", exact: true }).click();
+await page.getByRole("button", { name: "Sleep", exact: true }).click();
+await page.getByRole("button", { name: "1 month", exact: true }).click();
+await page.getByRole("button", { name: "Calendar", exact: true }).click();
+await page.getByRole("button", { name: "Bar chart", exact: true }).click();
+assert.equal(
+  await page
+    .getByRole("button", { name: "Sleep", exact: true })
+    .getAttribute("aria-selected"),
+  "true",
+);
+assert.equal(
+  await page
+    .getByRole("button", { name: "1 month", exact: true })
+    .getAttribute("aria-selected"),
+  "true",
+);
+assert.equal(
+  await page.evaluate(() => localStorage.getItem("little-days-v1-record-view")),
+  null,
+);
+await page.getByRole("tab", { name: "More", exact: true }).click();
+await page
+  .getByRole("button", { name: "Expand Default Records view", exact: true })
+  .click();
+await page.getByRole("radio", { name: "Bar chart", exact: true }).click();
+assert.equal(
+  await page.evaluate(() => localStorage.getItem("little-days-v1-record-view")),
+  "bars",
+);
+await page.getByRole("tab", { name: "Records", exact: true }).click();
+assert.equal(
+  await page
+    .getByRole("button", { name: "Bar chart", exact: true })
+    .getAttribute("aria-selected"),
+  "true",
+);
+await page.getByRole("button", { name: "Calendar", exact: true }).click();
+await page.getByRole("tab", { name: "Today", exact: true }).click();
+await page.getByRole("tab", { name: "Records", exact: true }).click();
+assert.equal(
+  await page
+    .getByRole("button", { name: "Bar chart", exact: true })
+    .getAttribute("aria-selected"),
+  "true",
+);
+const versionConfig = JSON.parse(await fs.readFile("app.json", "utf8")).expo;
+assert.equal(
+  await page.getByLabel("App version", { exact: true }).innerText(),
+  `Version ${versionConfig.version} · Build ${versionConfig.ios.buildNumber}`,
+);
+await page.reload();
+await page.getByRole("tab", { name: "记录", exact: true }).click();
+assert.equal(
+  await page
+    .getByRole("button", { name: "柱状图", exact: true })
+    .getAttribute("aria-selected"),
+  "true",
+);
+await page.getByRole("button", { name: "日历视图", exact: true }).click();
+await page.getByRole("button", { name: "选择日历日期", exact: true }).click();
+await page.getByLabel("日历日期", { exact: true }).fill(calendarDate);
+await page.getByRole("button", { name: "前往日期", exact: true }).click();
+assert.equal(
+  await page.getByRole("button", { name: /^查看记录：/ }).count(),
+  6,
+);
+assert.equal(
+  await page.evaluate(
+    () => document.documentElement.scrollWidth <= window.innerWidth,
+  ),
+  true,
+);
+await page
+  .getByRole("button", { name: "选择日历日期", exact: true })
+  .scrollIntoViewIfNeeded();
+await page.screenshot({
+  path: path.join(process.env.TEMP ?? "docs", "little-days-calendar-zh.png"),
+});
 assert.deepEqual(errors, []);
 console.log(
   "PASS: clean home, removed controls/milestones, daily chart summaries and intervals, unit switch, confirmed deletion without undo, growth, old data retained, dark mode, narrow layout.",

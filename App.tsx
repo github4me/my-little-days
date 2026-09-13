@@ -24,11 +24,15 @@ import {
   saveAvatarUri,
   loadLanguage,
   saveLanguage,
+  loadRecordView,
+  saveRecordView,
 } from "./src/storage";
 import { importBackup } from "./src/backup";
 import EntryEditor, { newEntry } from "./src/EntryEditor";
 import GrowthChart, { Metric } from "./src/GrowthChart";
 import Records from "./src/Records";
+import AppVersion from "./src/AppVersion";
+import type { RecordView } from "./src/recordCalendar";
 import Settings from "./src/Settings";
 import PrivacySupport from "./src/PrivacySupport";
 import FeedStopButton from "./src/FeedStopButton";
@@ -140,6 +144,7 @@ function BabyApp({
   const compactTitle = useWindowDimensions().width < 360;
   const systemTheme = useColorScheme();
   const [themePreference, setThemePreference] = useState<boolean | null>(null);
+  const [recordView, setRecordView] = useState<RecordView>("calendar");
   const darkMode = themePreference ?? systemTheme === "dark";
   const c = darkMode ? dark : light;
   const [state, setState] = useState<State | null>(null),
@@ -183,16 +188,19 @@ function BabyApp({
   }
   async function init() {
     try {
-      const [s, preference, savedAvatarUri] = await Promise.all([
-        loadState(),
-        loadTheme(),
-        loadAvatarUri(),
-      ]);
+      const [s, preference, savedAvatarUri, savedRecordView] =
+        await Promise.all([
+          loadState(),
+          loadTheme(),
+          loadAvatarUri(),
+          loadRecordView(),
+        ]);
       stateRef.current = s;
       setState(s);
       setAvatarUri(savedAvatarUri);
       setFatal("");
       setThemePreference(preference);
+      setRecordView(savedRecordView);
     } catch (e) {
       setFatal(
         `${t("无法读取本地数据，原数据没有被覆盖。")} ${(e as Error).message}`,
@@ -818,6 +826,7 @@ function BabyApp({
             ) : null}
             {tab === "records" ? (
               <Records
+                defaultView={recordView}
                 entries={entries}
                 now={now}
                 onEdit={setEditor}
@@ -985,6 +994,11 @@ function BabyApp({
                     await commit(next, recovery);
                   }}
                   themePreference={themePreference}
+                  recordView={recordView}
+                  onRecordViewChange={async (value) => {
+                    await saveRecordView(value);
+                    setRecordView(value);
+                  }}
                   language={language}
                   onLanguageChange={changeLanguage}
                   onOpenPrivacy={() => setSettingsPage("privacy")}
@@ -1013,6 +1027,7 @@ function BabyApp({
                 陪伴成长 · 不必完美记录
               </T>
             ) : null}
+            <AppVersion />
           </ScrollView>
           <SafeAreaView
             edges={["bottom"]}

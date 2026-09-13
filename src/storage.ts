@@ -5,6 +5,7 @@ import {
   type ReminderSettings,
 } from "./reminderSettings";
 import type { LanguagePreference } from "./i18n";
+import { parseRecordView, type RecordView } from "./recordCalendar";
 import {
   parsePlayFavorites,
   playCheckinKey,
@@ -33,6 +34,24 @@ export async function loadState(): Promise<State> {
   return row
     ? validateState(JSON.parse(row.value))
     : { ...initialState, profile: { ...initialState.profile }, entries: [] };
+}
+export async function loadRecordView(): Promise<RecordView> {
+  const row = await (
+    await db()
+  ).getFirstAsync<{ value: string }>(
+    "SELECT value FROM app_data WHERE key = ?",
+    "record-view",
+  );
+  return parseRecordView(row?.value);
+}
+export async function saveRecordView(value: RecordView): Promise<void> {
+  await (
+    await db()
+  ).runAsync(
+    "INSERT OR REPLACE INTO app_data (key,value) VALUES (?,?)",
+    "record-view",
+    parseRecordView(value),
+  );
 }
 export async function saveState(state: State, recovery = false): Promise<void> {
   const data = JSON.stringify(validateState(state)),

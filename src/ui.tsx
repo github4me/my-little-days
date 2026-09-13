@@ -155,6 +155,7 @@ export function Chips({
           accessibilityRole="button"
           accessibilityLabel={t(o.label)}
           accessibilityState={{ selected: value === o.value }}
+          aria-selected={value === o.value}
           key={o.value}
           onPress={() => onChange(o.value)}
           style={{
