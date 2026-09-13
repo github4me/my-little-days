@@ -8,4 +8,5 @@ dist-web/
 .env*
 .DS_Store
 .incoming-update/
+work/
 docs/FAMILY-SHARING-TECH-PLAN.md

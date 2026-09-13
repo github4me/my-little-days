@@ -1093,6 +1093,7 @@ function BabyApp({
         {editor ? (
           <EntryEditor
             entry={editor}
+            birthDate={state.profile.birthDate}
             onSave={upsert}
             onClose={() => setEditor(null)}
             dark={darkMode}

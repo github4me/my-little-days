@@ -1422,6 +1422,174 @@ await page.screenshot({
     "little-days-daily-care-dark.png",
   ),
 });
+// Formula shortcuts follow age on the feed date without replacing actual intake.
+await page.setViewportSize({ width: 320, height: 844 });
+const feedDates = await page.evaluate(() => {
+  const today = new Date();
+  const asDate = (date) =>
+    `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  const birth = new Date(today);
+  birth.setDate(birth.getDate() - 14);
+  const firstWeek = new Date(birth);
+  firstWeek.setDate(firstWeek.getDate() + 6);
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  localStorage.setItem(
+    "little-days-v1",
+    JSON.stringify({
+      schemaVersion: 1,
+      profile: { name: "Baby", birthDate: asDate(birth), sex: "unspecified" },
+      entries: [],
+    }),
+  );
+  return { firstWeek: asDate(firstWeek), yesterday: asDate(yesterday) };
+});
+await page.reload();
+await page.getByRole("tab", { name: "我的", exact: true }).click();
+await chooseEnglish();
+await page.getByRole("tab", { name: "Today", exact: true }).click();
+await page.getByRole("button", { name: "+ Add", exact: true }).first().click();
+async function assertAmountShortcuts(expected) {
+  const buttons = page.getByRole("button", { name: /^\d+ mL$/ });
+  assert.deepEqual(
+    await buttons.allTextContents(),
+    expected.map((n) => `${n} mL`),
+  );
+  const boxes = await buttons.evaluateAll((elements) =>
+    elements.map((element) => {
+      const box = element.getBoundingClientRect();
+      return { x: box.x, y: box.y, width: box.width, height: box.height };
+    }),
+  );
+  assert.ok(
+    boxes.every(
+      (box) =>
+        Math.abs(box.y - boxes[0].y) < 1 &&
+        box.x >= 0 &&
+        box.x + box.width <= 320 &&
+        box.height >= 44,
+    ),
+    `age-aware amount shortcuts must remain on one row with usable touch targets: ${JSON.stringify(boxes)}`,
+  );
+}
+async function waitForFeedEditor(closeLabel) {
+  await page.getByLabel(closeLabel, { exact: true }).waitFor();
+  await page.waitForFunction((label) => {
+    const close = document.querySelector(`[aria-label="${label}"]`);
+    return close && close.getBoundingClientRect().top <= 24;
+  }, closeLabel);
+}
+await waitForFeedEditor("Close editor");
+await page.getByText(/Quick amounts for age at feed \(14 days\)/).waitFor();
+await assertAmountShortcuts([30, 60, 90, 120]);
+assert.equal(
+  await page.getByLabel("Amount fed", { exact: true }).inputValue(),
+  "120",
+);
+await page
+  .getByRole("link", { name: "Formula feeding guide · AAP ↗", exact: true })
+  .waitFor();
+await assertNoUntranslatedChinese("age-aware feed editor");
+await page.getByLabel("Amount fed", { exact: true }).scrollIntoViewIfNeeded();
+for (const label of ["Time date", "Time time"]) {
+  const box = await page.getByLabel(label, { exact: true }).boundingBox();
+  assert.ok(
+    box && box.x >= 0 && box.x + box.width <= 320,
+    `${label} must fit a narrow screen`,
+  );
+}
+await page.screenshot({
+  path: path.join(
+    process.env.TEMP ?? "docs",
+    "little-days-feed-presets-en-dark.png",
+  ),
+});
+await page.getByLabel("Amount fed", { exact: true }).fill("57.5");
+await page.getByLabel("Time date", { exact: true }).fill(feedDates.firstWeek);
+await assertAmountShortcuts([15, 30, 45, 60]);
+assert.equal(
+  await page.getByLabel("Amount fed", { exact: true }).inputValue(),
+  "57.5",
+);
+await page
+  .getByRole("button", { name: "Feeding method: Bottle", exact: true })
+  .click();
+await assertAmountShortcuts([60, 90, 120, 150]);
+assert.equal(
+  await page.getByLabel("Amount fed", { exact: true }).inputValue(),
+  "57.5",
+);
+assert.equal(await page.getByText(/Quick amounts for age at feed/).count(), 0);
+await page
+  .getByRole("button", { name: "Feeding method: Left", exact: true })
+  .click();
+assert.equal(await page.getByLabel("Amount fed", { exact: true }).count(), 0);
+await page
+  .getByRole("button", { name: "Feeding method: Formula", exact: true })
+  .click();
+await assertAmountShortcuts([15, 30, 45, 60]);
+assert.equal(
+  await page.getByLabel("Amount fed", { exact: true }).inputValue(),
+  "57.5",
+);
+await page.getByLabel("Time date", { exact: true }).fill(feedDates.yesterday);
+await page.getByLabel("Time time", { exact: true }).fill("10:00");
+await assertAmountShortcuts([30, 60, 90, 120]);
+await page.getByRole("button", { name: "60 mL", exact: true }).click();
+await page
+  .getByRole("button", { name: "+ Add end time (optional)", exact: true })
+  .click();
+await page.getByRole("button", { name: "Save record", exact: true }).click();
+await page
+  .getByLabel("Close editor", { exact: true })
+  .waitFor({ state: "detached" });
+assert.equal(
+  await page.evaluate(
+    () => JSON.parse(localStorage.getItem("little-days-v1")).entries[0].amount,
+  ),
+  60,
+);
+await page.evaluate(() => localStorage.setItem("little-days-v1-dark", "false"));
+await page.reload();
+await page.getByRole("tab", { name: "记录", exact: true }).click();
+await page
+  .getByRole("button", { name: "展开当日明细", exact: true })
+  .first()
+  .click();
+await page
+  .getByRole("button", { name: "编辑喂奶", exact: true })
+  .first()
+  .click();
+await waitForFeedEditor("关闭记录编辑");
+await page.getByText(/按喂养当天日龄（13天）/).waitFor();
+assert.equal(
+  await page.getByLabel("实际喝奶量", { exact: true }).inputValue(),
+  "60",
+);
+await assertAmountShortcuts([30, 60, 90, 120]);
+await page.getByLabel("实际喝奶量", { exact: true }).scrollIntoViewIfNeeded();
+await page.screenshot({
+  path: path.join(
+    process.env.TEMP ?? "docs",
+    "little-days-feed-presets-zh-light.png",
+  ),
+});
+await page.getByLabel("关闭记录编辑", { exact: true }).click();
+await page.evaluate(() => {
+  const state = JSON.parse(localStorage.getItem("little-days-v1"));
+  state.profile.birthDate = "";
+  localStorage.setItem("little-days-v1", JSON.stringify(state));
+});
+await page.reload();
+await page.getByRole("button", { name: "＋记录", exact: true }).first().click();
+await waitForFeedEditor("关闭记录编辑");
+await assertAmountShortcuts([60, 90, 120, 150]);
+assert.equal(
+  await page.getByLabel("实际喝奶量", { exact: true }).inputValue(),
+  "120",
+);
+assert.equal(await page.getByText(/按喂养当天日龄/).count(), 0);
+await page.getByLabel("关闭记录编辑", { exact: true }).click();
 assert.deepEqual(errors, []);
 console.log(
   "PASS: clean home, removed controls/milestones, daily chart summaries and intervals, unit switch, confirmed deletion without undo, growth, old data retained, dark mode, narrow layout.",

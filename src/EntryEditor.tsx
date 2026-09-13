@@ -2,6 +2,7 @@ import React, { useRef, useState } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
+  Linking,
   Modal,
   Platform,
   Pressable,
@@ -19,6 +20,7 @@ import Svg, { Path } from "react-native-svg";
 import { light, dark as night } from "./ui";
 import { Entry, makeId, validateEntry } from "./domain";
 import { t } from "./i18n";
+import { feedAmountPresets, formulaFeedingSource } from "./feedAmountPresets";
 
 const names = {
   feed: "喂养",
@@ -124,11 +126,13 @@ export function newEntry(type: Entry["type"]): Entry {
 }
 export default function EntryEditor({
   entry,
+  birthDate,
   onSave,
   onClose,
   dark,
 }: {
   entry: Entry;
+  birthDate: string;
   onSave: (entry: Entry) => Promise<void>;
   onClose: () => void;
   dark: boolean;
@@ -140,6 +144,7 @@ export default function EntryEditor({
   const [hasEnd, setHasEnd] = useState(!!entry.end);
   const feedEndInitialized = useRef(!!entry.end);
   const [amount, setAmount] = useState(String(entry.amount ?? 120));
+  const [sourceError, setSourceError] = useState(false);
   const [weight, setWeight] = useState(
     entry.weight === undefined ? "" : String(entry.weight),
   );
@@ -163,6 +168,7 @@ export default function EntryEditor({
     muted = palette.muted;
   const accent = dark ? "#447FA6" : "#34759D";
   const bottle = draft.feedKind === "formula" || draft.feedKind === "expressed";
+  const quickAmounts = feedAmountPresets(birthDate, start.date, draft.feedKind);
   const inputStyle = [
     s.input,
     {
@@ -448,7 +454,7 @@ export default function EntryEditor({
                         style={[inputStyle, s.largeInput]}
                       />
                       <View style={[s.amountChips, { marginTop: 10 }]}>
-                        {[60, 90, 120, 150].map((n) =>
+                        {quickAmounts.amounts.map((n) =>
                           chip(
                             `${n} mL`,
                             amount === String(n),
@@ -457,6 +463,43 @@ export default function EntryEditor({
                           ),
                         )}
                       </View>
+                      {quickAmounts.ageAdjusted && (
+                        <>
+                          <Text style={[s.hint, { color: muted }]}>
+                            {t(
+                              "按喂养当天日龄（{days}天）提供快捷选项，并非建议奶量。请记录实际喝下的量，顺应饥饱信号或医护建议。",
+                              {
+                                days: quickAmounts.ageDays!,
+                              },
+                            )}
+                          </Text>
+                          <Pressable
+                            accessibilityRole="link"
+                            disabled={busy}
+                            onPress={() => {
+                              setSourceError(false);
+                              void Linking.openURL(formulaFeedingSource).catch(
+                                () => setSourceError(true),
+                              );
+                            }}
+                            style={{ minHeight: 44, justifyContent: "center" }}
+                          >
+                            <Text
+                              style={{ color: palette.primary, fontSize: 13 }}
+                            >
+                              {t("配方奶喂养参考 · 美国儿科学会 ↗")}
+                            </Text>
+                          </Pressable>
+                          {sourceError && (
+                            <Text
+                              accessibilityRole="alert"
+                              style={[s.hint, { color: muted }]}
+                            >
+                              {t("无法打开参考链接，请联网后重试。")}
+                            </Text>
+                          )}
+                        </>
+                      )}
                     </View>
                   )}
                 </View>
@@ -742,6 +785,7 @@ const s = StyleSheet.create({
     paddingVertical: 6,
   },
   input: {
+    minWidth: 0,
     borderWidth: 1,
     borderRadius: 16,
     padding: 15,

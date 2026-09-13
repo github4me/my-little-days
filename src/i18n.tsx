@@ -84,6 +84,11 @@ const english: Record<string, string> = {
   喂养方式: "Feeding method",
   "实际喝奶量 · mL": "Amount fed · mL",
   实际喝奶量: "Amount fed",
+  "按喂养当天日龄（{days}天）提供快捷选项，并非建议奶量。请记录实际喝下的量，顺应饥饱信号或医护建议。":
+    "Quick amounts for age at feed ({days} days), not feeding targets. Record what was drunk; follow hunger/fullness cues or your clinician's advice.",
+  "配方奶喂养参考 · 美国儿科学会 ↗": "Formula feeding guide · AAP ↗",
+  "无法打开参考链接，请联网后重试。":
+    "Could not open the guide. Check your connection and try again.",
   尿布情况: "Diaper details",
   有尿: "Pee",
   有便: "Poo",
