@@ -9,8 +9,10 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import DateTimePicker from "@react-native-community/datetimepicker";
+import Svg, { Rect } from "react-native-svg";
+import CareIcon from "./CareIcon";
 import { Entry, summarize } from "./domain";
-import { Button, Card, Chips, T, Theme, light, row } from "./ui";
+import { Button, Card, T, Theme, light, row } from "./ui";
 import { elapsed, formatDate, formatTime, t } from "./i18n";
 import {
   calendarDayKey,
@@ -23,6 +25,32 @@ import {
 } from "./recordCalendar";
 
 const kindLabels = { feed: "喂奶", diaper: "尿布", sleep: "睡眠" };
+const filterKinds: CalendarKind[] = ["all", "feed", "diaper", "sleep"];
+const filterLabel = (kind: CalendarKind) =>
+  t(kind === "all" ? "全部" : kindLabels[kind]);
+function FilterIcon({ kind, color }: { kind: CalendarKind; color: string }) {
+  return kind === "all" ? (
+    <Svg width={22} height={22} viewBox="0 0 24 24" accessible={false}>
+      {[3, 14].flatMap((x) =>
+        [3, 14].map((y) => (
+          <Rect
+            key={`${x}-${y}`}
+            x={x}
+            y={y}
+            width={7}
+            height={7}
+            rx={1.5}
+            fill="none"
+            stroke={color}
+            strokeWidth={1.8}
+          />
+        )),
+      )}
+    </Svg>
+  ) : (
+    <CareIcon kind={kind} size={22} color={color} />
+  );
+}
 function entryLabel(entry: Entry) {
   if (entry.type === "feed")
     return entry.amount !== undefined
@@ -54,6 +82,10 @@ export default function RecordsCalendar({
   const [chosenDay, setChosenDay] = useState<string | null>(null);
   const [mode, setMode] = useState("day");
   const [kind, setKind] = useState<CalendarKind>("all");
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [toolbarWidth, setToolbarWidth] = useState(0);
+  const [periodWidth, setPeriodWidth] = useState(0);
+  const compactFilters = toolbarWidth - periodWidth < 184;
   const [datePicker, setDatePicker] = useState(false);
   const [dateDraft, setDateDraft] = useState("");
   const [dateError, setDateError] = useState(false);
@@ -130,9 +162,45 @@ export default function RecordsCalendar({
   function eventName(item: CalendarItem) {
     return `${entryLabel(item.entry)} · ${formatTime(item.entry.start)}${item.running ? ` · ${t("进行中")}` : ""}`;
   }
+  function chooseFilter(value: CalendarKind) {
+    setKind(value);
+    setExpandedList(false);
+    setFiltersOpen(false);
+  }
+  function filterOption(value: CalendarKind, showLabel = false) {
+    return (
+      <Pressable
+        key={value}
+        accessibilityRole="button"
+        accessibilityLabel={t("筛选：{kind}", { kind: filterLabel(value) })}
+        accessibilityState={{ selected: kind === value }}
+        aria-selected={kind === value}
+        onPress={() => chooseFilter(value)}
+        style={({ pressed }) => ({
+          minWidth: 44,
+          minHeight: 44,
+          width: showLabel ? undefined : 44,
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: showLabel ? "flex-start" : "center",
+          paddingHorizontal: showLabel ? 12 : 0,
+          gap: 12,
+          borderRadius: 10,
+          borderWidth: 1,
+          borderColor: kind === value ? c.primary : "transparent",
+          backgroundColor: kind === value ? c.soft : "transparent",
+          opacity: pressed ? 0.65 : 1,
+        })}
+      >
+        <FilterIcon kind={value} color={kind === value ? c.primary : c.muted} />
+        {showLabel && <T>{filterLabel(value)}</T>}
+      </Pressable>
+    );
+  }
   return (
     <View style={{ gap: 16 }}>
       <View
+        onLayout={(event) => setToolbarWidth(event.nativeEvent.layout.width)}
         style={{
           flexDirection: "row",
           alignItems: "center",
@@ -140,7 +208,10 @@ export default function RecordsCalendar({
           gap: 8,
         }}
       >
-        <View style={{ flexDirection: "row", alignItems: "center" }}>
+        <View
+          onLayout={(event) => setPeriodWidth(event.nativeEvent.layout.width)}
+          style={{ flexDirection: "row", alignItems: "center", flexShrink: 0 }}
+        >
           {(["day", "week", "today"] as const).map((option) => (
             <Pressable
               key={option}
@@ -180,6 +251,37 @@ export default function RecordsCalendar({
             </Pressable>
           ))}
         </View>
+        {compactFilters ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t("筛选记录：{kind}", {
+              kind: filterLabel(kind),
+            })}
+            accessibilityState={{ expanded: filtersOpen }}
+            aria-expanded={filtersOpen}
+            onPress={() => setFiltersOpen(true)}
+            style={{
+              width: 56,
+              height: 44,
+              flexDirection: "row",
+              gap: 4,
+              alignItems: "center",
+              justifyContent: "center",
+              borderRadius: 10,
+              backgroundColor: c.soft,
+              flexShrink: 0,
+            }}
+          >
+            <FilterIcon kind={kind} color={c.primary} />
+            <T raw style={{ fontSize: 12, color: c.primary }}>
+              ▾
+            </T>
+          </Pressable>
+        ) : (
+          <View style={{ flexDirection: "row", flexShrink: 0 }}>
+            {filterKinds.map((value) => filterOption(value))}
+          </View>
+        )}
       </View>
       <View style={[row, { gap: 6 }]}>
         <Pressable
@@ -285,22 +387,6 @@ export default function RecordsCalendar({
             }}
           />
         ))}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-        <Chips
-          value={kind}
-          options={[
-            { label: "全部", value: "all" },
-            ...Object.entries(kindLabels).map(([value, label]) => ({
-              value,
-              label,
-            })),
-          ]}
-          onChange={(value) => {
-            setKind(value as CalendarKind);
-            setExpandedList(false);
-          }}
-        />
-      </ScrollView>
       <T style={{ fontSize: 13, color: c.muted }}>
         {t("{amount} mL · {nappies} 次尿布 · 睡眠 {duration}", {
           amount: totals.feedMl,
@@ -556,6 +642,38 @@ export default function RecordsCalendar({
           />
         )}
       </Card>
+      <Modal
+        visible={filtersOpen}
+        transparent
+        animationType="none"
+        onRequestClose={() => setFiltersOpen(false)}
+      >
+        <SafeAreaView
+          style={{
+            flex: 1,
+            backgroundColor: "rgba(0,0,0,0.4)",
+            justifyContent: "center",
+            padding: 20,
+          }}
+        >
+          <Card style={{ maxHeight: "90%", gap: 12 }}>
+            <T
+              accessibilityRole="header"
+              style={{ fontSize: 20, fontWeight: "700" }}
+            >
+              记录筛选
+            </T>
+            <ScrollView>
+              {filterKinds.map((value) => filterOption(value, true))}
+            </ScrollView>
+            <Button
+              secondary
+              label="关闭筛选"
+              onPress={() => setFiltersOpen(false)}
+            />
+          </Card>
+        </SafeAreaView>
+      </Modal>
       <Modal
         visible={!!selectedEntry}
         transparent

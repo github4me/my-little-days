@@ -1755,6 +1755,83 @@ assert.equal(
 await page
   .getByText("150 mL · 3 nappies · Sleep 3h 0m", { exact: true })
   .waitFor();
+const compactFilter = page.getByRole("button", {
+  name: "Filter records: All",
+  exact: true,
+});
+const compactFilterBox = await compactFilter.boundingBox();
+const calendarDayBox = await page
+  .getByRole("button", { name: "Day", exact: true })
+  .boundingBox();
+assert.ok(
+  compactFilterBox &&
+    calendarDayBox &&
+    Math.abs(compactFilterBox.y - calendarDayBox.y) < 2,
+);
+assert.ok(compactFilterBox.width >= 44 && compactFilterBox.height >= 44);
+for (const [label, count] of [
+  ["Feed", 2],
+  ["Sleep", 2],
+  ["Diaper", 3],
+  ["All", 7],
+]) {
+  await page.getByRole("button", { name: /^Filter records:/ }).click();
+  await page
+    .getByRole("button", { name: `Filter: ${label}`, exact: true })
+    .click();
+  assert.equal(
+    await page.getByRole("button", { name: /^View record:/ }).count(),
+    count,
+  );
+}
+await compactFilter.click();
+await page.getByRole("button", { name: "Close filters", exact: true }).click();
+assert.equal(
+  await page.getByRole("button", { name: /^View record:/ }).count(),
+  7,
+);
+await page.setViewportSize({ width: 390, height: 844 });
+await page.getByRole("button", { name: "Filter: All", exact: true }).waitFor();
+const fullFilterBoxes = await Promise.all(
+  ["All", "Feed", "Diaper", "Sleep"].map((label) =>
+    page
+      .getByRole("button", { name: `Filter: ${label}`, exact: true })
+      .boundingBox(),
+  ),
+);
+const fullDayBox = await page
+  .getByRole("button", { name: "Day", exact: true })
+  .boundingBox();
+assert.ok(
+  fullFilterBoxes.every(
+    (box) =>
+      box &&
+      box.width >= 44 &&
+      box.height >= 44 &&
+      Math.abs(box.y - fullDayBox.y) < 2,
+  ),
+);
+assert.ok(fullFilterBoxes[3].x + fullFilterBoxes[3].width <= 372);
+await page.getByRole("button", { name: "Filter: Sleep", exact: true }).click();
+assert.equal(
+  await page.getByRole("button", { name: /^View record:/ }).count(),
+  2,
+);
+await page.screenshot({
+  path: path.join(
+    process.env.TEMP ?? "docs",
+    "little-days-calendar-filter-en.png",
+  ),
+});
+await page.setViewportSize({ width: 320, height: 844 });
+await page
+  .getByRole("button", { name: "Filter records: Sleep", exact: true })
+  .click();
+await page.getByRole("button", { name: "Filter: All", exact: true }).click();
+assert.equal(
+  await page.getByRole("button", { name: /^View record:/ }).count(),
+  7,
+);
 await page
   .getByRole("button", { name: "Show all calendar records", exact: true })
   .click();
@@ -1899,6 +1976,31 @@ await page
   .scrollIntoViewIfNeeded();
 await page.screenshot({
   path: path.join(process.env.TEMP ?? "docs", "little-days-calendar-zh.png"),
+});
+await page.getByRole("button", { name: "筛选记录：全部", exact: true }).click();
+await page.getByRole("button", { name: "筛选：尿布", exact: true }).click();
+assert.equal(
+  await page.getByRole("button", { name: /^查看记录：/ }).count(),
+  2,
+);
+await page.setViewportSize({ width: 390, height: 844 });
+await page.getByRole("button", { name: "筛选：尿布", exact: true }).waitFor();
+assert.equal(
+  await page
+    .getByRole("button", { name: "筛选：尿布", exact: true })
+    .getAttribute("aria-selected"),
+  "true",
+);
+await page.getByRole("button", { name: "筛选：全部", exact: true }).click();
+assert.equal(
+  await page.getByRole("button", { name: /^查看记录：/ }).count(),
+  6,
+);
+await page.screenshot({
+  path: path.join(
+    process.env.TEMP ?? "docs",
+    "little-days-calendar-filter-zh.png",
+  ),
 });
 assert.deepEqual(errors, []);
 console.log(

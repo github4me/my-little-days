@@ -17,6 +17,10 @@ const english: Record<string, string> = {
   今天: "Today",
   记录: "Records",
   日历视图: "Calendar",
+  记录筛选: "Record filters",
+  关闭筛选: "Close filters",
+  "筛选：{kind}": "Filter: {kind}",
+  "筛选记录：{kind}": "Filter records: {kind}",
   致谢: "Credits",
   "感谢 Trista（来自 FPH）和她群里的 Mia、Violet、Bill 提出的建议与想法，也感谢群里每一位妈妈爸爸的支持。期待更多妈妈爸爸出现在这里，一起让小日子更好。":
     "Thank you to Trista from FPH and Mia, Violet, and Bill in her group for their suggestions and ideas, and to all the mums and dads in the group for their support. We hope to see more mums and dads here, helping make My Little Days even better.",

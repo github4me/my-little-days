@@ -166,9 +166,6 @@ function BabyApp({
   const [growthHistoryExpanded, setGrowthHistoryExpanded] = useState(false);
   const [openProfile, setOpenProfile] = useState(false);
   const mainScroll = useRef<ScrollView>(null);
-  useEffect(() => {
-    if (tab === "records") setActiveRecordView(recordView);
-  }, [tab, recordView]);
   const [finishingFeed, setFinishingFeed] = useState<{
     entry: Entry;
     stoppedAt: string;
@@ -1018,6 +1015,7 @@ function BabyApp({
                   onRecordViewChange={async (value) => {
                     await saveRecordView(value);
                     setRecordView(value);
+                    setActiveRecordView(value);
                   }}
                   language={language}
                   onLanguageChange={changeLanguage}
@@ -1072,6 +1070,9 @@ function BabyApp({
                   key={key}
                   onPress={() => {
                     setOpenProfile(false);
+                    if (key === "records" && tab !== "records") {
+                      setActiveRecordView(recordView);
+                    }
                     setTab(key);
                     setSettingsPage("main");
                     setMessage("");
