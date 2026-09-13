@@ -18,8 +18,8 @@ const english: Record<string, string> = {
   记录: "Records",
   日历视图: "Calendar",
   致谢: "Credits",
-  "感谢 Trista (FPH)、Mia、Violet、Bill，以及每一位支持小日子的人。期待更多人加入，一起让小日子更好。":
-    "Thank you to Trista (FPH), Mia, Violet, Bill, and everyone who supports My Little Days. We look forward to welcoming more people to help make it even better.",
+  "感谢 Trista（来自 FPH）和她群里的 Mia、Violet、Bill 提出的建议与想法，也感谢群里每一位妈妈爸爸的支持。期待更多妈妈爸爸出现在这里，一起让小日子更好。":
+    "Thank you to Trista from FPH and Mia, Violet, and Bill in her group for their suggestions and ideas, and to all the mums and dads in the group for their support. We hope to see more mums and dads here, helping make My Little Days even better.",
   柱状图: "Bar chart",
   记录默认视图: "Default Records view",
   "选择后立即保存；每次进入记录页时使用，也可在记录页临时切换。":

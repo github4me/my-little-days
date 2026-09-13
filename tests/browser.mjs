@@ -510,7 +510,7 @@ await assertNoUntranslatedChinese("Privacy & support");
 await page.getByText("Credits", { exact: true }).waitFor();
 await page
   .getByText(
-    "Thank you to Trista (FPH), Mia, Violet, Bill, and everyone who supports My Little Days. We look forward to welcoming more people to help make it even better.",
+    "Thank you to Trista from FPH and Mia, Violet, and Bill in her group for their suggestions and ideas, and to all the mums and dads in the group for their support. We hope to see more mums and dads here, helping make My Little Days even better.",
     { exact: true },
   )
   .waitFor();
@@ -1703,15 +1703,30 @@ async function assertCompactCalendarToolbar(labels) {
   );
   assert.ok(boxes.every((box) => box && box.width >= 44 && box.height >= 44));
   assert.ok(
-    boxes.every((box) => Math.abs(box.y - boxes[0].y) <= 2),
-    "calendar controls should share one row",
+    boxes.slice(0, 3).every((box) => Math.abs(box.y - boxes[0].y) <= 2),
+    "day, week and today should share one row",
   );
   assert.ok(
-    boxes.every(
-      (box, index) =>
-        index === 0 || box.x >= boxes[index - 1].x + boxes[index - 1].width,
-    ),
-    "calendar tools left, view icons right",
+    boxes
+      .slice(0, 3)
+      .every(
+        (box, index) =>
+          index === 0 || box.x >= boxes[index - 1].x + boxes[index - 1].width,
+      ),
+    "calendar tools stay left aligned",
+  );
+  const title = await page.getByRole("heading").boundingBox();
+  assert.ok(title && title.x + title.width <= boxes[3].x);
+  assert.ok(
+    Math.abs(title.y + title.height / 2 - (boxes[3].y + boxes[3].height / 2)) <=
+      2,
+    "view toggle is vertically centered beside the title",
+  );
+  assert.ok(Math.abs(boxes[3].y - boxes[4].y) <= 2);
+  assert.ok(boxes[3].x + boxes[3].width <= boxes[4].x);
+  assert.ok(
+    boxes[3].y + boxes[3].height <= boxes[0].y,
+    "title toggle is above calendar tools",
   );
   assert.ok(
     boxes.at(-1).x + boxes.at(-1).width <= page.viewportSize().width - 18,

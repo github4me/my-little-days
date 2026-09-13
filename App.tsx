@@ -30,7 +30,7 @@ import {
 import { importBackup } from "./src/backup";
 import EntryEditor, { newEntry } from "./src/EntryEditor";
 import GrowthChart, { Metric } from "./src/GrowthChart";
-import Records from "./src/Records";
+import Records, { RecordsViewToggle } from "./src/Records";
 import AppVersion from "./src/AppVersion";
 import type { RecordView } from "./src/recordCalendar";
 import Settings from "./src/Settings";
@@ -145,6 +145,7 @@ function BabyApp({
   const systemTheme = useColorScheme();
   const [themePreference, setThemePreference] = useState<boolean | null>(null);
   const [recordView, setRecordView] = useState<RecordView>("bars");
+  const [activeRecordView, setActiveRecordView] = useState<RecordView>("bars");
   const darkMode = themePreference ?? systemTheme === "dark";
   const c = darkMode ? dark : light;
   const [state, setState] = useState<State | null>(null),
@@ -165,6 +166,9 @@ function BabyApp({
   const [growthHistoryExpanded, setGrowthHistoryExpanded] = useState(false);
   const [openProfile, setOpenProfile] = useState(false);
   const mainScroll = useRef<ScrollView>(null);
+  useEffect(() => {
+    if (tab === "records") setActiveRecordView(recordView);
+  }, [tab, recordView]);
   const [finishingFeed, setFinishingFeed] = useState<{
     entry: Entry;
     stoppedAt: string;
@@ -491,22 +495,38 @@ function BabyApp({
                   MY LITTLE DAYS · 小日子
                 </T>
                 {tab !== "settings" ? (
-                  <T
-                    accessibilityRole="header"
-                    style={[
-                      heading,
-                      {
-                        marginTop: 6,
-                        fontSize: compactTitle ? 24 : 28,
-                        lineHeight: compactTitle ? 31 : 36,
-                        flexShrink: 1,
-                      },
-                    ]}
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 8,
+                      marginTop: 6,
+                    }}
                   >
-                    {tab === "today"
-                      ? t("{name}的小日子", { name: state.profile.name })
-                      : pageTitles[tab]}
-                  </T>
+                    <T
+                      accessibilityRole="header"
+                      style={[
+                        heading,
+                        {
+                          fontSize: compactTitle ? 24 : 28,
+                          lineHeight: compactTitle ? 31 : 36,
+                          flexShrink: 1,
+                          flex: 1,
+                          minWidth: 0,
+                        },
+                      ]}
+                    >
+                      {tab === "today"
+                        ? t("{name}的小日子", { name: state.profile.name })
+                        : pageTitles[tab]}
+                    </T>
+                    {tab === "records" ? (
+                      <RecordsViewToggle
+                        value={activeRecordView}
+                        onChange={setActiveRecordView}
+                      />
+                    ) : null}
+                  </View>
                 ) : null}
               </View>
             </View>
@@ -826,7 +846,7 @@ function BabyApp({
             ) : null}
             {tab === "records" ? (
               <Records
-                defaultView={recordView}
+                view={activeRecordView}
                 entries={entries}
                 now={now}
                 onEdit={setEditor}

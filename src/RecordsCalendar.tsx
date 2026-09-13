@@ -44,13 +44,11 @@ export default function RecordsCalendar({
   now,
   onEdit,
   onDelete,
-  viewToggle,
 }: {
   entries: Entry[];
   now: number;
   onEdit: (entry: Entry) => void;
   onDelete: (entry: Entry) => void;
-  viewToggle: React.ReactNode;
 }) {
   const c = useContext(Theme);
   const [chosenDay, setChosenDay] = useState<string | null>(null);
@@ -182,7 +180,6 @@ export default function RecordsCalendar({
             </Pressable>
           ))}
         </View>
-        {viewToggle}
       </View>
       <View style={[row, { gap: 6 }]}>
         <Pressable

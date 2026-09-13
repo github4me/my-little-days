@@ -123,7 +123,7 @@ type RecordsProps = {
   onEdit: (e: Entry) => void;
   onDelete: (e: Entry) => void;
 };
-function ViewToggle({
+export function RecordsViewToggle({
   value,
   onChange,
 }: {
@@ -229,11 +229,9 @@ function ViewToggle({
   );
 }
 export default function Records({
-  defaultView,
+  view,
   ...props
-}: RecordsProps & { defaultView: RecordView }) {
-  const [view, setView] = useState(defaultView);
-  const viewToggle = <ViewToggle value={view} onChange={setView} />;
+}: RecordsProps & { view: RecordView }) {
   return (
     <View style={{ gap: 16 }}>
       <View
@@ -243,7 +241,7 @@ export default function Records({
           view !== "calendar" ? "no-hide-descendants" : "auto"
         }
       >
-        <RecordsCalendar {...props} viewToggle={viewToggle} />
+        <RecordsCalendar {...props} />
       </View>
       <View
         style={{ display: view === "bars" ? "flex" : "none", gap: 16 }}
@@ -252,7 +250,6 @@ export default function Records({
           view !== "bars" ? "no-hide-descendants" : "auto"
         }
       >
-        <View style={{ alignItems: "flex-end" }}>{viewToggle}</View>
         <BarRecords {...props} />
       </View>
     </View>
