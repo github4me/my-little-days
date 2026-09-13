@@ -149,13 +149,6 @@ export default function PrivacySupport({ onBack }: { onBack: () => void }) {
           </View>
         </Card>
       </Pressable>
-      <Card>
-        <T style={{ fontSize: 17, fontWeight: "700" }}>致谢</T>
-        <T style={{ color: c.muted, fontSize: 13 }}>
-          感谢 Trista（来自 FPH）和她群里的 Mia、Violet、Bill
-          提出的建议与想法，也感谢群里每一位妈妈爸爸的支持。期待更多妈妈爸爸出现在这里，一起让小日子更好。
-        </T>
-      </Card>
     </View>
   );
 }

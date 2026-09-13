@@ -946,6 +946,12 @@ export default function Settings({
         </T>
         <Button label="隐私与支持" secondary onPress={onOpenPrivacy} />
       </SettingsSection>
+      <SettingsSection title="致谢" busy={busy}>
+        <T style={{ color: c.muted, fontSize: 13 }}>
+          感谢 Trista（来自 FPH）和她群里的 Mia、Violet、Bill
+          提出的建议与想法，也感谢群里每一位妈妈爸爸的支持。期待更多妈妈爸爸出现在这里，一起让小日子更好。
+        </T>
+      </SettingsSection>
       <View style={{ padding: 10, gap: 5 }}>
         <T style={{ color: c.muted, fontSize: 12, textAlign: "center" }}>
           Little Days · 单机离线版

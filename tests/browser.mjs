@@ -386,6 +386,7 @@ for (const section of [
   "照护提醒",
   "备份与恢复",
   "隐私与支持",
+  "致谢",
 ]) {
   const header = page.getByRole("button", {
     name: `展开${section}`,
@@ -398,6 +399,14 @@ for (const section of [
     exact: true,
   });
   assert.equal(await expanded.getAttribute("aria-expanded"), "true");
+  if (section === "致谢") {
+    await page
+      .getByText(
+        "感谢 Trista（来自 FPH）和她群里的 Mia、Violet、Bill 提出的建议与想法，也感谢群里每一位妈妈爸爸的支持。期待更多妈妈爸爸出现在这里，一起让小日子更好。",
+        { exact: true },
+      )
+      .waitFor();
+  }
   await expanded.click();
 }
 await page.screenshot({
@@ -507,14 +516,24 @@ assert.equal(
   1,
 );
 await assertNoUntranslatedChinese("Privacy & support");
-await page.getByText("Credits", { exact: true }).waitFor();
+assert.equal(await page.getByText("Credits", { exact: true }).count(), 0);
+await page.getByRole("button", { name: "Back to More", exact: true }).click();
+const creditsHeader = page.getByRole("button", {
+  name: "Expand Credits",
+  exact: true,
+});
+assert.equal(await creditsHeader.getAttribute("aria-expanded"), "false");
+await creditsHeader.click();
 await page
   .getByText(
     "Thank you to Trista from FPH and Mia, Violet, and Bill in her group for their suggestions and ideas, and to all the mums and dads in the group for their support. We hope to see more mums and dads here, helping make My Little Days even better.",
     { exact: true },
   )
   .waitFor();
-await page.getByRole("button", { name: "Back to More", exact: true }).click();
+await page
+  .getByRole("button", { name: "Collapse Credits", exact: true })
+  .click();
+assert.equal(await creditsHeader.getAttribute("aria-expanded"), "false");
 await page.getByText("Care reminders", { exact: true }).waitFor();
 await page.screenshot({
   path: path.join(
