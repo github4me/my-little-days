@@ -1,8 +1,28 @@
 # Family Sharing — Technical Plan
 
-Status: **Draft for review, not approved for implementation**  
-Date: 8 September 2026  
+Status: **Full-sharing roadmap; only the invitation pilot is approved for this iteration**
+
+Updated: 14 September 2026 (original plan: 8 September 2026)
+
 Baseline: existing Expo/React Native/TypeScript app, local SQLite, commit `6a22f51`.
+
+## 0. Current scope and review corrections
+
+The [Family invitation pilot contract](FAMILY-PILOT-CONTRACT.md) supersedes conflicting details below. The [Azure setup guide](AZURE-FAMILY-PILOT-SETUP.md) describes the actual pilot configuration and manual delivery. The broader screens, data types and migration work in this document remain a roadmap, not a claim of full implementation or release readiness.
+
+This iteration is limited to Entra email-OTP login, a controlled admitted identity list, one family/baby per account, owner/caregiver invitations and access lifecycle, and a separate completed bottle-feed test ledger. Its draft/cache/outbox uses a separate account/family keyspace. Existing local profiles, records, timers, learning, settings and backups are untouched and never uploaded. Use synthetic data only. Shared sleep/diaper/growth/profile editing, timer integration, charts, existing-history migration and public signup are not in this slice.
+
+The review corrections required by the pilot are:
+
+- Validate access-token signature, issuer, expiry, `tid`, API audience, delegated `Family.ReadWrite`, and mobile `azp`. Identify accounts using validated tenant + `oid`. Bind the two recipients to operator-verified email-OTP identities; generic mutable email claims do not prove invitation ownership. Admission remains closed until the actual identities are checked; native two-account behavior is still a release gate.
+- Atomically consume invitations and grant memberships. Remove/leave revokes the member and all their pending invitations; a consumed-token retry never resurrects a removed grant. Every new grant gets a new membership GUID, which binds queued work.
+- Serialize authorization, revocation, snapshot reads and writes through SQL transactions across API instances. The limited pilot deliberately uses a transaction-owned pilot-wide application lock. Record `rowversion`, revision and durable operation receipt belong to the same committed write; an in-memory lock is not sufficient.
+- Bind snapshots, ETags, receipts and queued mutations to an environment/history GUID as well as membership. Change `Family__HistoryId` after database restore/replacement. Quarantine old-history or old-grant work; compare monotonic revisions only within the same history.
+- Keep snapshots consistent and authorize before `304`. Guard every response and queue against account/family/session changes. Treat auth/network failures as paused work; terminal rejection retains the private payload and refreshes accepted state. Pending records appear once.
+- The public landing page uses `/join#token=...`, no third-party assets, no-referrer/no-store/CSP, and an explicit `mylittledays://family-invite#token=...` button. A default Azure hostname is sufficient; no paid custom domain is required.
+- Native auth dependencies and scheme registration require a new binary and compatible Expo runtime. CI is separate from deployment; Azure deployment is manual dispatch with a reviewed SHA and a protected GitHub environment. Migrations run separately with an operator identity; runtime has table DML permissions and never `db_owner` or DDL privileges.
+
+Repository implementation and automated checks do not prove live Entra behavior, Azure managed-identity SQL, two iPhones or backup recovery. Those gates, privacy/deletion/reviewer-access/retention decisions, and a regional hosting estimate remain outstanding until an operator records evidence. No Azure provisioning or production deployment is authorized by this document.
 
 ## 1. Recommendation
 
@@ -10,18 +30,18 @@ Keep the existing mobile app. Add **one C# ASP.NET Core API, one Azure SQL datab
 
 The product remains local-first: **draft locally → explicitly save → submit → accept or reject → refresh**. Family members share saved records, not live interactions.
 
-This document proposes architecture and review decisions only. It does not provision Azure, change the app, or authorize a production deployment.
+This document preserves the wider architectural direction. Only the narrower linked pilot contract is the current implementation scope; this roadmap does not authorize Azure provisioning or production deployment.
 
 ## 2. Agreed behavior
 
-| Action | On this device | Shared with family |
-| --- | --- | --- |
-| Type, change an option, edit a record | Persist a private draft | Nothing |
-| Start feeding/sleep timer | Persist a private active timer | Nothing; other people cannot stop it |
-| Cancel an editor | Discard unsaved changes | Existing shared record unchanged |
-| Save / Stop a timer | Save locally and queue an immutable operation | Submitted now if online, later if offline |
-| Confirm delete | Queue a deletion; show pending state | Removed only when the server accepts |
-| Conflicting update/delete | Retain rejected draft locally | No overwrite; display latest server state |
+| Action                                | On this device                                | Shared with family                        |
+| ------------------------------------- | --------------------------------------------- | ----------------------------------------- |
+| Type, change an option, edit a record | Persist a private draft                       | Nothing                                   |
+| Start feeding/sleep timer             | Persist a private active timer                | Nothing; other people cannot stop it      |
+| Cancel an editor                      | Discard unsaved changes                       | Existing shared record unchanged          |
+| Save / Stop a timer                   | Save locally and queue an immutable operation | Submitted now if online, later if offline |
+| Confirm delete                        | Queue a deletion; show pending state          | Removed only when the server accepts      |
+| Conflicting update/delete             | Retain rejected draft locally                 | No overwrite; display latest server state |
 
 - Different record IDs are independent: retain all new records, including matching or overlapping times from different users. Never auto-deduplicate by time or values.
 - For the **same record and base version**, the first valid operation committed by the server wins. Device tap time and device clocks do not determine priority.
@@ -30,11 +50,11 @@ This document proposes architecture and review decisions only. It does not provi
 - Language, theme and personal reminders stay device-local and retain their existing immediate-save behavior. The Save boundary applies to shared data; account/family commands use explicit Create, Invite, Accept or Confirm buttons.
 - No undo-delete feature. A rejected deletion restoring the actual server record is conflict recovery, not an undo operation.
 
-## 3. Proposed first-release scope
+## 3. Broader first-release scope (roadmap)
 
 One family space with one baby in the initial UI; schema supports multiple babies and memberships without implementing a full baby/family-management product now.
 
-Proposed roles, requiring approval:
+Roles approved for the pilot's feed ledger; the broader data scope below remains a proposal:
 
 - **Owner:** manage baby profile, invitations and membership; read/write all care records.
 - **Caregiver:** read, create, edit and delete shared care records, including another caregiver's entries.
@@ -45,15 +65,15 @@ Keep a local-only mode with no account required. Keep avatars local in v1; famil
 
 ## 4. Technology and deployment
 
-| Layer | Proposed choice | Reason |
-| --- | --- | --- |
-| Mobile | Existing Expo + TypeScript + SQLite | Preserve UI, offline behavior and existing tests |
-| API | C#, ASP.NET Core Minimal APIs, .NET 10 LTS | One deployable service with feature folders |
-| Persistence | EF Core 10 + Azure SQL Database | Transactions, constraints and record version checks |
-| Login | Microsoft Entra External ID customer tenant | Hosted email one-time-passcode login; no home-grown password system |
-| Hosting | Azure App Service, Linux | Deploy a normal .NET application without container orchestration |
-| Delivery | GitHub Actions + Bicep; retain Expo EAS | Repeatable Azure infrastructure, API deployment and mobile builds |
-| Diagnostics | Azure Monitor/Application Insights | Failures, latency, retry/conflict counts; exclude care payloads |
+| Layer       | Proposed choice                             | Reason                                                                                            |
+| ----------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Mobile      | Existing Expo + TypeScript + SQLite         | Preserve UI, offline behavior and existing tests                                                  |
+| API         | C#, ASP.NET Core Minimal APIs, .NET 10 LTS  | One deployable service with feature folders                                                       |
+| Persistence | EF Core 10 + Azure SQL Database             | Transactions, constraints and record version checks                                               |
+| Login       | Microsoft Entra External ID customer tenant | Hosted email one-time-passcode login; no home-grown password system                               |
+| Hosting     | Azure App Service, Linux                    | Deploy a normal .NET application without container orchestration                                  |
+| Delivery    | GitHub Actions; retain Expo EAS             | Manual pilot deployment; portal/SQL setup now, Bicep deferred until infrastructure choices settle |
+| Diagnostics | Azure Monitor/Application Insights          | Failures, latency, retry/conflict counts; exclude care payloads                                   |
 
 .NET 10 is an active LTS release; pin SDK/dependencies and maintain supported patches. Confirm the chosen App Service runtime/region during setup. [Microsoft support policy](https://dotnet.microsoft.com/en-us/platform/support/policy), [App Service .NET configuration](https://learn.microsoft.com/en-us/azure/app-service/configure-language-dotnetcore).
 
@@ -65,17 +85,17 @@ Choose the smallest suitable always-available App Service and SQL tiers after a 
 
 ## 5. Authentication and family invitations
 
-Use browser-based OpenID Connect authorization-code login with PKCE through Expo AuthSession. Store native credentials in SecureStore, never the record database or backup JSON. The API validates access-token signature, issuer, audience, lifetime and scope; identify users by the provider's stable subject, not email. Expo requires a development/native build for this redirect flow, not Expo Go. [Expo authentication guide](https://docs.expo.dev/guides/authentication/).
+Use browser-based OpenID Connect authorization-code login with PKCE through Expo AuthSession. Store native credentials in SecureStore, never the record database or backup JSON. The API validates access-token signature, issuer, audience, lifetime, tenant, delegated scope and mobile authorized party; identify users by tenant + `oid`, not email. The controlled pilot uses operator-verified identity/email bindings until an open-enrollment claim design is proven. Expo requires a development/native build for this redirect flow, not Expo Go. [Expo authentication guide](https://docs.expo.dev/guides/authentication/).
 
 External ID supports customer email-passcode user flows. Use a **customer external tenant**, not workforce guest accounts. Family membership is our application's SQL data, not Entra directory invitations or groups. [Customer user flows](https://learn.microsoft.com/en-us/entra/external-id/customers/how-to-user-flow-sign-up-sign-in-customers), [External tenant capabilities](https://learn.microsoft.com/en-us/entra/external-id/customers/concept-supported-features-customers).
 
 Invitation flow:
 
 1. Owner enters the recipient email and explicitly creates an invitation.
-2. API generates a cryptographically random, single-use token, stores only its hash, and expires it after a proposed 72 hours.
+2. API generates a cryptographically random, single-use token, stores only its hash, and expires it after the configured interval (pilot default: 48 hours).
 3. Owner shares the link using the phone's share sheet; defer an application email-sending service.
 4. Recipient signs in and accepts explicitly. API checks verified recipient identity/email, expiry, revocation and inviter authority, then atomically consumes the invitation and creates membership.
-5. Accept retries return the existing result; concurrent acceptance cannot create duplicate memberships. Expired/revoked/wrong-recipient links grant no access.
+5. Accept retries can return an existing active grant; they must never reactivate a removed grant. Concurrent acceptance cannot create duplicate memberships. Expired/revoked/wrong-recipient links grant no access. Removal and leave also revoke pending invitations for that recipient; a subsequent invitation creates a new membership ID.
 
 A small HTTPS landing page served by the API supports installed-app links and a paste-invite fallback after installation. Do not rely on deferred deep links surviving an App Store install. Keep invite tokens out of request logs/referrers and use a no-third-party-content landing page.
 
@@ -87,7 +107,7 @@ Minimum server tables:
 
 - `Users`: internal ID, identity issuer/subject, display name, account state.
 - `Families`: ID, owner user ID, aggregate revision for conditional refresh.
-- `Memberships`: family/user composite key, role, active/revoked state.
+- `Memberships`: unique grant ID, family/user, role, active/revoked state; each rejoin creates a new grant. Pilot enforces one active family per account.
 - `Invitations`: family, token hash, intended recipient, expiry, consumed/revoked state, version.
 - `Babies`: family ID, profile fields, `rowversion`.
 - `Records`: globally unique client-generated ID, baby ID, type, existing typed care fields, creator, last editor, server timestamps, deletion marker, `rowversion`.
@@ -109,18 +129,20 @@ Do not send an entire local `State` object to overwrite a family. A current serv
 
 Suggested REST surface:
 
-| Endpoint | Purpose |
-| --- | --- |
-| `GET /v1/me/families` | Authorized memberships |
-| `POST /v1/families` | Explicitly create family and initial baby |
-| `GET /v1/families/{id}/snapshot` | Authorized saved state, conditional ETag |
-| `POST /v1/babies/{id}/records` | Create independent record with client ID |
-| `PUT /v1/records/{id}` | Replace one record with `If-Match` version |
-| `DELETE /v1/records/{id}` | Version-checked soft deletion |
-| `PUT /v1/babies/{id}` | Owner's version-checked profile save |
+| Endpoint                               | Purpose                                           |
+| -------------------------------------- | ------------------------------------------------- |
+| `GET /v1/me/families`                  | Authorized memberships                            |
+| `POST /v1/families`                    | Explicitly create family and initial baby         |
+| `GET /v1/families/{id}/snapshot`       | Authorized saved state, conditional ETag          |
+| `POST /v1/babies/{id}/records`         | Create independent record with client ID          |
+| `PUT /v1/records/{id}`                 | Replace one record with `If-Match` version        |
+| `DELETE /v1/records/{id}`              | Version-checked soft deletion                     |
+| `PUT /v1/babies/{id}`                  | Owner's version-checked profile save              |
 | Family invitation/membership endpoints | Create, accept, revoke, leave, transfer ownership |
 
-Each mutation includes `operationId`; edits/deletes also include the opaque base version. Do not compare timestamps for conflict detection.
+This endpoint table is the broader roadmap. Use the exact `/v1/me`, invitation/member commands and `feed-operations` surface in [the pilot contract](FAMILY-PILOT-CONTRACT.md) for this iteration; profile and ownership-transfer endpoints are not implemented in the pilot.
+
+Each feed mutation includes `operationId`, `historyId` and `membershipId`; edits/deletes also include the opaque base version. Do not compare timestamps for conflict detection. Check the active grant/history before honoring an earlier receipt so a retry cannot evade removal or restore boundaries.
 
 Server transaction:
 
@@ -147,13 +169,15 @@ For the initial small-family release, use **conditional full snapshots**, not a 
 
 Read snapshot revision and data in one consistent SQL snapshot transaction; only advance the client's ETag after the full response is atomically applied. Keep drafts/outbox separate when replacing the accepted cache. An error or partial response is never an empty successful snapshot. Authorize before returning even `304 Not Modified`.
 
-Serialize refreshes per family. Include a monotonic family revision (encoded losslessly as a string) and reject snapshots older than the applied cache or an acknowledged mutation's revision. Guard every response with the current account/family session generation: a late response after sign-out, family change or revocation must never repopulate cleared data. Cancel in-flight requests where possible, but do not rely on cancellation alone for safety.
+Serialize refreshes per family. Include a monotonic family revision (encoded losslessly as a string) and reject snapshots older than the applied cache or an acknowledged mutation's revision within the same history. Include the history GUID and membership grant in snapshot metadata/ETag. A new history invalidates the previous revision comparison, clears accepted cache and quarantines old queued work; a new grant likewise cannot replay old-grant work. Guard every response with the current account/family session generation: a late response after sign-out, family change or revocation must never repopulate cleared data. Cancel in-flight requests where possible, but do not rely on cancellation alone for safety.
 
 Trade-off: a changed snapshot transfers all family records. Benchmark a proposed 20,000-record household dataset before release; if bandwidth, memory or latency is unacceptable, add a properly ordered paginated change feed as a separately reviewed enhancement. Do not pretend this pilot approach scales indefinitely, or use SQL rowversion as a naive sync cursor.
 
 After a conflict, immediately apply/fetch the newest authorized record and refresh summaries. Show “Latest status unavailable” if that fetch fails; preserve the last known state and draft. Other devices see accepted changes on their next refresh, not instantly.
 
-## 9. Existing-code migration
+## 9. Existing-code migration (deferred; not part of the pilot)
+
+None of the migration steps in this section is activated by invitation-pilot login. The pilot has its own ledger and does not attach uploading to local `saveState` or change existing timers.
 
 Current `src/storage.ts` stores one validated JSON state in SQLite `app_data`; `App.tsx` funnels edits through whole-state `commit/upsert`. Timer starts currently use that same path. Introduce a small local repository and explicit `saveDraft`, `saveRecord` and `confirmDelete` services instead of attaching uploads to `saveState`.
 
@@ -188,29 +212,29 @@ Record storage retains overlaps. Leave the existing sleep-summary interval-union
 Keep the mobile project at the repository root; add only:
 
 ```text
-server/LittleDays.Api/          # One C# app: Records, Families, Identity features
-server/LittleDays.Api.Tests/    # Unit and SQL-backed integration tests
-contracts/fixtures/            # Shared validation/serialization examples
-infra/                         # Bicep + environment parameters
-.github/workflows/             # Mobile/API CI and approved deployments
+server/LittleDays.FamilyApi/        # Pilot API, SQL model and migrations
+server/LittleDays.FamilyApi.Tests/  # Unit and real-SQL integration harness
+src/family/                       # Separate pilot wire types, persistence and UI
+infra/                            # Public config examples, SQL bootstrap/grants, OIDC template
+.github/workflows/                # CI and manual protected pilot deployment
 ```
 
-Use feature branches and PRs, required CI checks, and no direct production deployment from a developer laptop. PR CI: current TypeScript/unit/browser tests, `dotnet test`, SQL-backed concurrency/invitation tests, dependency/secret checks. EF's in-memory provider alone cannot verify SQL rowversion behavior.
+Use feature branches and PRs, required CI checks, and no direct production deployment from a developer laptop. Pilot CI covers TypeScript/unit/browser checks, `dotnet test` and a disposable SQL Server using `FAMILY_TEST_SQL_CONNECTION`. EF's in-memory provider alone cannot verify SQL rowversion behavior. Dependency/secret review and native security validation remain operational requirements; do not claim that a dedicated scanner is installed by this workflow.
 
-Merge deploys the API to an isolated preview environment; production promotion requires your approval. Review/apply EF migrations as a separate deployment step; use additive backward-compatible changes so previous mobile releases continue working. Keep `/v1` backward compatible and retain a tested API rollback artifact.
+Merging or pushing does not deploy. The pilot workflow accepts a reviewed full commit SHA only via manual dispatch, reruns checks, and waits on the protected `family-pilot` environment before OIDC deployment to its one configured Web App. It creates no Azure resources and runs no migrations. Review/apply EF migrations separately using an Entra operator identity; runtime managed identity receives only table `SELECT`/`INSERT`/`UPDATE`. Use additive backward-compatible changes so previous mobile releases continue working. Keep `/v1` backward compatible and retain a tested API rollback artifact. A database restore additionally requires a fresh history GUID and access-lifecycle review before reopening.
 
 GitHub Actions uses scoped Azure OIDC identities and protected environments. Production API credentials never belong in the app. Expo public configuration contains only the API URL and public identity configuration. Continue EAS preview builds/updates; authentication native dependencies and URL registration require a compatible new native build, not just an OTA update.
 
-Current delivery blocker: the GitHub plugin can read this repository, but its last code-write attempt returned HTTP 403. Repository Contents write access must be fixed before remote publishing. Azure deployments additionally need a scoped deployment identity; workflow updates need their own permitted access. GitHub integration authorization and local Git credentials are separate.
+Remote publishing/deployment access must be checked when an operator is ready; an old connector error is not evidence of current permission. Azure resources, customer registrations, checked identity bindings, SQL bootstrap, protected GitHub environment and scoped OIDC identity are setup work described in the linked guide, not infrastructure already created by this iteration.
 
 ## 12. Delivery milestones and review gates
 
-1. **Approve this plan:** roles, login, scope, region/budget and retention decisions.
-2. **Prove login:** two real accounts on iPhone, verified invite recipient and API token validation; no production data migration.
-3. **Backend vertical slice:** family/invite + create/edit/delete, atomic first-wins and idempotency proven against SQL.
-4. **Local-first integration:** draft/timer separation, durable outbox, snapshots, migration and bilingual conflict/pending UX.
-5. **Two-device pilot:** test normal/offline/concurrent behavior, access removal, reminders and restore. Fix correctness before expanding scope.
-6. **Public-release gate:** privacy/account-deletion decisions, approved hosting estimate, rollback and operational checks.
+1. **Current authorized slice:** the invitation pilot contract, roles and separate synthetic feed ledger; not approval of the entire roadmap.
+2. **Prove setup/login:** create reviewed infrastructure, check two actual email-OTP identities on iPhone, validate recipient binding and access tokens; no production data migration.
+3. **Pilot backend/client validation:** prove first-wins, idempotency, grant/history boundaries and durable isolated outbox behavior against SQL and the native runtime.
+4. **Two-device pilot:** test normal/offline/concurrent behavior, access removal/account switching and database restore. Record evidence before expanding scope.
+5. **Future local-first integration:** broader record types, private timers, shared summaries, migration and bilingual conflict/pending UX require separately scoped work.
+6. **Public-release gate:** privacy/account/family deletion, reviewer access, retention, approved hosting estimate, rollback and operational checks.
 
 Planning allowance: approximately **4–6 developer-weeks** for the small release after access and decisions are available, plus your review/device-testing time. This is a rough engineering estimate, not a delivery commitment; login and migration spikes refine it.
 
@@ -227,12 +251,12 @@ Planning allowance: approximately **4–6 developer-weeks** for the small releas
 - Account switching leaks neither cached data nor pending operations; migration retries do not duplicate legacy records.
 - SQL snapshot consistency, large household dataset, database restore, narrow screens, both languages and two real iPhones pass.
 
-## 14. Decisions requested
+## 14. Remaining decisions and setup gates
 
-1. Approve .NET 10 + Azure App Service + Azure SQL + Entra External ID, with Azure resource creation gated on a regional cost estimate?
-2. May caregivers edit/delete **any shared care record**, while only the owner manages profile/members?
-3. Approve email-passcode login and recipient-bound, single-use invitations shared through the phone, with no app email service initially?
-4. Approve v1 limits: one-baby UI, local avatars, private running timers, foreground refresh rather than instant shared notifications?
-5. Confirm Australia East preference and monthly hosting budget; decide account/family deletion and backup retention before public release.
+1. Operator confirms region, monthly budget, SQL networking and backup retention before creating resources.
+2. Complete the actual two-account Entra/iPhone identity and invite proof; open enrollment needs a separately verified recipient-claim design.
+3. Complete SQL concurrency, removed/rejoined grants, restore history and two-device offline testing before declaring the pilot usable.
+4. Decide account/family deletion, retained shared attribution, exports, privacy/store copy and reviewer access before public/external TestFlight release.
+5. Scope any broader shared care types, timers and existing-history migration separately; their presence in this roadmap is not authorization to upload local history.
 
-No application implementation or cloud deployment should start until you review these choices.
+Proceed with the already approved invitation-pilot implementation. Cloud provisioning remains an operator task; production deployment, real-history migration and public release remain outside this iteration.

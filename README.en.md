@@ -2,7 +2,7 @@
 
 English | [简体中文](README.md)
 
-An offline baby-care and growth tracker built with Expo, React Native, and TypeScript. Record feeds, sleep, diaper changes, and measurements without creating an account. The app supports English and Simplified Chinese, including a system-language option.
+An offline baby-care and growth tracker built with Expo, React Native, and TypeScript. The original local features record feeds, sleep, diaper changes, and measurements without an account or backend. The repository also contains a separate, controlled family invitation pilot that requires configured infrastructure and admitted accounts. The app supports English and Simplified Chinese, including a system-language option.
 
 ## Features
 
@@ -24,6 +24,17 @@ An offline baby-care and growth tracker built with Expo, React Native, and TypeS
 - **Privacy, support, and credits:** More has separate expandable Privacy & support and Credits sections. Credits thanks Trista from FPH and Mia, Violet, and Bill in her group for their suggestions and ideas, and the group's mums and dads for their support. More parents are welcome to join in. Activity guidance is for parents, not a screen-based course for babies or a developmental assessment.
 - **Backups:** export and import validated JSON files. Imports replace the current records after confirmation rather than merging them.
 
+## Family invitation pilot — implemented source, not deployed
+
+Open **More → Family invitation pilot**. This is a separate test space for two checked accounts and fictional baby names and **completed bottle feeds**. It is not full family synchronization or a public beta. Existing profiles, feeds, sleep, diapers, growth, daily care, timers, learning, settings, photos, and backups are never migrated or uploaded.
+
+- Native sign-in uses Microsoft Entra External ID email one-time passcodes. An account can belong to one pilot family. The owner can invite admitted recipients, revoke invitations, and remove caregivers; caregivers can leave.
+- Members can create, edit, and delete test bottle feeds. Typing stays in a private device draft. Explicit Save writes a durable queue first; offline work stays marked as waiting and resumes when the pilot screen is open and connectivity returns.
+- The first server commit wins for a record version. Independent records and overlapping times remain separate. Conflicts, replaced memberships, and restored database histories retain private work for review without automatically overwriting current records.
+- Sign-out warns about unsent work, then clears this device's pilot cache, drafts, queue, and credentials after confirmation. Original local records remain. Pilot export/import and history migration are not included.
+
+Follow the [Azure pilot setup guide](docs/AZURE-FAMILY-PILOT-SETUP.md) for the .NET 10 API, Azure SQL, customer identity tenant, and operator-verified account bindings. [Server instructions](server/README.md) cover running and testing. Unconfigured builds show setup as incomplete; production browser sign-in is disabled. Source and automated checks do not establish a working Azure deployment or two-iPhone validation. The [pilot contract](docs/FAMILY-PILOT-CONTRACT.md) defines this slice; the rest of the [family-sharing technical plan](docs/FAMILY-SHARING-TECH-PLAN.md) remains a roadmap.
+
 ## Run locally
 
 Use a Node.js version supported by `package.json` (`^22.13.0` or `>=24.3.0`).
@@ -41,11 +52,13 @@ For a browser preview:
 npm run web
 ```
 
-The browser stores its own data in localStorage, separate from the installed mobile app. Native reminders, photo storage, and file-sharing behavior need testing on a phone. For mobile development, use an Expo client compatible with this project's SDK or an appropriate signed build.
+The browser stores original local data in localStorage, separate from the installed mobile app. The pilot page provides information but does not enable production account sign-in. Native reminders, photo storage, and file-sharing behavior need testing on a phone. Expo Go may preview the original local features when compatible with this SDK; pilot authentication requires a new signed native build. The mobile pilot uses its own SQLite database and account/family keyspace.
 
 ## iPhone builds and updates
 
 The repository includes `preview` and `production` EAS build profiles. Preview uses internal distribution and the `preview` update channel; production uses the `production` channel and automatic build-number increments.
+
+The current source version is **0.2.0**. Added authentication, browser-session and SecureStore dependencies plus the `mylittledays` URL scheme require a new native binary. The version bump separates its `appVersion` update runtime from older 0.1.1 installations: do not publish pilot JavaScript to that old runtime. No new IPA, TestFlight build, or OTA release was produced in this implementation. Configure the pilot's public environment values and complete two-phone validation before distribution.
 
 With access to the Expo project and the required Apple signing credentials:
 
@@ -57,21 +70,21 @@ npx eas-cli build --platform ios --profile preview
 
 Install using the link provided by EAS. An installed build can run independently of the development computer. Keep the existing application identity when updating an installation containing records.
 
-To publish a compatible JavaScript update to the preview channel:
+After installing and validating the new native pilot runtime, a subsequent compatible JavaScript update can use the matching preview environment and channel:
 
 ```sh
 npx eas-cli update --channel preview --environment preview --message "Describe the update"
 ```
 
-Native dependency or configuration changes may require a new build. App Store distribution requires a production build, Apple credentials, and an App Store Connect app record; uploading a build is separate from submitting it for Apple's review. See [Expo's iOS submission guide](https://docs.expo.dev/submit/ios/).
+Further native dependency or configuration changes may require another build. Public or external TestFlight distribution remains gated on privacy, account/family deletion, reviewer access, retention, and live device checks. App Store distribution requires a production build, Apple credentials, and an App Store Connect app record; uploading a build is separate from submitting it for Apple's review. See [Expo's iOS submission guide](https://docs.expo.dev/submit/ios/).
 
 ## Data and privacy
 
-Mobile records are stored locally in SQLite. The app does not provide accounts, family sharing, or cloud synchronization. Baby photos are copied into local app storage when selected. Notifications are scheduled locally.
+Original mobile records remain local in SQLite and require no account. Signing in to the pilot does not upload or synchronize them. The separate pilot stores an account/family cache, private drafts, and a durable queue; after service configuration, explicit family/invitation commands and saved test feeds are sent to its API. It does not share existing timers, notifications, charts, photos, or history backups. Baby photos are copied into local app storage when selected. Notifications remain local.
 
 The app uses Expo's update service to check for and download software updates. This can exchange technical metadata with that service; baby records and photos are not included in the app's update requests.
 
-Backups are unencrypted JSON containing the baby profile, tracking entries, and daily-care records. They do not include the local avatar, theme/language preferences, reminder schedules, or activity selections/check-ins. Export a backup before uninstalling or changing phones. Files leave the app when you explicitly export/share them; selecting a cloud destination uses the service you choose.
+Backups are unencrypted JSON containing the original local baby profile, tracking entries, and daily-care records. They do not include the local avatar, theme/language preferences, reminder schedules, activity selections/check-ins, or separate pilot data and credentials. Export a local backup before uninstalling or changing phones. Backup files leave the app when you explicitly export/share them; selecting a cloud destination uses the service you choose.
 
 ## Time and growth calculations
 
@@ -88,7 +101,9 @@ npx playwright install chromium
 npm run test:browser
 ```
 
-`verify` runs TypeScript checking and unit tests. Browser regression tests exercise the web implementation. `npm run export:ios` exports the iOS JavaScript bundle; it does not compile or sign an IPA. SQLite persistence, notifications, photo selection, and file sharing also require device validation. See [validation notes](docs/VALIDATION.md) for the checklist and historical results.
+`verify` runs TypeScript checking, local-domain and pilot unit tests, and `test:family-controller`. The controller harness exercises the real pilot controller with deterministic identity, HTTP, and SQLite test boundaries; it does not run native authentication or the device database. Browser regression exercises the web implementation. `npm run export:ios` exports the iOS JavaScript bundle; it does not compile or sign an IPA.
+
+With .NET 10, run `dotnet test server/LittleDays.FamilyApi.Tests`. SQL tests run only when `FAMILY_TEST_SQL_CONNECTION` points to a disposable SQL Server `master` connection; never use the pilot or production database. See [server instructions](server/README.md). Azure managed identity, live Entra login, SQLite persistence, notifications, photos, file sharing, and two-iPhone offline/conflict/removal behavior remain device/infrastructure checks. See [validation notes](docs/VALIDATION.md).
 
 ## Project layout
 
@@ -103,7 +118,10 @@ npm run test:browser
 - `src/domain.ts` — data validation and summary calculations.
 - `src/storage.ts`, `src/backup.ts`, `src/reminders.ts` — native persistence, backups, and notifications; `.web.ts` files provide browser variants.
 - `src/growth.ts`, `assets/who/` — bundled growth references.
-- `src/*.test.ts`, `tests/browser.mjs` — unit and browser tests.
+- `src/family/` — separate pilot UI, authentication, wire contracts, cache, drafts, and durable queue.
+- `server/LittleDays.FamilyApi/`, `server/LittleDays.FamilyApi.Tests/` — .NET 10 API, EF SQL migrations, and backend tests.
+- `infra/`, `.github/workflows/` — setup templates, SQL permissions, CI, and manual deployment through a protected environment. Merges do not deploy.
+- `src/*.test.ts`, `tests/family-controller.mjs`, `tests/browser.mjs` — unit, pilot controller, and browser tests.
 
 See [Repository Guidelines](AGENTS.md) for contributor conventions.
 

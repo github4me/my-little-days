@@ -88,7 +88,18 @@ export default function PrivacySupport({ onBack }: { onBack: () => void }) {
           你的数据，由你掌控
         </T>
         <T style={{ color: c.muted, fontSize: 13 }}>
-          小日子是一款离线记录工具：我们不提供账号、服务器或云同步。
+          本机记录无需账号，不会自动上传。可选的家庭邀请试点使用独立登录和服务器，仅用于主动保存的虚构测试资料。
+        </T>
+      </Card>
+
+      <Card>
+        <T style={{ fontSize: 18, fontWeight: "700" }}>家庭邀请试点</T>
+        <T style={{ color: c.muted, fontSize: 13 }}>
+          试点通过 Microsoft Entra External ID
+          登录。创建测试家庭、发送邀请、接受邀请和保存测试记录时，相关资料会发送到配置的试点服务。原有宝宝档案、历史、计时器、照片、早教打卡和备份不会上传。
+        </T>
+        <T style={{ color: c.muted, fontSize: 13 }}>
+          试点仅限获准的测试账户，请勿填写真实宝宝资料。退出会清除这台设备的试点缓存和草稿；服务端数据仍保留。账户删除、保留期限和正式隐私披露完成前，不对外发布家庭共享。
         </T>
       </Card>
 

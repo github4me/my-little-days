@@ -10,6 +10,7 @@ import {
   Platform,
   useWindowDimensions,
   useColorScheme,
+  Linking,
 } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
@@ -35,6 +36,7 @@ import AppVersion from "./src/AppVersion";
 import type { RecordView } from "./src/recordCalendar";
 import Settings from "./src/Settings";
 import PrivacySupport from "./src/PrivacySupport";
+import FamilyScreen from "./src/family/FamilyScreen";
 import FeedStopButton from "./src/FeedStopButton";
 import FinishFeedDialog from "./src/FinishFeedDialog";
 import { finishFeed } from "./src/feedFinish";
@@ -154,7 +156,9 @@ function BabyApp({
     [fatal, setFatal] = useState(""),
     [message, setMessage] = useState(""),
     [tab, setTab] = useState("today"),
-    [settingsPage, setSettingsPage] = useState<"main" | "privacy">("main"),
+    [settingsPage, setSettingsPage] = useState<"main" | "privacy" | "family">(
+      "main",
+    ),
     [now, setNow] = useState(Date.now()),
     [editor, setEditor] = useState<Entry | null>(null),
     [busy, setBusy] = useState(false),
@@ -165,7 +169,30 @@ function BabyApp({
   const [metric, setMetric] = useState<Metric>("weight");
   const [growthHistoryExpanded, setGrowthHistoryExpanded] = useState(false);
   const [openProfile, setOpenProfile] = useState(false);
+  const [familyInvitation, setFamilyInvitation] = useState("");
   const mainScroll = useRef<ScrollView>(null);
+  useEffect(() => {
+    let mounted = true;
+    function openInvitation(url: string | null) {
+      if (!mounted || !url?.startsWith("mylittledays://family-invite#token="))
+        return;
+      // Keep the token in memory only. Acceptance always needs an explicit action.
+      setFamilyInvitation(url);
+      setSettingsPage("family");
+      setTab("settings");
+      mainScroll.current?.scrollTo({ y: 0, animated: false });
+    }
+    void Linking.getInitialURL()
+      .then(openInvitation)
+      .catch(() => {});
+    const listener = Linking.addEventListener("url", (event) =>
+      openInvitation(event.url),
+    );
+    return () => {
+      mounted = false;
+      listener.remove();
+    };
+  }, []);
   const [finishingFeed, setFinishingFeed] = useState<{
     entry: Entry;
     stoppedAt: string;
@@ -1001,6 +1028,15 @@ function BabyApp({
             {tab === "settings" ? (
               settingsPage === "privacy" ? (
                 <PrivacySupport onBack={() => setSettingsPage("main")} />
+              ) : settingsPage === "family" ? (
+                <FamilyScreen
+                  initialInvitation={familyInvitation}
+                  onBack={() => {
+                    setFamilyInvitation("");
+                    setSettingsPage("main");
+                    mainScroll.current?.scrollTo({ y: 0, animated: false });
+                  }}
+                />
               ) : (
                 <Settings
                   initialProfileExpanded={openProfile}
@@ -1020,6 +1056,10 @@ function BabyApp({
                   language={language}
                   onLanguageChange={changeLanguage}
                   onOpenPrivacy={() => setSettingsPage("privacy")}
+                  onOpenFamily={() => {
+                    setSettingsPage("family");
+                    mainScroll.current?.scrollTo({ y: 0, animated: false });
+                  }}
                   onDarkMode={async (v) => {
                     const previous = themePreference;
                     setThemePreference(v);
@@ -1075,6 +1115,7 @@ function BabyApp({
                     }
                     setTab(key);
                     setSettingsPage("main");
+                    setFamilyInvitation("");
                     setMessage("");
                     setDeleting(null);
                   }}

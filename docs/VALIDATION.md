@@ -1,4 +1,18 @@
-# 验证记录 · 0.1.0
+# 验证记录
+
+## 家庭邀请试点 · 0.2.0 源码 · 2026-09-14
+
+Windows、Node.js 24.19、.NET 10 和本机 SQL Server 环境；仅虚构数据。本节为本次执行结果，下方 0.1.0 等内容为历史结果，不代表本次原生设备验收。
+
+- `npm run verify`：TypeScript、68 项单元测试、13 项试点控制器/原生认证边界测试通过。控制器测试执行实际 hook、存储与认证模块，使用确定性 React、SQLite、HTTP、SecureStore、AuthSession 测试桩，覆盖先持久保存再发送、导航恢复、退出清理失败与重试、重新认证和旧会话竞争。
+- 设置 `FAMILY_TEST_SQL_CONNECTION` 后运行 `dotnet test server/LittleDays.FamilyApi.Tests`：15 项通过，使用真实 SQL Server 而非内存数据库，覆盖 JWT、邀请、并发写入、版本冲突、撤销权限、历史变更和迁移；仅创建并清理测试工具自己的 GUID 命名数据库。命令与权限见 [服务端说明](../server/README.md)。
+- `npm run export:web` 和 `npm run export:ios` 通过。iOS 为 JavaScript/Hermes 导出，不是 IPA 编译、签名或真机验证。
+- `npm run test:browser` 通过：既有本机流程、日历/历史、深色与窄屏，以及中英文未配置试点页面、禁止网页登录、返回后本机历史保留。浏览器未验证原生登录、分享或 SQLite。
+- 依赖检查：`npm audit` 为 12 项 moderate、0 high、0 critical；来自既有 `uuid@7.0.3 → xcode@3.0.1 → Expo` 工具链，相关版本与本次改动前一致。未强制降级 Expo；兼容的依赖修复仍需跟进，不能将本次结果称为完整安全认证。服务端依赖审计未报告已知漏洞。
+- **未执行**：Azure 资源创建/部署、真实 Entra 邮箱验证码登录、托管身份连接 Azure SQL、两部 iPhone 的原生离线/冲突/撤销验收，以及 Azure 数据库恢复演练。当前仍是独立、仅虚构数据的受控试点，原有宝宝资料不会上传。没有生成新 IPA、发布 OTA 或提交 TestFlight。
+- 下一步按 [Azure 设置指南](AZURE-FAMILY-PILOT-SETUP.md) 配置服务与两个核验账户，安装新的 0.2.0 原生构建并完成双机检查。公开或外部 TestFlight 发布还需账户/家庭删除、保留策略、隐私披露和审核访问安排。
+
+## 历史验证 · 0.1.0
 
 执行环境：Linux、Node.js 24.19、Expo SDK 57。测试数据为虚构数据；docs 中预览图不包含用户真实记录。
 

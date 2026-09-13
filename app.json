@@ -19,7 +19,8 @@
       }
     },
     "slug": "little-days",
-    "version": "0.1.1",
+    "version": "0.2.0",
+    "scheme": "mylittledays",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "icon": "./assets/icon.png",
@@ -60,7 +61,9 @@
           "microphonePermission": false
         }
       ],
-      "expo-localization"
+      "expo-localization",
+      "expo-web-browser",
+      "expo-secure-store"
     ],
     "web": {
       "bundler": "metro"

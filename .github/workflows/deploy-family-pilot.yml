@@ -1,0 +1,90 @@
+name: Deploy family pilot manually
+
+# No push, merge, release, schedule, or workflow_run deployment trigger.
+on:
+  workflow_dispatch:
+    inputs:
+      release_sha:
+        description: Reviewed full 40-character commit SHA from this repository
+        type: string
+        required: true
+      database_ready:
+        description: I reviewed and separately applied required migrations; this is the synthetic-data pilot
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-family-pilot
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require explicit reviewed revision and database readiness
+        shell: bash
+        env:
+          RELEASE_SHA: ${{ inputs.release_sha }}
+          DATABASE_READY: ${{ inputs.database_ready }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_SHA" =~ ^[0-9a-fA-F]{40}$ ]] || { echo 'Supply a full commit SHA.' >&2; exit 1; }
+          [ "$DATABASE_READY" = true ] || { echo 'Review and apply migrations separately before deployment.' >&2; exit 1; }
+
+  verify:
+    needs: validate
+    uses: ./.github/workflows/family-pilot-ci.yml
+    with:
+      revision: ${{ inputs.release_sha }}
+
+  deploy:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: family-pilot
+      url: ${{ vars.FAMILY_API_PUBLIC_URL }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Require configured protected pilot environment
+        shell: bash
+        env:
+          ENABLED: ${{ vars.FAMILY_PILOT_DEPLOY_ENABLED }}
+          WEBAPP: ${{ vars.AZURE_WEBAPP_NAME }}
+          PUBLIC_URL: ${{ vars.FAMILY_API_PUBLIC_URL }}
+          CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+        run: |
+          set -euo pipefail
+          [ "$ENABLED" = true ] || { echo 'Configure and protect the family-pilot environment before enabling deployment.' >&2; exit 1; }
+          for value in "$WEBAPP" "$PUBLIC_URL" "$CLIENT_ID" "$TENANT_ID" "$SUBSCRIPTION_ID"; do
+            [ -n "$value" ] || { echo 'A required pilot environment variable is missing.' >&2; exit 1; }
+          done
+          [[ "$PUBLIC_URL" == https://* ]] || { echo 'The pilot API URL must use HTTPS.' >&2; exit 1; }
+      - uses: actions/download-artifact@v4
+        with:
+          name: family-api-${{ github.run_id }}
+          path: family-api
+      - uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ vars.AZURE_WEBAPP_NAME }}
+          package: family-api
+      - name: Check public liveness only
+        shell: bash
+        env:
+          PUBLIC_URL: ${{ vars.FAMILY_API_PUBLIC_URL }}
+        run: |
+          curl --fail --silent --show-error --retry 10 --retry-delay 5 --retry-all-errors \
+            --connect-timeout 10 --max-time 20 "${PUBLIC_URL%/}/health/live"

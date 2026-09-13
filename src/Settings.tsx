@@ -77,6 +77,7 @@ export default function Settings({
   language,
   onLanguageChange,
   onOpenPrivacy,
+  onOpenFamily,
 }: {
   initialProfileExpanded?: boolean;
   state: State;
@@ -90,6 +91,7 @@ export default function Settings({
   language: LanguagePreference;
   onLanguageChange: (language: LanguagePreference) => Promise<void>;
   onOpenPrivacy: () => void;
+  onOpenFamily: () => void;
 }) {
   const c = useContext(Theme);
   const [name, setName] = useState(state.profile.name),
@@ -940,6 +942,12 @@ export default function Settings({
           </View>
         )}
       </SettingsSection>
+      <SettingsSection title="家庭邀请试点" busy={busy}>
+        <T style={{ color: c.muted, fontSize: 13 }}>
+          独立测试空间，仅使用虚构数据。现有宝宝记录不会上传或共享。
+        </T>
+        <Button label="打开家庭邀请试点" secondary onPress={onOpenFamily} />
+      </SettingsSection>
       <SettingsSection title="隐私与支持" busy={busy}>
         <T style={{ color: c.muted, fontSize: 13 }}>
           了解本机数据、备份和软件更新
@@ -957,7 +965,7 @@ export default function Settings({
           Little Days · 单机离线版
         </T>
         <T style={{ color: c.muted, fontSize: 12, textAlign: "center" }}>
-          无需账号 · 无后台服务器 · 不共享 · 不上传照片
+          本机记录无需账号 · 家庭试点为独立测试空间 · 不上传照片
         </T>
         <T style={{ color: c.muted, fontSize: 12, textAlign: "center" }}>
           日期按设备当地时区显示和统计

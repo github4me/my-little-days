@@ -9,6 +9,18 @@ type TranslationValues = Record<string, string | number>;
 // Chinese source text remains the fallback. Keeping translations together makes
 // adding another language a data change rather than a screen-by-screen rewrite.
 const english: Record<string, string> = {
+  家庭邀请试点: "Family invitation pilot",
+  打开家庭邀请试点: "Open family invitation pilot",
+  "独立测试空间，仅使用虚构数据。现有宝宝记录不会上传或共享。":
+    "A separate test space for fictional data only. Your existing baby records are never uploaded or shared.",
+  "本机记录无需账号 · 家庭试点为独立测试空间 · 不上传照片":
+    "Local records need no account · Family pilot is separate · No photo uploads",
+  "本机记录无需账号，不会自动上传。可选的家庭邀请试点使用独立登录和服务器，仅用于主动保存的虚构测试资料。":
+    "Local records need no account and are never uploaded automatically. The optional family invitation pilot has separate sign-in and server storage for fictional test data you explicitly save.",
+  "试点通过 Microsoft Entra External ID 登录。创建测试家庭、发送邀请、接受邀请和保存测试记录时，相关资料会发送到配置的试点服务。原有宝宝档案、历史、计时器、照片、早教打卡和备份不会上传。":
+    "The pilot uses Microsoft Entra External ID for sign-in. Creating a test family, inviting or joining, and saving test feeds sends the relevant data to the configured pilot service. Your existing baby profile, history, timers, photos, learning check-ins and backups are not uploaded.",
+  "试点仅限获准的测试账户，请勿填写真实宝宝资料。退出会清除这台设备的试点缓存和草稿；服务端数据仍保留。账户删除、保留期限和正式隐私披露完成前，不对外发布家庭共享。":
+    "The pilot is limited to admitted test accounts. Do not enter real baby data. Signing out clears this device's pilot cache and drafts; server data remains. Family sharing will not be publicly released until account deletion, retention rules and privacy disclosures are ready.",
   "MY LITTLE DAYS · 小日子": "MY LITTLE DAYS",
   今天的小日子: "{name}'s little days",
   "每一天，都记得": "Every day remembered",

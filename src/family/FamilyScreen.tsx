@@ -1,0 +1,1246 @@
+import React, { useContext, useEffect, useRef, useState } from "react";
+import {
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  Share,
+  StyleSheet,
+  TextInput,
+  View,
+} from "react-native";
+import DateTimePicker from "@react-native-community/datetimepicker";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { useI18n, type AppLocale } from "../i18n";
+import { Button, Card, T, Theme } from "../ui";
+import type { SharedFeed } from "./contracts";
+import type { FeedDraft } from "./pilotState";
+import {
+  familyErrorMessage,
+  familyMessage,
+  familyNoticeMessage,
+  type FamilyMessageKey,
+} from "./messages";
+import { useFamilyPilot } from "./useFamilyPilot";
+
+type Translate = (
+  key: FamilyMessageKey,
+  values?: Record<string, string | number>,
+) => string;
+type Confirmation = {
+  title: string;
+  body: string;
+  label: string;
+  action: () => Promise<void>;
+};
+
+function Disclosure({
+  title,
+  children,
+  initiallyOpen = false,
+}: {
+  title: string;
+  children: React.ReactNode;
+  initiallyOpen?: boolean;
+}) {
+  const c = useContext(Theme);
+  const { locale } = useI18n();
+  const [open, setOpen] = useState(initiallyOpen);
+  return (
+    <Card style={styles.card}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={familyMessage(
+          locale,
+          open ? "hideSection" : "showSection",
+          { section: title },
+        )}
+        accessibilityState={{ expanded: open }}
+        aria-expanded={open}
+        onPress={() => setOpen((value) => !value)}
+        style={({ pressed }) => [
+          styles.disclosure,
+          { opacity: pressed ? 0.65 : 1 },
+        ]}
+      >
+        <T raw style={styles.sectionTitle}>
+          {title}
+        </T>
+        <T
+          raw
+          accessibilityElementsHidden
+          style={{ color: c.primary, fontSize: 20 }}
+        >
+          {open ? "−" : "+"}
+        </T>
+      </Pressable>
+      {open ? <View style={styles.stack}>{children}</View> : null}
+    </Card>
+  );
+}
+
+function Input({
+  label,
+  ...props
+}: React.ComponentProps<typeof TextInput> & { label: string }) {
+  const c = useContext(Theme);
+  return (
+    <View style={styles.field}>
+      <T raw style={{ fontSize: 13, color: c.muted }}>
+        {label}
+      </T>
+      <TextInput
+        {...props}
+        accessibilityLabel={label}
+        placeholderTextColor={c.muted}
+        style={[
+          styles.input,
+          { color: c.text, backgroundColor: c.bg, borderColor: c.line },
+          props.style,
+        ]}
+      />
+    </View>
+  );
+}
+
+function Consent({
+  checked,
+  onChange,
+  label,
+  disabled,
+}: {
+  checked: boolean;
+  onChange: (value: boolean) => void;
+  label: string;
+  disabled: boolean;
+}) {
+  const c = useContext(Theme);
+  return (
+    <Pressable
+      accessibilityRole="checkbox"
+      accessibilityLabel={label}
+      accessibilityState={{ checked, disabled }}
+      disabled={disabled}
+      onPress={() => onChange(!checked)}
+      style={({ pressed }) => [
+        styles.consent,
+        { opacity: disabled ? 0.5 : pressed ? 0.65 : 1 },
+      ]}
+    >
+      <View
+        style={[
+          styles.checkbox,
+          {
+            backgroundColor: checked ? c.soft : c.bg,
+            borderColor: checked ? c.primary : c.muted,
+          },
+        ]}
+      >
+        <T
+          raw
+          accessibilityElementsHidden
+          style={{ color: c.primary, fontWeight: "700" }}
+        >
+          {checked ? "✓" : ""}
+        </T>
+      </View>
+      <T raw style={{ flex: 1, fontSize: 13, lineHeight: 20, color: c.muted }}>
+        {label}
+      </T>
+    </Pressable>
+  );
+}
+
+const pad = (value: number) => String(value).padStart(2, "0");
+function localFields(iso: string) {
+  const value = new Date(iso);
+  return {
+    date: `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}`,
+    time: `${pad(value.getHours())}:${pad(value.getMinutes())}`,
+  };
+}
+
+function localISO(date: string, time: string): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time))
+    return null;
+  const [year, month, day] = date.split("-").map(Number);
+  const [hour, minute] = time.split(":").map(Number);
+  const value = new Date(year, month - 1, day, hour, minute);
+  if (
+    value.getFullYear() !== year ||
+    value.getMonth() !== month - 1 ||
+    value.getDate() !== day ||
+    value.getHours() !== hour ||
+    value.getMinutes() !== minute
+  )
+    return null;
+  return value.toISOString();
+}
+
+function displayDate(value: string, locale: AppLocale) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "";
+  return new Intl.DateTimeFormat(locale, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(date);
+}
+
+function DateFields({
+  value,
+  dateLabel,
+  timeLabel,
+  onChange,
+  onValidityChange,
+  disabled,
+}: {
+  value: string;
+  dateLabel: string;
+  timeLabel: string;
+  onChange: (iso: string) => void;
+  onValidityChange: (valid: boolean) => void;
+  disabled: boolean;
+}) {
+  const c = useContext(Theme);
+  const [fields, setFields] = useState(() => localFields(value));
+  const [picker, setPicker] = useState<"date" | "time" | null>(null);
+  useEffect(() => {
+    setFields(localFields(value));
+    onValidityChange(true);
+  }, [value]);
+  function update(next: typeof fields) {
+    setFields(next);
+    const iso = localISO(next.date, next.time);
+    onValidityChange(iso !== null);
+    if (iso) onChange(iso);
+  }
+  return (
+    <View style={styles.stack}>
+      <View style={styles.dateRow}>
+        {Platform.OS === "web" ? (
+          <>
+            <View style={{ flex: 1.25 }}>
+              <Input
+                label={dateLabel}
+                value={fields.date}
+                onChangeText={(date) => update({ ...fields, date })}
+                placeholder="YYYY-MM-DD"
+                maxLength={10}
+                editable={!disabled}
+              />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Input
+                label={timeLabel}
+                value={fields.time}
+                onChangeText={(time) => update({ ...fields, time })}
+                placeholder="HH:mm"
+                maxLength={5}
+                editable={!disabled}
+              />
+            </View>
+          </>
+        ) : (
+          <>
+            <View style={{ flex: 1.25, gap: 4 }}>
+              <T raw style={{ color: c.muted, fontSize: 13 }}>
+                {dateLabel}
+              </T>
+              <Button
+                label={fields.date}
+                secondary
+                disabled={disabled}
+                onPress={() => setPicker(picker === "date" ? null : "date")}
+              />
+            </View>
+            <View style={{ flex: 1, gap: 4 }}>
+              <T raw style={{ color: c.muted, fontSize: 13 }}>
+                {timeLabel}
+              </T>
+              <Button
+                label={fields.time}
+                secondary
+                disabled={disabled}
+                onPress={() => setPicker(picker === "time" ? null : "time")}
+              />
+            </View>
+          </>
+        )}
+      </View>
+      {picker && Platform.OS !== "web" ? (
+        <DateTimePicker
+          value={new Date(value)}
+          mode={picker}
+          display={Platform.OS === "ios" ? "spinner" : "default"}
+          maximumDate={new Date()}
+          is24Hour
+          onChange={(event, next) => {
+            if (Platform.OS !== "ios" || event.type === "dismissed")
+              setPicker(null);
+            if (next && event.type !== "dismissed") {
+              onValidityChange(true);
+              onChange(next.toISOString());
+            }
+          }}
+        />
+      ) : null}
+    </View>
+  );
+}
+
+function DraftEditor({
+  draft,
+  busy,
+  canSave,
+  m,
+  onChange,
+  onSave,
+  onDiscard,
+}: {
+  draft: FeedDraft;
+  busy: boolean;
+  canSave: boolean;
+  m: Translate;
+  onChange: (draft: FeedDraft) => void;
+  onSave: () => void;
+  onDiscard: () => void;
+}) {
+  const c = useContext(Theme);
+  const [startValid, setStartValid] = useState(true);
+  const [endValid, setEndValid] = useState(true);
+  const [validation, setValidation] = useState<FamilyMessageKey | null>(null);
+  function save() {
+    if (
+      !startValid ||
+      !endValid ||
+      !Number.isFinite(Date.parse(draft.start)) ||
+      !Number.isFinite(Date.parse(draft.end))
+    )
+      return setValidation("errorDate");
+    if (Date.parse(draft.end) < Date.parse(draft.start))
+      return setValidation("errorEnd");
+    if (
+      Date.parse(draft.start) > Date.now() + 60000 ||
+      Date.parse(draft.end) > Date.now() + 60000
+    )
+      return setValidation("errorFuture");
+    if (!/^\d+$/.test(draft.amount.trim()) || Number(draft.amount) > 2000)
+      return setValidation("errorAmount");
+    setValidation(null);
+    onSave();
+  }
+  return (
+    <Card style={{ ...styles.card, borderColor: c.primary }}>
+      <T raw accessibilityRole="header" style={styles.sectionTitle}>
+        {m(draft.baseVersion ? "editingFeed" : "privateDraft")}
+      </T>
+      <T raw style={styles.muted(c.muted)}>
+        {m("draftDescription")}
+      </T>
+      <DateFields
+        value={draft.start}
+        dateLabel={m("startDate")}
+        timeLabel={m("startTime")}
+        disabled={busy}
+        onValidityChange={setStartValid}
+        onChange={(start) => onChange({ ...draft, start })}
+      />
+      <DateFields
+        value={draft.end}
+        dateLabel={m("endDate")}
+        timeLabel={m("endTime")}
+        disabled={busy}
+        onValidityChange={setEndValid}
+        onChange={(end) => onChange({ ...draft, end })}
+      />
+      <T raw style={styles.muted(c.muted)}>
+        {m("localTimeHint")}
+      </T>
+      <Input
+        label={m("amount")}
+        value={draft.amount}
+        onChangeText={(amount) => onChange({ ...draft, amount })}
+        keyboardType="number-pad"
+        inputMode="numeric"
+        maxLength={4}
+        editable={!busy}
+      />
+      <T raw style={styles.muted(c.muted)}>
+        {m("amountHint")}
+      </T>
+      <Input
+        label={m("note")}
+        value={draft.note}
+        onChangeText={(note) => onChange({ ...draft, note })}
+        placeholder={m("notePlaceholder")}
+        maxLength={500}
+        multiline
+        editable={!busy}
+        style={{ minHeight: 72, textAlignVertical: "top" }}
+      />
+      {validation ? (
+        <T raw accessibilityRole="alert">
+          {m(validation)}
+        </T>
+      ) : null}
+      <View style={styles.actions}>
+        <Button
+          label={m(busy ? "saving" : "saveFeed")}
+          onPress={save}
+          disabled={busy || !canSave}
+          style={styles.flexButton}
+        />
+        <Button
+          label={m("discardDraft")}
+          secondary
+          onPress={onDiscard}
+          disabled={busy}
+          style={styles.flexButton}
+        />
+      </View>
+    </Card>
+  );
+}
+
+export default function FamilyScreen({
+  onBack,
+  initialInvitation,
+}: {
+  onBack: () => void;
+  initialInvitation?: string;
+}) {
+  const c = useContext(Theme);
+  const { locale } = useI18n();
+  const m: Translate = (key, values) => familyMessage(locale, key, values);
+  const pilot = useFamilyPilot();
+  const [babyName, setBabyName] = useState("");
+  const [createConsent, setCreateConsent] = useState(false);
+  const [joinConsent, setJoinConsent] = useState(false);
+  const [inviteInput, setInviteInput] = useState(initialInvitation ?? "");
+  const [recipient, setRecipient] = useState("");
+  const [createdInvite, setCreatedInvite] = useState<{
+    url: string;
+    email: string;
+  } | null>(null);
+  const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
+  const [localError, setLocalError] = useState<FamilyMessageKey | null>(null);
+  const [acting, setActing] = useState(false);
+  const lock = useRef(false);
+  const mounted = useRef(true);
+  const busy = acting || pilot.busy;
+  const snapshot = pilot.snapshot;
+  const owner = snapshot?.family.role === "owner";
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  useEffect(() => {
+    setCreatedInvite(null);
+    setRecipient("");
+  }, [pilot.user?.id, snapshot?.family.id]);
+  useEffect(() => {
+    if (initialInvitation !== undefined) setInviteInput(initialInvitation);
+  }, [initialInvitation]);
+
+  async function run(action: () => Promise<void>, close = false) {
+    if (lock.current) return;
+    lock.current = true;
+    setActing(true);
+    setLocalError(null);
+    try {
+      await action();
+      if (mounted.current && close) setConfirmation(null);
+    } catch {
+      // The controller publishes safe error codes; never show exception payloads.
+    } finally {
+      lock.current = false;
+      if (mounted.current) setActing(false);
+    }
+  }
+
+  function confirm(
+    title: FamilyMessageKey,
+    body: string,
+    label: FamilyMessageKey,
+    action: () => Promise<void>,
+  ) {
+    setConfirmation({ title: m(title), body, label: m(label), action });
+  }
+
+  async function shareInvitation() {
+    if (!createdInvite) return;
+    try {
+      await Share.share(
+        Platform.OS === "ios"
+          ? { url: createdInvite.url }
+          : { message: createdInvite.url },
+      );
+    } catch {
+      if (mounted.current) setLocalError("errorShare");
+    }
+  }
+
+  const memberName = (id: string) =>
+    snapshot?.members.find((member) => member.id === id)?.displayName ||
+    m("memberFallback");
+  const error = localError
+    ? m(localError)
+    : pilot.error
+      ? familyErrorMessage(locale, pilot.error)
+      : null;
+  const notice = pilot.notice
+    ? familyNoticeMessage(locale, pilot.notice)
+    : null;
+  const needsSignIn =
+    pilot.error === "sign_in_required" || pilot.error === "unauthorized";
+  const staleDraft =
+    !!pilot.draft &&
+    !!snapshot &&
+    (pilot.draft.historyId !== snapshot.historyId ||
+      pilot.draft.membershipId !== snapshot.family.membershipId);
+  const draftEditor = pilot.draft ? (
+    <View style={styles.stack}>
+      {staleDraft ? (
+        <View style={[styles.notice, { backgroundColor: c.soft }]}>
+          <T raw>{m("noticeContextChanged")}</T>
+          <Button
+            label={m("reviewPrivateDraft")}
+            secondary
+            disabled={busy}
+            onPress={() =>
+              confirm(
+                "reviewPrivateTitle",
+                m("reviewPrivateDescription"),
+                "reviewPrivateDraft",
+                pilot.reviewPrivateDraft,
+              )
+            }
+          />
+        </View>
+      ) : null}
+      <DraftEditor
+        key={pilot.draft.recordId}
+        draft={pilot.draft}
+        busy={busy}
+        canSave={!!snapshot && !staleDraft}
+        m={m}
+        onChange={(draft) => {
+          void pilot.setDraft(draft).catch(() => {});
+        }}
+        onSave={() => void run(pilot.saveDraft)}
+        onDiscard={() =>
+          confirm(
+            "discardDraftTitle",
+            m("discardDraftDescription"),
+            "discardDraft",
+            pilot.discardDraft,
+          )
+        }
+      />
+    </View>
+  ) : null;
+
+  function feedItem(
+    feed: SharedFeed & {
+      pending?: boolean;
+      pendingDelete?: boolean;
+      awaitingRefresh?: boolean;
+    },
+  ) {
+    const waiting = feed.pending || feed.pendingDelete || feed.awaitingRefresh;
+    return (
+      <View key={feed.id} style={[styles.listItem, { borderColor: c.line }]}>
+        <View style={styles.spread}>
+          <T raw style={{ fontSize: 18, fontWeight: "700" }}>
+            {feed.amount} mL
+          </T>
+          {waiting ? (
+            <T raw style={{ color: c.primary, fontSize: 13 }}>
+              {m(
+                feed.awaitingRefresh
+                  ? "savedRefreshing"
+                  : feed.pendingDelete
+                    ? "pendingDelete"
+                    : "pendingFeed",
+              )}
+            </T>
+          ) : null}
+        </View>
+        <T raw>
+          {displayDate(feed.start, locale)} — {displayDate(feed.end, locale)}
+        </T>
+        {feed.note ? (
+          <T raw style={styles.muted(c.muted)}>
+            {feed.note}
+          </T>
+        ) : null}
+        <T raw style={styles.muted(c.muted)}>
+          {m("recordedBy", { name: memberName(feed.recordedBy) })}
+        </T>
+        {feed.lastEditedBy !== feed.recordedBy ? (
+          <T raw style={styles.muted(c.muted)}>
+            {m("editedBy", { name: memberName(feed.lastEditedBy) })}
+          </T>
+        ) : null}
+        <View style={styles.actions}>
+          <Button
+            label={m("editFeed")}
+            secondary
+            disabled={busy || !!waiting || !!pilot.draft}
+            onPress={() => void run(() => pilot.beginFeed(feed))}
+            style={styles.flexButton}
+          />
+          <Button
+            label={m("deleteFeed")}
+            secondary
+            disabled={busy || !!waiting || !!pilot.draft}
+            onPress={() =>
+              confirm(
+                "deleteFeedTitle",
+                m("deleteFeedDescription"),
+                "deleteFeed",
+                () => pilot.deleteFeed(feed.id),
+              )
+            }
+            style={styles.flexButton}
+          />
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.screen}>
+      <View style={styles.spread}>
+        <T raw accessibilityRole="header" style={styles.title}>
+          {m("title")}
+        </T>
+        <Button
+          label={m("back")}
+          secondary
+          onPress={onBack}
+          style={{ minHeight: 44, paddingHorizontal: 14 }}
+        />
+      </View>
+      <View style={[styles.notice, { backgroundColor: c.soft }]}>
+        <T raw style={{ fontSize: 13, lineHeight: 20 }}>
+          {m("pilotNotice")}
+        </T>
+      </View>
+
+      {error ? (
+        <View
+          style={[styles.notice, { borderColor: c.primary, borderWidth: 1 }]}
+        >
+          <T raw accessibilityRole="alert">
+            {error}
+          </T>
+        </View>
+      ) : null}
+      {notice && !error ? (
+        <View style={[styles.notice, { backgroundColor: c.soft }]}>
+          <T raw accessibilityLiveRegion="polite">
+            {notice}
+          </T>
+        </View>
+      ) : null}
+
+      {!pilot.configured || pilot.webUnsupported ? (
+        <Card style={styles.card}>
+          <T raw accessibilityRole="header" style={styles.sectionTitle}>
+            {m(!pilot.configured ? "unconfigured" : "nativeOnly")}
+          </T>
+          <T raw style={styles.muted(c.muted)}>
+            {m(
+              !pilot.configured
+                ? "unconfiguredDescription"
+                : "nativeOnlyDescription",
+            )}
+          </T>
+        </Card>
+      ) : !pilot.user ? (
+        <Card style={styles.card}>
+          <T raw accessibilityRole="header" style={styles.sectionTitle}>
+            {m("account")}
+          </T>
+          <T raw style={styles.muted(c.muted)}>
+            {m("signInDescription")}
+          </T>
+          <Button
+            label={m(
+              busy
+                ? "working"
+                : pilot.error === "sign_out_failed"
+                  ? "retrySignOut"
+                  : "signIn",
+            )}
+            disabled={busy}
+            onPress={() =>
+              void run(
+                pilot.error === "sign_out_failed"
+                  ? pilot.signOut
+                  : pilot.signIn,
+              )
+            }
+          />
+        </Card>
+      ) : (
+        <>
+          {needsSignIn ? (
+            <Button
+              label={m("signIn")}
+              disabled={busy}
+              onPress={() => void run(pilot.signIn)}
+            />
+          ) : null}
+          <Disclosure title={m("account")}>
+            <T raw style={{ fontWeight: "600" }}>
+              {pilot.user.displayName}
+            </T>
+            <T raw selectable style={styles.muted(c.muted)}>
+              {pilot.user.email}
+            </T>
+            {!snapshot ? (
+              <Button
+                label={m(pilot.syncing ? "refreshing" : "refresh")}
+                secondary
+                disabled={busy || pilot.syncing}
+                onPress={() => void run(pilot.refresh)}
+              />
+            ) : null}
+            <Button
+              label={m("signOut")}
+              secondary
+              disabled={busy}
+              onPress={() =>
+                confirm(
+                  "signOutTitle",
+                  m(
+                    pilot.hasPrivateWork
+                      ? "signOutWithWork"
+                      : "signOutDescription",
+                  ),
+                  "signOut",
+                  pilot.signOut,
+                )
+              }
+            />
+          </Disclosure>
+
+          {!snapshot ? (
+            <>
+              <Disclosure title={m("joinSection")} initiallyOpen>
+                <T raw style={styles.muted(c.muted)}>
+                  {m("joinDescription")}
+                </T>
+                <Input
+                  label={m("inviteLink")}
+                  value={inviteInput}
+                  onChangeText={setInviteInput}
+                  placeholder={m("inviteLinkPlaceholder")}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  editable={!busy}
+                  maxLength={4096}
+                />
+                <Consent
+                  checked={joinConsent}
+                  onChange={setJoinConsent}
+                  disabled={busy}
+                  label={m("joinConsent")}
+                />
+                <Button
+                  label={m("acceptInvite")}
+                  disabled={busy || !inviteInput.trim() || !joinConsent}
+                  onPress={() =>
+                    void run(async () => {
+                      await pilot.acceptInvitation(inviteInput.trim());
+                      if (mounted.current) setInviteInput("");
+                    })
+                  }
+                />
+              </Disclosure>
+              <Disclosure title={m("createSection")}>
+                <T raw style={styles.muted(c.muted)}>
+                  {m("oneFamily")}
+                </T>
+                <Input
+                  label={m("babyName")}
+                  value={babyName}
+                  onChangeText={setBabyName}
+                  placeholder={m("babyNamePlaceholder")}
+                  maxLength={60}
+                  editable={!busy}
+                />
+                <Consent
+                  checked={createConsent}
+                  onChange={setCreateConsent}
+                  disabled={busy}
+                  label={m("createConsent")}
+                />
+                <Button
+                  label={m("createFamily")}
+                  disabled={busy || !babyName.trim() || !createConsent}
+                  onPress={() =>
+                    void run(() => pilot.createFamily(babyName.trim()))
+                  }
+                />
+              </Disclosure>
+            </>
+          ) : (
+            <>
+              <View style={styles.spread}>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <T raw style={{ fontSize: 18, fontWeight: "700" }}>
+                    {snapshot.family.babyName}
+                  </T>
+                  <T raw style={styles.muted(c.muted)}>
+                    {m(owner ? "owner" : "caregiver")}
+                  </T>
+                </View>
+                <Button
+                  label={m(pilot.syncing ? "refreshing" : "refresh")}
+                  secondary
+                  disabled={busy || pilot.syncing}
+                  onPress={() => void run(pilot.refresh)}
+                  style={{ minHeight: 44, paddingHorizontal: 14 }}
+                />
+              </View>
+
+              {pilot.pending.length ? (
+                <View style={[styles.notice, { backgroundColor: c.soft }]}>
+                  <T
+                    raw
+                    accessibilityLiveRegion="polite"
+                    style={{ fontWeight: "600" }}
+                  >
+                    {m("pendingCount", { count: pilot.pending.length })}
+                  </T>
+                  <T raw style={styles.muted(c.muted)}>
+                    {m("pendingDescription")}
+                  </T>
+                </View>
+              ) : null}
+
+              {draftEditor}
+              <Card style={styles.card}>
+                <T raw accessibilityRole="header" style={styles.sectionTitle}>
+                  {m("feedSection")}
+                </T>
+                <T raw style={styles.muted(c.muted)}>
+                  {m("feedDescription")}
+                </T>
+                {!pilot.draft ? (
+                  <Button
+                    label={m("addFeed")}
+                    disabled={busy}
+                    onPress={() => void run(() => pilot.beginFeed())}
+                  />
+                ) : null}
+                {!pilot.feeds.length ? (
+                  <T raw style={styles.muted(c.muted)}>
+                    {m("noFeeds")}
+                  </T>
+                ) : (
+                  pilot.feeds.map(feedItem)
+                )}
+              </Card>
+            </>
+          )}
+
+          {!snapshot ? draftEditor : null}
+
+          {pilot.conflicts.length ? (
+            <Disclosure
+              title={m("preservedSection", { count: pilot.conflicts.length })}
+              initiallyOpen
+            >
+              <T raw style={styles.muted(c.muted)}>
+                {m("preservedDescription")}
+              </T>
+              {pilot.conflicts.map((conflict) => (
+                <View
+                  key={conflict.operation.operationId}
+                  style={[styles.listItem, { borderColor: c.line }]}
+                >
+                  <T raw>
+                    {familyErrorMessage(
+                      locale,
+                      conflict.error ?? "record_changed",
+                    )}
+                  </T>
+                  {conflict.operation.feed ? (
+                    <>
+                      <T raw style={{ fontWeight: "600" }}>
+                        {conflict.operation.feed.amount} mL
+                      </T>
+                      <T raw style={styles.muted(c.muted)}>
+                        {displayDate(conflict.operation.feed.start, locale)} —{" "}
+                        {displayDate(conflict.operation.feed.end, locale)}
+                      </T>
+                      {conflict.operation.feed.note ? (
+                        <T raw>{conflict.operation.feed.note}</T>
+                      ) : null}
+                    </>
+                  ) : (
+                    <T raw style={styles.muted(c.muted)}>
+                      {m("preservedDelete")}
+                    </T>
+                  )}
+                  <View style={styles.actions}>
+                    <Button
+                      label={m("reviewDraft")}
+                      secondary
+                      disabled={busy || !!pilot.draft || !snapshot}
+                      onPress={() =>
+                        void run(() =>
+                          pilot.reviewConflict(conflict.operation.operationId),
+                        )
+                      }
+                      style={styles.flexButton}
+                    />
+                    <Button
+                      label={m("discardPreserved")}
+                      secondary
+                      disabled={busy}
+                      onPress={() =>
+                        confirm(
+                          "discardPreservedTitle",
+                          m("discardPreservedDescription"),
+                          "discardPreserved",
+                          () =>
+                            pilot.discardConflict(
+                              conflict.operation.operationId,
+                            ),
+                        )
+                      }
+                      style={styles.flexButton}
+                    />
+                  </View>
+                </View>
+              ))}
+            </Disclosure>
+          ) : null}
+
+          {snapshot ? (
+            <>
+              <Disclosure
+                title={m("membersCount", { count: snapshot.members.length })}
+              >
+                <T raw style={styles.muted(c.muted)}>
+                  {m("sharingDescription")}
+                </T>
+                {snapshot.members.map((member) => (
+                  <View
+                    key={member.membershipId}
+                    style={[styles.listItem, { borderColor: c.line }]}
+                  >
+                    <View style={styles.spread}>
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <T raw style={{ fontWeight: "600" }}>
+                          {member.displayName}
+                          {member.id === pilot.user?.id ? ` (${m("you")})` : ""}
+                        </T>
+                        <T raw style={styles.muted(c.muted)}>
+                          {m(member.role)}
+                        </T>
+                      </View>
+                      {owner && member.role !== "owner" ? (
+                        <Button
+                          label={m("remove")}
+                          secondary
+                          disabled={busy}
+                          onPress={() =>
+                            confirm(
+                              "removeTitle",
+                              m("removeDescription", {
+                                name: member.displayName,
+                              }),
+                              "remove",
+                              () => pilot.removeMember(member.id),
+                            )
+                          }
+                          style={{ minHeight: 44, paddingHorizontal: 14 }}
+                        />
+                      ) : null}
+                    </View>
+                    <T raw style={styles.muted(c.muted)}>
+                      {member.email}
+                    </T>
+                  </View>
+                ))}
+                {!owner ? (
+                  <Button
+                    label={m("leave")}
+                    secondary
+                    disabled={busy}
+                    onPress={() =>
+                      confirm(
+                        "leaveTitle",
+                        m("leaveDescription"),
+                        "leave",
+                        pilot.leaveFamily,
+                      )
+                    }
+                  />
+                ) : null}
+              </Disclosure>
+
+              {owner ? (
+                <Disclosure title={m("inviteSection")}>
+                  <T raw style={styles.muted(c.muted)}>
+                    {m("recipientHint")}
+                  </T>
+                  <Input
+                    label={m("recipientEmail")}
+                    value={recipient}
+                    onChangeText={setRecipient}
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    editable={!busy}
+                    maxLength={254}
+                  />
+                  <Button
+                    label={m("createInvitation")}
+                    disabled={busy || !recipient.trim()}
+                    onPress={() =>
+                      void run(async () => {
+                        setCreatedInvite(null);
+                        const email = recipient.trim();
+                        const url = await pilot.createInvitation(email);
+                        if (mounted.current) setCreatedInvite({ url, email });
+                      })
+                    }
+                  />
+                  {createdInvite ? (
+                    <View style={[styles.notice, { backgroundColor: c.soft }]}>
+                      <T
+                        raw
+                        accessibilityLiveRegion="polite"
+                        style={{ fontWeight: "600" }}
+                      >
+                        {m("invitationReady")}
+                      </T>
+                      <T raw>{createdInvite.email}</T>
+                      <T raw style={styles.muted(c.muted)}>
+                        {m("invitationMemory")}
+                      </T>
+                      <Button
+                        label={m("shareInvite")}
+                        disabled={busy}
+                        onPress={() => void shareInvitation()}
+                      />
+                      <Button
+                        label={m("clearInvite")}
+                        secondary
+                        disabled={busy}
+                        onPress={() => setCreatedInvite(null)}
+                      />
+                    </View>
+                  ) : null}
+                  <T raw style={{ fontWeight: "600" }}>
+                    {m("invitations")}
+                  </T>
+                  {!snapshot.invitations.length ? (
+                    <T raw style={styles.muted(c.muted)}>
+                      {m("noInvitations")}
+                    </T>
+                  ) : (
+                    snapshot.invitations.map((invitation) => {
+                      const pending =
+                        invitation.status === "pending" &&
+                        Date.parse(invitation.expiresAt) > Date.now();
+                      const status =
+                        invitation.status === "pending" && !pending
+                          ? "expired"
+                          : invitation.status;
+                      const statusLabel: Record<
+                        typeof status,
+                        FamilyMessageKey
+                      > = {
+                        pending: "pendingInvitation",
+                        accepted: "acceptedInvitation",
+                        revoked: "revokedInvitation",
+                        expired: "expiredInvitation",
+                      };
+                      return (
+                        <View
+                          key={invitation.id}
+                          style={[styles.listItem, { borderColor: c.line }]}
+                        >
+                          <T raw>{invitation.email}</T>
+                          <T raw style={styles.muted(c.muted)}>
+                            {m(statusLabel[status])}
+                          </T>
+                          <T raw style={styles.muted(c.muted)}>
+                            {m("expiresAt", {
+                              time: displayDate(invitation.expiresAt, locale),
+                            })}
+                          </T>
+                          {pending ? (
+                            <Button
+                              label={m("revoke")}
+                              secondary
+                              disabled={busy}
+                              onPress={() =>
+                                confirm(
+                                  "revokeTitle",
+                                  m("revokeDescription", {
+                                    email: invitation.email,
+                                  }),
+                                  "revoke",
+                                  async () => {
+                                    await pilot.revokeInvitation(invitation.id);
+                                    if (
+                                      createdInvite?.email.toLowerCase() ===
+                                      invitation.email.toLowerCase()
+                                    )
+                                      setCreatedInvite(null);
+                                  },
+                                )
+                              }
+                            />
+                          ) : null}
+                        </View>
+                      );
+                    })
+                  )}
+                </Disclosure>
+              ) : null}
+              <Disclosure title={m("details")}>
+                <T raw style={styles.muted(c.muted)}>
+                  {m("firstCommit")}
+                </T>
+              </Disclosure>
+            </>
+          ) : null}
+        </>
+      )}
+
+      {busy ? (
+        <ActivityIndicator
+          color={c.primary}
+          accessibilityLabel={m("working")}
+        />
+      ) : null}
+
+      <Modal
+        visible={confirmation !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          if (!busy) setConfirmation(null);
+        }}
+      >
+        <SafeAreaView style={styles.modalBackdrop}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === "ios" ? "padding" : undefined}
+            style={{ width: "100%", maxWidth: 420, alignSelf: "center" }}
+          >
+            <View
+              accessibilityViewIsModal
+              style={[styles.modal, { backgroundColor: c.card }]}
+            >
+              <ScrollView contentContainerStyle={styles.stack}>
+                <T raw accessibilityRole="header" style={styles.title}>
+                  {confirmation?.title}
+                </T>
+                <T raw>{confirmation?.body}</T>
+                {error ? (
+                  <T raw accessibilityRole="alert">
+                    {error}
+                  </T>
+                ) : null}
+                <Button
+                  label={
+                    busy ? m("working") : (confirmation?.label ?? m("confirm"))
+                  }
+                  disabled={busy}
+                  onPress={() => {
+                    if (confirmation) void run(confirmation.action, true);
+                  }}
+                />
+                <Button
+                  label={m("cancel")}
+                  secondary
+                  disabled={busy}
+                  onPress={() => setConfirmation(null)}
+                />
+              </ScrollView>
+            </View>
+          </KeyboardAvoidingView>
+        </SafeAreaView>
+      </Modal>
+    </View>
+  );
+}
+
+const styles = {
+  ...StyleSheet.create({
+    screen: { width: "100%", maxWidth: 680, alignSelf: "center", gap: 14 },
+    title: { fontSize: 22, lineHeight: 29, fontWeight: "700", flexShrink: 1 },
+    sectionTitle: { fontSize: 17, lineHeight: 24, fontWeight: "700", flex: 1 },
+    card: { padding: 16, borderRadius: 20, gap: 12 },
+    stack: { gap: 12 },
+    spread: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      gap: 12,
+    },
+    disclosure: {
+      minHeight: 44,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 12,
+    },
+    notice: { borderRadius: 16, padding: 14, gap: 8 },
+    field: { gap: 4 },
+    input: {
+      borderWidth: 1,
+      borderRadius: 14,
+      minHeight: 48,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      fontSize: 15,
+      lineHeight: 22,
+    },
+    consent: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: 10,
+      minHeight: 44,
+      paddingVertical: 4,
+    },
+    checkbox: {
+      width: 24,
+      height: 24,
+      borderWidth: 1,
+      borderRadius: 6,
+      alignItems: "center",
+      justifyContent: "center",
+      marginTop: 2,
+    },
+    dateRow: { flexDirection: "row", gap: 10 },
+    actions: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+    flexButton: { flexGrow: 1, flexBasis: 120, paddingHorizontal: 12 },
+    listItem: { borderTopWidth: 1, paddingTop: 12, gap: 6 },
+    modalBackdrop: {
+      flex: 1,
+      backgroundColor: "rgba(0,0,0,0.45)",
+      justifyContent: "center",
+      padding: 20,
+    },
+    modal: { borderRadius: 24, padding: 20, maxHeight: "100%" },
+  }),
+  muted: (color: string) => ({ color, fontSize: 15, lineHeight: 22 }),
+};

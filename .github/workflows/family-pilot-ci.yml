@@ -1,0 +1,89 @@
+name: Family pilot CI
+
+on:
+  pull_request:
+  push:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      revision:
+        description: Exact commit supplied by the manual deployment workflow
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  mobile:
+    name: TypeScript and browser
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.revision || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - run: npm run verify
+      - run: npm run export:web
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:browser
+
+  api:
+    name: API and SQL integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.revision || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - name: Start a disposable SQL Server
+        shell: bash
+        run: |
+          set -euo pipefail
+          sql_password="Pilot!$(openssl rand -hex 24)"
+          echo "::add-mask::$sql_password"
+          docker run --detach --name family-pilot-ci-sql \
+            --publish 127.0.0.1:1433:1433 \
+            --env ACCEPT_EULA=Y --env MSSQL_PID=Developer \
+            --env MSSQL_SA_PASSWORD="$sql_password" \
+            mcr.microsoft.com/mssql/server:2022-latest
+          ready=false
+          for attempt in $(seq 1 60); do
+            if docker exec --env SQLCMDPASSWORD="$sql_password" family-pilot-ci-sql \
+              /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -C -b -Q 'SELECT 1' > /dev/null 2>&1; then
+              ready=true
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ready" != true ]; then
+            echo 'Disposable SQL Server did not become ready.' >&2
+            exit 1
+          fi
+          sql_connection="Server=localhost,1433;Database=master;User Id=sa;Password=$sql_password;Encrypt=True;TrustServerCertificate=True;"
+          echo "::add-mask::$sql_connection"
+          printf 'FAMILY_TEST_SQL_CONNECTION=%s\n' "$sql_connection" >> "$GITHUB_ENV"
+      - name: Run unit and real SQL tests
+        run: dotnet test server/LittleDays.FamilyApi.Tests/LittleDays.FamilyApi.Tests.csproj --configuration Release
+      - name: Publish reviewed API artifact
+        run: dotnet publish server/LittleDays.FamilyApi/LittleDays.FamilyApi.csproj --configuration Release --output artifacts/family-api
+      - uses: actions/upload-artifact@v4
+        with:
+          name: family-api-${{ github.run_id }}
+          path: artifacts/family-api
+          if-no-files-found: error
+          retention-days: 14
+      - name: Remove disposable SQL Server
+        if: always()
+        run: docker rm --force family-pilot-ci-sql

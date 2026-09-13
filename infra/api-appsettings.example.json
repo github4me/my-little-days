@@ -1,0 +1,25 @@
+{
+  "ConnectionStrings": {
+    "FamilyDatabase": "Server=tcp:REPLACE_SERVER.database.windows.net,1433;Database=REPLACE_DATABASE;Authentication=Active Directory Managed Identity;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;"
+  },
+  "Entra": {
+    "TenantId": "REPLACE_CUSTOMER_TENANT_GUID",
+    "Audience": "REPLACE_API_APPLICATION_CLIENT_GUID",
+    "MobileClientId": "REPLACE_MOBILE_APPLICATION_CLIENT_GUID"
+  },
+  "Family": {
+    "PublicBaseUrl": "https://REPLACE_APP.azurewebsites.net",
+    "HistoryId": "REPLACE_NEW_HISTORY_GUID"
+  },
+  "Pilot": {
+    "Identities": [],
+    "MaxMembers": 4,
+    "MaxFeeds": 1000,
+    "MaxOperationsPerFamily": 100000,
+    "InvitationHours": 48,
+    "MaxNoteLength": 500,
+    "MaxBabyNameLength": 60,
+    "RequestsPerMinute": 120,
+    "SensitiveRequestsPerMinute": 10
+  }
+}

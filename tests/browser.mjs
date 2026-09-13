@@ -2021,8 +2021,75 @@ await page.screenshot({
     "little-days-calendar-filter-zh.png",
   ),
 });
+// An unconfigured family pilot must be usable as an explanation page without
+// touching existing local history or attempting a customer login on the web.
+const localHistoryBeforePilot = await page.evaluate(() =>
+  localStorage.getItem("little-days-v1"),
+);
+await page.getByRole("tab", { name: "我的", exact: true }).click();
+await page
+  .getByRole("button", { name: "展开家庭邀请试点", exact: true })
+  .click();
+await page
+  .getByRole("button", { name: "打开家庭邀请试点", exact: true })
+  .click();
+await page
+  .getByRole("heading", { name: "试点尚未配置", exact: true })
+  .waitFor();
+assert.equal(
+  await page.getByRole("button", { name: "登录试点账户", exact: true }).count(),
+  0,
+);
+await page.setViewportSize({ width: 320, height: 740 });
+assert.equal(
+  await page.evaluate(
+    () => document.documentElement.scrollWidth <= window.innerWidth,
+  ),
+  true,
+);
+await page.getByRole("button", { name: "返回", exact: true }).click();
+await chooseEnglish();
+const pilotDisclosure = page.getByRole("button", {
+  name: "Expand Family invitation pilot",
+  exact: true,
+});
+if (await pilotDisclosure.isVisible()) await pilotDisclosure.click();
+await page
+  .getByRole("button", { name: "Open family invitation pilot", exact: true })
+  .click();
+await page
+  .getByRole("heading", { name: "Pilot setup is incomplete", exact: true })
+  .waitFor();
+assert.equal(
+  await page
+    .getByRole("button", { name: "Sign in to the pilot", exact: true })
+    .count(),
+  0,
+);
+assert.equal(
+  await page.evaluate(
+    () => document.documentElement.scrollWidth <= window.innerWidth,
+  ),
+  true,
+);
+assert.equal(
+  await page.evaluate(() => localStorage.getItem("little-days-v1")),
+  localHistoryBeforePilot,
+);
+await page.getByRole("button", { name: "Back", exact: true }).click();
+await page.getByRole("tab", { name: "Records", exact: true }).click();
+await page.getByRole("button", { name: "Calendar", exact: true }).click();
+await page
+  .getByRole("button", { name: "Choose calendar date", exact: true })
+  .click();
+await page.getByLabel("Calendar date", { exact: true }).fill(calendarDate);
+await page.getByRole("button", { name: "Go to date", exact: true }).click();
+assert.equal(
+  await page.getByRole("button", { name: /^View record:/ }).count(),
+  6,
+);
 assert.deepEqual(errors, []);
 console.log(
-  "PASS: clean home, removed controls/milestones, daily chart summaries and intervals, unit switch, confirmed deletion without undo, growth, old data retained, dark mode, narrow layout.",
+  "PASS: existing local flows, calendar/history, dark/narrow layout, bilingual unconfigured family pilot and preserved local history.",
 );
 await browser.close();
