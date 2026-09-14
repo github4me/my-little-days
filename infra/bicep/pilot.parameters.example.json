@@ -1,0 +1,20 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "resourceGroupName": { "value": "my-little-days-pilot-rg" },
+    "location": { "value": "australiasoutheast" },
+    "existingPlanResourceGroup": { "value": "ProdRG" },
+    "existingPlanName": { "value": "reticelASP" },
+    "sqlAdministratorObjectId": {
+      "value": "REPLACE_HOSTING_DIRECTORY_USER_OR_GROUP_OBJECT_ID"
+    },
+    "sqlAdministratorDisplayName": {
+      "value": "REPLACE_SQL_ADMINISTRATOR_DISPLAY_NAME"
+    },
+    "sqlAdministratorPrincipalType": { "value": "User" },
+    "tags": {
+      "value": { "application": "my-little-days", "environment": "pilot" }
+    }
+  }
+}

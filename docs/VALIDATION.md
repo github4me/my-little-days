@@ -1,5 +1,14 @@
 # 验证记录
 
+## Bicep 基础设施与部署脚本 · 2026-09-14
+
+- 新增订阅级 Bicep、独立资源组模块、精确出站 IP 的 SQL 防火墙模块，以及默认仅本机验证的 PowerShell 部署脚本。复用 `ProdRG/reticelASP`，不创建或调整计划；新增 Web App/托管身份与免费额度用尽即暂停的 SQL，不创建 Key Vault、付费网络或额外监控资源。
+- `./infra/tests/bicep.Tests.ps1`：实际 Bicep 编译通过，8 项编译产物检查通过。检查资源范围、创建时父资源、托管身份、TLS、免费额度、备份保留、防火墙及无密钥输入输出。使用 Azure CLI 2.61.0 / Bicep 0.46.1，没有读取 Azure 账户或资源。
+- `./infra/tests/deploy-pilot.Tests.ps1`：53 项模拟 Azure CLI 测试通过，覆盖默认不访问云端、显式审批、订阅/计划/归属校验、付费与宽泛防火墙拦截、配置漂移、Web App 或 SQL 单独创建后的重试、参数/模板快照、异常停止和清理失败时保留原始错误。测试不是实际 Azure 部署或权限验收。
+- 独立复核发现普通 SQL server GET 不包含管理员子资源，已改为明确请求 `administrators/activedirectory` 扩展，并加入严格请求形状及缺失管理员拦截测试。重复部署不 PUT 已有 Web App/SQL server，不读取或重写手工配置的应用设置、密钥和 HistoryId。
+- 更新中英文 README、[部署指南](AZURE-BICEP-DEPLOYMENT.md) 及原有 Azure 配置指南。未更改手机或 API 运行逻辑，未重跑无关的应用测试，未发布 Expo/TestFlight。真实免费资格、区域可用性、Azure RBAC、托管身份 SQL、Entra/Graph 和双机测试仍待部署后验证；当前清理任务每分钟访问 SQL 的行为仍须调整，避免耗尽免费额度。
+- 一次早期模拟清理失败测试留下了仓库外的 GUID 临时目录，仅含测试脚本和虚构参数；宿主拒绝自动清理，未改用其他方式删除。其余本轮测试的临时快照正常清理，未触碰用户已有 `work/` 内容。
+
 ## 初版不依赖 Key Vault · 2026-09-14
 
 - Azure 设置指南、试点契约和服务端/基础设施说明改为直接使用受限的 App Service 服务器设置保存目录删除凭据；初版不创建 Key Vault 或授予其访问角色。配置模板继续保留空密钥，不向 Git、手机/EAS、日志或部署产物加入真实凭据。SQL 托管身份、GitHub OIDC 与账户删除要求不变。

@@ -1,0 +1,6 @@
+*.local.json
+*.local.bicepparam
+bicep/main.json
+bicep/resources.json
+bicep/sql-firewall.json
+bicep/modules/*.json
