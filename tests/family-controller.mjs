@@ -112,6 +112,7 @@ function makeWorld({ offline = true, queued = false } = {}) {
     account,
     data,
     disk: new Map([[account, JSON.stringify(data.state)]]),
+    ownerSetupDisk: new Map(),
     identity: structuredClone(data.identity),
     cachedIdentity: structuredClone(data.identity),
     server: structuredClone(data.state.snapshot),
@@ -137,6 +138,7 @@ function makeWorld({ offline = true, queued = false } = {}) {
   const contexts = new Map();
   let activeReact;
   let operationSequence = 0;
+  const ownerSetupDisk = world.ownerSetupDisk;
   class PilotApiError extends Error {
     constructor(code, status = 0) {
       super(code);
@@ -146,22 +148,46 @@ function makeWorld({ offline = true, queued = false } = {}) {
   }
   const database = {
     execAsync: async () => {},
-    getFirstAsync: async (_query, key) => {
+    getFirstAsync: async (query, key) => {
       world.readCalls++;
-      const payload = world.disk.get(key);
+      const payload = (
+        query.includes("owner_setup_drafts") ? ownerSetupDisk : world.disk
+      ).get(key);
       return payload === undefined ? null : { payload };
     },
     withExclusiveTransactionAsync: async (callback) => {
-      const transaction = { number: world.transactions.length + 1, writes: [] };
+      const transaction = {
+        number: world.transactions.length + 1,
+        writes: [],
+        deletes: [],
+      };
       world.transactions.push(transaction);
       await callback({
-        runAsync: async (_query, key, payload) => {
-          transaction.writes.push([key, payload]);
+        runAsync: async (query, key, payload) => {
+          if (query.startsWith("DELETE ")) {
+            assert.match(
+              query,
+              /^DELETE FROM (pilot_accounts|owner_setup_drafts) WHERE account_id = \?$/,
+            );
+            if (query.includes("pilot_accounts")) {
+              world.deleteCalls++;
+              await world.beforeDelete();
+            }
+            transaction.deletes.push([query, key]);
+          } else {
+            assert.match(query, /^INSERT OR REPLACE INTO pilot_accounts/);
+            transaction.writes.push([key, payload]);
+          }
         },
       });
       await world.beforeCommit(transaction);
       for (const [key, payload] of transaction.writes)
         world.disk.set(key, payload);
+      for (const [query, key] of transaction.deletes)
+        (query.includes("owner_setup_drafts")
+          ? ownerSetupDisk
+          : world.disk
+        ).delete(key);
     },
     runAsync: async (query, key) => {
       assert.match(query, /^DELETE /);
@@ -908,6 +934,7 @@ test("membership refresh prevents an old admin's queued edit from being sent aft
 
 test("deletion receipt is durable before network and a lost response reuses its secret", async () => {
   const world = makeWorld();
+  world.ownerSetupDisk.set(world.account, "staged-personal-history");
   world.data.state.snapshot.family.role = "caregiver";
   world.cachedIdentity.families[0].role = "caregiver";
   world.identity.families[0].role = "caregiver";
@@ -922,6 +949,11 @@ test("deletion receipt is durable before network and a lost response reuses its 
     await assert.rejects(
       controller.result().deleteAccount(),
       /secure_store_unavailable/,
+    );
+    assert.equal(
+      world.ownerSetupDisk.has(world.account),
+      false,
+      "Explicit deletion intent durably discards setup before network",
     );
     assert.equal(
       world.http.filter((r) => r.url === "/v1/account/delete").length,
@@ -1185,6 +1217,7 @@ test("native logout marker survives module restart even when key deletion fails"
 
 test("logout discard survives restart and explicit login when final SQLite row cleanup fails", async () => {
   const world = makeWorld({ queued: true });
+  world.ownerSetupDisk.set(world.account, "staged-personal-history");
   const controller = await boot(world);
   world.beforeDelete = async () => {
     throw new Error("disk_delete_failed");
@@ -1193,6 +1226,7 @@ test("logout discard survives restart and explicit login when final SQLite row c
   assert.equal(world.read().snapshot, null);
   assert.equal(world.read().draft, null);
   assert.equal(world.read().queue.length, 0);
+  assert.equal(world.ownerSetupDisk.has(world.account), false);
   assert.equal(world.session, false);
   controller.unmount();
   world.beforeDelete = async () => {};
@@ -1204,6 +1238,7 @@ test("logout discard survives restart and explicit login when final SQLite row c
     assert.equal(world.feedsSent.length, 0);
     assert.equal(reopened.result().draft, null);
     assert.equal(world.read().queue.length, 0);
+    assert.equal(world.ownerSetupDisk.has(world.account), false);
   } finally {
     reopened.unmount();
   }
@@ -1211,6 +1246,7 @@ test("logout discard survives restart and explicit login when final SQLite row c
 
 test("logout reports a failed purge before changing credentials when the discard cannot persist", async () => {
   const world = makeWorld({ queued: true });
+  world.ownerSetupDisk.set(world.account, "staged-personal-history");
   const controller = await boot(world);
   world.beforeCommit = async () => {
     throw new Error("disk_full");
@@ -1220,6 +1256,10 @@ test("logout reports a failed purge before changing credentials when the discard
     assert.equal(world.authSignOutCalls, 0);
     assert.equal(world.session, true);
     assert.equal(world.read().queue.length, 1);
+    assert.equal(
+      world.ownerSetupDisk.get(world.account),
+      "staged-personal-history",
+    );
     assert.equal(controller.result().notice, null);
   } finally {
     controller.unmount();

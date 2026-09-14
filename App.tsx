@@ -1015,6 +1015,7 @@ function BabyApp({
                 />
               ) : settingsPage === "family" ? (
                 <FamilyScreen
+                  source={state}
                   onBack={() => {
                     setSettingsPage("main");
                     mainScroll.current?.scrollTo({ y: 0, animated: false });

@@ -2,6 +2,8 @@
 
 Updated 14 September 2026. Supersedes the token-link/all-caregivers-edit contract and conflicting roadmap sections.
 
+Mobile first-invitation review now supports an account-scoped **local-only setup draft**. It does not call the synthetic family-create endpoint or upload original records. The [owner-onboarding handoff](FAMILY-OWNER-ONBOARDING.md) describes this boundary and the unimplemented full-history API/activation work.
+
 ## Scope
 
 Controlled **synthetic-data** pilot: Entra External ID login, one family/baby per account, email invitation inbox, roles/ownership lifecycle, and a separate completed bottle-feed ledger. Original offline profiles, records, photos, timers, care, learning and backups are never uploaded, replaced or erased by pilot login/join/deletion. Production invitee-history replacement and owner-history migration are **not activated**. No family export/import exists; existing offline backup only exports the original offline dataset.
@@ -21,7 +23,7 @@ Public enrollment remains closed. `Pilot:Identities` binds operator-verified ema
 - Invitations expire after **30 days**. Verified recipients explicitly accept/decline. Declined/expired/revoked invitations need a new invitation. Inbox previews show inviter/expiry, not baby data. Accepted membership binds to immutable user ID, not email.
 - Joining warns that admins can remove access without advance notice, including access to one's own contributions, and edit/delete records. Ordinary departure retains accepted contributions. Offline devices can clear cached data only after detecting revocation.
 - Only the owner edits the synthetic name/birth date. Shared photo upload remains deferred; real local photos are untouched.
-- Ownership nomination targets an active member. On acceptance, both roles switch atomically; the former admin becomes a caregiver. Until then, roles stay unchanged. Removal/leave invalidates the nomination. Transfer does not delete an account.
+- Ownership nomination targets an active member. On acceptance, both roles and control of the same family's data switch atomically; the former admin becomes a caregiver. Record authorship stays unchanged; transfer neither copies nor re-imports data. Until acceptance, roles stay unchanged. Removal/leave invalidates the nomination. Transfer does not delete an account.
 - Leave/removal revokes access and unused invitations, retaining accepted contributions. Member status distinguishes active/left/removed. No departure-history cleanup option or personal archive.
 - Owner account deletion is blocked until transfer completes or the owner removes other members and explicitly closes the family. Closure requires no other active members; access is soft-deleted immediately and content purge follows.
 - **Account deletion differs from leaving:** disable access and purge associated app data and directory identity. This includes records created or last edited by the account (no prior-version reconstruction exists), associated memberships/invitations/receipts and identifying editor references. Small security/deletion-status tombstones remain; operational retention is a real-user release gate.

@@ -36,7 +36,9 @@ Open **More → Family invitation pilot**. This is a separate test space for two
 
 Follow the [Azure pilot setup guide](docs/AZURE-FAMILY-PILOT-SETUP.md) for the .NET 10 API, Azure SQL, customer identity tenant, and operator-verified account bindings. [Server instructions](server/README.md) cover running and testing. Unconfigured builds show setup as incomplete; production browser sign-in is disabled. Source and automated checks do not establish a working Azure deployment or two-iPhone validation. The [pilot contract](docs/FAMILY-PILOT-CONTRACT.md) defines this slice; the rest of the [family-sharing technical plan](docs/FAMILY-SHARING-TECH-PLAN.md) remains a roadmap.
 
-For layout review without Azure or login, use the dedicated [iPhone UI preview](docs/FAMILY-UI-PREVIEW.md). Its eight sample scenarios reuse the real family screens; all actions are simulated in memory and reset on exit. The `ui-preview` build has its own update channel and does not bypass live authentication.
+First-invitation setup now reviews the baby profile and feeding, nappy, sleep, growth, milestone and daily-care counts, then up to three family emails and explicit confirmation. In the signed-in native pilot it saves an account-scoped **local-only, not-sent setup**: no family creation or history upload; original records stay unchanged. Running timers block preparation and changed source data requires a new review. The full-history API and main-app sharing integration remain unimplemented; see [the mobile/Azure handoff](docs/FAMILY-OWNER-ONBOARDING.md).
+
+For layout review without Azure or login, use the dedicated [iPhone UI preview](docs/FAMILY-UI-PREVIEW.md). Its nine sample scenarios reuse the real family screens, starting with **First invitation** and a complete fictional seed dataset; all actions are simulated in memory and reset on exit. The `ui-preview` build has its own update channel and does not bypass live authentication.
 
 ## Run locally
 

@@ -38,7 +38,9 @@
 
 先按 [Azure 试点设置指南](docs/AZURE-FAMILY-PILOT-SETUP.md) 配置 .NET 10 API、Azure SQL、客户身份租户和核对后的账户绑定；[服务端说明](server/README.md) 包含运行与测试命令。未配置时显示设置未完成，浏览器不提供生产登录。代码、配置模板和自动检查不代表 Azure 已运行或两部 iPhone 已验证。范围以 [试点契约](docs/FAMILY-PILOT-CONTRACT.md) 为准；[完整家庭共享技术计划](docs/FAMILY-SHARING-TECH-PLAN.md) 中的其余内容仍是路线图。
 
-无需 Azure 或登录即可使用专用的 [iPhone 界面预览](docs/FAMILY-UI-PREVIEW.md)：八种样例场景复用实际家庭界面，所有操作只在内存中模拟，退出即重置。`ui-preview` 构建使用独立更新频道，不会绕过真实登录。
+首次邀请现可查看宝宝资料及喂养、尿布、睡眠、成长、里程碑和日常照护记录数量，填写最多三个邮箱并确认。正常原生试点登录后只能保存为账户隔离的**本机准备内容，尚未发送**；不创建家庭、不上传历史，原有记录不变。进行中的计时须先结束，确认前资料变化须重新查看。完整历史 API 和主应用共享数据接入尚未实现，详见 [手机端与 Azure 交接说明](docs/FAMILY-OWNER-ONBOARDING.md)。
+
+无需 Azure 或登录即可使用专用的 [iPhone 界面预览](docs/FAMILY-UI-PREVIEW.md)：九种样例场景复用实际家庭界面，默认从「首次邀请」查看完整虚构历史的创建流程。所有操作只在内存中模拟，退出即重置。`ui-preview` 构建使用独立更新频道，不会绕过真实登录。
 
 ## Windows 上启动
 

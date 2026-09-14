@@ -3,15 +3,18 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   createFamilyDemo,
+  demoOwnerSource,
   demoScenarios,
   reduceFamilyDemo,
 } from "./family/demoScenarios";
 import { canEditSharedFeed } from "./family/pilotState";
+import { prepareOwnerSeed, summarizeOwnerSeed } from "./family/ownerSeed";
 
 const now = Date.UTC(2026, 8, 14, 12);
 
 test("family demo scenarios use fresh, fictional fixtures and do not share state", () => {
-  assert.equal(demoScenarios.length, 8);
+  assert.equal(demoScenarios.length, 9);
+  assert.equal(demoScenarios[0].id, "first-invite");
   for (const scenario of demoScenarios) {
     assert.ok(scenario.label.en && scenario.label["zh-CN"]);
     const first = createFamilyDemo(scenario.id, now);
@@ -30,6 +33,231 @@ test("family demo scenarios use fresh, fictional fixtures and do not share state
       assert.equal(second.snapshot?.feeds.length, 2);
     }
   }
+});
+
+test("first-invitation source includes every record category without using real app history", () => {
+  const initial = createFamilyDemo("first-invite", now);
+  assert.equal(initial.snapshot, null);
+  assert.equal(initial.seededSource, null);
+  assert.deepEqual(initial.inbox, []);
+  assert.equal(initial.user?.email, "sample.admin@example.com");
+  const source = demoOwnerSource(now);
+  const another = demoOwnerSource(now);
+  assert.deepEqual(source, another);
+  assert.deepEqual(
+    new Set(source.entries.map((entry) => entry.type)),
+    new Set(["feed", "diaper", "sleep", "growth", "milestone"]),
+  );
+  assert.deepEqual(summarizeOwnerSeed(source), {
+    counts: {
+      feed: 2,
+      diaper: 1,
+      sleep: 1,
+      growth: 1,
+      milestone: 1,
+      care: 1,
+      total: 7,
+    },
+    runningCount: 0,
+  });
+  source.entries[0].note = "Changed one sample";
+  source.profile.name = "Changed sample";
+  assert.equal(another.entries[0].note, "Fictional bottle feed");
+  assert.equal(another.profile.name, "Demo Baby");
+});
+
+test("first-invitation review is side-effect free; confirmation retains the whole seed and creates normalized invites", () => {
+  const initial = createFamilyDemo("first-invite", now);
+  const before = structuredClone(initial);
+  const source = demoOwnerSource(now);
+  const original = structuredClone(source);
+  const draft = prepareOwnerSeed(
+    source,
+    " FAMILY.ONE@example.com, family.two@example.com\nfamily.one@example.com",
+    initial.user!.email,
+  );
+  assert.deepEqual(initial, before, "Review must not create a family");
+  assert.deepEqual(source, original);
+  const created = reduceFamilyDemo(
+    initial,
+    { type: "create-family-from-seed", draft },
+    now,
+  );
+  assert.deepEqual(created.seededSource, original);
+  assert.notEqual(created.seededSource, draft.source);
+  assert.equal(created.snapshot?.family.role, "owner");
+  assert.equal(created.snapshot?.family.babyName, original.profile.name);
+  assert.equal(
+    created.snapshot?.family.babyBirthDate,
+    original.profile.birthDate,
+  );
+  assert.equal(
+    created.snapshot?.members.length,
+    1,
+    "Inviting does not grant membership",
+  );
+  assert.deepEqual(
+    created.snapshot?.invitations.map((item) => item.email),
+    ["family.one@example.com", "family.two@example.com"],
+  );
+  for (const invitation of created.snapshot!.invitations) {
+    assert.equal(invitation.status, "pending");
+    assert.equal(Date.parse(invitation.expiresAt) - now, 30 * 86400000);
+  }
+  assert.equal(
+    created.snapshot?.feeds.length,
+    1,
+    "Pilot projection displays only completed bottle feeds",
+  );
+  assert.equal(created.snapshot?.feeds[0].recordedBy, initial.user!.id);
+  assert.equal(
+    created.seededSource?.entries.length,
+    6,
+    "Projection must not discard other record types",
+  );
+  assert.deepEqual(initial, before);
+  draft.source.entries[0].amount = 999;
+  assert.equal(created.seededSource?.entries[0].amount, 100);
+});
+
+test("first-invitation confirmation revalidates timers and recipients without partial creation", () => {
+  const initial = createFamilyDemo("first-invite", now);
+  const draft = prepareOwnerSeed(
+    demoOwnerSource(now),
+    "family@example.com",
+    initial.user!.email,
+  );
+  for (const kind of ["feed", "sleep"] as const) {
+    const changed = structuredClone(draft);
+    const entry = changed.source.entries.find((item) => item.type === kind)!;
+    delete entry.end;
+    if (kind === "feed") entry.feedRunning = true;
+    assert.throws(
+      () =>
+        reduceFamilyDemo(
+          initial,
+          { type: "create-family-from-seed", draft: changed },
+          now,
+        ),
+      /owner_active_timer/,
+    );
+  }
+  assert.throws(
+    () =>
+      reduceFamilyDemo(
+        initial,
+        {
+          type: "create-family-from-seed",
+          draft: { ...draft, inviteeEmails: [initial.user!.email] },
+        },
+        now,
+      ),
+    /owner_self_invite/,
+  );
+  assert.throws(
+    () =>
+      reduceFamilyDemo(
+        initial,
+        {
+          type: "create-family-from-seed",
+          draft: { ...draft, inviteeEmails: ["bad-address"] },
+        },
+        now,
+      ),
+    /owner_invalid_email/,
+  );
+  assert.deepEqual(initial, createFamilyDemo("first-invite", now));
+});
+
+test("later invitations keep the same seeded family and existing membership blocks another import", () => {
+  const initial = createFamilyDemo("first-invite", now);
+  const draft = prepareOwnerSeed(
+    demoOwnerSource(now),
+    "family.one@example.com",
+    initial.user!.email,
+  );
+  const created = reduceFamilyDemo(
+    initial,
+    { type: "create-family-from-seed", draft },
+    now,
+  );
+  const later = reduceFamilyDemo(
+    created,
+    { type: "create-invitation", email: "family.two@example.com" },
+    now,
+  );
+  assert.equal(later.snapshot!.family.id, created.snapshot!.family.id);
+  assert.equal(
+    later.snapshot!.family.membershipId,
+    created.snapshot!.family.membershipId,
+  );
+  assert.deepEqual(later.seededSource, created.seededSource);
+  assert.deepEqual(later.snapshot!.feeds, created.snapshot!.feeds);
+  assert.equal(later.snapshot!.invitations.length, 2);
+  for (const state of [later, createFamilyDemo("member", now)]) {
+    assert.throws(
+      () =>
+        reduceFamilyDemo(
+          state,
+          { type: "create-family-from-seed", draft },
+          now,
+        ),
+      /already_in_family/,
+    );
+  }
+  assert.equal(
+    reduceFamilyDemo(created, { type: "sign-out" }, now).seededSource,
+    null,
+  );
+  assert.equal(
+    reduceFamilyDemo(created, { type: "close-family" }, now).seededSource,
+    null,
+  );
+});
+
+test("admin acceptance changes control of the same seeded family without copying data or changing authors", () => {
+  const initial = createFamilyDemo("first-invite", now);
+  const draft = prepareOwnerSeed(
+    demoOwnerSource(now),
+    "family@example.com",
+    initial.user!.email,
+  );
+  const created = reduceFamilyDemo(
+    initial,
+    { type: "create-family-from-seed", draft },
+    now,
+  );
+  const member = createFamilyDemo("member", now);
+  created.snapshot!.members.push(
+    member.snapshot!.members.find((item) => item.id === member.user!.id)!,
+  );
+  const nominated = reduceFamilyDemo(
+    created,
+    { type: "nominate-owner", id: member.user!.id },
+    now,
+  );
+  const nominee = {
+    ...nominated,
+    user: member.user,
+    snapshot: {
+      ...nominated.snapshot!,
+      family: {
+        ...nominated.snapshot!.family,
+        role: "caregiver" as const,
+        membershipId: "demo-member-grant",
+      },
+    },
+  };
+  const accepted = reduceFamilyDemo(nominee, { type: "accept-transfer" }, now);
+  assert.equal(accepted.snapshot!.family.id, created.snapshot!.family.id);
+  assert.equal(accepted.snapshot!.historyId, created.snapshot!.historyId);
+  assert.equal(accepted.snapshot!.family.role, "owner");
+  assert.deepEqual(accepted.seededSource, created.seededSource);
+  assert.deepEqual(accepted.snapshot!.feeds, created.snapshot!.feeds);
+  assert.equal(
+    accepted.snapshot!.members.filter((item) => item.role === "owner").length,
+    1,
+  );
 });
 
 test("family demo controllers have no runtime account, network or storage imports", () => {

@@ -8,6 +8,8 @@ import type {
   SharedFeed,
 } from "./contracts";
 import type { FeedDraft } from "./pilotState";
+import type { State } from "../domain";
+import { prepareOwnerSeed, type OwnerSeedDraft } from "./ownerSeed";
 import {
   canEditSharedFeed,
   feedFromDraft,
@@ -15,6 +17,10 @@ import {
 } from "./pilotState";
 
 export const demoScenarios = [
+  {
+    id: "first-invite",
+    label: { "zh-CN": "首次邀请", en: "First invitation" },
+  },
   { id: "signed-out", label: { "zh-CN": "未登录", en: "Signed out" } },
   { id: "invitations", label: { "zh-CN": "收到邀请", en: "Invitations" } },
   { id: "owner", label: { "zh-CN": "管理员", en: "Admin" } },
@@ -35,6 +41,7 @@ export type FamilyDemoState = {
   deletionStatus: AccountDeletion | null;
   notice: string | null;
   sequence: number;
+  seededSource: State | null;
 };
 
 const demoUser = (owner: boolean): FamilyUser => ({
@@ -43,6 +50,79 @@ const demoUser = (owner: boolean): FamilyUser => ({
   email: owner ? "sample.admin@example.com" : "sample.member@example.com",
 });
 const iso = (milliseconds: number) => new Date(milliseconds).toISOString();
+
+// Complete fake starting data. Do not pass the app's actual local state into a
+// demo session: every activity kind here is independently reviewable.
+export function demoOwnerSource(now = Date.now()): State {
+  const start = iso(now - 4 * 3600000);
+  return {
+    schemaVersion: 1,
+    profile: {
+      name: "Demo Baby",
+      birthDate: iso(now - 70 * 86400000).slice(0, 10),
+      sex: "unspecified",
+    },
+    entries: [
+      {
+        id: "sample-source-feed",
+        type: "feed",
+        start,
+        end: iso(now - 4 * 3600000 + 20 * 60000),
+        feedKind: "formula",
+        amount: 100,
+        note: "Fictional bottle feed",
+      },
+      {
+        id: "sample-source-breast",
+        type: "feed",
+        start: iso(now - 8 * 3600000),
+        end: iso(now - 8 * 3600000 + 15 * 60000),
+        feedKind: "breast-left",
+        note: "Fictional breastfeed",
+      },
+      {
+        id: "sample-source-diaper",
+        type: "diaper",
+        start,
+        diaperKind: "mixed",
+        note: "Fictional nappy change",
+      },
+      {
+        id: "sample-source-sleep",
+        type: "sleep",
+        start: iso(now - 3 * 3600000),
+        end: iso(now - 2 * 3600000),
+        note: "Fictional sleep",
+      },
+      {
+        id: "sample-source-growth",
+        type: "growth",
+        start,
+        weight: 5.1,
+        length: 57,
+        head: 38,
+        note: "Fictional measurement",
+      },
+      {
+        id: "sample-source-milestone",
+        type: "milestone",
+        start,
+        title: "First smile",
+        note: "Fictional milestone",
+      },
+    ],
+    careRecords: [
+      {
+        id: "sample-source-care",
+        kind: "temperature",
+        time: start,
+        temperature: 36.8,
+        method: "armpit",
+        note: "Fictional care record",
+      },
+    ],
+  };
+}
 
 function demoSnapshot(owner: boolean, now: number): FamilySnapshot {
   const members: FamilyMember[] = [
@@ -142,7 +222,10 @@ export function createFamilyDemo(
   scenario: FamilyDemoScenario,
   now = Date.now(),
 ): FamilyDemoState {
-  const owner = scenario === "owner" || scenario === "sole-owner";
+  const owner =
+    scenario === "owner" ||
+    scenario === "sole-owner" ||
+    scenario === "first-invite";
   const state: FamilyDemoState = {
     user: scenario === "signed-out" ? null : demoUser(owner),
     snapshot: ["owner", "member", "transfer", "sole-owner"].includes(scenario)
@@ -170,6 +253,7 @@ export function createFamilyDemo(
     deletionStatus: null,
     notice: scenario === "removed" ? "membership_revoked" : null,
     sequence: 1,
+    seededSource: null,
   };
   if (scenario === "sole-owner" && state.snapshot) {
     state.snapshot.members = state.snapshot.members.map((member) =>
@@ -215,6 +299,7 @@ export type FamilyDemoAction =
         | "save-draft";
     }
   | { type: "create-family"; babyName: string }
+  | { type: "create-family-from-seed"; draft: OwnerSeedDraft }
   | {
       type:
         | "accept-invitation"
@@ -254,6 +339,7 @@ export function reduceFamilyDemo(
   const clearFamily = () => {
     state.snapshot = null;
     state.draft = null;
+    state.seededSource = null;
   };
   const validName = (name: string) => {
     if (!name.trim() || name.trim().length > 60)
@@ -292,6 +378,57 @@ export function reduceFamilyDemo(
       ];
       snapshot.feeds = [];
       snapshot.invitations = [];
+      state.snapshot = snapshot;
+      state.inbox = [];
+      break;
+    }
+    case "create-family-from-seed": {
+      const user = requireUser();
+      if (state.snapshot) throw new Error("already_in_family");
+      const seed = prepareOwnerSeed(
+        action.draft.source,
+        action.draft.inviteeEmails.join("\n"),
+        user.email,
+      );
+      const snapshot = demoSnapshot(true, now);
+      snapshot.family.babyName = seed.source.profile.name;
+      snapshot.family.babyBirthDate = seed.source.profile.birthDate || null;
+      snapshot.family.membershipId = "demo-created-grant";
+      snapshot.members = [
+        {
+          ...user,
+          role: "owner",
+          membershipId: snapshot.family.membershipId,
+          status: "active",
+          endedAt: null,
+        },
+      ];
+      snapshot.feeds = seed.source.entries
+        .filter(
+          (entry) =>
+            entry.type === "feed" &&
+            !!entry.end &&
+            (entry.feedKind === "formula" || entry.feedKind === "expressed"),
+        )
+        .map((entry) => ({
+          id: entry.id,
+          version: "1",
+          recordedBy: user.id,
+          lastEditedBy: user.id,
+          start: entry.start,
+          end: entry.end!,
+          amount: entry.amount!,
+          note: entry.note,
+        }));
+      snapshot.invitations = seed.inviteeEmails.map((email) => ({
+        id: nextId(),
+        email,
+        expiresAt: iso(now + 30 * 86400000),
+        status: "pending",
+      }));
+      // The feed-only pilot projection must not discard other record types.
+      // Keep the entire validated source, unchanged, beside that projection.
+      state.seededSource = seed.source;
       state.snapshot = snapshot;
       state.inbox = [];
       break;

@@ -15,6 +15,7 @@ const browser = await chromium.launch({
 });
 const scenarios = {
   en: [
+    "First invitation",
     "Signed out",
     "Invitations",
     "Admin",
@@ -25,6 +26,7 @@ const scenarios = {
     "Account deletion",
   ],
   zh: [
+    "首次邀请",
     "未登录",
     "收到邀请",
     "管理员",
@@ -51,6 +53,36 @@ const fixture = {
       amount: 85,
       feedKind: "formula",
       note: "Original offline record must remain untouched",
+    },
+    {
+      id: "private-local-diaper",
+      type: "diaper",
+      start: "2026-09-01T02:00:00.000Z",
+      diaperKind: "mixed",
+      note: "Original offline nappy",
+    },
+    {
+      id: "private-local-sleep",
+      type: "sleep",
+      start: "2026-09-01T03:00:00.000Z",
+      end: "2026-09-01T04:00:00.000Z",
+      note: "Original offline sleep",
+    },
+    {
+      id: "private-local-growth",
+      type: "growth",
+      start: "2026-09-01T04:00:00.000Z",
+      weight: 4.25,
+      length: 54.5,
+      head: 36.1,
+      note: "Original offline growth",
+    },
+    {
+      id: "private-local-milestone",
+      type: "milestone",
+      start: "2026-09-01T04:00:00.000Z",
+      title: "Private first smile",
+      note: "Original offline milestone",
     },
   ],
   careRecords: [
@@ -130,6 +162,7 @@ async function confirm(page, name, consent = false, zh = false) {
 }
 
 async function englishFlows(page) {
+  await button(page, "Invitations").click();
   await expect(button(page, "Accept invitation")).toHaveCount(2);
   await button(page, "Accept invitation").first().click();
   await expect(
@@ -232,7 +265,161 @@ async function englishFlows(page) {
   await expect(button(page, "Accept invitation")).toHaveCount(1);
   await button(page, "Back").click();
   await openDemo(page, false);
+  await expect(
+    page.getByRole("heading", {
+      name: "Start a family with your records",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await button(page, "Invitations").click();
   await expect(button(page, "Accept invitation")).toHaveCount(2);
+}
+
+async function firstInvitationFlow(page, zh, width) {
+  const label = (en, chinese) => (zh ? chinese : en);
+  const setupTitle = label(
+    "Start a family with your records",
+    "从现有记录建立家庭",
+  );
+  const reviewTitle = label(
+    "Review the family’s starting data",
+    "确认家庭初始资料",
+  );
+  const emailsLabel = label("Family emails (up to 3)", "家人邮箱（最多 3 个）");
+  const reviewLabel = label("Review setup", "查看并确认");
+  const createLabel = label("Create family and invite", "创建家庭并邀请");
+  const startingTitle = label("Family starting records", "家庭初始记录");
+  await expect(
+    page.getByRole("heading", { name: setupTitle, exact: true }),
+  ).toBeVisible();
+  await expect(button(page, reviewLabel)).toBeDisabled();
+  await expect(page.getByText("Offline Fixture", { exact: true })).toHaveCount(
+    0,
+  );
+  if (!zh && width === 390) {
+    await page
+      .getByRole("heading", { name: setupTitle, exact: true })
+      .scrollIntoViewIfNeeded();
+    await page.screenshot({
+      path: path.join(screenshots, "first-invitation-en-390.png"),
+      animations: "disabled",
+    });
+  }
+  await page.getByLabel(emailsLabel, { exact: true }).fill("invalid-address");
+  await button(page, reviewLabel).click();
+  await expect(page.getByRole("alert")).toContainText(
+    label(
+      "Enter 1–3 valid, different family email addresses.",
+      "请填写 1–3 个有效且不同的家人邮箱。",
+    ),
+  );
+  await expect(
+    page.getByRole("heading", { name: reviewTitle, exact: true }),
+  ).toHaveCount(0);
+  await page
+    .getByLabel(emailsLabel, { exact: true })
+    .fill(
+      " FAMILY.ONE@example.com, family.two@example.com\nfamily.one@example.com ",
+    );
+  await button(page, reviewLabel).click();
+  await expect(
+    page.getByRole("heading", { name: reviewTitle, exact: true }),
+  ).toBeVisible();
+  await expect(button(page, createLabel)).toBeDisabled();
+  await expect(
+    page.getByText("family.one@example.com", { exact: true }),
+  ).toHaveCount(1);
+  await expect(
+    page.getByText("family.two@example.com", { exact: true }),
+  ).toHaveCount(1);
+  await expect(
+    page
+      .getByText(
+        label(
+          "Only fictional sample data is used below. Creation and invitations are simulated for this preview session.",
+          "下面仅使用虚构的样例资料。创建和邀请都是本次预览中的模拟操作。",
+        ),
+        { exact: true },
+      )
+      .last(),
+  ).toBeVisible();
+  await noOverflow(
+    page,
+    `First invitation review/${zh ? "zh" : "en"}/${width}`,
+  );
+  if (!zh && width === 390) {
+    await expect
+      .poll(() =>
+        page
+          .getByRole("heading", { name: reviewTitle, exact: true })
+          .evaluate((element) => {
+            for (
+              let current = element;
+              current;
+              current = current.parentElement
+            ) {
+              if (Number(getComputedStyle(current).opacity) < 0.99)
+                return false;
+            }
+            return true;
+          }),
+      )
+      .toBe(true);
+    await page.screenshot({
+      path: path.join(screenshots, "first-invitation-review-en-390.png"),
+      animations: "disabled",
+    });
+  }
+  await button(page, label("Cancel", "取消")).click();
+  await expect(
+    page.getByRole("heading", { name: startingTitle, exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("heading", { name: setupTitle, exact: true }),
+  ).toBeVisible();
+  await button(page, reviewLabel).click();
+  await expect(button(page, createLabel)).toBeDisabled();
+  await page.getByRole("checkbox").last().click();
+  await expect(button(page, createLabel)).toBeEnabled();
+  await button(page, createLabel).click();
+  await expect(
+    page.getByRole("heading", { name: startingTitle, exact: true }),
+  ).toBeVisible();
+  await expect(button(page, label("Edit", "编辑"))).toHaveCount(1);
+  await expect(page.getByText("100 mL", { exact: true })).toBeVisible();
+  await expect(page.getByText("85 mL", { exact: true })).toHaveCount(0);
+  for (const name of [
+    label("Feeds", "喂养"),
+    label("Nappies", "尿布"),
+    label("Sleep", "睡眠"),
+    label("Growth", "成长"),
+    label("Milestones", "里程碑"),
+    label("Daily care", "日常照护"),
+  ]) {
+    await expect(page.getByText(name, { exact: true }).first()).toBeVisible();
+  }
+  await button(
+    page,
+    label("Show Invite a caregiver", "展开邀请照护者"),
+  ).click();
+  await expect(button(page, label("Revoke", "撤销"))).toHaveCount(2);
+  await expect(
+    page.getByText("family.one@example.com", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("family.two@example.com", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    button(page, label("Show Family members (1)", "展开家庭成员（1）")),
+  ).toBeVisible();
+  await button(page, label("Reset samples", "重置样例")).click();
+  await expect(
+    page.getByRole("heading", { name: setupTitle, exact: true }),
+  ).toBeVisible();
+  await expect(page.getByLabel(emailsLabel, { exact: true })).toHaveValue("");
+  await expect(
+    page.getByRole("heading", { name: startingTitle, exact: true }),
+  ).toHaveCount(0);
 }
 
 try {
@@ -324,6 +511,7 @@ try {
     await expect(
       page.getByText(zh ? /^仅供界面预览/ : /^UI preview only/),
     ).toBeVisible();
+    await firstInvitationFlow(page, zh, width);
     if (locale === "en" && width === 390) await englishFlows(page);
     for (const scenario of scenarios[locale]) {
       await button(page, scenario).click();
@@ -370,7 +558,7 @@ try {
     await context.close();
   }
   console.log(
-    "PASS: 8 family UI scenarios, invitation consent, roles, editing, removal, transfer, closure, deletion and reset; English/Chinese, light/dark at 390/320px; offline data preserved, no family persistence or API/auth traffic.",
+    "PASS: 9 family UI scenarios, first-invitation seed review/cancel/consent with multiple emails, invitation consent, roles, editing, removal, transfer, closure, deletion and reset; English/Chinese, light/dark at 390/320px; all original record types preserved, no family persistence or API/auth traffic.",
   );
 } finally {
   await browser.close();

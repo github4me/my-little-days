@@ -2,6 +2,8 @@
 
 Status: setup instructions and deployment templates, not a deployed or device-validated service. Reviewed against Microsoft and Expo documentation on 14 September 2026. The operator creates resources after reviewing the regional cost estimate. No Azure resource creation, real-history upload or public release is part of this implementation.
 
+**First-invitation update:** mobile now reviews the owner's current profile/history and can save an account-scoped local setup, without sending it. The new [mobile/Azure handoff](FAMILY-OWNER-ONBOARDING.md) lists configuration values to return and the additional API/mobile activation work. Deploying this guide's feed-only API will **not** enable full-history migration.
+
 The [pilot contract](FAMILY-PILOT-CONTRACT.md) is authoritative. The revised pilot adds an email invitation inbox, author/admin permissions, accepted ownership transfer, owner-only test name/birth date, and deletion processing. Use synthetic data only. Existing local profiles, records, timers, photos and backups stay local. Full synchronization, migration, shared photos and public enrollment remain follow-up work. Apply the new migration and updated mobile/API together; old token-link pilot clients are incompatible.
 
 ## 1. Record the configuration inventory

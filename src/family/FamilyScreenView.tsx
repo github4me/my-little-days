@@ -23,6 +23,8 @@ import {
   type FamilyMessageKey,
 } from "./messages";
 import type { useFamilyPilot } from "./useFamilyPilot";
+import type { OwnerSeedSummary } from "./ownerSeed";
+import { OwnerSeedCountsView } from "./OwnerSetupCard";
 
 type Translate = (
   key: FamilyMessageKey,
@@ -412,10 +414,14 @@ export default function FamilyScreenView({
   onBack,
   pilot,
   demo = false,
+  ownerSetup,
+  initialDataSummary,
 }: {
   onBack: () => void;
   pilot: ReturnType<typeof useFamilyPilot>;
   demo?: boolean;
+  ownerSetup?: React.ReactNode;
+  initialDataSummary?: OwnerSeedSummary;
 }) {
   const c = useContext(Theme);
   const { locale } = useI18n();
@@ -849,7 +855,10 @@ export default function FamilyScreenView({
             </Card>
           ) : !snapshot ? (
             <>
-              <Disclosure title={m("joinSection")} initiallyOpen>
+              <Disclosure
+                title={m("joinSection")}
+                initiallyOpen={!ownerSetup || !!pilot.inbox.length}
+              >
                 <T raw style={styles.muted(c.muted)}>
                   {m("joinDescription")}
                 </T>
@@ -905,32 +914,34 @@ export default function FamilyScreenView({
                   ))
                 )}
               </Disclosure>
-              <Disclosure title={m("createSection")}>
-                <T raw style={styles.muted(c.muted)}>
-                  {m("oneFamily")}
-                </T>
-                <Input
-                  label={m("babyName")}
-                  value={babyName}
-                  onChangeText={setBabyName}
-                  placeholder={m("babyNamePlaceholder")}
-                  maxLength={60}
-                  editable={!busy}
-                />
-                <Consent
-                  checked={createConsent}
-                  onChange={setCreateConsent}
-                  disabled={busy}
-                  label={m("createConsent")}
-                />
-                <Button
-                  label={m("createFamily")}
-                  disabled={busy || !babyName.trim() || !createConsent}
-                  onPress={() =>
-                    void run(() => pilot.createFamily(babyName.trim()))
-                  }
-                />
-              </Disclosure>
+              {ownerSetup ?? (
+                <Disclosure title={m("createSection")}>
+                  <T raw style={styles.muted(c.muted)}>
+                    {m("oneFamily")}
+                  </T>
+                  <Input
+                    label={m("babyName")}
+                    value={babyName}
+                    onChangeText={setBabyName}
+                    placeholder={m("babyNamePlaceholder")}
+                    maxLength={60}
+                    editable={!busy}
+                  />
+                  <Consent
+                    checked={createConsent}
+                    onChange={setCreateConsent}
+                    disabled={busy}
+                    label={m("createConsent")}
+                  />
+                  <Button
+                    label={m("createFamily")}
+                    disabled={busy || !babyName.trim() || !createConsent}
+                    onPress={() =>
+                      void run(() => pilot.createFamily(babyName.trim()))
+                    }
+                  />
+                </Disclosure>
+              )}
             </>
           ) : (
             <>
@@ -951,6 +962,18 @@ export default function FamilyScreenView({
                   style={{ minHeight: 44, paddingHorizontal: 14 }}
                 />
               </View>
+
+              {initialDataSummary ? (
+                <Card style={styles.card}>
+                  <T raw accessibilityRole="header" style={styles.sectionTitle}>
+                    {m("ownerSeededCounts")}
+                  </T>
+                  <OwnerSeedCountsView summary={initialDataSummary} />
+                  <T raw style={styles.muted(c.muted)}>
+                    {m("ownerSeededHint")}
+                  </T>
+                </Card>
+              ) : null}
 
               {transfer?.toUserId === pilot.user.id ? (
                 <Card style={{ ...styles.card, borderColor: c.primary }}>

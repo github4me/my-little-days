@@ -109,6 +109,7 @@ export function useFamilyPilot() {
     change: (s: PilotState) => PilotState,
     e = epoch.current,
     rollbackOnFailure = true,
+    discardOwnerSetup = false,
   ) {
     check(e);
     const id = who.current?.user.id;
@@ -119,7 +120,12 @@ export function useFamilyPilot() {
     // Register the write immediately in the platform-wide ordered store. An
     // already accepted local Save may finish after navigation, for this account
     // only; a reopened screen waits behind it before loading its cache.
-    const write = savePilot(accountKey(id), next).then(() => {
+    const write = savePilot(accountKey(id), next, {
+      discardOwnerSetup:
+        discardOwnerSetup ||
+        next.transition?.kind === "delete-account" ||
+        !!who.current?.accountDeletion,
+    }).then(() => {
       if (isCurrent(e)) durable.current = next;
     });
     writes.current = write.catch(() => {});
@@ -169,7 +175,8 @@ export function useFamilyPilot() {
     // cleanup failed because the disk was full.
     await auth.saveIdentity(result);
     check(e);
-    if (revoked) await persist(revokeCache, e, false);
+    if (revoked || result.accountDeletion)
+      await persist(revokeCache, e, false, true);
     return result;
   }
   async function snapshot(e: number, familyId: string) {
@@ -528,8 +535,8 @@ export function useFamilyPilot() {
           grantMatches || stored.transition ? cachedState : revokeCache(stored),
           true,
         );
-        if (!grantMatches && !stored.transition)
-          await persist(revokeCache, e, false);
+        if (cached.accountDeletion || (!grantMatches && !stored.transition))
+          await persist(revokeCache, e, false, true);
       }
       await sync();
     } catch (cause) {
@@ -732,7 +739,12 @@ export function useFamilyPilot() {
           // during final row cleanup, a later explicit login loads an EMPTY
           // workspace rather than resurrecting work the user discarded.
           if (who.current)
-            await persist(() => emptyPilotState(), beforeLogoutEpoch);
+            await persist(
+              () => emptyPilotState(),
+              beforeLogoutEpoch,
+              true,
+              true,
+            );
           cleanupPending.current = true;
           logoutAccount.current = who.current?.user.id ?? logoutAccount.current;
           epoch.current++;

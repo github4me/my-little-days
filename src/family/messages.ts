@@ -65,6 +65,84 @@ const messages = {
     "试点中，每个账户只能加入一个家庭。",
     "Each account can belong to one family in this pilot.",
   ],
+  ownerSetup: ["从现有记录建立家庭", "Start a family with your records"],
+  ownerSetupDescription: [
+    "首次邀请将以你的宝宝资料和已保存记录建立一个家庭，由你担任管理员。后续邀请加入同一家庭，不会重复导入。",
+    "Your first invitation starts one family from your baby profile and saved records, with you as admin. Later invitations join that same family without importing the records again.",
+  ],
+  ownerSetupLocalNotice: [
+    "尚未连接完整家庭服务。本次只把设置草稿保存在此设备：不会创建线上家庭、发送邀请、上传或替换宝宝记录。Azure 全量记录接口接入后，仍需重新查看并确认发送。",
+    "Full family service is not connected yet. This only saves a setup draft on this device: no online family is created, no invitation is sent, and no baby records are uploaded or replaced. After the Azure full-history service is connected, you must review and confirm sending again.",
+  ],
+  ownerSetupDemoNotice: [
+    "下面仅使用虚构的样例资料。创建和邀请都是本次预览中的模拟操作。",
+    "Only fictional sample data is used below. Creation and invitations are simulated for this preview session.",
+  ],
+  ownerSetupProfile: ["将作为家庭资料的宝宝", "Baby profile for the family"],
+  ownerSetupCounts: ["现有已保存记录", "Existing saved records"],
+  ownerSeededCounts: ["家庭初始记录", "Family starting records"],
+  ownerSeededHint: [
+    "完整样例已保留：喂养、尿布、睡眠、成长、里程碑及日常照护。下方瓶喂编辑器仅用于演示；全类型共享编辑待接口接入。",
+    "The complete sample is retained: feeds, nappies, sleep, growth, milestones and daily care. The bottle-feed editor below is a demo; shared editing for every record type awaits service integration.",
+  ],
+  ownerCountFeed: ["喂养", "Feeds"],
+  ownerCountDiaper: ["尿布", "Nappies"],
+  ownerCountSleep: ["睡眠", "Sleep"],
+  ownerCountGrowth: ["成长", "Growth"],
+  ownerCountMilestone: ["里程碑", "Milestones"],
+  ownerCountCare: ["日常照护", "Daily care"],
+  ownerEmails: ["家人邮箱（最多 3 个）", "Family emails (up to 3)"],
+  ownerEmailsHint: [
+    "每行一个，或用逗号分隔。对方无需已注册，也不会收到通知；以后登录并验证邮箱后可接受或拒绝。",
+    "One per line, or separated by commas. They need not be registered. No notification is sent; after signing in and verifying their email, they can accept or decline.",
+  ],
+  ownerReview: ["查看并确认", "Review setup"],
+  ownerReviewTitle: ["确认家庭初始资料", "Review the family’s starting data"],
+  ownerReviewSharing: [
+    "正式启用时，这些资料和记录将成为家庭共享数据，家庭成员可以查看。受邀成员的个人记录不会合并进来。管理员转让需对方接受；同一家庭的全部数据管理权随之转让，原始作者不变，不复制数据。",
+    "When sharing is activated, this profile and these records become shared family data visible to members. Invitees’ personal records are never merged in. Admin transfer requires acceptance and transfers control of all data in this same family; original authors stay unchanged and no data is copied.",
+  ],
+  ownerExclusions: [
+    "照片、设备偏好、提醒和早教打卡仍只在本机，不包含在此次设置中。正在计时的喂养或睡眠须先结束并保存。",
+    "Photos, device preferences, reminders and play check-ins stay on this device and are not included. Finish and save any running feeding or sleep timer first.",
+  ],
+  ownerConsent: [
+    "我已查看初始资料，了解未来启用共享后家庭成员可见，并且受邀人的记录不会合并。当前操作只模拟或本地保存，不会发送。",
+    "I have reviewed the starting data and understand that family members can see it when sharing is activated. Invitees’ records are not merged. This action only simulates or saves locally; nothing is sent.",
+  ],
+  ownerCreateDemo: ["创建家庭并邀请", "Create family and invite"],
+  ownerSaveLocal: ["仅保存到此设备", "Save setup on this device"],
+  ownerDraftSaved: [
+    "已保存本机设置 · 尚未发送",
+    "Setup saved on this device · Not sent",
+  ],
+  ownerDraftHint: [
+    "这不是已经建立的家庭。连接服务后需重新确认；你的原始宝宝资料与记录仍正常保留。",
+    "This is not an active family. Review again after the service is connected. Your original baby profile and records remain available.",
+  ],
+  ownerReviewSaved: ["重新查看设置", "Review saved setup"],
+  ownerDiscardSaved: ["删除设置草稿", "Delete setup draft"],
+  ownerDiscardTitle: ["删除本机设置草稿？", "Delete this setup draft?"],
+  ownerDiscardDescription: [
+    "只删除家庭设置草稿。不会删除宝宝资料、原始记录、线上家庭或邀请。",
+    "Only the family setup draft will be deleted. Your baby profile, original records, online families and invitations are not deleted.",
+  ],
+  ownerGenericError: [
+    "设置未保存。请检查邮箱和记录后重试；原始宝宝资料不受影响。",
+    "Setup was not saved. Check the emails and records, then retry. Your original baby data is unaffected.",
+  ],
+  ownerTimerError: [
+    "请先结束并保存正在计时的喂养或睡眠，再重新查看家庭设置。",
+    "Finish and save the running feeding or sleep timer, then review the family setup again.",
+  ],
+  ownerChangedError: [
+    "宝宝资料或记录已变更。请关闭确认窗口，重新查看最新资料后再保存。",
+    "The baby profile or records changed. Close this confirmation and review the latest data before saving.",
+  ],
+  ownerEmailError: [
+    "请填写 1–3 个有效且不同的家人邮箱。",
+    "Enter 1–3 valid, different family email addresses.",
+  ],
   joinSection: ["接受家庭邀请", "Accept a family invitation"],
   inviteLink: ["邀请链接", "Invitation link"],
   inviteLinkPlaceholder: [
@@ -167,14 +245,14 @@ const messages = {
   ],
   ownership: ["管理员权限", "Admin role"],
   ownershipDescription: [
-    "提名一位当前成员接任。对方接受前，你仍是管理员；接受后，双方权限同时切换，你成为普通成员。",
-    "Nominate an active member. You remain admin until they accept. Acceptance switches both roles together and makes you an ordinary member.",
+    "提名一位当前成员接任。对方接受前，你仍是管理员；接受后，全部家庭数据的管理权与管理员权限一并转让，你成为普通成员。家庭和记录不变，不复制或重新导入，原始记录作者不变。",
+    "Nominate an active member. You stay admin until they accept. Acceptance transfers control of all family data together with the admin role; you become an ordinary member. The family and records stay in place, with no copying or re-import. Original authorship stays unchanged.",
   ],
   nominateOwner: ["提名为管理员", "Nominate as admin"],
   nominateOwnerTitle: ["提名新管理员？", "Nominate a new admin?"],
   nominateOwnerDescription: [
-    "提名 {name} 接任。只有对方接受后，你才会成为普通成员；这不会删除你的账户或任何家庭记录。",
-    "Nominate {name}. You become an ordinary member only after they accept. This does not delete your account or any family records.",
+    "提名 {name} 接任，并管理现有家庭的全部共享数据。只有对方接受后，你才会成为普通成员；家庭、记录和原始作者不变，不复制或重新导入数据。",
+    "Nominate {name} to take over this family and control all its shared data. You become an ordinary member only after acceptance. The family, records and original authors stay unchanged; nothing is copied or re-imported.",
   ],
   ownershipPending: [
     "正在等待 {name} 接受管理员提名。",
@@ -182,8 +260,8 @@ const messages = {
   ],
   ownershipIncoming: ["你已被提名为管理员", "You have been nominated as admin"],
   ownershipIncomingDescription: [
-    "接受后，你将负责家庭邀请、成员管理和宝宝资料，并可修改或删除任何家庭记录。原管理员成为普通成员。",
-    "Accepting gives you responsibility for invitations, members and the baby profile, and permission to edit or delete any family record. The previous admin becomes an ordinary member.",
+    "接受后，现有家庭全部共享数据的管理权与你的管理员权限同时生效。你可管理邀请、成员和宝宝资料，并可修改或删除任何家庭记录。原管理员成为普通成员。所有记录仍在同一个家庭，原始作者不变，不复制或重新导入。",
+    "Acceptance transfers control of all existing shared family data and activates your admin permissions together. You can manage invitations, members and the baby profile, and edit or delete any family record. The previous admin becomes an ordinary member. All records stay in the same family with their original authors; nothing is copied or re-imported.",
   ],
   acceptOwnership: ["接受管理员权限", "Accept admin role"],
   acceptOwnershipTitle: ["接任家庭管理员？", "Become the family admin?"],

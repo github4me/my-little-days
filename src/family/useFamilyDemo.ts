@@ -1,8 +1,15 @@
 import { useRef, useState } from "react";
 import type { useFamilyPilot } from "./useFamilyPilot";
 import { canEditSharedFeed } from "./pilotState";
+import type { State } from "../domain";
+import {
+  summarizeOwnerSeed,
+  type OwnerSeedDraft,
+  type OwnerSeedSummary,
+} from "./ownerSeed";
 import {
   createFamilyDemo,
+  demoOwnerSource,
   reduceFamilyDemo,
   type FamilyDemoAction,
   type FamilyDemoScenario,
@@ -10,10 +17,15 @@ import {
 
 // Deliberately no runtime import of the live controller, API, authentication or
 // persistence. Unmounting this hook discards the entire review session.
-export function useFamilyDemo(
-  scenario: FamilyDemoScenario,
-): ReturnType<typeof useFamilyPilot> {
+export function useFamilyDemo(scenario: FamilyDemoScenario): ReturnType<
+  typeof useFamilyPilot
+> & {
+  demoSource: State;
+  initialDataSummary: OwnerSeedSummary | undefined;
+  createFamilyFromSeed: (draft: OwnerSeedDraft) => Promise<void>;
+} {
   const [state, setState] = useState(() => createFamilyDemo(scenario));
+  const [demoSource] = useState(() => demoOwnerSource());
   const [error, setError] = useState<string | null>(null);
   const current = useRef(state);
   async function act(action: FamilyDemoAction) {
@@ -36,6 +48,12 @@ export function useFamilyDemo(
     throw new Error("record_changed");
   }
   return {
+    demoSource,
+    initialDataSummary: state.seededSource
+      ? summarizeOwnerSeed(state.seededSource)
+      : undefined,
+    createFamilyFromSeed: (draft) =>
+      run({ type: "create-family-from-seed", draft }),
     configured: true,
     webUnsupported: false,
     user: state.user,

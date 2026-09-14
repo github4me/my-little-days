@@ -175,6 +175,8 @@ function fixture(overrides = {}, locale = "en") {
         if (name === "../i18n") return { useI18n: () => ({ locale }) };
         if (name === "../ui") return ui;
         if (name === "./messages") return messages;
+        if (name === "./OwnerSetupCard")
+          return load("src/family/OwnerSetupCard.tsx");
         if (name === "./FamilyScreenView")
           return load("src/family/FamilyScreenView.tsx");
         if (name === "./useFamilyPilot")
@@ -185,7 +187,7 @@ function fixture(overrides = {}, locale = "en") {
     return result.exports;
   }
   messages = load("src/family/messages.ts");
-  const Screen = load("src/family/FamilyScreen.tsx").default;
+  const Screen = load("src/family/FamilyScreenView.tsx").default;
   function visit(element, position = "0") {
     if (element == null || typeof element === "boolean") return;
     if (Array.isArray(element))
@@ -211,7 +213,7 @@ function fixture(overrides = {}, locale = "en") {
     controller,
     render() {
       nodes = [];
-      visit(react.createElement(Screen, { onBack() {} }));
+      visit(react.createElement(Screen, { onBack() {}, pilot: controller }));
       return nodes;
     },
     buttons(label) {

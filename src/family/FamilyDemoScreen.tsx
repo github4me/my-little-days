@@ -5,6 +5,8 @@ import { Button, T, Theme } from "../ui";
 import { demoScenarios, type FamilyDemoScenario } from "./demoScenarios";
 import { useFamilyDemo } from "./useFamilyDemo";
 import FamilyScreenView from "./FamilyScreenView";
+import OwnerSetupCard from "./OwnerSetupCard";
+import { prepareOwnerSeed, summarizeOwnerSeed } from "./ownerSeed";
 
 function SampleScreen({
   scenario,
@@ -14,14 +16,32 @@ function SampleScreen({
   onBack: () => void;
 }) {
   const pilot = useFamilyDemo(scenario);
-  return <FamilyScreenView pilot={pilot} onBack={onBack} demo />;
+  return (
+    <FamilyScreenView
+      pilot={pilot}
+      onBack={onBack}
+      demo
+      initialDataSummary={pilot.initialDataSummary}
+      ownerSetup={
+        <OwnerSetupCard
+          mode="demo"
+          profile={pilot.demoSource.profile}
+          summary={summarizeOwnerSeed(pilot.demoSource)}
+          onPrepare={async (emails) =>
+            prepareOwnerSeed(pilot.demoSource, emails, pilot.user?.email ?? "")
+          }
+          onSave={pilot.createFamilyFromSeed}
+        />
+      }
+    />
+  );
 }
 
 export default function FamilyDemoScreen({ onBack }: { onBack: () => void }) {
   const c = useContext(Theme);
   const { locale } = useI18n();
   const zh = locale === "zh-CN";
-  const [scenario, setScenario] = useState<FamilyDemoScenario>("invitations");
+  const [scenario, setScenario] = useState<FamilyDemoScenario>("first-invite");
   const [revision, setRevision] = useState(0);
   return (
     <View
