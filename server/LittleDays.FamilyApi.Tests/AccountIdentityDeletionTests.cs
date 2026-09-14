@@ -84,6 +84,33 @@ public sealed class AccountIdentityDeletionTests
     }
 
     [Fact]
+    public async Task DirectServerSettingsConfigureDeletionWithoutKeyVault()
+    {
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["AccountDeletion:GraphClientId"] = clientId.ToString(),
+            ["AccountDeletion:GraphClientSecret"] = "fixture-only-not-a-real-secret"
+        }).Build();
+        var pilot = new PilotConfiguration(new() { TenantId = tenantId }, new(), new()
+        {
+            Identities = [new() { ObjectId = userId }]
+        });
+        var services = new ServiceCollection();
+        services.AddAccountIdentityDeletion(configuration, pilot);
+        using var handler = new ScriptedHandler(HttpStatusCode.NoContent, HttpStatusCode.NoContent);
+        services.AddHttpClient(nameof(IAccountIdentityDeletion))
+            .ConfigurePrimaryHttpMessageHandler(() => handler);
+        using var provider = services.BuildServiceProvider();
+
+        await provider.GetRequiredService<IAccountIdentityDeletion>().DeleteIdentityAsync(userId, default);
+
+        Assert.Equal(3, handler.Requests.Count);
+        Assert.Contains($"client_id={clientId:D}", handler.TokenBody);
+        Assert.Contains("client_secret=fixture-only-not-a-real-secret", handler.TokenBody);
+        Assert.EndsWith($"DELETE https://graph.microsoft.com/v1.0/directory/deletedItems/{userId:D}", handler.Requests[^1]);
+    }
+
+    [Fact]
     public async Task MissingDirectoryConfigurationFailsClosed()
     {
         await Assert.ThrowsAsync<InvalidOperationException>(() =>

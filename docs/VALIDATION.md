@@ -1,5 +1,11 @@
 # 验证记录
 
+## 初版不依赖 Key Vault · 2026-09-14
+
+- Azure 设置指南、试点契约和服务端/基础设施说明改为直接使用受限的 App Service 服务器设置保存目录删除凭据；初版不创建 Key Vault 或授予其访问角色。配置模板继续保留空密钥，不向 Git、手机/EAS、日志或部署产物加入真实凭据。SQL 托管身份、GitHub OIDC 与账户删除要求不变。
+- 运行 `dotnet test server/LittleDays.FamilyApi.Tests/LittleDays.FamilyApi.Tests.csproj --configuration Release --filter FullyQualifiedName~AccountIdentityDeletionTests --no-restore`：12 项通过、0 跳过。新增测试通过实际配置/依赖注入注册目录删除提供程序并验证删除请求；HTTP 为测试桩。保留缺失配置、未解析引用、权限/网络错误不能误报删除完成的验证。
+- 运行时代码仅更新注释，无逻辑或手机界面变更。未执行 Azure 部署、真实凭据配置/轮换、真实 Entra/Graph 删除或 SQL 集成测试；真实用户发布仍须完成这些适用的验收。下方较早记录中的 Key Vault 验收不再是初版前置条件。
+
 ## 首次邀请手机端准备 · 2026-09-14
 
 - 实现完整本机 `State` 的严格快照验证、六类记录数量汇总、最多三位邮箱校验、确认前资料变化检测、进行中计时阻止、10 MiB UTF-8 限制。真实原生页面仅保存账户隔离的本机准备内容，不发送到 API；普通离线档案与记录不变。完整历史上传及主应用共享模式尚未实现，见 [Azure 交接说明](FAMILY-OWNER-ONBOARDING.md)。

@@ -44,7 +44,7 @@ public sealed class UnconfiguredAccountIdentityDeletion : IAccountIdentityDeleti
         Task.FromException(new InvalidOperationException("identity_deletion_not_configured"));
 }
 
-// Server-only settings. Never serialize or log this object; resolve the secret from a Key Vault reference.
+// Server-only settings. Initial release uses restricted App Service settings; never serialize or log this object.
 public sealed class AccountDeletionDirectorySettings(Guid tenantId, Guid clientId, string clientSecret,
     IReadOnlySet<Guid> admittedUsers)
 {
