@@ -16,10 +16,13 @@
     "MaxMembers": 4,
     "MaxFeeds": 1000,
     "MaxOperationsPerFamily": 100000,
-    "InvitationHours": 48,
     "MaxNoteLength": 500,
     "MaxBabyNameLength": 60,
     "RequestsPerMinute": 120,
     "SensitiveRequestsPerMinute": 10
+  },
+  "AccountDeletion": {
+    "GraphClientId": "",
+    "GraphClientSecret": ""
   }
 }

@@ -6,7 +6,6 @@ import {
   Platform,
   Pressable,
   ScrollView,
-  Share,
   StyleSheet,
   TextInput,
   View,
@@ -34,6 +33,8 @@ type Confirmation = {
   body: string;
   label: string;
   action: () => Promise<void>;
+  acknowledgement?: string;
+  allowDuringTransition?: boolean;
 };
 
 function Disclosure({
@@ -407,27 +408,19 @@ function DraftEditor({
   );
 }
 
-export default function FamilyScreen({
-  onBack,
-  initialInvitation,
-}: {
-  onBack: () => void;
-  initialInvitation?: string;
-}) {
+export default function FamilyScreen({ onBack }: { onBack: () => void }) {
   const c = useContext(Theme);
   const { locale } = useI18n();
   const m: Translate = (key, values) => familyMessage(locale, key, values);
   const pilot = useFamilyPilot();
   const [babyName, setBabyName] = useState("");
   const [createConsent, setCreateConsent] = useState(false);
-  const [joinConsent, setJoinConsent] = useState(false);
-  const [inviteInput, setInviteInput] = useState(initialInvitation ?? "");
+  const [profileName, setProfileName] = useState("");
+  const [profileBirthDate, setProfileBirthDate] = useState("");
   const [recipient, setRecipient] = useState("");
-  const [createdInvite, setCreatedInvite] = useState<{
-    url: string;
-    email: string;
-  } | null>(null);
+  const [createdInvite, setCreatedInvite] = useState<string | null>(null);
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
+  const [acknowledged, setAcknowledged] = useState(false);
   const [localError, setLocalError] = useState<FamilyMessageKey | null>(null);
   const [acting, setActing] = useState(false);
   const lock = useRef(false);
@@ -435,6 +428,14 @@ export default function FamilyScreen({
   const busy = acting || pilot.busy;
   const snapshot = pilot.snapshot;
   const owner = snapshot?.family.role === "owner";
+  const activeMembers =
+    snapshot?.members.filter((member) => member.status === "active") ?? [];
+  const successors = activeMembers.filter(
+    (member) => member.id !== pilot.user?.id,
+  );
+  const transfer = snapshot?.ownershipTransfer;
+  const deletion = pilot.deletionStatus ?? pilot.accountDeletion;
+  const workspaceBusy = busy || pilot.transitionPending || !!deletion;
 
   useEffect(() => {
     mounted.current = true;
@@ -447,8 +448,13 @@ export default function FamilyScreen({
     setRecipient("");
   }, [pilot.user?.id, snapshot?.family.id]);
   useEffect(() => {
-    if (initialInvitation !== undefined) setInviteInput(initialInvitation);
-  }, [initialInvitation]);
+    setProfileName(snapshot?.family.babyName ?? "");
+    setProfileBirthDate(snapshot?.family.babyBirthDate ?? "");
+  }, [
+    snapshot?.family.id,
+    snapshot?.family.babyName,
+    snapshot?.family.babyBirthDate,
+  ]);
 
   async function run(action: () => Promise<void>, close = false) {
     if (lock.current) return;
@@ -471,21 +477,17 @@ export default function FamilyScreen({
     body: string,
     label: FamilyMessageKey,
     action: () => Promise<void>,
+    acknowledgement?: FamilyMessageKey,
   ) {
-    setConfirmation({ title: m(title), body, label: m(label), action });
-  }
-
-  async function shareInvitation() {
-    if (!createdInvite) return;
-    try {
-      await Share.share(
-        Platform.OS === "ios"
-          ? { url: createdInvite.url }
-          : { message: createdInvite.url },
-      );
-    } catch {
-      if (mounted.current) setLocalError("errorShare");
-    }
+    setAcknowledged(false);
+    setConfirmation({
+      title: m(title),
+      body,
+      label: m(label),
+      action,
+      acknowledgement: acknowledgement ? m(acknowledgement) : undefined,
+      allowDuringTransition: label === "signOut",
+    });
   }
 
   const memberName = (id: string) =>
@@ -506,47 +508,30 @@ export default function FamilyScreen({
     !!snapshot &&
     (pilot.draft.historyId !== snapshot.historyId ||
       pilot.draft.membershipId !== snapshot.family.membershipId);
-  const draftEditor = pilot.draft ? (
-    <View style={styles.stack}>
-      {staleDraft ? (
-        <View style={[styles.notice, { backgroundColor: c.soft }]}>
-          <T raw>{m("noticeContextChanged")}</T>
-          <Button
-            label={m("reviewPrivateDraft")}
-            secondary
-            disabled={busy}
-            onPress={() =>
-              confirm(
-                "reviewPrivateTitle",
-                m("reviewPrivateDescription"),
-                "reviewPrivateDraft",
-                pilot.reviewPrivateDraft,
-              )
-            }
-          />
-        </View>
-      ) : null}
-      <DraftEditor
-        key={pilot.draft.recordId}
-        draft={pilot.draft}
-        busy={busy}
-        canSave={!!snapshot && !staleDraft}
-        m={m}
-        onChange={(draft) => {
-          void pilot.setDraft(draft).catch(() => {});
-        }}
-        onSave={() => void run(pilot.saveDraft)}
-        onDiscard={() =>
-          confirm(
-            "discardDraftTitle",
-            m("discardDraftDescription"),
-            "discardDraft",
-            pilot.discardDraft,
-          )
-        }
-      />
-    </View>
-  ) : null;
+  const draftEditor =
+    pilot.draft && snapshot && !staleDraft && !workspaceBusy ? (
+      <View style={styles.stack}>
+        <DraftEditor
+          key={pilot.draft.recordId}
+          draft={pilot.draft}
+          busy={busy}
+          canSave={!!snapshot && !staleDraft}
+          m={m}
+          onChange={(draft) => {
+            void pilot.setDraft(draft).catch(() => {});
+          }}
+          onSave={() => void run(pilot.saveDraft)}
+          onDiscard={() =>
+            confirm(
+              "discardDraftTitle",
+              m("discardDraftDescription"),
+              "discardDraft",
+              pilot.discardDraft,
+            )
+          }
+        />
+      </View>
+    ) : null;
 
   function feedItem(
     feed: SharedFeed & {
@@ -556,6 +541,7 @@ export default function FamilyScreen({
     },
   ) {
     const waiting = feed.pending || feed.pendingDelete || feed.awaitingRefresh;
+    const canEdit = owner || feed.recordedBy === pilot.user?.id;
     return (
       <View key={feed.id} style={[styles.listItem, { borderColor: c.line }]}>
         <View style={styles.spread}>
@@ -590,29 +576,31 @@ export default function FamilyScreen({
             {m("editedBy", { name: memberName(feed.lastEditedBy) })}
           </T>
         ) : null}
-        <View style={styles.actions}>
-          <Button
-            label={m("editFeed")}
-            secondary
-            disabled={busy || !!waiting || !!pilot.draft}
-            onPress={() => void run(() => pilot.beginFeed(feed))}
-            style={styles.flexButton}
-          />
-          <Button
-            label={m("deleteFeed")}
-            secondary
-            disabled={busy || !!waiting || !!pilot.draft}
-            onPress={() =>
-              confirm(
-                "deleteFeedTitle",
-                m("deleteFeedDescription"),
-                "deleteFeed",
-                () => pilot.deleteFeed(feed.id),
-              )
-            }
-            style={styles.flexButton}
-          />
-        </View>
+        {canEdit ? (
+          <View style={styles.actions}>
+            <Button
+              label={m("editFeed")}
+              secondary
+              disabled={workspaceBusy || !!waiting || !!pilot.draft}
+              onPress={() => void run(() => pilot.beginFeed(feed))}
+              style={styles.flexButton}
+            />
+            <Button
+              label={m("deleteFeed")}
+              secondary
+              disabled={workspaceBusy || !!waiting || !!pilot.draft}
+              onPress={() =>
+                confirm(
+                  "deleteFeedTitle",
+                  m("deleteFeedDescription"),
+                  "deleteFeed",
+                  () => pilot.deleteFeed(feed.id),
+                )
+              }
+              style={styles.flexButton}
+            />
+          </View>
+        ) : null}
       </View>
     );
   }
@@ -653,7 +641,85 @@ export default function FamilyScreen({
         </View>
       ) : null}
 
-      {!pilot.configured || pilot.webUnsupported ? (
+      {deletion ? (
+        <Card style={styles.card}>
+          <T raw accessibilityRole="header" style={styles.sectionTitle}>
+            {m(
+              pilot.transitionPending
+                ? "transitionPending"
+                : deletion.status === "completed"
+                  ? "deletionComplete"
+                  : deletion.status === "awaiting_identity_deletion"
+                    ? "deletionIdentity"
+                    : "deletionPending",
+            )}
+          </T>
+          {pilot.transitionPending || deletion.status !== "completed" ? (
+            <T raw style={styles.muted(c.muted)}>
+              {m(
+                pilot.transitionPending
+                  ? "transitionDescription"
+                  : deletion.status === "awaiting_identity_deletion"
+                    ? "deletionIdentityDescription"
+                    : "deletionPendingDescription",
+              )}
+            </T>
+          ) : null}
+          <T raw style={styles.muted(c.muted)}>
+            {m("deletionRequestedAt", {
+              time: displayDate(deletion.requestedAt, locale),
+            })}
+          </T>
+          <Button
+            label={m("checkDeletionStatus")}
+            secondary
+            disabled={busy}
+            onPress={() =>
+              void run(async () => {
+                await pilot.checkDeletionStatus();
+              })
+            }
+          />
+          {deletion.status === "completed" && !pilot.transitionPending ? (
+            <Button
+              label={m("deletionDone")}
+              disabled={busy}
+              onPress={() =>
+                void run(async () => {
+                  if (pilot.user) await pilot.signOut();
+                  await pilot.dismissDeletionStatus();
+                })
+              }
+            />
+          ) : null}
+          {pilot.transitionPending && pilot.user ? (
+            <Button
+              label={m(pilot.syncing ? "refreshing" : "refresh")}
+              disabled={busy || pilot.syncing}
+              onPress={() => void run(pilot.refresh)}
+            />
+          ) : null}
+          {pilot.user ? (
+            <Button
+              label={m("signOut")}
+              secondary
+              disabled={busy}
+              onPress={() =>
+                confirm(
+                  "signOutTitle",
+                  m(
+                    pilot.transitionPending
+                      ? "signOutDuringTransition"
+                      : "signOutDescription",
+                  ),
+                  "signOut",
+                  pilot.signOut,
+                )
+              }
+            />
+          ) : null}
+        </Card>
+      ) : !pilot.configured || pilot.webUnsupported ? (
         <Card style={styles.card}>
           <T raw accessibilityRole="header" style={styles.sectionTitle}>
             {m(!pilot.configured ? "unconfigured" : "nativeOnly")}
@@ -724,49 +790,113 @@ export default function FamilyScreen({
                 confirm(
                   "signOutTitle",
                   m(
-                    pilot.hasPrivateWork
-                      ? "signOutWithWork"
-                      : "signOutDescription",
+                    pilot.transitionPending
+                      ? "signOutDuringTransition"
+                      : pilot.hasPrivateWork
+                        ? "signOutWithWork"
+                        : "signOutDescription",
                   ),
                   "signOut",
                   pilot.signOut,
                 )
               }
             />
+            {!pilot.accountDeletion ? (
+              <>
+                <T raw style={styles.muted(c.muted)}>
+                  {m(
+                    owner ? "deleteAccountBlocked" : "deleteAccountDescription",
+                  )}
+                </T>
+                <Button
+                  label={m("deleteAccount")}
+                  secondary
+                  disabled={workspaceBusy || owner}
+                  onPress={() =>
+                    confirm(
+                      "deleteAccountTitle",
+                      m("deleteAccountDescription"),
+                      "deleteAccount",
+                      pilot.deleteAccount,
+                      "deleteAccountConsent",
+                    )
+                  }
+                />
+              </>
+            ) : null}
           </Disclosure>
 
-          {!snapshot ? (
+          {pilot.transitionPending ? (
+            <Card style={styles.card}>
+              <T raw accessibilityRole="header" style={styles.sectionTitle}>
+                {m("transitionPending")}
+              </T>
+              <T raw style={styles.muted(c.muted)}>
+                {m("transitionDescription")}
+              </T>
+              <Button
+                label={m(pilot.syncing ? "refreshing" : "refresh")}
+                disabled={busy || pilot.syncing}
+                onPress={() => void run(pilot.refresh)}
+              />
+            </Card>
+          ) : !snapshot ? (
             <>
               <Disclosure title={m("joinSection")} initiallyOpen>
                 <T raw style={styles.muted(c.muted)}>
                   {m("joinDescription")}
                 </T>
-                <Input
-                  label={m("inviteLink")}
-                  value={inviteInput}
-                  onChangeText={setInviteInput}
-                  placeholder={m("inviteLinkPlaceholder")}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  editable={!busy}
-                  maxLength={4096}
-                />
-                <Consent
-                  checked={joinConsent}
-                  onChange={setJoinConsent}
-                  disabled={busy}
-                  label={m("joinConsent")}
-                />
-                <Button
-                  label={m("acceptInvite")}
-                  disabled={busy || !inviteInput.trim() || !joinConsent}
-                  onPress={() =>
-                    void run(async () => {
-                      await pilot.acceptInvitation(inviteInput.trim());
-                      if (mounted.current) setInviteInput("");
-                    })
-                  }
-                />
+                {!pilot.inbox.length ? (
+                  <T raw style={styles.muted(c.muted)}>
+                    {m("noIncomingInvitations")}
+                  </T>
+                ) : (
+                  pilot.inbox.map((invitation) => (
+                    <View
+                      key={invitation.id}
+                      style={[styles.listItem, { borderColor: c.line }]}
+                    >
+                      <T raw style={{ fontWeight: "600" }}>
+                        {m("invitedBy", { name: invitation.ownerDisplayName })}
+                      </T>
+                      <T raw style={styles.muted(c.muted)}>
+                        {m("expiresAt", {
+                          time: displayDate(invitation.expiresAt, locale),
+                        })}
+                      </T>
+                      <View style={styles.actions}>
+                        <Button
+                          label={m("acceptInvite")}
+                          disabled={workspaceBusy}
+                          style={styles.flexButton}
+                          onPress={() =>
+                            confirm(
+                              "acceptInviteTitle",
+                              m("joinWarning"),
+                              "acceptInvite",
+                              () => pilot.acceptInvitation(invitation.id),
+                              "joinConsent",
+                            )
+                          }
+                        />
+                        <Button
+                          label={m("declineInvite")}
+                          secondary
+                          disabled={workspaceBusy}
+                          style={styles.flexButton}
+                          onPress={() =>
+                            confirm(
+                              "declineInviteTitle",
+                              m("declineInviteDescription"),
+                              "declineInvite",
+                              () => pilot.declineInvitation(invitation.id),
+                            )
+                          }
+                        />
+                      </View>
+                    </View>
+                  ))
+                )}
               </Disclosure>
               <Disclosure title={m("createSection")}>
                 <T raw style={styles.muted(c.muted)}>
@@ -815,6 +945,29 @@ export default function FamilyScreen({
                 />
               </View>
 
+              {transfer?.toUserId === pilot.user.id ? (
+                <Card style={{ ...styles.card, borderColor: c.primary }}>
+                  <T raw accessibilityRole="header" style={styles.sectionTitle}>
+                    {m("ownershipIncoming")}
+                  </T>
+                  <T raw style={styles.muted(c.muted)}>
+                    {m("ownershipIncomingDescription")}
+                  </T>
+                  <Button
+                    label={m("acceptOwnership")}
+                    disabled={workspaceBusy}
+                    onPress={() =>
+                      confirm(
+                        "acceptOwnershipTitle",
+                        m("ownershipIncomingDescription"),
+                        "acceptOwnership",
+                        pilot.acceptOwnership,
+                      )
+                    }
+                  />
+                </Card>
+              ) : null}
+
               {pilot.pending.length ? (
                 <View style={[styles.notice, { backgroundColor: c.soft }]}>
                   <T
@@ -856,9 +1009,7 @@ export default function FamilyScreen({
             </>
           )}
 
-          {!snapshot ? draftEditor : null}
-
-          {pilot.conflicts.length ? (
+          {snapshot && !workspaceBusy && pilot.conflicts.length ? (
             <Disclosure
               title={m("preservedSection", { count: pilot.conflicts.length })}
               initiallyOpen
@@ -897,17 +1048,6 @@ export default function FamilyScreen({
                   )}
                   <View style={styles.actions}>
                     <Button
-                      label={m("reviewDraft")}
-                      secondary
-                      disabled={busy || !!pilot.draft || !snapshot}
-                      onPress={() =>
-                        void run(() =>
-                          pilot.reviewConflict(conflict.operation.operationId),
-                        )
-                      }
-                      style={styles.flexButton}
-                    />
-                    <Button
                       label={m("discardPreserved")}
                       secondary
                       disabled={busy}
@@ -930,7 +1070,7 @@ export default function FamilyScreen({
             </Disclosure>
           ) : null}
 
-          {snapshot ? (
+          {snapshot && !pilot.transitionPending && !pilot.accountDeletion ? (
             <>
               <Disclosure
                 title={m("membersCount", { count: snapshot.members.length })}
@@ -950,10 +1090,19 @@ export default function FamilyScreen({
                           {member.id === pilot.user?.id ? ` (${m("you")})` : ""}
                         </T>
                         <T raw style={styles.muted(c.muted)}>
-                          {m(member.role)}
+                          {m(member.role)} ·{" "}
+                          {m(
+                            member.status === "left"
+                              ? "leftMember"
+                              : member.status === "removed"
+                                ? "removedMember"
+                                : "activeMember",
+                          )}
                         </T>
                       </View>
-                      {owner && member.role !== "owner" ? (
+                      {owner &&
+                      member.role !== "owner" &&
+                      member.status === "active" ? (
                         <Button
                           label={m("remove")}
                           secondary
@@ -972,9 +1121,18 @@ export default function FamilyScreen({
                         />
                       ) : null}
                     </View>
-                    <T raw style={styles.muted(c.muted)}>
-                      {member.email}
-                    </T>
+                    {member.email ? (
+                      <T raw style={styles.muted(c.muted)}>
+                        {member.email}
+                      </T>
+                    ) : null}
+                    {member.endedAt ? (
+                      <T raw style={styles.muted(c.muted)}>
+                        {m("endedAt", {
+                          time: displayDate(member.endedAt, locale),
+                        })}
+                      </T>
+                    ) : null}
                   </View>
                 ))}
                 {!owner ? (
@@ -992,6 +1150,53 @@ export default function FamilyScreen({
                     }
                   />
                 ) : null}
+              </Disclosure>
+
+              <Disclosure title={m("profile")}>
+                <T raw style={styles.muted(c.muted)}>
+                  {m("profileDescription")}
+                </T>
+                {owner ? (
+                  <>
+                    <Input
+                      label={m("babyName")}
+                      value={profileName}
+                      onChangeText={setProfileName}
+                      maxLength={60}
+                      editable={!workspaceBusy}
+                    />
+                    <Input
+                      label={m("babyBirthDate")}
+                      value={profileBirthDate}
+                      onChangeText={setProfileBirthDate}
+                      placeholder="YYYY-MM-DD"
+                      maxLength={10}
+                      editable={!workspaceBusy}
+                    />
+                    <Button
+                      label={m("saveProfile")}
+                      disabled={workspaceBusy || !profileName.trim()}
+                      onPress={() => {
+                        const date = profileBirthDate.trim();
+                        const iso = date ? localISO(date, "00:00") : null;
+                        if (date && (!iso || Date.parse(iso) > Date.now())) {
+                          setLocalError("profileDateError");
+                          return;
+                        }
+                        void run(() =>
+                          pilot.updateProfile(profileName.trim(), date || null),
+                        );
+                      }}
+                    />
+                  </>
+                ) : (
+                  <>
+                    <T raw>{snapshot.family.babyName}</T>
+                    <T raw style={styles.muted(c.muted)}>
+                      {snapshot.family.babyBirthDate || m("noBirthDate")}
+                    </T>
+                  </>
+                )}
               </Disclosure>
 
               {owner ? (
@@ -1016,8 +1221,11 @@ export default function FamilyScreen({
                       void run(async () => {
                         setCreatedInvite(null);
                         const email = recipient.trim();
-                        const url = await pilot.createInvitation(email);
-                        if (mounted.current) setCreatedInvite({ url, email });
+                        await pilot.createInvitation(email);
+                        if (mounted.current) {
+                          setCreatedInvite(email);
+                          setRecipient("");
+                        }
                       })
                     }
                   />
@@ -1030,21 +1238,7 @@ export default function FamilyScreen({
                       >
                         {m("invitationReady")}
                       </T>
-                      <T raw>{createdInvite.email}</T>
-                      <T raw style={styles.muted(c.muted)}>
-                        {m("invitationMemory")}
-                      </T>
-                      <Button
-                        label={m("shareInvite")}
-                        disabled={busy}
-                        onPress={() => void shareInvitation()}
-                      />
-                      <Button
-                        label={m("clearInvite")}
-                        secondary
-                        disabled={busy}
-                        onPress={() => setCreatedInvite(null)}
-                      />
+                      <T raw>{createdInvite}</T>
                     </View>
                   ) : null}
                   <T raw style={{ fontWeight: "600" }}>
@@ -1069,6 +1263,7 @@ export default function FamilyScreen({
                       > = {
                         pending: "pendingInvitation",
                         accepted: "acceptedInvitation",
+                        declined: "declinedInvitation",
                         revoked: "revokedInvitation",
                         expired: "expiredInvitation",
                       };
@@ -1100,11 +1295,7 @@ export default function FamilyScreen({
                                   "revoke",
                                   async () => {
                                     await pilot.revokeInvitation(invitation.id);
-                                    if (
-                                      createdInvite?.email.toLowerCase() ===
-                                      invitation.email.toLowerCase()
-                                    )
-                                      setCreatedInvite(null);
+                                    setCreatedInvite(null);
                                   },
                                 )
                               }
@@ -1114,6 +1305,86 @@ export default function FamilyScreen({
                       );
                     })
                   )}
+                </Disclosure>
+              ) : null}
+              {owner ? (
+                <Disclosure title={m("ownership")}>
+                  <T raw style={styles.muted(c.muted)}>
+                    {m("ownershipDescription")}
+                  </T>
+                  {transfer ? (
+                    <View style={styles.stack}>
+                      <T raw>
+                        {m("ownershipPending", {
+                          name: memberName(transfer.toUserId),
+                        })}
+                      </T>
+                      <Button
+                        label={m("cancelOwnership")}
+                        secondary
+                        disabled={workspaceBusy}
+                        onPress={() =>
+                          confirm(
+                            "cancelOwnershipTitle",
+                            m("cancelOwnershipDescription"),
+                            "cancelOwnership",
+                            pilot.cancelOwnership,
+                          )
+                        }
+                      />
+                    </View>
+                  ) : successors.length ? (
+                    successors.map((member) => (
+                      <View
+                        key={member.membershipId}
+                        style={[styles.listItem, { borderColor: c.line }]}
+                      >
+                        <T raw>{member.displayName}</T>
+                        <Button
+                          label={m("nominateOwner")}
+                          secondary
+                          disabled={workspaceBusy}
+                          onPress={() =>
+                            confirm(
+                              "nominateOwnerTitle",
+                              m("nominateOwnerDescription", {
+                                name: member.displayName,
+                              }),
+                              "nominateOwner",
+                              () => pilot.nominateOwner(member.id),
+                            )
+                          }
+                        />
+                      </View>
+                    ))
+                  ) : (
+                    <T raw style={styles.muted(c.muted)}>
+                      {m("noSuccessor")}
+                    </T>
+                  )}
+                  <View style={[styles.listItem, { borderColor: c.line }]}>
+                    <T raw style={styles.muted(c.muted)}>
+                      {m(
+                        successors.length
+                          ? "closeFamilyBlocked"
+                          : "closeFamilyDescription",
+                      )}
+                    </T>
+                    <Button
+                      label={m("closeFamily")}
+                      secondary
+                      disabled={workspaceBusy || successors.length > 0}
+                      onPress={() =>
+                        confirm(
+                          "closeFamilyTitle",
+                          m("closeFamilyDescription"),
+                          "closeFamily",
+                          pilot.closeFamily,
+                          "closeFamilyConsent",
+                        )
+                      }
+                    />
+                  </View>
                 </Disclosure>
               ) : null}
               <Disclosure title={m("details")}>
@@ -1144,17 +1415,34 @@ export default function FamilyScreen({
         <SafeAreaView style={styles.modalBackdrop}>
           <KeyboardAvoidingView
             behavior={Platform.OS === "ios" ? "padding" : undefined}
-            style={{ width: "100%", maxWidth: 420, alignSelf: "center" }}
+            style={{
+              width: "100%",
+              maxWidth: 420,
+              maxHeight: "100%",
+              flexShrink: 1,
+              alignSelf: "center",
+            }}
           >
             <View
               accessibilityViewIsModal
               style={[styles.modal, { backgroundColor: c.card }]}
             >
-              <ScrollView contentContainerStyle={styles.stack}>
+              <ScrollView
+                contentContainerStyle={styles.stack}
+                keyboardShouldPersistTaps="handled"
+              >
                 <T raw accessibilityRole="header" style={styles.title}>
                   {confirmation?.title}
                 </T>
                 <T raw>{confirmation?.body}</T>
+                {confirmation?.acknowledgement ? (
+                  <Consent
+                    checked={acknowledged}
+                    onChange={setAcknowledged}
+                    disabled={busy}
+                    label={confirmation.acknowledgement}
+                  />
+                ) : null}
                 {error ? (
                   <T raw accessibilityRole="alert">
                     {error}
@@ -1164,7 +1452,12 @@ export default function FamilyScreen({
                   label={
                     busy ? m("working") : (confirmation?.label ?? m("confirm"))
                   }
-                  disabled={busy}
+                  disabled={
+                    busy ||
+                    (!!confirmation?.acknowledgement && !acknowledged) ||
+                    (pilot.transitionPending &&
+                      !confirmation?.allowDuringTransition)
+                  }
                   onPress={() => {
                     if (confirmation) void run(confirmation.action, true);
                   }}

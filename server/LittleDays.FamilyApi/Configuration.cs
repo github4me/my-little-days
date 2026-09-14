@@ -30,7 +30,6 @@ public sealed class PilotSettings
     public int MaxMembers { get; set; } = 4;
     public int MaxFeeds { get; set; } = 1000;
     public int MaxOperationsPerFamily { get; set; } = 100000;
-    public int InvitationHours { get; set; } = 48;
     public int MaxNoteLength { get; set; } = 500;
     public int MaxBabyNameLength { get; set; } = 60;
     public int RequestsPerMinute { get; set; } = 120;
@@ -49,9 +48,11 @@ public sealed record PilotConfiguration(EntraSettings Entra, FamilySettings Fami
             uri.Scheme != "https" || uri.UserInfo.Length != 0 || uri.Query.Length != 0 || uri.Fragment.Length != 0 ||
             uri.AbsolutePath != "/")
             throw new InvalidOperationException("Entra and Family configuration must contain valid IDs and a public HTTPS origin.");
-        if (pilot.Identities.Length is < 2 or > 20 || pilot.MaxMembers is < 2 or > 20 ||
+        // Removing the final checked binding must not disable health/deletion-receipt access.
+        // An empty list admits no authenticated users; it is not an authentication fallback.
+        if (pilot.Identities.Length > 20 || pilot.MaxMembers is < 2 or > 20 ||
             pilot.MaxFeeds is < 1 or > 10000 || pilot.MaxOperationsPerFamily is < 10 or > 1000000 ||
-            pilot.InvitationHours is < 1 or > 168 || pilot.MaxNoteLength is < 1 or > 500 ||
+            pilot.MaxNoteLength is < 1 or > 500 ||
             pilot.MaxBabyNameLength is < 1 or > 60 || pilot.RequestsPerMinute is < 1 or > 600 ||
             pilot.SensitiveRequestsPerMinute is < 1 or > 60)
             throw new InvalidOperationException("Pilot identities and limits must be explicitly valid.");

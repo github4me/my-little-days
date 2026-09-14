@@ -11,6 +11,7 @@ type StoredTokens = {
 };
 const key = "my-little-days.family-pilot.tokens";
 const identityKey = "my-little-days.family-pilot.identity";
+const logoutKey = "my-little-days.family-pilot.signed-out";
 const binding = JSON.stringify(familyConfig);
 const options = {
   keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
@@ -36,6 +37,11 @@ const config = () => {
 async function load(): Promise<StoredTokens | null> {
   await mutations;
   if (signedOut) return null;
+  // A failed credential erase must not restore a signed-out session after process death.
+  if ((await SecureStore.getItemAsync(logoutKey, options)) === binding) {
+    signedOut = true;
+    return null;
+  }
   const raw = await SecureStore.getItemAsync(key, options);
   if (!raw) return null;
   try {
@@ -76,7 +82,12 @@ async function store(
       await SecureStore.deleteItemAsync(key, options);
       throw new Error("session_changed");
     }
-    if (replaceIdentity) signedOut = false;
+    if (replaceIdentity) {
+      // Only a successful, explicit new login can remove the durable logout barrier.
+      await SecureStore.deleteItemAsync(logoutKey, options);
+      if (generation !== expectedGeneration) throw new Error("session_changed");
+      signedOut = false;
+    }
   });
 }
 export async function hasSession(): Promise<boolean> {
@@ -121,11 +132,17 @@ export async function signOut(): Promise<void> {
   signedOut = true;
   refresh = null;
   await mutate(async () => {
+    let markerFailed = false;
+    try {
+      await SecureStore.setItemAsync(logoutKey, binding, options);
+    } catch {
+      markerFailed = true;
+    }
     const results = await Promise.allSettled([
       SecureStore.deleteItemAsync(key, options),
       SecureStore.deleteItemAsync(identityKey, options),
     ]);
-    if (results.some((result) => result.status === "rejected"))
+    if (markerFailed || results.some((result) => result.status === "rejected"))
       throw new Error("sign_out_failed");
   });
   // A future login explicitly prompts again; we do not claim to revoke all

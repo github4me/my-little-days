@@ -34,19 +34,28 @@ function fixture() {
     email: "test-a@example.invalid",
     role: "owner",
     membershipId: "grant-a",
+    status: "active",
+    endedAt: null,
   };
   const family = {
     id: "family-a",
     babyName: "Fictional baby",
     role: "owner",
     membershipId: "grant-a",
+    babyBirthDate: null,
+    profileVersion: "0",
   };
   const end = new Date(Date.now() - 60_000).toISOString();
   const start = new Date(Date.now() - 1_260_000).toISOString();
   return {
-    identity: { user: member, families: [family] },
+    identity: {
+      user: member,
+      families: [family],
+      pendingInvitations: [],
+      accountDeletion: null,
+    },
     state: {
-      schema: 1,
+      schema: 2,
       snapshot: {
         family,
         historyId: "history-a",
@@ -54,6 +63,7 @@ function fixture() {
         members: [member],
         invitations: [],
         feeds: [],
+        ownershipTransfer: null,
       },
       draft: {
         recordId: "draft-a",
@@ -63,9 +73,16 @@ function fixture() {
         note: "",
         membershipId: "grant-a",
         historyId: "history-a",
+        origin: {
+          familyId: "family-a",
+          userId: "user-a",
+          membershipId: "grant-a",
+          historyId: "history-a",
+        },
       },
       queue: [],
       acknowledgedRevision: null,
+      transition: null,
     },
   };
 }
@@ -75,6 +92,7 @@ function makeWorld({ offline = true, queued = false } = {}) {
   if (queued)
     data.state.queue.push({
       status: "pending",
+      origin: structuredClone(data.state.draft.origin),
       operation: {
         operationId: "saved-operation-a",
         recordId: "saved-record-a",
@@ -111,6 +129,10 @@ function makeWorld({ offline = true, queued = false } = {}) {
     beforeDelete: async () => {},
     beforeAuthSignOut: async () => {},
     beforeAuthSignIn: async () => {},
+    beforeMutation: async () => {},
+    mutationReceipts: new Map(),
+    deletionReceipt: null,
+    beforeReceiptSave: async () => {},
   };
   const contexts = new Map();
   let activeReact;
@@ -162,7 +184,10 @@ function makeWorld({ offline = true, queued = false } = {}) {
         addEventListener: () => ({ remove() {} }),
       },
     },
-    "expo-crypto": { randomUUID: () => `operation-${++operationSequence}` },
+    "expo-crypto": {
+      randomUUID: () =>
+        `00000000-0000-4000-8000-${String(++operationSequence).padStart(12, "0")}`,
+    },
     "expo-sqlite": { openDatabaseAsync: async () => database },
     config: {
       familyConfig: {
@@ -187,6 +212,16 @@ function makeWorld({ offline = true, queued = false } = {}) {
         await world.beforeAuthSignOut();
         world.session = false;
         world.cachedIdentity = null;
+      },
+    },
+    deletionReceipt: {
+      loadDeletionReceipt: async () => structuredClone(world.deletionReceipt),
+      saveDeletionReceipt: async (receipt) => {
+        await world.beforeReceiptSave(receipt);
+        world.deletionReceipt = structuredClone(receipt);
+      },
+      clearDeletionReceipt: async () => {
+        world.deletionReceipt = null;
       },
     },
     api: {
@@ -231,6 +266,40 @@ function makeWorld({ offline = true, queued = false } = {}) {
             revision: world.server.revision,
           };
         }
+        if (operation?.operationId) {
+          const previous = world.mutationReceipts.get(operation.operationId);
+          if (previous) return structuredClone(previous);
+          const committed = JSON.parse(world.disk.get(account));
+          assert.equal(
+            committed.transition?.operationId,
+            operation.operationId,
+            "Lifecycle mutation was sent before its durable intent",
+          );
+          if (url.endsWith("/leave") || url.endsWith("/close"))
+            world.identity.families = [];
+          else if (
+            url.endsWith("/accept") &&
+            url.startsWith("/v1/invitations/")
+          ) {
+            world.identity.families = [structuredClone(world.server.family)];
+          } else if (url === "/v1/account/delete") {
+            world.identity.families = [];
+            world.identity.accountDeletion = {
+              status: "pending",
+              requestedAt: new Date().toISOString(),
+            };
+          }
+          const receipt =
+            url === "/v1/account/delete"
+              ? {
+                  deletionId: operation.operationId,
+                  ...world.identity.accountDeletion,
+                }
+              : { ok: true };
+          world.mutationReceipts.set(operation.operationId, receipt);
+          await world.beforeMutation(url, operation);
+          return world.corruptMutationResponse ? {} : receipt;
+        }
         throw new Error(`Unexpected request ${url}`);
       },
     },
@@ -249,7 +318,7 @@ function makeWorld({ offline = true, queued = false } = {}) {
       if (overrides[specifier]) return overrides[specifier];
       if (specifier.startsWith(".")) {
         const basename = path.basename(specifier);
-        if (["auth", "api", "config"].includes(basename))
+        if (["auth", "api", "config", "deletionReceipt"].includes(basename))
           return overrides[basename];
         const base = path.resolve(path.dirname(filename), specifier);
         const next = [".native.ts", ".ts"]
@@ -276,6 +345,22 @@ function makeWorld({ offline = true, queued = false } = {}) {
         structuredClone,
         setTimeout,
         clearTimeout,
+        fetch: async (url, request) => {
+          assert.equal(
+            url,
+            "https://pilot.example.invalid/v1/account-deletion-status",
+          );
+          const body = JSON.parse(request.body);
+          assert.equal(body.receiptSecret, world.deletionReceipt.receiptSecret);
+          return {
+            ok: true,
+            json: async () => ({
+              deletionId: body.deletionId,
+              status: "completed",
+              requestedAt: world.deletionReceipt.requestedAt,
+            }),
+          };
+        },
         setInterval: () => 1,
         clearInterval() {},
       },
@@ -598,6 +683,284 @@ test("reauthentication as a different account hides the original data and never 
   }
 });
 
+test("revocation and joining another family erase every recovery payload", async () => {
+  const world = makeWorld({ queued: true });
+  const controller = await boot(world);
+  const oldDraft = structuredClone(controller.result().draft);
+  world.offline = false;
+  world.identity.families = [];
+  try {
+    await controller.result().refresh();
+    assert.equal(controller.result().draft, null);
+    assert.equal(controller.result().conflicts.length, 0);
+    assert.equal(world.read().queue.length, 0);
+    const b = {
+      ...world.server.family,
+      id: "family-b",
+      membershipId: "grant-b",
+    };
+    world.server = {
+      ...world.server,
+      family: b,
+      members: [{ ...world.server.members[0], membershipId: "grant-b" }],
+    };
+    world.identity.families = [b];
+    await controller.result().refresh();
+    await assert.rejects(
+      controller.result().setDraft(oldDraft),
+      /draft_changed/,
+    );
+    await assert.rejects(
+      controller.result().reviewPrivateDraft(),
+      /family_unavailable/,
+    );
+    await assert.rejects(
+      controller.result().reviewConflict("saved-operation-a"),
+      /family_unavailable/,
+    );
+    assert.equal(world.feedsSent.length, 0);
+    assert.equal(world.read().snapshot.family.id, "family-b");
+  } finally {
+    controller.unmount();
+  }
+});
+
+test("lost leave response freezes workspace and restart reuses the durable operation", async () => {
+  const world = makeWorld({ queued: true });
+  world.data.state.snapshot.family.role = "caregiver";
+  world.cachedIdentity.families[0].role = "caregiver";
+  world.identity.families[0].role = "caregiver";
+  world.server.family.role = "caregiver";
+  world.disk.set(world.account, JSON.stringify(world.data.state));
+  const controller = await boot(world);
+  world.offline = false;
+  world.beforeMutation = async () => {
+    throw new Error("network_unavailable");
+  };
+  await assert.rejects(
+    controller.result().leaveFamily(),
+    /network_unavailable/,
+  );
+  const intent = world.read().transition;
+  assert.equal(intent.kind, "leave");
+  assert.equal(controller.result().transitionPending, true);
+  assert.equal(controller.result().snapshot, null);
+  assert.equal(controller.result().draft, null);
+  await assert.rejects(controller.result().saveDraft(), /transition_pending/);
+  controller.unmount();
+  world.beforeMutation = async () => {};
+  const reopened = world.mount();
+  try {
+    await until(
+      () =>
+        world.read().transition === null &&
+        world.http.filter((r) => r.url.endsWith("/leave")).length === 2,
+      "idempotent leave recovery",
+    );
+    const requests = world.http.filter((r) => r.url.endsWith("/leave"));
+    assert.equal(
+      requests[0].operation.operationId,
+      requests[1].operation.operationId,
+    );
+    assert.equal(requests[0].operation.operationId, intent.operationId);
+    assert.equal(world.read().snapshot, null);
+    assert.equal(world.read().draft, null);
+    assert.equal(world.read().queue.length, 0);
+    assert.equal(world.feedsSent.length, 0);
+  } finally {
+    reopened.unmount();
+  }
+});
+
+test("join keeps old storage intact until the replacement snapshot is downloaded", async () => {
+  const world = makeWorld();
+  const controller = await boot(world);
+  const before = world.read();
+  const b = { ...world.server.family, id: "family-b", membershipId: "grant-b" };
+  world.server = {
+    ...world.server,
+    family: b,
+    members: [{ ...world.server.members[0], membershipId: "grant-b" }],
+  };
+  world.offline = false;
+  world.snapshotOffline = true;
+  try {
+    await assert.rejects(
+      controller.result().acceptInvitation("invite-b"),
+      /network_unavailable/,
+    );
+    assert.equal(controller.result().transitionPending, true);
+    assert.equal(world.read().transition.phase, "committed");
+    assert.deepEqual(world.read().draft, before.draft);
+    assert.equal(world.read().snapshot.family.id, "family-a");
+    world.snapshotOffline = false;
+    await controller.result().refresh();
+    assert.equal(world.read().transition, null);
+    assert.equal(world.read().snapshot.family.id, "family-b");
+    assert.equal(world.read().draft, null);
+    assert.equal(world.read().queue.length, 0);
+    assert.equal(world.feedsSent.length, 0);
+  } finally {
+    controller.unmount();
+  }
+});
+
+test("an uncertain leave is never replayed against a new membership grant", async () => {
+  const world = makeWorld();
+  world.data.state.snapshot.family.role = "caregiver";
+  world.cachedIdentity.families[0].role = "caregiver";
+  world.identity.families[0].role = "caregiver";
+  world.server.family.role = "caregiver";
+  world.disk.set(world.account, JSON.stringify(world.data.state));
+  const controller = await boot(world);
+  world.offline = false;
+  world.beforeMutation = async () => {
+    throw new Error("network_unavailable");
+  };
+  try {
+    await assert.rejects(
+      controller.result().leaveFamily(),
+      /network_unavailable/,
+    );
+    const b = {
+      ...world.server.family,
+      membershipId: "new-grant",
+      role: "caregiver",
+    };
+    world.identity.families = [b];
+    world.server = {
+      ...world.server,
+      family: b,
+      members: [{ ...world.server.members[0], membershipId: "new-grant" }],
+    };
+    await controller.result().refresh();
+    assert.equal(world.http.filter((r) => r.url.endsWith("/leave")).length, 1);
+    assert.equal(world.read().transition, null);
+    assert.equal(controller.result().snapshot.family.membershipId, "new-grant");
+    assert.equal(controller.result().draft, null);
+    assert.equal(controller.result().error, "membership_changed");
+  } finally {
+    controller.unmount();
+  }
+});
+
+test("failed lifecycle intent persistence sends no membership mutation", async () => {
+  const world = makeWorld();
+  const controller = await boot(world);
+  world.offline = false;
+  world.beforeCommit = async () => {
+    throw new Error("disk unavailable");
+  };
+  try {
+    await assert.rejects(
+      controller.result().closeFamily(),
+      /local_save_failed/,
+    );
+    assert.equal(world.http.filter((r) => r.url.endsWith("/close")).length, 0);
+    assert.equal(world.read().transition, null);
+    assert.notEqual(world.read().draft, null);
+  } finally {
+    controller.unmount();
+  }
+});
+
+test("membership refresh prevents an old admin's queued edit from being sent after downgrade", async () => {
+  const world = makeWorld();
+  const other = {
+    ...world.data.state.draft,
+    id: "other-feed",
+    amount: 120,
+    version: "v1",
+    recordedBy: "other-user",
+    lastEditedBy: "other-user",
+  };
+  world.data.state.snapshot.feeds = [other];
+  world.disk.set(world.account, JSON.stringify(world.data.state));
+  const controller = await boot(world);
+  try {
+    await controller.result().beginFeed(other);
+    await controller.result().saveDraft();
+    await until(() => !controller.result().syncing, "offline queue pause");
+    world.server.feeds = [other];
+    world.server.family.role = "caregiver";
+    world.server.members[0].role = "caregiver";
+    world.identity.families[0].role = "caregiver";
+    world.offline = false;
+    await controller.result().refresh();
+    assert.equal(world.feedsSent.length, 0);
+    assert.equal(controller.result().conflicts[0].error, "record_forbidden");
+    await assert.rejects(
+      controller.result().beginFeed(other),
+      /record_forbidden/,
+    );
+    await assert.rejects(
+      controller.result().deleteFeed(other.id),
+      /record_forbidden/,
+    );
+    await assert.rejects(
+      controller.result().createInvitation("b@example.test"),
+      /owner_required/,
+    );
+  } finally {
+    controller.unmount();
+  }
+});
+
+test("deletion receipt is durable before network and a lost response reuses its secret", async () => {
+  const world = makeWorld();
+  world.data.state.snapshot.family.role = "caregiver";
+  world.cachedIdentity.families[0].role = "caregiver";
+  world.identity.families[0].role = "caregiver";
+  world.server.family.role = "caregiver";
+  world.disk.set(world.account, JSON.stringify(world.data.state));
+  const controller = await boot(world);
+  world.offline = false;
+  world.beforeReceiptSave = async () => {
+    throw new Error("secure_store_unavailable");
+  };
+  try {
+    await assert.rejects(
+      controller.result().deleteAccount(),
+      /secure_store_unavailable/,
+    );
+    assert.equal(
+      world.http.filter((r) => r.url === "/v1/account/delete").length,
+      0,
+    );
+    assert.equal(controller.result().transitionPending, true);
+    world.beforeReceiptSave = async () => {};
+    world.beforeMutation = async () => {
+      throw new Error("network_unavailable");
+    };
+    await controller.result().refresh();
+    const sent = world.http.find(
+      (r) => r.url === "/v1/account/delete",
+    ).operation;
+    assert.match(sent.receiptSecret, /^[a-f0-9]{64}$/);
+    assert.equal(world.deletionReceipt.receiptSecret, sent.receiptSecret);
+    assert.equal(
+      JSON.stringify(world.read()).includes(sent.receiptSecret),
+      false,
+    );
+    world.beforeMutation = async () => {};
+    await controller.result().refresh();
+    const again = world.http.filter((r) => r.url === "/v1/account/delete")[1]
+      .operation;
+    assert.equal(again.operationId, sent.operationId);
+    assert.equal(again.receiptSecret, sent.receiptSecret);
+    assert.equal(world.read().snapshot, null);
+    assert.equal(world.read().draft, null);
+    assert.equal(world.read().transition, null);
+    await controller.result().signOut();
+    assert.notEqual(world.deletionReceipt, null);
+    await controller.result().checkDeletionStatus();
+    assert.equal(controller.result().deletionStatus.status, "completed");
+    assert.equal(controller.result().user, null);
+  } finally {
+    controller.unmount();
+  }
+});
+
 function nativeAuthWorld() {
   const secure = new Map();
   const world = {
@@ -605,6 +968,7 @@ function nativeAuthWorld() {
     exchanges: [],
     refreshes: [],
     beforeSet: async () => {},
+    beforeDeleteKey: async () => {},
     token: (name) => ({
       accessToken: name,
       refreshToken: `refresh-${name}`,
@@ -629,6 +993,7 @@ function nativeAuthWorld() {
         secure.set(key, value);
       },
       deleteItemAsync: async (key) => {
+        await world.beforeDeleteKey(key);
         secure.delete(key);
       },
     },
@@ -663,7 +1028,6 @@ function nativeAuthWorld() {
     },
     "./config": { familyConfig: config },
   };
-  const module = { exports: {} };
   const filename = path.join(root, "src/family/auth.native.ts");
   const code = ts.transpileModule(fs.readFileSync(filename, "utf8"), {
     compilerOptions: {
@@ -671,24 +1035,28 @@ function nativeAuthWorld() {
       target: ts.ScriptTarget.ES2022,
     },
   }).outputText;
-  vm.runInNewContext(
-    code,
-    {
-      module,
-      exports: module.exports,
-      require: (name) => {
-        assert.ok(dependencies[name], `Unstubbed auth dependency ${name}`);
-        return dependencies[name];
+  world.reloadAuth = () => {
+    const module = { exports: {} };
+    vm.runInNewContext(
+      code,
+      {
+        module,
+        exports: module.exports,
+        require: (name) => {
+          assert.ok(dependencies[name], `Unstubbed auth dependency ${name}`);
+          return dependencies[name];
+        },
+        Date,
+        Promise,
+        Error,
+        setTimeout,
+        clearTimeout,
       },
-      Date,
-      Promise,
-      Error,
-      setTimeout,
-      clearTimeout,
-    },
-    { filename },
-  );
-  world.auth = module.exports;
+      { filename },
+    );
+    world.auth = module.exports;
+  };
+  world.reloadAuth();
   world.expireToken = () => {
     const key = "my-little-days.family-pilot.tokens";
     const stored = JSON.parse(secure.get(key));
@@ -780,5 +1148,177 @@ test("a replacement login does not wait for an older session’s refresh respons
   } finally {
     world.refreshes[0].resolve(world.token("obsolete-refreshed-token"));
     await Promise.allSettled([access, oldResult]);
+  }
+});
+
+test("native logout marker survives module restart even when key deletion fails", async () => {
+  const world = nativeAuthWorld();
+  const signingIn = world.auth.signIn();
+  await until(
+    () => world.exchanges.length === 1,
+    "login before interrupted logout",
+  );
+  world.exchanges[0].resolve(world.token("old-token"));
+  await signingIn;
+  await world.auth.saveIdentity({ user: { id: "user-a" }, families: [] });
+  world.beforeDeleteKey = async () => {
+    throw new Error("native_delete_failed");
+  };
+  await assert.rejects(world.auth.signOut(), /sign_out_failed/);
+  assert.ok(world.secure.has("my-little-days.family-pilot.tokens"));
+  assert.ok(world.secure.has("my-little-days.family-pilot.signed-out"));
+  world.reloadAuth();
+  assert.equal(await world.auth.hasSession(), false);
+  assert.equal(await world.auth.loadIdentity(), null);
+  await assert.rejects(world.auth.getAccessToken(), /sign_in_required/);
+  world.beforeDeleteKey = async () => {};
+  const next = world.auth.signIn();
+  await until(() => world.exchanges.length === 2, "fresh explicit login");
+  world.exchanges[1].resolve(world.token("fresh-token"));
+  await next;
+  assert.equal(await world.auth.getAccessToken(), "fresh-token");
+  assert.equal(
+    world.secure.has("my-little-days.family-pilot.signed-out"),
+    false,
+  );
+});
+
+test("logout discard survives restart and explicit login when final SQLite row cleanup fails", async () => {
+  const world = makeWorld({ queued: true });
+  const controller = await boot(world);
+  world.beforeDelete = async () => {
+    throw new Error("disk_delete_failed");
+  };
+  await assert.rejects(controller.result().signOut(), /sign_out_failed/);
+  assert.equal(world.read().snapshot, null);
+  assert.equal(world.read().draft, null);
+  assert.equal(world.read().queue.length, 0);
+  assert.equal(world.session, false);
+  controller.unmount();
+  world.beforeDelete = async () => {};
+  const reopened = world.mount();
+  world.offline = false;
+  try {
+    await reopened.result().signIn();
+    await reopened.result().refresh();
+    assert.equal(world.feedsSent.length, 0);
+    assert.equal(reopened.result().draft, null);
+    assert.equal(world.read().queue.length, 0);
+  } finally {
+    reopened.unmount();
+  }
+});
+
+test("logout reports a failed purge before changing credentials when the discard cannot persist", async () => {
+  const world = makeWorld({ queued: true });
+  const controller = await boot(world);
+  world.beforeCommit = async () => {
+    throw new Error("disk_full");
+  };
+  try {
+    await assert.rejects(controller.result().signOut(), /local_save_failed/);
+    assert.equal(world.authSignOutCalls, 0);
+    assert.equal(world.session, true);
+    assert.equal(world.read().queue.length, 1);
+    assert.equal(controller.result().notice, null);
+  } finally {
+    controller.unmount();
+  }
+});
+
+test("a malformed successful deletion response preserves its durable receipt for retry", async () => {
+  const world = makeWorld();
+  world.cachedIdentity.families = [];
+  world.identity.families = [];
+  const controller = await boot(world);
+  world.offline = false;
+  world.corruptMutationResponse = true;
+  try {
+    await assert.rejects(
+      controller.result().deleteAccount(),
+      /invalid_response/,
+    );
+    const receipt = structuredClone(world.deletionReceipt);
+    assert.equal(world.read().transition.phase, "pending");
+    assert.equal(controller.result().transitionPending, true);
+    world.corruptMutationResponse = false;
+    await controller.result().refresh();
+    assert.equal(world.deletionReceipt.receiptSecret, receipt.receiptSecret);
+    assert.equal(world.read().transition, null);
+    const calls = world.http.filter((r) => r.url === "/v1/account/delete");
+    assert.equal(calls.length, 2);
+    assert.equal(
+      calls[0].operation.operationId,
+      calls[1].operation.operationId,
+    );
+    assert.equal(controller.result().deletionStatus.status, "pending");
+  } finally {
+    controller.unmount();
+  }
+});
+
+test("verified revocation stays hidden across a restart even if SQLite cleanup fails", async () => {
+  const world = makeWorld({ queued: true });
+  const controller = await boot(world);
+  world.offline = false;
+  world.identity.families = [];
+  world.beforeCommit = async () => {
+    throw new Error("disk_full");
+  };
+  await controller.result().refresh();
+  assert.equal(controller.result().snapshot, null);
+  assert.equal(controller.result().draft, null);
+  assert.equal(world.cachedIdentity.families.length, 0);
+  assert.equal(
+    world.read().queue.length,
+    1,
+    "Synthetic disk failure retains old physical row",
+  );
+  controller.unmount();
+  world.offline = true;
+  const reopened = world.mount();
+  try {
+    await until(
+      () => reopened.result().user?.id === "user-a",
+      "cached identity after failed purge",
+    );
+    assert.equal(reopened.result().snapshot, null);
+    assert.equal(reopened.result().draft, null);
+    assert.equal(reopened.result().pending.length, 0);
+    assert.equal(world.feedsSent.length, 0);
+  } finally {
+    reopened.unmount();
+  }
+});
+
+test("explicit logout can discard an unresolved offline lifecycle intent without replay on login", async () => {
+  const world = makeWorld({ queued: true });
+  const controller = await boot(world);
+  try {
+    // No request reaches the server; the intent remains pending on disk.
+    await assert.rejects(
+      controller.result().closeFamily(),
+      /network_unavailable/,
+    );
+    assert.equal(controller.result().transitionPending, true);
+    const closeCalls = world.http.filter((r) =>
+      r.url.endsWith("/close"),
+    ).length;
+    await controller.result().signOut();
+    assert.equal(controller.result().user, null);
+    assert.equal(controller.result().transitionPending, false);
+    assert.equal(world.read(), null);
+    world.offline = false;
+    await controller.result().signIn();
+    await controller.result().refresh();
+    assert.equal(controller.result().snapshot.family.id, "family-a");
+    assert.equal(
+      world.http.filter((r) => r.url.endsWith("/close")).length,
+      closeCalls,
+    );
+    assert.equal(world.feedsSent.length, 0);
+    assert.equal(controller.result().draft, null);
+  } finally {
+    controller.unmount();
   }
 });

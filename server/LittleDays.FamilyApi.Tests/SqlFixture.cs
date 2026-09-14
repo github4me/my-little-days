@@ -71,11 +71,29 @@ public sealed class Scenario(SqlFixture sql)
     public PilotIdentity Other => Config.Pilot.Identities[2];
     public Task<T> Call<T>(Func<FamilyService, Task<T>> action) => sql.Call(Config, action);
     public Task<FamilySummary> Create() => Call(x => x.CreateFamily(Owner, new(Guid.NewGuid(), "Test baby"), default));
-    public Task<InvitationResult> Invite(Guid familyId) => Call(x => x.CreateInvitation(Owner, familyId, new(Guid.NewGuid(), Caregiver.Email), default));
-    public Task<FamilySummary> Accept(InvitationResult invite, Guid? operationId = null) => Call(x => x.AcceptInvitation(Caregiver, new(operationId ?? Guid.NewGuid(), Token(invite)), default));
-    public static string Token(InvitationResult invite) => invite.InviteUrl.Split("#token=")[1];
+    public async Task<InvitationResult> Invite(Guid familyId)
+    {
+        var family = (await Call(x => x.Snapshot(Owner, familyId, default))).Family;
+        return await Call(x => x.CreateInvitation(Owner, familyId, Invitation(family, Caregiver.Email), default));
+    }
+    public CreateInvitationRequest Invitation(FamilySummary family, string email, Guid? operationId = null) =>
+        new(operationId ?? Guid.NewGuid(), email, family.MembershipId, Config.Family.HistoryId);
+    public OperationRequest Context(FamilySummary family, Guid? operationId = null, Guid? target = null) =>
+        new(operationId ?? Guid.NewGuid(), family.MembershipId, Config.Family.HistoryId, target);
+    public async Task<OkResult> Remove(FamilySummary family, Guid userId)
+    {
+        var snapshot = await Call(x => x.Snapshot(Owner, family.Id, default));
+        var target = snapshot.Members.SingleOrDefault(x => x.Id == userId && x.Status == "active")?.MembershipId ?? Guid.NewGuid();
+        return await Call(x => x.RemoveMember(Owner, family.Id, userId, Context(family, target: target), default));
+    }
+    public async Task<OkResult> Leave(PilotIdentity user, Guid familyId)
+    {
+        var family = (await Call(x => x.Snapshot(user, familyId, default))).Family;
+        return await Call(x => x.Leave(user, familyId, Context(family), default));
+    }
+    public Task<FamilySummary> Accept(InvitationResult invite, Guid? operationId = null) => Call(x => x.AcceptInvitation(Caregiver, invite.Invitation.Id, new(operationId ?? Guid.NewGuid()), default));
     public static SharedFeedInput Feed(decimal amount = 100) => new(DateTimeOffset.UtcNow.AddMinutes(-30), DateTimeOffset.UtcNow.AddMinutes(-20), amount, "Synthetic pilot feed");
     public FeedOperation CreateFeed(FamilySummary grant, SharedFeedInput? feed = null) =>
         new(Guid.NewGuid(), Guid.NewGuid(), grant.MembershipId, Config.Family.HistoryId, "create", null, feed ?? Feed());
-    private static PilotIdentity Identity(string name) => new() { ObjectId = Guid.NewGuid(), Email = name.ToLowerInvariant() + "@example.test", DisplayName = name };
+    private static PilotIdentity Identity(string name) => new() { ObjectId = Guid.NewGuid(), Email = name.ToLowerInvariant() + "." + Guid.NewGuid().ToString("N") + "@example.test", DisplayName = name };
 }

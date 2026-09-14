@@ -10,6 +10,8 @@ public sealed class PilotDatabase(DbContextOptions<PilotDatabase> options) : DbC
     public DbSet<InvitationRow> Invitations => Set<InvitationRow>();
     public DbSet<FeedRow> Feeds => Set<FeedRow>();
     public DbSet<OperationRow> Operations => Set<OperationRow>();
+    public DbSet<OwnershipTransferRow> OwnershipTransfers => Set<OwnershipTransferRow>();
+    public DbSet<AccountDeletionRow> AccountDeletions => Set<AccountDeletionRow>();
 
     protected override void OnModelCreating(ModelBuilder model)
     {
@@ -17,6 +19,7 @@ public sealed class PilotDatabase(DbContextOptions<PilotDatabase> options) : DbC
         {
             entity.HasKey(x => x.Id);
             entity.Property(x => x.BabyName).HasMaxLength(60);
+            entity.Property(x => x.BabyBirthDate).HasMaxLength(10);
         });
         model.Entity<MembershipRow>(entity =>
         {
@@ -24,6 +27,7 @@ public sealed class PilotDatabase(DbContextOptions<PilotDatabase> options) : DbC
             entity.Property(x => x.Role).HasMaxLength(10);
             entity.Property(x => x.Email).HasMaxLength(254);
             entity.Property(x => x.DisplayName).HasMaxLength(80);
+            entity.Property(x => x.Status).HasMaxLength(10);
             entity.HasIndex(x => x.UserId).IsUnique().HasFilter("[Active] = 1");
             entity.HasIndex(x => new { x.FamilyId, x.UserId, x.Active });
             entity.HasOne<FamilyRow>().WithMany().HasForeignKey(x => x.FamilyId).OnDelete(DeleteBehavior.Restrict);
@@ -32,11 +36,23 @@ public sealed class PilotDatabase(DbContextOptions<PilotDatabase> options) : DbC
         {
             entity.HasKey(x => x.Id);
             entity.Property(x => x.Email).HasMaxLength(254);
-            entity.Property(x => x.TokenHash).HasMaxLength(64).IsUnicode(false);
             entity.Property(x => x.Status).HasMaxLength(10);
-            entity.HasIndex(x => x.TokenHash).IsUnique();
-            entity.HasIndex(x => new { x.FamilyId, x.RecipientUserId }).IsUnique().HasFilter("[Status] = N'pending'");
+            entity.HasIndex(x => new { x.FamilyId, x.Email }).IsUnique().HasFilter("[Status] = N'pending'");
             entity.HasOne<FamilyRow>().WithMany().HasForeignKey(x => x.FamilyId).OnDelete(DeleteBehavior.Restrict);
+        });
+        model.Entity<OwnershipTransferRow>(entity =>
+        {
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Status).HasMaxLength(10);
+            entity.HasIndex(x => x.FamilyId).IsUnique().HasFilter("[Status] = N'pending'");
+            entity.HasOne<FamilyRow>().WithMany().HasForeignKey(x => x.FamilyId).OnDelete(DeleteBehavior.Restrict);
+        });
+        model.Entity<AccountDeletionRow>(entity =>
+        {
+            entity.HasKey(x => x.UserId);
+            entity.Property(x => x.Status).HasMaxLength(32);
+            entity.Property(x => x.ReceiptHash).HasMaxLength(64).IsUnicode(false);
+            entity.HasIndex(x => x.OperationId).IsUnique();
         });
         model.Entity<FeedRow>(entity =>
         {
@@ -66,6 +82,10 @@ public sealed class FamilyRow
     public string BabyName { get; set; } = "";
     public long Revision { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
+    public string? BabyBirthDate { get; set; }
+    public DateTimeOffset? DeletedAt { get; set; }
+    public Guid? DeletedBy { get; set; }
+    public Guid? DeleteOperationId { get; set; }
 }
 public sealed class MembershipRow
 {
@@ -78,18 +98,40 @@ public sealed class MembershipRow
     public bool Active { get; set; } = true;
     public DateTimeOffset GrantedAt { get; set; }
     public DateTimeOffset? EndedAt { get; set; }
+    public string Status { get; set; } = "active";
 }
 public sealed class InvitationRow
 {
     public Guid Id { get; set; }
     public Guid FamilyId { get; set; }
-    public Guid RecipientUserId { get; set; }
+    public Guid? RecipientUserId { get; set; }
     public string Email { get; set; } = "";
-    public string TokenHash { get; set; } = "";
     public string Status { get; set; } = "pending";
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset ExpiresAt { get; set; }
     public Guid? AcceptedMembershipId { get; set; }
+}
+public sealed class OwnershipTransferRow
+{
+    public Guid Id { get; set; }
+    public Guid FamilyId { get; set; }
+    public Guid FromUserId { get; set; }
+    public Guid ToUserId { get; set; }
+    public Guid FromMembershipId { get; set; }
+    public Guid ToMembershipId { get; set; }
+    public string Status { get; set; } = "pending";
+    public DateTimeOffset CreatedAt { get; set; }
+}
+// Minimal durable tombstone also denies access with an otherwise valid old JWT.
+// No email/name/token is retained here after deletion.
+public sealed class AccountDeletionRow
+{
+    public Guid UserId { get; set; }
+    public Guid OperationId { get; set; }
+    public string Status { get; set; } = "pending";
+    public DateTimeOffset RequestedAt { get; set; }
+    public DateTimeOffset? CompletedAt { get; set; }
+    public string ReceiptHash { get; set; } = "";
 }
 public sealed class FeedRow
 {

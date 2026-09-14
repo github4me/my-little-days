@@ -19,7 +19,6 @@ public sealed class FamilySqlTests(SqlFixture sql) : IClassFixture<SqlFixture>
                     FamilyId = family.Id,
                     RecipientUserId = s.Other.ObjectId,
                     Email = s.Other.Email,
-                    TokenHash = FamilyService.TokenHash(Guid.NewGuid().ToString()),
                     Status = "revoked",
                     CreatedAt = DateTimeOffset.UtcNow,
                     ExpiresAt = DateTimeOffset.UtcNow.AddHours(48)
@@ -73,36 +72,36 @@ public sealed class FamilySqlTests(SqlFixture sql) : IClassFixture<SqlFixture>
     }
 
     [SqlFact]
-    public async Task InvitationIsHashedBoundSingleUseRevocableAndExpiring()
+    public async Task EmailInvitationIsDiscoverableBoundRetryableSingleUseAndExpiresAfterThirtyDays()
     {
         var s = new Scenario(sql);
         var family = await s.Create();
         var operationId = Guid.NewGuid();
-        var request = new CreateInvitationRequest(operationId, s.Caregiver.Email);
+        var request = s.Invitation(family, s.Caregiver.Email, operationId);
         var invite = await s.Call(x => x.CreateInvitation(s.Owner, family.Id, request, default));
-        var token = Scenario.Token(invite);
-        Assert.Matches("^[A-Za-z0-9_-]{43}$", token);
-        await Code("invitation_already_created", () => s.Call(x => x.CreateInvitation(s.Owner, family.Id, request, default)));
-        await Code("invitation_unavailable", () => s.Call(x => x.AcceptInvitation(s.Other, new(Guid.NewGuid(), token), default)));
-        await Code("invitation_unavailable", () => s.Call(x => x.AcceptInvitation(s.Caregiver, new(Guid.NewGuid(), new string('a', 43)), default)));
+        Assert.Equal(invite, await s.Call(x => x.CreateInvitation(s.Owner, family.Id, request, default)));
+        await Code("invitation_unavailable", () => s.Call(x => x.AcceptInvitation(s.Other, invite.Invitation.Id, new(Guid.NewGuid()), default)));
+        await Code("invitation_unavailable", () => s.Call(x => x.AcceptInvitation(s.Caregiver, Guid.NewGuid(), new(Guid.NewGuid()), default)));
+        Assert.Single((await s.Call(x => x.Me(s.Caregiver, default))).PendingInvitations);
+        Assert.Empty((await s.Call(x => x.Me(s.Other, default))).PendingInvitations);
         await using (var db = sql.Open())
         {
             var row = await db.Invitations.SingleAsync(x => x.Id == invite.Invitation.Id);
-            Assert.Equal(FamilyService.TokenHash(token), row.TokenHash);
+            Assert.Null(row.RecipientUserId);
             var receipt = await db.Operations.SingleAsync(x => x.OperationId == operationId && x.UserId == s.Owner.ObjectId);
-            Assert.DoesNotContain(token, receipt.ResultJson);
+            Assert.DoesNotContain(s.Caregiver.Email, receipt.ResultJson);
             Assert.DoesNotContain("inviteUrl", receipt.ResultJson);
         }
         var second = await s.Invite(family.Id);
         await Code("invitation_unavailable", () => s.Accept(invite));
-        await s.Call(x => x.RevokeInvitation(s.Owner, family.Id, second.Invitation.Id, new(Guid.NewGuid()), default));
+        await s.Call(x => x.RevokeInvitation(s.Owner, family.Id, second.Invitation.Id, s.Context(family), default));
         await Code("invitation_unavailable", () => s.Accept(second));
         var third = await s.Invite(family.Id);
         await Code("invitation_unavailable", () => sql.Call(s.Config,
-            x => x.AcceptInvitation(s.Caregiver, new(Guid.NewGuid(), Scenario.Token(third)), default),
-            new FixedClock(DateTimeOffset.UtcNow.AddHours(49))));
+            x => x.AcceptInvitation(s.Caregiver, third.Invitation.Id, new(Guid.NewGuid()), default),
+            new FixedClock(DateTimeOffset.UtcNow.AddDays(31))));
         var grant = await s.Accept(third);
-        await Code("forbidden", () => s.Call(x => x.CreateInvitation(s.Caregiver, family.Id, new(Guid.NewGuid(), s.Other.Email), default)));
+        await Code("forbidden", () => s.Call(x => x.CreateInvitation(s.Caregiver, family.Id, s.Invitation(family, s.Other.Email), default)));
         await Code("invitation_unavailable", () => s.Accept(third));
         Assert.Equal("caregiver", grant.Role);
     }
@@ -117,7 +116,7 @@ public sealed class FamilySqlTests(SqlFixture sql) : IClassFixture<SqlFixture>
         var grants = await Task.WhenAll(Enumerable.Range(0, 5).Select(_ => s.Accept(invite, acceptId)));
         Assert.Single(grants.Select(x => x.MembershipId).Distinct());
         var oldOperation = s.CreateFeed(grants[0]);
-        await s.Call(x => x.RemoveMember(s.Owner, family.Id, s.Caregiver.ObjectId, new(Guid.NewGuid()), default));
+        await s.Remove(family, s.Caregiver.ObjectId);
         await Code("membership_revoked", () => s.Accept(invite, acceptId));
         await Code("membership_revoked", () => s.Call(x => x.ApplyFeed(s.Caregiver, family.Id, oldOperation, default)));
         var newInvite = await s.Invite(family.Id);
@@ -134,12 +133,12 @@ public sealed class FamilySqlTests(SqlFixture sql) : IClassFixture<SqlFixture>
         var s = new Scenario(sql);
         var family = await s.Create();
         var invite = await s.Invite(family.Id);
-        await s.Call(x => x.RemoveMember(s.Owner, family.Id, s.Caregiver.ObjectId, new(Guid.NewGuid()), default));
+        await s.Call(x => x.RevokeInvitation(s.Owner, family.Id, invite.Invitation.Id, s.Context(family), default));
         await Code("invitation_unavailable", () => s.Accept(invite));
-        await Code("forbidden", () => s.Call(x => x.Leave(s.Owner, family.Id, new(Guid.NewGuid()), default)));
-        await Code("invalid_input", () => s.Call(x => x.RemoveMember(s.Owner, family.Id, s.Owner.ObjectId, new(Guid.NewGuid()), default)));
+        await Code("forbidden", () => s.Leave(s.Owner, family.Id));
+        await Code("invalid_input", () => s.Remove(family, s.Owner.ObjectId));
         var grant = await s.Accept(await s.Invite(family.Id));
-        var leave = new OperationRequest(Guid.NewGuid());
+        var leave = s.Context(grant);
         await s.Call(x => x.Leave(s.Caregiver, family.Id, leave, default));
         await s.Call(x => x.Leave(s.Caregiver, family.Id, leave, default));
         var regrant = await s.Accept(await s.Invite(family.Id));
@@ -156,14 +155,14 @@ public sealed class FamilySqlTests(SqlFixture sql) : IClassFixture<SqlFixture>
         var s = new Scenario(sql);
         var family = await s.Create();
         var caregiver = await s.Accept(await s.Invite(family.Id));
-        var create = s.CreateFeed(family);
-        var receipt = await s.Call(x => x.ApplyFeed(s.Owner, family.Id, create, default));
-        Assert.Equal(receipt, await s.Call(x => x.ApplyFeed(s.Owner, family.Id, create, default)));
-        await Code("operation_reused", () => s.Call(x => x.ApplyFeed(s.Owner, family.Id, create with { Feed = Scenario.Feed(99) }, default)));
+        var create = s.CreateFeed(caregiver);
+        var receipt = await s.Call(x => x.ApplyFeed(s.Caregiver, family.Id, create, default));
+        Assert.Equal(receipt, await s.Call(x => x.ApplyFeed(s.Caregiver, family.Id, create, default)));
+        await Code("operation_reused", () => s.Call(x => x.ApplyFeed(s.Caregiver, family.Id, create with { Feed = Scenario.Feed(99) }, default)));
         var snapshot = await s.Call(x => x.Snapshot(s.Owner, family.Id, default));
         var version = Assert.Single(snapshot.Feeds).Version;
         Assert.Equal(8, Convert.FromBase64String(version).Length);
-        var first = create with { OperationId = Guid.NewGuid(), Kind = "update", BaseVersion = version, Feed = Scenario.Feed(110) };
+        var first = create with { OperationId = Guid.NewGuid(), MembershipId = family.MembershipId, Kind = "update", BaseVersion = version, Feed = Scenario.Feed(110) };
         var second = first with { OperationId = Guid.NewGuid(), MembershipId = caregiver.MembershipId, Feed = Scenario.Feed(120) };
         var updates = await Task.WhenAll(Capture(() => s.Call(x => x.ApplyFeed(s.Owner, family.Id, first, default))),
             Capture(() => s.Call(x => x.ApplyFeed(s.Caregiver, family.Id, second, default))));
@@ -173,11 +172,11 @@ public sealed class FamilySqlTests(SqlFixture sql) : IClassFixture<SqlFixture>
         Assert.Equal(long.Parse(snapshot.Revision) + 1, long.Parse(after.Revision));
         var feed = Assert.Single(after.Feeds);
         Assert.NotEqual(version, feed.Version);
-        var delete = create with { OperationId = Guid.NewGuid(), Kind = "delete", BaseVersion = feed.Version, Feed = null };
+        var delete = create with { OperationId = Guid.NewGuid(), MembershipId = family.MembershipId, Kind = "delete", BaseVersion = feed.Version, Feed = null };
         await s.Call(x => x.ApplyFeed(s.Owner, family.Id, delete, default));
         Assert.Empty((await s.Call(x => x.Snapshot(s.Owner, family.Id, default))).Feeds);
-        await Code("record_changed", () => s.Call(x => x.ApplyFeed(s.Owner, family.Id, create with { OperationId = Guid.NewGuid() }, default)));
-        Assert.Equal(receipt, await s.Call(x => x.ApplyFeed(s.Owner, family.Id, create, default)));
+        await Code("record_changed", () => s.Call(x => x.ApplyFeed(s.Caregiver, family.Id, create with { OperationId = Guid.NewGuid() }, default)));
+        Assert.Equal(receipt, await s.Call(x => x.ApplyFeed(s.Caregiver, family.Id, create, default)));
     }
 
     [SqlFact]
@@ -229,23 +228,23 @@ public sealed class FamilySqlTests(SqlFixture sql) : IClassFixture<SqlFixture>
         var s = new Scenario(sql);
         var family = await s.Create();
         var grant = await s.Accept(await s.Invite(family.Id));
-        var pending = await s.Call(x => x.CreateInvitation(s.Owner, family.Id, new(Guid.NewGuid(), s.Other.Email), default));
+        var pending = await s.Call(x => x.CreateInvitation(s.Owner, family.Id, s.Invitation(family, s.Other.Email), default));
         s.Config.Pilot.MaxOperationsPerFamily = 1;
         await Code("invalid_input", () => s.Call(x => x.ApplyFeed(s.Owner, family.Id, s.CreateFeed(family), default)));
-        await s.Call(x => x.RevokeInvitation(s.Owner, family.Id, pending.Invitation.Id, new(Guid.NewGuid()), default));
-        await s.Call(x => x.RemoveMember(s.Owner, family.Id, s.Caregiver.ObjectId, new(Guid.NewGuid()), default));
+        await s.Call(x => x.RevokeInvitation(s.Owner, family.Id, pending.Invitation.Id, s.Context(family), default));
+        await s.Remove(family, s.Caregiver.ObjectId);
         await Code("membership_revoked", () => s.Call(x => x.Snapshot(s.Caregiver, family.Id, default)));
-        await Code("invalid_input", () => s.Call(x => x.RemoveMember(s.Owner, family.Id, s.Caregiver.ObjectId, new(Guid.NewGuid()), default)));
-        await Code("invitation_unavailable", () => s.Call(x => x.RevokeInvitation(s.Owner, family.Id, pending.Invitation.Id, new(Guid.NewGuid()), default)));
+        await Code("member_changed", () => s.Remove(family, s.Caregiver.ObjectId));
+        await Code("invitation_unavailable", () => s.Call(x => x.RevokeInvitation(s.Owner, family.Id, pending.Invitation.Id, s.Context(family), default)));
         s.Config.Pilot.MaxOperationsPerFamily = 100000;
         await s.Accept(await s.Invite(family.Id));
         s.Config.Pilot.MaxOperationsPerFamily = 1;
-        await s.Call(x => x.Leave(s.Caregiver, family.Id, new(Guid.NewGuid()), default));
+        await s.Leave(s.Caregiver, family.Id);
         s.Config.Pilot.MaxOperationsPerFamily = 100000;
         var expiring = await s.Invite(family.Id);
         var before = await s.Call(x => x.Snapshot(s.Owner, family.Id, default));
         Assert.Contains(before.Invitations, x => x.Id == expiring.Invitation.Id && x.Status == "pending");
-        var after = await sql.Call(s.Config, x => x.Snapshot(s.Owner, family.Id, default), new FixedClock(DateTimeOffset.UtcNow.AddHours(49)));
+        var after = await sql.Call(s.Config, x => x.Snapshot(s.Owner, family.Id, default), new FixedClock(DateTimeOffset.UtcNow.AddDays(31)));
         Assert.Contains(after.Invitations, x => x.Id == expiring.Invitation.Id && x.Status == "expired");
         Assert.Equal(long.Parse(before.Revision) + 1, long.Parse(after.Revision));
     }
@@ -258,12 +257,13 @@ public sealed class FamilySqlTests(SqlFixture sql) : IClassFixture<SqlFixture>
         var caregiver = await s.Accept(await s.Invite(family.Id));
         var create = s.CreateFeed(caregiver);
         var results = await Task.WhenAll(Capture(() => s.Call(x => x.ApplyFeed(s.Caregiver, family.Id, create, default))),
-            Capture(() => s.Call(x => x.RemoveMember(s.Owner, family.Id, s.Caregiver.ObjectId, new(Guid.NewGuid()), default))));
+            Capture(() => s.Remove(family, s.Caregiver.ObjectId)));
         Assert.Null(results[1]);
         Assert.True(results[0] is null || results[0]?.Code == "membership_revoked");
         await Code("membership_revoked", () => s.Call(x => x.ApplyFeed(s.Caregiver, family.Id, create, default)));
         var snapshot = await s.Call(x => x.Snapshot(s.Owner, family.Id, default));
-        Assert.Single(snapshot.Members);
+        Assert.Single(snapshot.Members, x => x.Status == "active");
+        Assert.Contains(snapshot.Members, x => x.Id == s.Caregiver.ObjectId && x.Status == "removed");
         Assert.Equal(results[0] is null ? 1 : 0, snapshot.Feeds.Length);
     }
 

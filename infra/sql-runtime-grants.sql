@@ -11,17 +11,22 @@ IF DATABASE_PRINCIPAL_ID(N'family_pilot_runtime') IS NULL
 IF OBJECT_ID(N'dbo.Families', N'U') IS NULL OR OBJECT_ID(N'dbo.Memberships', N'U') IS NULL
     OR OBJECT_ID(N'dbo.Invitations', N'U') IS NULL OR OBJECT_ID(N'dbo.Feeds', N'U') IS NULL
     OR OBJECT_ID(N'dbo.Operations', N'U') IS NULL
+    OR OBJECT_ID(N'dbo.OwnershipTransfers', N'U') IS NULL
+    OR OBJECT_ID(N'dbo.AccountDeletions', N'U') IS NULL
     THROW 50006, 'Apply the application migration before runtime grants.', 1;
 
 BEGIN TRANSACTION;
 GRANT SELECT, INSERT, UPDATE ON OBJECT::dbo.Families TO [family_pilot_runtime];
-GRANT SELECT, INSERT, UPDATE ON OBJECT::dbo.Memberships TO [family_pilot_runtime];
-GRANT SELECT, INSERT, UPDATE ON OBJECT::dbo.Invitations TO [family_pilot_runtime];
-GRANT SELECT, INSERT, UPDATE ON OBJECT::dbo.Feeds TO [family_pilot_runtime];
-GRANT SELECT, INSERT, UPDATE ON OBJECT::dbo.Operations TO [family_pilot_runtime];
+GRANT SELECT, INSERT, UPDATE, DELETE ON OBJECT::dbo.Memberships TO [family_pilot_runtime];
+GRANT SELECT, INSERT, UPDATE, DELETE ON OBJECT::dbo.Invitations TO [family_pilot_runtime];
+GRANT SELECT, INSERT, UPDATE, DELETE ON OBJECT::dbo.Feeds TO [family_pilot_runtime];
+GRANT SELECT, INSERT, UPDATE, DELETE ON OBJECT::dbo.Operations TO [family_pilot_runtime];
+GRANT SELECT, INSERT, UPDATE, DELETE ON OBJECT::dbo.OwnershipTransfers TO [family_pilot_runtime];
+GRANT SELECT, INSERT, UPDATE ON OBJECT::dbo.AccountDeletions TO [family_pilot_runtime];
 COMMIT;
 
 -- sys.sp_getapplock is executable through the database public role by default.
 -- Verify the API can take transaction-owned locks during the synthetic pilot.
 -- Do not grant runtime write access to __EFMigrationsHistory or schema ownership.
--- Feed deletion uses a tombstone; runtime does not need DELETE permission.
+-- Ordinary feed deletion uses a tombstone. The in-process cleanup worker needs
+-- DELETE only on content tables; family/account deletion security tombstones remain.

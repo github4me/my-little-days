@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseFamilyConfig, parseInviteToken } from "./family/config";
+import { parseFamilyConfig } from "./family/config";
 import {
   acceptReceipt,
   applySnapshot,
@@ -11,6 +11,9 @@ import {
   pendingForSend,
   rejectOperation,
   revokeCache,
+  originForSnapshot,
+  parseStoredPilot,
+  canEditSharedFeed,
 } from "./family/pilotState";
 import type { FamilySnapshot, FeedOperation } from "./family/contracts";
 
@@ -32,6 +35,8 @@ const snap = (
     babyName: "Test baby",
     role: "owner",
     membershipId,
+    babyBirthDate: null,
+    profileVersion: revision,
   },
   members: [
     {
@@ -40,10 +45,13 @@ const snap = (
       email: "a@example.test",
       membershipId,
       role: "owner",
+      status: "active",
+      endedAt: null,
     },
   ],
   invitations: [],
   feeds: [],
+  ownershipTransfer: null,
 });
 const op = (id = "feed-a"): FeedOperation => ({
   operationId: `operation-${id}`,
@@ -77,24 +85,6 @@ test("family configuration requires HTTPS, exact public API scope and tenant IDs
   assert.equal(parseFamilyConfig({ ...config, tenantId: "common" }), null);
 });
 
-test("invitation parser accepts fragments only on first-party or app links", () => {
-  const token = "a".repeat(43),
-    host = "https://family.example.test";
-  assert.equal(parseInviteToken(`${host}/join#token=${token}`, host), token);
-  assert.equal(
-    parseInviteToken(`mylittledays://family-invite#token=${token}`, host),
-    token,
-  );
-  assert.equal(parseInviteToken(token, host), token);
-  for (const value of [
-    `https://evil.example/join#token=${token}`,
-    `${host}/join?token=${token}`,
-    `mylittledays://auth#token=${token}`,
-    `${host}/join#token=short`,
-  ])
-    assert.throws(() => parseInviteToken(value, host));
-});
-
 test("draft edits remain private and snapshot refresh never overwrites typed values", () => {
   const draft = {
     recordId: "feed-a",
@@ -104,6 +94,7 @@ test("draft edits remain private and snapshot refresh never overwrites typed val
     note: "not saved",
     historyId: "history-a",
     membershipId: "grant-a",
+    origin: originForSnapshot(snap()),
   };
   const state = { ...seeded(), draft };
   const refreshed = applySnapshot(state, snap("2"));
@@ -242,12 +233,12 @@ test("removal clears cache and rejoining never replays old-grant work", () => {
   assert.equal(removed.snapshot, null);
   assert.equal(projectedFeeds(removed, "a").length, 0);
   const rejoined = applySnapshot(removed, snap("3", "grant-b"));
-  assert.equal(rejoined.queue[0].status, "failed");
-  assert.equal(rejoined.queue[0].error, "membership_changed");
+  assert.equal(rejoined.queue.length, 0);
+  assert.equal(rejoined.draft, null);
   assert.throws(() => enqueue(rejoined, op()), /membership_changed/);
 });
 
-test("a restored history resets the revision floor and quarantines old operations", () => {
+test("a restored history resets the revision floor and erases old operations", () => {
   const original = applySnapshot(emptyPilotState(), snap("120"));
   const queued = enqueue(original, op());
   const restored = applySnapshot(
@@ -255,9 +246,88 @@ test("a restored history resets the revision floor and quarantines old operation
     snap("100", "grant-a", "history-restored"),
   );
   assert.equal(restored.snapshot!.revision, "100");
-  assert.equal(restored.queue[0].error, "history_changed");
+  assert.equal(restored.queue.length, 0);
   assert.equal(restored.acknowledgedRevision, null);
   assert.equal(projectedFeeds(restored, "a").length, 0);
+});
+
+test("family, author, grant and history origins cannot be rebound by snapshot or disk recovery", () => {
+  const draft = {
+    recordId: "draft",
+    ...input,
+    amount: "100",
+    origin: originForSnapshot(snap()),
+  };
+  const saved = { ...enqueue(seeded(), op()), draft };
+  for (const incoming of [
+    { ...snap("2"), family: { ...snap().family, id: "family-b" } },
+    snap("2", "grant-b"),
+    snap("2", "grant-a", "history-b"),
+    { ...snap("2"), members: [{ ...snap().members[0], id: "other-user" }] },
+  ]) {
+    const replaced = applySnapshot(saved, incoming);
+    assert.equal(replaced.draft, null);
+    assert.equal(replaced.queue.length, 0);
+    assert.equal(pendingForSend(saved, replaced).length, 0);
+  }
+  const legacy = parseStoredPilot(JSON.stringify({ ...saved, schema: 1 }));
+  assert.equal(legacy.draft, null);
+  assert.equal(legacy.queue.length, 0);
+  assert.equal(legacy.snapshot?.family.id, "family-a");
+});
+
+test("only an active author or administrator may enqueue changes to existing records", () => {
+  const other = {
+    ...input,
+    id: "other-feed",
+    version: "v1",
+    recordedBy: "b",
+    lastEditedBy: "b",
+  };
+  const caregiver = {
+    ...snap(),
+    family: { ...snap().family, role: "caregiver" as const },
+    feeds: [other],
+  };
+  assert.equal(canEditSharedFeed(caregiver, other), false);
+  assert.equal(
+    canEditSharedFeed(caregiver, { ...other, recordedBy: "a" }),
+    true,
+  );
+  assert.equal(canEditSharedFeed(snap(), other), true);
+  assert.throws(
+    () =>
+      enqueue(applySnapshot(emptyPilotState(), caregiver), {
+        ...op("other-feed"),
+        kind: "delete",
+        baseVersion: "v1",
+      }),
+    /record_forbidden/,
+  );
+});
+
+test("persisted transition freezes outbox and projected data until resolved", () => {
+  const queued = enqueue(seeded(), op());
+  const frozen = {
+    ...queued,
+    transition: {
+      operationId: "leave-a",
+      kind: "leave" as const,
+      userId: "a",
+      familyId: "family-a",
+      path: "/v1/families/family-a/leave",
+      body: {},
+      phase: "pending" as const,
+    },
+  };
+  assert.equal(pendingForSend(queued, frozen).length, 0);
+  assert.equal(projectedFeeds(frozen, "a").length, 0);
+  assert.throws(() => enqueue(frozen, op("other")), /transition_pending/);
+  assert.deepEqual(
+    parseStoredPilot(JSON.stringify(frozen)).transition,
+    frozen.transition,
+  );
+  assert.equal(revokeCache(frozen).transition?.operationId, "leave-a");
 });
 
 test("revision comparison remains lossless above JavaScript safe integers", () => {

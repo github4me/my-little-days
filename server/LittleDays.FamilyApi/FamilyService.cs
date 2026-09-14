@@ -33,15 +33,26 @@ public sealed class FamilyService(PilotDatabase db, PilotConfiguration config, T
 
     public Task<MeResult> Me(PilotIdentity user, CancellationToken ct) => Transaction(async () =>
     {
+        var deletion = await db.AccountDeletions.FindAsync([user.ObjectId], ct);
+        if (deletion is not null) return new MeResult(new(user.ObjectId, "", ""), [], [], new(deletion.OperationId, deletion.Status, deletion.RequestedAt));
         var memberships = await db.Memberships.Where(x => x.UserId == user.ObjectId && x.Active).ToArrayAsync(ct);
         var ids = memberships.Select(x => x.FamilyId).ToArray();
-        var families = await db.Families.Where(x => ids.Contains(x.Id)).ToArrayAsync(ct);
+        var families = await db.Families.Where(x => ids.Contains(x.Id) && x.DeletedAt == null).ToArrayAsync(ct);
+        var now = Now;
+        var inbox = await (from invitation in db.Invitations
+            join family in db.Families on invitation.FamilyId equals family.Id
+            join owner in db.Memberships on family.Id equals owner.FamilyId
+            where invitation.Email == user.Email && invitation.Status == "pending" && invitation.ExpiresAt > now &&
+                family.DeletedAt == null && owner.Active && owner.Role == "owner"
+            orderby invitation.CreatedAt descending
+            select new PendingFamilyInvitation(invitation.Id, family.Id, owner.DisplayName, invitation.ExpiresAt)).ToArrayAsync(ct);
         return new MeResult(new(user.ObjectId, user.DisplayName, user.Email),
-            families.Select(x => Summary(x, memberships.Single(m => m.FamilyId == x.Id))).ToArray());
+            families.Select(x => Summary(x, memberships.Single(m => m.FamilyId == x.Id))).ToArray(), inbox, null);
     }, ct);
 
     public Task<FamilySummary> CreateFamily(PilotIdentity user, CreateFamilyRequest request, CancellationToken ct) => Transaction(async () =>
     {
+        await RequireAccount(user, ct);
         ValidateId(request.OperationId);
         if (request.BabyName is null || request.BabyName.Trim().Length < 1 ||
             request.BabyName.Length > config.Pilot.MaxBabyNameLength || request.BabyName.Any(char.IsControl)) Invalid();
@@ -49,8 +60,8 @@ public sealed class FamilyService(PilotDatabase db, PilotConfiguration config, T
         var old = await Receipt(user, request.OperationId, hash, ct);
         if (old is not null)
         {
-            await RequireGrant(user, old.FamilyId, old.MembershipId, ct);
-            return ReadResult<FamilySummary>(old);
+            var existingGrant = await RequireGrant(user, old.FamilyId, old.MembershipId, ct);
+            return Summary(await Family(old.FamilyId, ct), existingGrant);
         }
         if (await db.Memberships.AnyAsync(x => x.UserId == user.ObjectId && x.Active, ct))
             throw new ApiException(409, "already_in_family");
@@ -73,71 +84,249 @@ public sealed class FamilyService(PilotDatabase db, PilotConfiguration config, T
         var expired = await db.Invitations.Where(x => x.FamilyId == familyId && x.Status == "pending" && x.ExpiresAt <= now).ToArrayAsync(ct);
         foreach (var invitation in expired) invitation.Status = "expired";
         if (expired.Length > 0) family.Revision++;
-        var members = await db.Memberships.Where(x => x.FamilyId == familyId && x.Active).OrderBy(x => x.GrantedAt).ToArrayAsync(ct);
+        var members = await db.Memberships.Where(x => x.FamilyId == familyId && (x.Active || grant.Role == "owner")).OrderBy(x => x.GrantedAt).ToArrayAsync(ct);
         var feeds = await db.Feeds.Where(x => x.FamilyId == familyId && !x.Deleted).OrderByDescending(x => x.Start).ThenBy(x => x.Id).ToArrayAsync(ct);
         // Only the owner receives recipient emails and invitation administration state.
         var invitations = grant.Role == "owner"
             ? await db.Invitations.Where(x => x.FamilyId == familyId)
                 .OrderBy(x => x.Status == "pending" ? 0 : 1).ThenByDescending(x => x.CreatedAt).Take(100).ToArrayAsync(ct)
             : [];
+        var transfer = await db.OwnershipTransfers.SingleOrDefaultAsync(x => x.FamilyId == familyId && x.Status == "pending", ct);
         return new FamilySnapshot(Summary(family, grant), config.Family.HistoryId, Revision(family),
-            members.Select(Member).ToArray(), invitations.Select(Invitation).ToArray(),
+            members.Select(x => Member(x, grant.Role == "owner")).ToArray(), invitations.Select(Invitation).ToArray(),
             feeds.Select(x => new SharedFeed(x.Id, Convert.ToBase64String(x.Version), x.RecordedBy, x.LastEditedBy,
-                x.Start, x.End, x.Amount, x.Note)).ToArray());
+                x.Start, x.End, x.Amount, x.Note)).ToArray(), transfer is null ? null : Transfer(transfer));
     }, ct);
 
     public Task<InvitationResult> CreateInvitation(PilotIdentity user, Guid familyId, CreateInvitationRequest request, CancellationToken ct) => Transaction(async () =>
     {
         ValidateId(request.OperationId);
         var grant = await RequireOwner(user, familyId, ct);
+        RequireContext(request, grant);
         var email = PilotConfiguration.NormalizeEmail(request.Email);
         if (!PilotConfiguration.IsEmail(email)) Invalid();
-        var recipient = config.Pilot.Identities.SingleOrDefault(x => x.Email == email);
-        if (recipient is null || recipient.ObjectId == user.ObjectId) Invalid();
-        var hash = Fingerprint("create-invitation", new { familyId, request.OperationId, email });
+        if (email == user.Email) Invalid();
+        var hash = Fingerprint("create-invitation", new { familyId, request.OperationId, email, request.MembershipId, request.HistoryId });
         var old = await Receipt(user, request.OperationId, hash, ct);
-        // The token never enters durable receipts: a lost issuance response needs a new invitation.
-        if (old is not null) throw new ApiException(409, "invitation_already_created");
+        if (old is not null)
+        {
+            var priorId = ReadResult<InvitationReceipt>(old).InvitationId;
+            var prior = await db.Invitations.SingleOrDefaultAsync(x => x.Id == priorId && x.FamilyId == familyId, ct)
+                ?? throw new ApiException(410, "invitation_unavailable");
+            return new InvitationResult(Invitation(prior));
+        }
         await CheckCapacity(familyId, ct);
-        if (await db.Memberships.AnyAsync(x => x.UserId == recipient!.ObjectId && x.Active, ct))
-            throw new ApiException(409, "already_in_family");
+        // Never reveal whether an arbitrary email is registered or belongs to another family.
         if (await db.Memberships.CountAsync(x => x.FamilyId == familyId && x.Active, ct) >= config.Pilot.MaxMembers) Invalid();
-        await RevokePending(familyId, recipient!.ObjectId, ct);
+        var now = Now;
+        if (await db.Invitations.CountAsync(x => x.FamilyId == familyId && x.Email != email && x.Status == "pending" && x.ExpiresAt > now, ct) >= 100)
+            throw new ApiException(409, "invitation_limit");
+        foreach (var prior in await db.Invitations.Where(x => x.FamilyId == familyId && x.Email == email && x.Status == "pending").ToArrayAsync(ct))
+            prior.Status = "revoked";
         // Flush revocation before inserting into the unique pending-recipient index, still in this transaction.
         await db.SaveChangesAsync(ct);
-        var token = Base64Url(RandomNumberGenerator.GetBytes(32));
         var row = new InvitationRow
         {
             Id = Guid.NewGuid(),
             FamilyId = familyId,
-            RecipientUserId = recipient.ObjectId,
             Email = email,
-            TokenHash = TokenHash(token),
             CreatedAt = Now,
-            ExpiresAt = Now.AddHours(config.Pilot.InvitationHours)
+            ExpiresAt = Now.AddDays(30)
         };
         db.Invitations.Add(row);
         var family = await Family(familyId, ct);
         family.Revision++;
-        SaveReceipt(user, request.OperationId, familyId, grant.Id, "create-invitation", hash, new { invitationId = row.Id });
-        return new InvitationResult(Invitation(row), $"{config.Family.PublicBaseUrl}/join#token={token}");
+        var result = new InvitationResult(Invitation(row));
+        SaveReceipt(user, request.OperationId, familyId, grant.Id, "create-invitation", hash, new InvitationReceipt(row.Id));
+        return result;
     }, ct);
 
-    public Task<FamilySummary> AcceptInvitation(PilotIdentity user, AcceptInvitationRequest request, CancellationToken ct) => Transaction(async () =>
+    public Task<FamilySummary> UpdateProfile(PilotIdentity user, Guid familyId, ProfileRequest request, CancellationToken ct) => Transaction(async () =>
     {
         ValidateId(request.OperationId);
-        if (!IsToken(request.Token)) throw new ApiException(410, "invitation_unavailable");
-        var tokenHash = TokenHash(request.Token);
-        var hash = Fingerprint("accept-invitation", new { request.OperationId, tokenHash });
+        var grant = await RequireOwner(user, familyId, ct);
+        RequireContext(request, grant);
+        if (request.BabyName is null || request.BabyName.Trim().Length < 1 || request.BabyName.Length > config.Pilot.MaxBabyNameLength || request.BabyName.Any(char.IsControl)) Invalid();
+        if (request.BabyBirthDate is not null && (!DateOnly.TryParseExact(request.BabyBirthDate, "yyyy-MM-dd", CultureInfo.InvariantCulture,
+            DateTimeStyles.None, out var birthDate) || birthDate < new DateOnly(1970, 1, 1) || birthDate > DateOnly.FromDateTime(Now.UtcDateTime.AddDays(1)))) Invalid();
+        var hash = Fingerprint("profile", new { familyId, request });
+        var old = await Receipt(user, request.OperationId, hash, ct);
+        if (old is not null) return Summary(await Family(familyId, ct), grant);
+        await CheckCapacity(familyId, ct);
+        var family = await Family(familyId, ct);
+        if (Revision(family) != request.BaseVersion) throw new ApiException(412, "profile_changed");
+        family.BabyName = request.BabyName!.Trim();
+        family.BabyBirthDate = request.BabyBirthDate;
+        family.Revision++;
+        // Profile receipts contain no profile data; retries return the authorized current profile.
+        SaveReceipt(user, request.OperationId, familyId, grant.Id, "profile", hash, new OkResult());
+        return Summary(family, grant);
+    }, ct);
+
+    public Task<OwnershipTransfer> NominateOwner(PilotIdentity user, Guid familyId, NominateOwnerRequest request, CancellationToken ct) => Transaction(async () =>
+    {
+        ValidateId(request.OperationId); ValidateId(request.UserId);
+        var grant = await RequireOwner(user, familyId, ct);
+        RequireContext(request, grant);
+        var hash = Fingerprint("nominate-owner", new { familyId, request });
         var old = await Receipt(user, request.OperationId, hash, ct);
         if (old is not null)
         {
-            // A consumed-token retry returns its original receipt only while that exact grant exists.
-            await RequireGrant(user, old.FamilyId, old.MembershipId, ct);
-            return ReadResult<FamilySummary>(old);
+            var result = ReadResult<OwnershipTransfer>(old);
+            if (!await db.OwnershipTransfers.AnyAsync(x => x.Id == result.Id && x.Status == "pending", ct))
+                throw new ApiException(409, "transfer_unavailable");
+            return result;
         }
-        var invitation = await db.Invitations.SingleOrDefaultAsync(x => x.TokenHash == tokenHash, ct);
-        if (invitation is null || invitation.RecipientUserId != user.ObjectId || invitation.Email != user.Email ||
+        var nominee = await db.Memberships.SingleOrDefaultAsync(x => x.FamilyId == familyId && x.UserId == request.UserId && x.Active, ct);
+        await CheckCapacity(familyId, ct);
+        if (nominee is null || nominee.UserId == user.ObjectId) Invalid();
+        if (await db.OwnershipTransfers.AnyAsync(x => x.FamilyId == familyId && x.Status == "pending", ct))
+            throw new ApiException(409, "transfer_pending");
+        var row = new OwnershipTransferRow
+        {
+            Id = Guid.NewGuid(), FamilyId = familyId, FromUserId = user.ObjectId, ToUserId = nominee!.UserId,
+            FromMembershipId = grant.Id, ToMembershipId = nominee.Id, CreatedAt = Now
+        };
+        db.OwnershipTransfers.Add(row);
+        (await Family(familyId, ct)).Revision++;
+        var resultNew = Transfer(row);
+        SaveReceipt(user, request.OperationId, familyId, grant.Id, "nominate-owner", hash, resultNew);
+        return resultNew;
+    }, ct);
+
+    public Task<OkResult> AcceptOwnership(PilotIdentity user, Guid familyId, Guid transferId, OperationRequest request, CancellationToken ct) => Transaction(async () =>
+    {
+        ValidateId(request.OperationId);
+        var grant = await RequireGrant(user, familyId, null, ct);
+        RequireContext(request, grant);
+        var hash = Fingerprint("accept-owner", new { familyId, transferId, request });
+        var old = await Receipt(user, request.OperationId, hash, ct);
+        if (old is not null)
+        {
+            if (old.MembershipId != grant.Id) throw new ApiException(409, "membership_changed");
+            return ReadResult<OkResult>(old);
+        }
+        var transfer = await db.OwnershipTransfers.SingleOrDefaultAsync(x => x.Id == transferId && x.FamilyId == familyId, ct);
+        if (transfer is null || transfer.Status != "pending" || transfer.ToUserId != user.ObjectId || transfer.ToMembershipId != grant.Id)
+            throw new ApiException(409, "transfer_unavailable");
+        var owner = await db.Memberships.SingleOrDefaultAsync(x => x.Id == transfer.FromMembershipId && x.Active && x.Role == "owner", ct);
+        if (owner is null || grant.Role != "caregiver") throw new ApiException(409, "transfer_unavailable");
+        owner.Role = "caregiver";
+        grant.Role = "owner";
+        transfer.Status = "accepted";
+        (await Family(familyId, ct)).Revision++;
+        var result = new OkResult();
+        SaveReceipt(user, request.OperationId, familyId, grant.Id, "accept-owner", hash, result);
+        return result;
+    }, ct);
+
+    public Task<OkResult> CancelOwnership(PilotIdentity user, Guid familyId, Guid transferId, OperationRequest request, CancellationToken ct) => Transaction(async () =>
+    {
+        ValidateId(request.OperationId);
+        var grant = await RequireOwner(user, familyId, ct);
+        RequireContext(request, grant);
+        var hash = Fingerprint("cancel-owner", new { familyId, transferId, request });
+        var old = await Receipt(user, request.OperationId, hash, ct);
+        if (old is not null) return ReadResult<OkResult>(old);
+        var transfer = await db.OwnershipTransfers.SingleOrDefaultAsync(x => x.Id == transferId && x.FamilyId == familyId && x.Status == "pending", ct)
+            ?? throw new ApiException(409, "transfer_unavailable");
+        transfer.Status = "cancelled";
+        (await Family(familyId, ct)).Revision++;
+        var result = new OkResult();
+        SaveReceipt(user, request.OperationId, familyId, grant.Id, "cancel-owner", hash, result);
+        return result;
+    }, ct);
+
+    public Task<OkResult> CloseFamily(PilotIdentity user, Guid familyId, OperationRequest request, CancellationToken ct) => Transaction(async () =>
+    {
+        await RequireAccount(user, ct);
+        ValidateId(request.OperationId);
+        var family = await db.Families.SingleOrDefaultAsync(x => x.Id == familyId, ct)
+            ?? throw new ApiException(403, "membership_revoked");
+        if (family.DeletedAt is not null)
+        {
+            if (family.DeletedBy == user.ObjectId && family.DeleteOperationId == request.OperationId) return new OkResult();
+            throw new ApiException(403, "membership_revoked");
+        }
+        var grant = await RequireOwner(user, familyId, ct);
+        RequireContext(request, grant);
+        if (await db.Memberships.AnyAsync(x => x.FamilyId == familyId && x.Active && x.Id != grant.Id, ct))
+            throw new ApiException(409, "family_has_members");
+        // Keep the closure receipt in the family tombstone so cleanup cannot permit replay.
+        var hash = Fingerprint("close-family", new { familyId, request.OperationId });
+        await Receipt(user, request.OperationId, hash, ct);
+        family.DeletedAt = Now; family.DeletedBy = user.ObjectId; family.DeleteOperationId = request.OperationId;
+        family.Revision++;
+        EndGrant(grant, "left");
+        await InvalidateTransfers(familyId, user.ObjectId, ct);
+        foreach (var invite in await db.Invitations.Where(x => x.FamilyId == familyId && x.Status == "pending").ToArrayAsync(ct)) invite.Status = "revoked";
+        return new OkResult();
+    }, ct);
+
+    public Task<AccountDeletion> DeleteAccount(PilotIdentity user, DeleteAccountRequest request, CancellationToken ct) => Transaction(async () =>
+    {
+        ValidateId(request.OperationId);
+        var receiptHash = ReceiptSecretHash(request.ReceiptSecret);
+        var old = await db.AccountDeletions.FindAsync([user.ObjectId], ct);
+        if (old is not null)
+        {
+            if (old.OperationId != request.OperationId || old.ReceiptHash != receiptHash) throw new ApiException(409, "operation_reused");
+            return new AccountDeletion(old.OperationId, old.Status, old.RequestedAt);
+        }
+        if (await db.AccountDeletions.AnyAsync(x => x.OperationId == request.OperationId, ct)) throw new ApiException(409, "operation_reused");
+        await Receipt(user, request.OperationId, Fingerprint("delete-account", new { request.OperationId, receiptHash }), ct);
+        if (await db.Memberships.AnyAsync(x => x.UserId == user.ObjectId && x.Active && x.Role == "owner", ct))
+            throw new ApiException(409, "family_owner_cannot_delete");
+        var row = new AccountDeletionRow { UserId = user.ObjectId, OperationId = request.OperationId, RequestedAt = Now, ReceiptHash = receiptHash };
+        db.AccountDeletions.Add(row);
+        foreach (var grant in await db.Memberships.Where(x => x.UserId == user.ObjectId && x.Active).ToArrayAsync(ct))
+        {
+            EndGrant(grant, "left");
+            (await Family(grant.FamilyId, ct)).Revision++;
+            await InvalidateTransfers(grant.FamilyId, user.ObjectId, ct);
+        }
+        // API access is denied as soon as this transaction commits; content cleanup is durable/retryable.
+        return new AccountDeletion(row.OperationId, row.Status, row.RequestedAt);
+    }, ct);
+
+    public Task<AccountDeletion> DeletionStatus(DeletionStatusRequest request, CancellationToken ct) => Transaction(async () =>
+    {
+        if (!IsReceiptSecret(request.ReceiptSecret)) throw new ApiException(404, "deletion_unavailable");
+        var hash = ReceiptSecretHash(request.ReceiptSecret);
+        var row = await db.AccountDeletions.SingleOrDefaultAsync(x => x.OperationId == request.DeletionId, ct);
+        if (row is null || !CryptographicOperations.FixedTimeEquals(Convert.FromHexString(row.ReceiptHash), Convert.FromHexString(hash)))
+            throw new ApiException(404, "deletion_unavailable");
+        return new AccountDeletion(row.OperationId, row.Status, row.RequestedAt);
+    }, ct);
+    private static bool IsReceiptSecret(string? secret) => secret is { Length: 64 } && secret.All(char.IsAsciiHexDigit);
+    private static string ReceiptSecretHash(string secret)
+    {
+        if (!IsReceiptSecret(secret)) Invalid();
+        return Convert.ToHexString(SHA256.HashData(Encoding.ASCII.GetBytes(secret.ToLowerInvariant())));
+    }
+
+    private async Task InvalidateTransfers(Guid familyId, Guid userId, CancellationToken ct)
+    {
+        foreach (var transfer in await db.OwnershipTransfers.Where(x => x.FamilyId == familyId && x.Status == "pending" &&
+            (x.FromUserId == userId || x.ToUserId == userId)).ToArrayAsync(ct)) transfer.Status = "cancelled";
+    }
+    private static OwnershipTransfer Transfer(OwnershipTransferRow row) => new(row.Id, row.FromUserId, row.ToUserId, row.Status, row.CreatedAt);
+    private sealed record InvitationReceipt(Guid InvitationId);
+
+    public Task<FamilySummary> AcceptInvitation(PilotIdentity user, Guid invitationId, OperationRequest request, CancellationToken ct) => Transaction(async () =>
+    {
+        await RequireAccount(user, ct);
+        ValidateId(request.OperationId);
+        var hash = Fingerprint("accept-invitation", new { request.OperationId, invitationId });
+        var old = await Receipt(user, request.OperationId, hash, ct);
+        if (old is not null)
+        {
+            // An accepted-invitation retry is valid only while that exact membership grant exists.
+            var existingGrant = await RequireGrant(user, old.FamilyId, old.MembershipId, ct);
+            return Summary(await Family(old.FamilyId, ct), existingGrant);
+        }
+        var invitation = await db.Invitations.SingleOrDefaultAsync(x => x.Id == invitationId, ct);
+        if (invitation is null || invitation.Email != user.Email ||
             invitation.Status != "pending" || invitation.ExpiresAt <= Now)
             throw new ApiException(410, "invitation_unavailable");
         if (await db.Memberships.AnyAsync(x => x.UserId == user.ObjectId && x.Active, ct))
@@ -146,6 +335,7 @@ public sealed class FamilyService(PilotDatabase db, PilotConfiguration config, T
         await CheckCapacity(invitation.FamilyId, ct);
         var family = await Family(invitation.FamilyId, ct);
         var grant = NewGrant(user, family.Id, "caregiver");
+        invitation.RecipientUserId = user.ObjectId;
         invitation.Status = "accepted";
         invitation.AcceptedMembershipId = grant.Id;
         db.Memberships.Add(grant);
@@ -155,11 +345,31 @@ public sealed class FamilyService(PilotDatabase db, PilotConfiguration config, T
         return result;
     }, ct);
 
+    public Task<OkResult> DeclineInvitation(PilotIdentity user, Guid invitationId, OperationRequest request, CancellationToken ct) => Transaction(async () =>
+    {
+        await RequireAccount(user, ct);
+        ValidateId(request.OperationId);
+        var hash = Fingerprint("decline-invitation", new { request.OperationId, invitationId });
+        var old = await Receipt(user, request.OperationId, hash, ct);
+        if (old is not null) return ReadResult<OkResult>(old);
+        var invitation = await db.Invitations.SingleOrDefaultAsync(x => x.Id == invitationId, ct);
+        if (invitation is null || invitation.Email != user.Email || invitation.Status != "pending" || invitation.ExpiresAt <= Now)
+            throw new ApiException(410, "invitation_unavailable");
+        var family = await Family(invitation.FamilyId, ct);
+        invitation.Status = "declined";
+        invitation.RecipientUserId = user.ObjectId;
+        family.Revision++;
+        var result = new OkResult();
+        SaveReceipt(user, request.OperationId, family.Id, Guid.Empty, "decline-invitation", hash, result);
+        return result;
+    }, ct);
+
     public Task<OkResult> RevokeInvitation(PilotIdentity user, Guid familyId, Guid invitationId, OperationRequest request, CancellationToken ct) => Transaction(async () =>
     {
         ValidateId(request.OperationId);
         var grant = await RequireOwner(user, familyId, ct);
-        var hash = Fingerprint("revoke-invitation", new { familyId, invitationId, request.OperationId });
+        RequireContext(request, grant);
+        var hash = Fingerprint("revoke-invitation", new { familyId, invitationId, request });
         var old = await Receipt(user, request.OperationId, hash, ct);
         if (old is not null) return ReadResult<OkResult>(old);
         var invitation = await db.Invitations.SingleOrDefaultAsync(x => x.Id == invitationId && x.FamilyId == familyId, ct)
@@ -178,18 +388,18 @@ public sealed class FamilyService(PilotDatabase db, PilotConfiguration config, T
     {
         ValidateId(request.OperationId);
         var grant = await RequireOwner(user, familyId, ct);
+        RequireContext(request, grant);
         if (memberId == user.ObjectId || memberId == Guid.Empty) Invalid();
-        var hash = Fingerprint("remove-member", new { familyId, memberId, request.OperationId });
+        var hash = Fingerprint("remove-member", new { familyId, memberId, request });
         var old = await Receipt(user, request.OperationId, hash, ct);
         if (old is not null) return ReadResult<OkResult>(old);
         var member = await db.Memberships.SingleOrDefaultAsync(x => x.FamilyId == familyId && x.UserId == memberId && x.Active, ct);
-        // Also revoke unused recipient invitations when membership was already removed or never accepted.
         if (member is not null && member.Role == "owner") throw new ApiException(403, "forbidden");
-        var hasPending = await db.Invitations.AnyAsync(x => x.FamilyId == familyId && x.RecipientUserId == memberId && x.Status == "pending", ct);
-        if (member is null && !hasPending) Invalid();
+        if (member is null || request.TargetMembershipId != member.Id) throw new ApiException(409, "member_changed");
         // Existing grants/invites can always be revoked even when ordinary writes reached the cap.
-        if (member is not null) EndGrant(member);
+        EndGrant(member, "removed");
         await RevokePending(familyId, memberId, ct);
+        await InvalidateTransfers(familyId, memberId, ct);
         (await Family(familyId, ct)).Revision++;
         var result = new OkResult();
         SaveReceipt(user, request.OperationId, familyId, grant.Id, "remove-member", hash, result);
@@ -198,8 +408,9 @@ public sealed class FamilyService(PilotDatabase db, PilotConfiguration config, T
 
     public Task<OkResult> Leave(PilotIdentity user, Guid familyId, OperationRequest request, CancellationToken ct) => Transaction(async () =>
     {
+        await RequireAccount(user, ct);
         ValidateId(request.OperationId);
-        var hash = Fingerprint("leave", new { familyId, request.OperationId });
+        var hash = Fingerprint("leave", new { familyId, request });
         var old = await Receipt(user, request.OperationId, hash, ct);
         if (old is not null)
         {
@@ -207,9 +418,11 @@ public sealed class FamilyService(PilotDatabase db, PilotConfiguration config, T
             return ReadResult<OkResult>(old);
         }
         var grant = await RequireGrant(user, familyId, null, ct);
+        RequireContext(request, grant);
         if (grant.Role == "owner") throw new ApiException(403, "forbidden");
-        EndGrant(grant);
+        EndGrant(grant, "left");
         await RevokePending(familyId, user.ObjectId, ct);
+        await InvalidateTransfers(familyId, user.ObjectId, ct);
         (await Family(familyId, ct)).Revision++;
         var result = new OkResult();
         SaveReceipt(user, request.OperationId, familyId, grant.Id, "leave", hash, result);
@@ -236,6 +449,8 @@ public sealed class FamilyService(PilotDatabase db, PilotConfiguration config, T
         }
         else if (row is null || row.Deleted || Convert.ToBase64String(row.Version) != operation.BaseVersion)
             throw new ApiException(412, "record_changed");
+        if (operation.Kind != "create" && grant.Role != "owner" && row.RecordedBy != user.ObjectId)
+            throw new ApiException(403, "record_forbidden");
         row.LastEditedBy = user.ObjectId;
         if (operation.Kind == "delete") row.Deleted = true;
         else
@@ -257,6 +472,9 @@ public sealed class FamilyService(PilotDatabase db, PilotConfiguration config, T
 
     private async Task<MembershipRow> RequireGrant(PilotIdentity user, Guid familyId, Guid? membershipId, CancellationToken ct)
     {
+        await RequireAccount(user, ct);
+        if (!await db.Families.AnyAsync(x => x.Id == familyId && x.DeletedAt == null, ct))
+            throw new ApiException(403, "membership_revoked");
         var grant = await db.Memberships.SingleOrDefaultAsync(x => x.UserId == user.ObjectId && x.FamilyId == familyId && x.Active, ct)
             ?? throw new ApiException(403, "membership_revoked");
         if (membershipId is not null && grant.Id != membershipId) throw new ApiException(409, "membership_changed");
@@ -268,7 +486,18 @@ public sealed class FamilyService(PilotDatabase db, PilotConfiguration config, T
         if (grant.Role != "owner") throw new ApiException(403, "forbidden");
         return grant;
     }
-    private Task<FamilyRow> Family(Guid id, CancellationToken ct) => db.Families.SingleAsync(x => x.Id == id, ct);
+    private async Task<FamilyRow> Family(Guid id, CancellationToken ct) => await db.Families.SingleOrDefaultAsync(x => x.Id == id && x.DeletedAt == null, ct)
+        ?? throw new ApiException(403, "membership_revoked");
+    private async Task RequireAccount(PilotIdentity user, CancellationToken ct)
+    {
+        if (await db.AccountDeletions.AnyAsync(x => x.UserId == user.ObjectId, ct)) throw new ApiException(410, "account_deleted");
+    }
+    private void RequireContext(IGrantContext request, MembershipRow grant)
+    {
+        if (request.MembershipId is null || request.HistoryId is null) Invalid();
+        if (request.HistoryId != config.Family.HistoryId) throw new ApiException(409, "history_changed");
+        if (request.MembershipId != grant.Id) throw new ApiException(409, "membership_changed");
+    }
     private MembershipRow NewGrant(PilotIdentity user, Guid familyId, string role) => new()
     {
         Id = Guid.NewGuid(),
@@ -279,10 +508,11 @@ public sealed class FamilyService(PilotDatabase db, PilotConfiguration config, T
         DisplayName = user.DisplayName,
         Email = user.Email
     };
-    private void EndGrant(MembershipRow grant) { grant.Active = false; grant.EndedAt = Now; }
+    private void EndGrant(MembershipRow grant, string status) { grant.Active = false; grant.EndedAt = Now; grant.Status = status; }
     private async Task RevokePending(Guid familyId, Guid recipientId, CancellationToken ct)
     {
-        foreach (var invite in await db.Invitations.Where(x => x.FamilyId == familyId && x.RecipientUserId == recipientId && x.Status == "pending").ToArrayAsync(ct))
+        var email = config.Pilot.Identities.SingleOrDefault(x => x.ObjectId == recipientId)?.Email;
+        foreach (var invite in await db.Invitations.Where(x => x.FamilyId == familyId && (x.RecipientUserId == recipientId || x.Email == email) && x.Status == "pending").ToArrayAsync(ct))
             invite.Status = "revoked";
     }
     private async Task CheckCapacity(Guid familyId, CancellationToken ct)
@@ -291,6 +521,8 @@ public sealed class FamilyService(PilotDatabase db, PilotConfiguration config, T
     }
     private async Task<OperationRow?> Receipt(PilotIdentity user, Guid id, string hash, CancellationToken ct)
     {
+        if (await db.Families.AnyAsync(x => x.DeletedBy == user.ObjectId && x.DeleteOperationId == id, ct))
+            throw new ApiException(409, "operation_reused");
         var old = await db.Operations.SingleOrDefaultAsync(x => x.UserId == user.ObjectId && x.OperationId == id, ct);
         if (old is not null && old.HistoryId != config.Family.HistoryId) throw new ApiException(409, "history_changed");
         if (old is not null && old.Fingerprint != hash) throw new ApiException(409, "operation_reused");
@@ -312,18 +544,15 @@ public sealed class FamilyService(PilotDatabase db, PilotConfiguration config, T
         });
     }
     private static T ReadResult<T>(OperationRow row) => JsonSerializer.Deserialize<T>(row.ResultJson, Json)!;
-    private static FamilySummary Summary(FamilyRow family, MembershipRow grant) => new(family.Id, family.BabyName, grant.Role, grant.Id);
-    private FamilyMember Member(MembershipRow row)
+    private static FamilySummary Summary(FamilyRow family, MembershipRow grant) => new(family.Id, family.BabyName, grant.Role, grant.Id, family.BabyBirthDate, Revision(family));
+    private FamilyMember Member(MembershipRow row, bool owner)
     {
         var binding = config.Pilot.Identities.SingleOrDefault(x => x.ObjectId == row.UserId);
-        return new(row.UserId, binding?.DisplayName ?? row.DisplayName, binding?.Email ?? row.Email, row.Role, row.Id);
+        return new(row.UserId, binding?.DisplayName ?? row.DisplayName, owner ? binding?.Email ?? row.Email : null, row.Role, row.Id, row.Status, row.EndedAt);
     }
     private static FamilyInvitation Invitation(InvitationRow row) => new(row.Id, row.Email, row.ExpiresAt, row.Status);
     private static string Revision(FamilyRow family) => family.Revision.ToString(CultureInfo.InvariantCulture);
     private static string Fingerprint<T>(string action, T value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(action + ":" + JsonSerializer.Serialize(value, Json))));
-    public static string TokenHash(string token) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token)));
-    private static string Base64Url(byte[] bytes) => Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
-    public static bool IsToken(string? token) => token is { Length: 43 } && token.All(c => char.IsAsciiLetterOrDigit(c) || c is '_' or '-');
     private static void ValidateId(Guid id) { if (id == Guid.Empty) Invalid(); }
     private static void Invalid() => throw new ApiException(422, "invalid_input");
     private void ValidateFeed(FeedOperation operation)

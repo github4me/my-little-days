@@ -46,19 +46,3 @@ export const familyConfig = parseFamilyConfig({
   clientId: process.env.EXPO_PUBLIC_ENTRA_CLIENT_ID,
   scope: process.env.EXPO_PUBLIC_ENTRA_API_SCOPE,
 });
-
-export function parseInviteToken(value: string, apiUrl: string): string {
-  let token = value.trim();
-  if (token.includes("://")) {
-    const url = new URL(token);
-    const validWeb = url.origin === apiUrl && url.pathname === "/join";
-    const validApp =
-      url.protocol === "mylittledays:" && url.hostname === "family-invite";
-    if ((!validWeb && !validApp) || url.username || url.password || url.search)
-      throw new Error("invalid_invitation");
-    token = new URLSearchParams(url.hash.slice(1)).get("token") ?? "";
-  }
-  if (!/^[A-Za-z0-9_-]{40,128}$/.test(token))
-    throw new Error("invalid_invitation");
-  return token;
-}

@@ -15,8 +15,27 @@ export type FeedDraft = {
   note: string;
   membershipId?: string;
   historyId?: string;
+  origin?: SharingOrigin;
+};
+export type SharingOrigin = {
+  familyId: string;
+  userId: string;
+  membershipId: string;
+  historyId: string;
+};
+export type PilotTransition = {
+  operationId: string;
+  kind: "create" | "join" | "leave" | "close" | "delete-account" | "manage";
+  path: string;
+  body: Record<string, unknown>;
+  userId: string;
+  familyId?: string;
+  origin?: SharingOrigin;
+  phase: "pending" | "committed" | "rejected";
+  error?: string;
 };
 export type QueuedFeed = {
+  origin: SharingOrigin;
   operation: FeedOperation;
   status: "pending" | "failed" | "accepted";
   error?: string;
@@ -28,19 +47,51 @@ export type PilotFeed = SharedFeed & {
   awaitingRefresh?: boolean;
 };
 export type PilotState = {
-  schema: 1;
+  schema: 2;
   snapshot: FamilySnapshot | null;
   draft: FeedDraft | null;
   queue: QueuedFeed[];
   acknowledgedRevision: string | null;
+  transition: PilotTransition | null;
 };
 export const emptyPilotState = (): PilotState => ({
-  schema: 1,
+  schema: 2,
   snapshot: null,
   draft: null,
   queue: [],
   acknowledgedRevision: null,
+  transition: null,
 });
+export function originForSnapshot(snapshot: FamilySnapshot): SharingOrigin {
+  const member = snapshot.members.find(
+    (m) => m.membershipId === snapshot.family.membershipId,
+  );
+  if (!member) throw new Error("invalid_response");
+  return {
+    familyId: snapshot.family.id,
+    userId: member.id,
+    membershipId: snapshot.family.membershipId,
+    historyId: snapshot.historyId,
+  };
+}
+export function matchesOrigin(
+  origin: SharingOrigin | undefined,
+  snapshot: FamilySnapshot | null,
+): boolean {
+  if (!origin || !snapshot) return false;
+  const expected = originForSnapshot(snapshot);
+  return Object.keys(expected).every(
+    (key) =>
+      origin[key as keyof SharingOrigin] ===
+      expected[key as keyof SharingOrigin],
+  );
+}
+export function canEditSharedFeed(snapshot: FamilySnapshot, feed: SharedFeed) {
+  return (
+    snapshot.family.role === "owner" ||
+    feed.recordedBy === originForSnapshot(snapshot).userId
+  );
+}
 const revision = (value: string) => {
   if (!/^\d{1,20}$/.test(value)) throw new Error("invalid_response");
   return BigInt(value);
@@ -77,11 +128,20 @@ export function enqueue(
   operation: FeedOperation,
 ): PilotState {
   if (!state.snapshot) throw new Error("family_unavailable");
+  if (state.transition) throw new Error("transition_pending");
   if (
     operation.historyId !== state.snapshot.historyId ||
     operation.membershipId !== state.snapshot.family.membershipId
   )
     throw new Error("membership_changed");
+  if (operation.kind !== "create") {
+    const record = state.snapshot.feeds.find(
+      (f) => f.id === operation.recordId,
+    );
+    if (!record) throw new Error("record_changed");
+    if (!canEditSharedFeed(state.snapshot, record))
+      throw new Error("record_forbidden");
+  }
   if (
     state.queue.some(
       (q) =>
@@ -96,6 +156,7 @@ export function enqueue(
     queue: [
       ...state.queue,
       {
+        origin: originForSnapshot(state.snapshot),
         operation: {
           ...operation,
           ...(operation.feed ? { feed: { ...operation.feed } } : {}),
@@ -152,6 +213,8 @@ export function pendingForSend(
 ): QueuedFeed[] {
   const context = visible.snapshot;
   if (
+    durable.transition ||
+    visible.transition ||
     !context ||
     durable.snapshot?.family.id !== context.family.id ||
     durable.snapshot.historyId !== context.historyId ||
@@ -161,6 +224,7 @@ export function pendingForSend(
   return durable.queue.filter(
     (q) =>
       q.status === "pending" &&
+      matchesOrigin(q.origin, context) &&
       q.operation.historyId === context.historyId &&
       q.operation.membershipId === context.family.membershipId &&
       visible.queue.some(
@@ -172,14 +236,8 @@ export function pendingForSend(
 }
 export function revokeCache(state: PilotState): PilotState {
   return {
-    ...state,
-    snapshot: null,
-    acknowledgedRevision: null,
-    queue: state.queue.map((q) => ({
-      ...q,
-      status: "failed",
-      error: "membership_revoked",
-    })),
+    ...emptyPilotState(),
+    transition: state.transition,
   };
 }
 export function applySnapshot(
@@ -209,13 +267,16 @@ export function applySnapshot(
   )
     return state;
   const queue = state.queue.flatMap<QueuedFeed>((q) => {
-    const error =
-      q.operation.historyId !== snapshot.historyId
-        ? "history_changed"
-        : q.operation.membershipId !== snapshot.family.membershipId
-          ? "membership_changed"
-          : null;
-    if (error) return [{ ...q, status: "failed", error }];
+    if (!sameGrant || !matchesOrigin(q.origin, snapshot)) return [];
+    const record = snapshot.feeds.find(
+      (feed) => feed.id === q.operation.recordId,
+    );
+    if (
+      record &&
+      q.operation.kind !== "create" &&
+      !canEditSharedFeed(snapshot, record)
+    )
+      return [{ ...q, status: "failed", error: "record_forbidden" }];
     if (
       q.status === "accepted" &&
       q.receiptRevision &&
@@ -224,16 +285,21 @@ export function applySnapshot(
       return [];
     return [q];
   });
-  // Never overwrite a private editor with network data. Old grant/history drafts
-  // remain readable but require explicit review before they can be submitted.
+  // A private editor survives only inside its immutable original grant. Old
+  // family data must never become a new family's editable recovery payload.
   return {
     ...state,
     snapshot,
     queue,
+    draft:
+      sameGrant && matchesOrigin(state.draft?.origin, snapshot)
+        ? state.draft
+        : null,
     acknowledgedRevision: sameGrant ? state.acknowledgedRevision : null,
   };
 }
 export function projectedFeeds(state: PilotState, author: string): PilotFeed[] {
+  if (state.transition) return [];
   const feeds = new Map<string, PilotFeed>(
     state.snapshot?.feeds.map((f) => [f.id, f]) ?? [],
   );
@@ -241,6 +307,7 @@ export function projectedFeeds(state: PilotState, author: string): PilotFeed[] {
     const op = q.operation;
     if (
       q.status === "failed" ||
+      !matchesOrigin(q.origin, state.snapshot) ||
       op.historyId !== state.snapshot?.historyId ||
       op.membershipId !== state.snapshot.family.membershipId
     )
@@ -274,9 +341,21 @@ export function projectedFeeds(state: PilotState, author: string): PilotFeed[] {
 
 export function parseStoredPilot(raw: string | null): PilotState {
   if (!raw) return emptyPilotState();
-  const state = JSON.parse(raw) as PilotState;
+  const parsed = JSON.parse(raw);
+  // The previous pilot did not bind drafts/outbox payloads to their source
+  // family and author. Those payloads cannot be safely migrated or recovered.
+  if (parsed.schema === 1) {
+    const migrated = emptyPilotState();
+    if (parsed.snapshot) {
+      revision(parsed.snapshot.revision);
+      originForSnapshot(parsed.snapshot);
+      migrated.snapshot = parsed.snapshot;
+    }
+    return migrated;
+  }
+  const state = parsed as PilotState;
   if (
-    state.schema !== 1 ||
+    state.schema !== 2 ||
     !Array.isArray(state.queue) ||
     state.queue.length > 200 ||
     !("snapshot" in state) ||
@@ -288,9 +367,25 @@ export function parseStoredPilot(raw: string | null): PilotState {
       !q.operation?.operationId ||
       !q.operation.membershipId ||
       !q.operation.historyId ||
+      !q.origin ||
       !["pending", "accepted", "failed"].includes(q.status)
     )
       throw new Error("local_data_invalid");
   if (state.snapshot) revision(state.snapshot.revision);
-  return state;
+  if (
+    state.transition &&
+    (!state.transition.operationId ||
+      !state.transition.userId ||
+      !state.transition.path?.startsWith("/v1/") ||
+      !["pending", "committed", "rejected"].includes(state.transition.phase))
+  )
+    throw new Error("local_data_invalid");
+  return {
+    ...state,
+    transition: state.transition ?? null,
+    draft: matchesOrigin(state.draft?.origin, state.snapshot)
+      ? state.draft
+      : null,
+    queue: state.queue.filter((q) => matchesOrigin(q.origin, state.snapshot)),
+  };
 }

@@ -38,6 +38,9 @@ var config = PilotConfiguration.Load(builder.Configuration);
 builder.Services.AddSingleton(config);
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<FamilyService>();
+builder.Services.AddAccountIdentityDeletion(builder.Configuration, config);
+builder.Services.AddScoped<DeletionProcessor>();
+if (builder.Configuration.GetValue("AccountDeletion:WorkerEnabled", true)) builder.Services.AddHostedService<DeletionWorker>();
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer(options =>
 {
     options.Authority = config.Entra.Authority;
@@ -136,7 +139,7 @@ app.UseAuthentication();
 app.UseRateLimiter();
 app.UseAuthorization();
 app.MapGet("/health/live", () => Results.Json(new { status = "ok" })).DisableRateLimiting();
-app.MapGet("/join", JoinLanding.Render);
+app.MapPost("/v1/account-deletion-status", (DeletionStatusRequest request, FamilyService service, CancellationToken ct) => service.DeletionStatus(request, ct));
 var api = app.MapGroup("/v1").RequireAuthorization();
 api.AddEndpointFilter(async (context, next) =>
 {
@@ -156,8 +159,10 @@ api.MapGet("/families/{familyId:guid}/snapshot", async (Guid familyId, HttpConte
 });
 api.MapPost("/families/{familyId:guid}/invitations", (Guid familyId, ClaimsPrincipal user, CreateInvitationRequest request, FamilyService service, CancellationToken ct) =>
     service.CreateInvitation(config.Admit(user), familyId, request, ct)).RequireRateLimiting("sensitive");
-api.MapPost("/invitations/accept", (ClaimsPrincipal user, AcceptInvitationRequest request, FamilyService service, CancellationToken ct) =>
-    service.AcceptInvitation(config.Admit(user), request, ct)).RequireRateLimiting("sensitive");
+api.MapPost("/invitations/{invitationId:guid}/accept", (Guid invitationId, ClaimsPrincipal user, OperationRequest request, FamilyService service, CancellationToken ct) =>
+    service.AcceptInvitation(config.Admit(user), invitationId, request, ct)).RequireRateLimiting("sensitive");
+api.MapPost("/invitations/{invitationId:guid}/decline", (Guid invitationId, ClaimsPrincipal user, OperationRequest request, FamilyService service, CancellationToken ct) =>
+    service.DeclineInvitation(config.Admit(user), invitationId, request, ct)).RequireRateLimiting("sensitive");
 api.MapPost("/families/{familyId:guid}/invitations/{invitationId:guid}/revoke", (Guid familyId, Guid invitationId, ClaimsPrincipal user, OperationRequest request, FamilyService service, CancellationToken ct) =>
     service.RevokeInvitation(config.Admit(user), familyId, invitationId, request, ct));
 api.MapPost("/families/{familyId:guid}/members/{userId:guid}/remove", (Guid familyId, Guid userId, ClaimsPrincipal user, OperationRequest request, FamilyService service, CancellationToken ct) =>
@@ -166,6 +171,18 @@ api.MapPost("/families/{familyId:guid}/leave", (Guid familyId, ClaimsPrincipal u
     service.Leave(config.Admit(user), familyId, request, ct));
 api.MapPost("/families/{familyId:guid}/feed-operations", (Guid familyId, ClaimsPrincipal user, FeedOperation request, FamilyService service, CancellationToken ct) =>
     service.ApplyFeed(config.Admit(user), familyId, request, ct));
+api.MapPost("/families/{familyId:guid}/profile", (Guid familyId, ClaimsPrincipal user, ProfileRequest request, FamilyService service, CancellationToken ct) =>
+    service.UpdateProfile(config.Admit(user), familyId, request, ct));
+api.MapPost("/families/{familyId:guid}/ownership-transfer", (Guid familyId, ClaimsPrincipal user, NominateOwnerRequest request, FamilyService service, CancellationToken ct) =>
+    service.NominateOwner(config.Admit(user), familyId, request, ct));
+api.MapPost("/families/{familyId:guid}/ownership-transfer/{transferId:guid}/accept", (Guid familyId, Guid transferId, ClaimsPrincipal user, OperationRequest request, FamilyService service, CancellationToken ct) =>
+    service.AcceptOwnership(config.Admit(user), familyId, transferId, request, ct));
+api.MapPost("/families/{familyId:guid}/ownership-transfer/{transferId:guid}/cancel", (Guid familyId, Guid transferId, ClaimsPrincipal user, OperationRequest request, FamilyService service, CancellationToken ct) =>
+    service.CancelOwnership(config.Admit(user), familyId, transferId, request, ct));
+api.MapPost("/families/{familyId:guid}/close", (Guid familyId, ClaimsPrincipal user, OperationRequest request, FamilyService service, CancellationToken ct) =>
+    service.CloseFamily(config.Admit(user), familyId, request, ct)).RequireRateLimiting("sensitive");
+api.MapPost("/account/delete", (ClaimsPrincipal user, DeleteAccountRequest request, FamilyService service, CancellationToken ct) =>
+    service.DeleteAccount(config.Admit(user), request, ct)).RequireRateLimiting("sensitive");
 app.Run();
 
 static async Task Error(HttpContext context, int status, string code)

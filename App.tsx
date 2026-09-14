@@ -10,7 +10,6 @@ import {
   Platform,
   useWindowDimensions,
   useColorScheme,
-  Linking,
 } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
@@ -169,30 +168,7 @@ function BabyApp({
   const [metric, setMetric] = useState<Metric>("weight");
   const [growthHistoryExpanded, setGrowthHistoryExpanded] = useState(false);
   const [openProfile, setOpenProfile] = useState(false);
-  const [familyInvitation, setFamilyInvitation] = useState("");
   const mainScroll = useRef<ScrollView>(null);
-  useEffect(() => {
-    let mounted = true;
-    function openInvitation(url: string | null) {
-      if (!mounted || !url?.startsWith("mylittledays://family-invite#token="))
-        return;
-      // Keep the token in memory only. Acceptance always needs an explicit action.
-      setFamilyInvitation(url);
-      setSettingsPage("family");
-      setTab("settings");
-      mainScroll.current?.scrollTo({ y: 0, animated: false });
-    }
-    void Linking.getInitialURL()
-      .then(openInvitation)
-      .catch(() => {});
-    const listener = Linking.addEventListener("url", (event) =>
-      openInvitation(event.url),
-    );
-    return () => {
-      mounted = false;
-      listener.remove();
-    };
-  }, []);
   const [finishingFeed, setFinishingFeed] = useState<{
     entry: Entry;
     stoppedAt: string;
@@ -1030,9 +1006,7 @@ function BabyApp({
                 <PrivacySupport onBack={() => setSettingsPage("main")} />
               ) : settingsPage === "family" ? (
                 <FamilyScreen
-                  initialInvitation={familyInvitation}
                   onBack={() => {
-                    setFamilyInvitation("");
                     setSettingsPage("main");
                     mainScroll.current?.scrollTo({ y: 0, animated: false });
                   }}
@@ -1115,7 +1089,6 @@ function BabyApp({
                     }
                     setTab(key);
                     setSettingsPage("main");
-                    setFamilyInvitation("");
                     setMessage("");
                     setDeleting(null);
                   }}

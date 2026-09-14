@@ -48,24 +48,16 @@ public sealed class HttpTests(SqlFixture sql) : IClassFixture<SqlFixture>
     }
 
     [Fact]
-    public async Task LandingDoesNotConsumeTokenAndUsesNoRemoteAssetsAndRatesAreBounded()
+    public async Task LegacyShareLinkIsRemovedAndRatesAreBounded()
     {
         var s = new Scenario(sql);
         s.Config.Pilot.RequestsPerMinute = 2;
         await using var host = new TestHost(s.Config);
         using var client = host.CreateClient();
         var landing = await client.GetAsync("/join");
-        Assert.Equal(HttpStatusCode.OK, landing.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, landing.StatusCode);
         Assert.Equal("no-store", landing.Headers.CacheControl!.ToString());
         Assert.Equal("no-referrer", Assert.Single(landing.Headers.GetValues("Referrer-Policy")));
-        var csp = Assert.Single(landing.Headers.GetValues("Content-Security-Policy"));
-        Assert.Contains("connect-src 'none'", csp);
-        Assert.Contains("frame-ancestors 'none'", csp);
-        var html = await landing.Content.ReadAsStringAsync();
-        Assert.Contains("mylittledays://family-invite#token=", html);
-        Assert.Contains("history.replaceState", html);
-        Assert.DoesNotContain("fetch(", html);
-        Assert.DoesNotContain("src=\"http", html);
         await client.GetAsync("/join");
         var limited = await client.GetAsync("/join");
         Assert.Equal(HttpStatusCode.TooManyRequests, limited.StatusCode);
@@ -85,12 +77,12 @@ public sealed class HttpTests(SqlFixture sql) : IClassFixture<SqlFixture>
         var familyResponse = await owner.PostAsJsonAsync("/v1/families", new CreateFamilyRequest(Guid.NewGuid(), "Test baby"));
         familyResponse.EnsureSuccessStatusCode();
         var family = (await familyResponse.Content.ReadFromJsonAsync<FamilySummary>())!;
-        var inviteResponse = await owner.PostAsJsonAsync($"/v1/families/{family.Id}/invitations", new CreateInvitationRequest(Guid.NewGuid(), s.Caregiver.Email));
+        var inviteResponse = await owner.PostAsJsonAsync($"/v1/families/{family.Id}/invitations", s.Invitation(family, s.Caregiver.Email));
         inviteResponse.EnsureSuccessStatusCode();
         var invite = (await inviteResponse.Content.ReadFromJsonAsync<InvitationResult>())!;
         using var caregiver = host.CreateClient();
         caregiver.DefaultRequestHeaders.Authorization = new("Bearer", host.Token(s.Caregiver));
-        var accepted = await caregiver.PostAsJsonAsync("/v1/invitations/accept", new AcceptInvitationRequest(Guid.NewGuid(), Scenario.Token(invite)));
+        var accepted = await caregiver.PostAsJsonAsync($"/v1/invitations/{invite.Invitation.Id}/accept", new OperationRequest(Guid.NewGuid()));
         accepted.EnsureSuccessStatusCode();
         var grant = (await accepted.Content.ReadFromJsonAsync<FamilySummary>())!;
         var op = s.CreateFeed(grant);
@@ -103,7 +95,7 @@ public sealed class HttpTests(SqlFixture sql) : IClassFixture<SqlFixture>
         var etag = snapshotResponse.Headers.ETag!;
         caregiver.DefaultRequestHeaders.IfNoneMatch.Add(etag);
         Assert.Equal(HttpStatusCode.NotModified, (await caregiver.GetAsync($"/v1/families/{family.Id}/snapshot")).StatusCode);
-        var removed = await owner.PostAsJsonAsync($"/v1/families/{family.Id}/members/{s.Caregiver.ObjectId}/remove", new OperationRequest(Guid.NewGuid()));
+        var removed = await owner.PostAsJsonAsync($"/v1/families/{family.Id}/members/{s.Caregiver.ObjectId}/remove", s.Context(family, target: grant.MembershipId));
         removed.EnsureSuccessStatusCode();
         var revoked = await caregiver.GetAsync($"/v1/families/{family.Id}/snapshot");
         Assert.Equal(HttpStatusCode.Forbidden, revoked.StatusCode);
@@ -117,6 +109,58 @@ public sealed class HttpTests(SqlFixture sql) : IClassFixture<SqlFixture>
         Assert.Equal(HttpStatusCode.UnprocessableEntity, tooLarge.StatusCode);
     }
 
+    [SqlFact]
+    public async Task DeletionReceiptWorksWithoutLoginAndCannotExposeFamilyOrIdentityData()
+    {
+        var s = new Scenario(sql);
+        await using var host = new TestHost(s.Config, sql.ConnectionString);
+        using var authenticated = host.CreateClient();
+        authenticated.DefaultRequestHeaders.Authorization = new("Bearer", host.Token(s.Owner));
+        var secret = Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N");
+        var request = new DeleteAccountRequest(Guid.NewGuid(), secret);
+        var response = await authenticated.PostAsJsonAsync("/v1/account/delete", request);
+        response.EnsureSuccessStatusCode();
+        var deletion = (await response.Content.ReadFromJsonAsync<AccountDeletion>())!;
+        Assert.Equal(request.OperationId, deletion.DeletionId);
+        Assert.Equal("pending", deletion.Status);
+        using var anonymous = host.CreateClient();
+        var receipt = await anonymous.PostAsJsonAsync("/v1/account-deletion-status", new DeletionStatusRequest(deletion.DeletionId, secret));
+        receipt.EnsureSuccessStatusCode();
+        Assert.Equal(deletion, await receipt.Content.ReadFromJsonAsync<AccountDeletion>());
+        Assert.Equal("no-store", receipt.Headers.CacheControl!.ToString());
+        var body = await receipt.Content.ReadAsStringAsync();
+        Assert.DoesNotContain(s.Owner.Email, body);
+        Assert.DoesNotContain(s.Owner.ObjectId.ToString(), body);
+        Assert.DoesNotContain(secret, body);
+        var wrong = await anonymous.PostAsJsonAsync("/v1/account-deletion-status", new DeletionStatusRequest(deletion.DeletionId, new string('a', 64)));
+        Assert.Equal(HttpStatusCode.NotFound, wrong.StatusCode);
+        var missing = await anonymous.PostAsJsonAsync("/v1/account-deletion-status", new DeletionStatusRequest(Guid.NewGuid(), secret));
+        Assert.Equal(await wrong.Content.ReadAsStringAsync(), await missing.Content.ReadAsStringAsync());
+        var blocked = await authenticated.PostAsJsonAsync("/v1/families", new CreateFamilyRequest(Guid.NewGuid(), "Not created"));
+        Assert.Equal(HttpStatusCode.Gone, blocked.StatusCode);
+        Assert.Equal("account_deleted", (await blocked.Content.ReadFromJsonAsync<ErrorBody>())!.Code);
+    }
+
+    [SqlFact]
+    public async Task RemovingLastBindingKeepsPublicDeletionReceiptAvailableButAdmitsNobody()
+    {
+        var s = new Scenario(sql);
+        var deletedUser = s.Owner;
+        var secret = Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N");
+        var deletion = await s.Call(x => x.DeleteAccount(deletedUser, new(Guid.NewGuid(), secret), default));
+        s.Config.Pilot.Identities = [];
+        var loaded = PilotConfiguration.Load(new ConfigurationBuilder().AddInMemoryCollection(TestHost.Values(s.Config)).Build());
+        Assert.Empty(loaded.Pilot.Identities);
+        await using var host = new TestHost(s.Config, sql.ConnectionString);
+        using var client = host.CreateClient();
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/health/live")).StatusCode);
+        var receipt = await client.PostAsJsonAsync("/v1/account-deletion-status", new DeletionStatusRequest(deletion.DeletionId, secret));
+        receipt.EnsureSuccessStatusCode();
+        Assert.Equal(deletion, await receipt.Content.ReadFromJsonAsync<AccountDeletion>());
+        client.DefaultRequestHeaders.Authorization = new("Bearer", host.Token(deletedUser));
+        await AssertCode(client, HttpStatusCode.Forbidden, "pilot_not_admitted");
+    }
+
     [Fact]
     public void ConfigurationRejectsMissingAndAmbiguousBindingsAndUntrustedEmailClaims()
     {
@@ -126,6 +170,8 @@ public sealed class HttpTests(SqlFixture sql) : IClassFixture<SqlFixture>
         var valid = PilotConfiguration.Load(new ConfigurationBuilder().AddInMemoryCollection(values).Build());
         var principal = new ClaimsPrincipal(new ClaimsIdentity([new Claim("oid", s.Owner.ObjectId.ToString()), new Claim("email", "forged@example.test")]));
         Assert.Equal(s.Owner.Email, valid.Admit(principal).Email);
+        var single = TestHost.Values(s.Config with { Pilot = new PilotSettings { Identities = [s.Owner] } });
+        Assert.Single(PilotConfiguration.Load(new ConfigurationBuilder().AddInMemoryCollection(single).Build()).Pilot.Identities);
         values["Pilot:Identities:1:ObjectId"] = s.Owner.ObjectId.ToString();
         Assert.Throws<InvalidOperationException>(() => PilotConfiguration.Load(new ConfigurationBuilder().AddInMemoryCollection(values).Build()));
     }
@@ -179,7 +225,8 @@ public sealed class TestHost(PilotConfiguration config, string? connection = nul
             ["Entra:MobileClientId"] = config.Entra.MobileClientId.ToString(),
             ["Family:PublicBaseUrl"] = config.Family.PublicBaseUrl,
             ["Family:HistoryId"] = config.Family.HistoryId.ToString(),
-            ["Pilot:RequestsPerMinute"] = config.Pilot.RequestsPerMinute.ToString()
+            ["Pilot:RequestsPerMinute"] = config.Pilot.RequestsPerMinute.ToString(),
+            ["AccountDeletion:WorkerEnabled"] = "false"
         };
         for (var i = 0; i < config.Pilot.Identities.Length; i++)
         {
