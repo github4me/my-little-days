@@ -175,6 +175,8 @@ function fixture(overrides = {}, locale = "en") {
         if (name === "../i18n") return { useI18n: () => ({ locale }) };
         if (name === "../ui") return ui;
         if (name === "./messages") return messages;
+        if (name === "./FamilyScreenView")
+          return load("src/family/FamilyScreenView.tsx");
         if (name === "./useFamilyPilot")
           return { useFamilyPilot: () => controller };
         throw new Error(`Unexpected screen dependency: ${name}`);

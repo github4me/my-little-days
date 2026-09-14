@@ -4,6 +4,7 @@ node_modules/
 dist/
 dist-ios/
 dist-web/
+dist-ui-demo/
 *.log
 .env*
 .DS_Store

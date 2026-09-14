@@ -65,6 +65,7 @@ function SettingsSection({
 }
 
 export default function Settings({
+  familyUiPreview = false,
   initialProfileExpanded = false,
   state,
   avatarUri,
@@ -79,6 +80,7 @@ export default function Settings({
   onOpenPrivacy,
   onOpenFamily,
 }: {
+  familyUiPreview?: boolean;
   initialProfileExpanded?: boolean;
   state: State;
   avatarUri: string | null;
@@ -944,9 +946,15 @@ export default function Settings({
       </SettingsSection>
       <SettingsSection title="家庭邀请试点" busy={busy}>
         <T style={{ color: c.muted, fontSize: 13 }}>
-          独立测试空间，仅使用虚构数据。现有宝宝记录不会上传或共享。
+          {familyUiPreview
+            ? "预览邀请和成员管理界面。仅使用样例，不登录、不联网、不保存。"
+            : "独立测试空间，仅使用虚构数据。现有宝宝记录不会上传或共享。"}
         </T>
-        <Button label="打开家庭邀请试点" secondary onPress={onOpenFamily} />
+        <Button
+          label={familyUiPreview ? "界面预览（无需登录）" : "打开家庭邀请试点"}
+          secondary
+          onPress={onOpenFamily}
+        />
       </SettingsSection>
       <SettingsSection title="隐私与支持" busy={busy}>
         <T style={{ color: c.muted, fontSize: 13 }}>

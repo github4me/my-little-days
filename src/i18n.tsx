@@ -11,6 +11,9 @@ type TranslationValues = Record<string, string | number>;
 const english: Record<string, string> = {
   家庭邀请试点: "Family invitation pilot",
   打开家庭邀请试点: "Open family invitation pilot",
+  "界面预览（无需登录）": "Preview screens — no login",
+  "预览邀请和成员管理界面。仅使用样例，不登录、不联网、不保存。":
+    "Preview invitations and member management with samples only: no sign-in, network requests or saving.",
   "独立测试空间，仅使用虚构数据。现有宝宝记录不会上传或共享。":
     "A separate test space for fictional data only. Your existing baby records are never uploaded or shared.",
   "本机记录无需账号 · 家庭试点为独立测试空间 · 不上传照片":

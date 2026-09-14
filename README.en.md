@@ -36,6 +36,8 @@ Open **More → Family invitation pilot**. This is a separate test space for two
 
 Follow the [Azure pilot setup guide](docs/AZURE-FAMILY-PILOT-SETUP.md) for the .NET 10 API, Azure SQL, customer identity tenant, and operator-verified account bindings. [Server instructions](server/README.md) cover running and testing. Unconfigured builds show setup as incomplete; production browser sign-in is disabled. Source and automated checks do not establish a working Azure deployment or two-iPhone validation. The [pilot contract](docs/FAMILY-PILOT-CONTRACT.md) defines this slice; the rest of the [family-sharing technical plan](docs/FAMILY-SHARING-TECH-PLAN.md) remains a roadmap.
 
+For layout review without Azure or login, use the dedicated [iPhone UI preview](docs/FAMILY-UI-PREVIEW.md). Its eight sample scenarios reuse the real family screens; all actions are simulated in memory and reset on exit. The `ui-preview` build has its own update channel and does not bypass live authentication.
+
 ## Run locally
 
 Use a Node.js version supported by `package.json` (`^22.13.0` or `>=24.3.0`).

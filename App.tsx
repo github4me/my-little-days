@@ -36,6 +36,8 @@ import type { RecordView } from "./src/recordCalendar";
 import Settings from "./src/Settings";
 import PrivacySupport from "./src/PrivacySupport";
 import FamilyScreen from "./src/family/FamilyScreen";
+import FamilyDemoScreen from "./src/family/FamilyDemoScreen";
+import { familyDemoEnabled } from "./src/family/demoConfig";
 import FeedStopButton from "./src/FeedStopButton";
 import FinishFeedDialog from "./src/FinishFeedDialog";
 import { finishFeed } from "./src/feedFinish";
@@ -155,9 +157,9 @@ function BabyApp({
     [fatal, setFatal] = useState(""),
     [message, setMessage] = useState(""),
     [tab, setTab] = useState("today"),
-    [settingsPage, setSettingsPage] = useState<"main" | "privacy" | "family">(
-      "main",
-    ),
+    [settingsPage, setSettingsPage] = useState<
+      "main" | "privacy" | "family" | "family-demo"
+    >("main"),
     [now, setNow] = useState(Date.now()),
     [editor, setEditor] = useState<Entry | null>(null),
     [busy, setBusy] = useState(false),
@@ -1004,6 +1006,13 @@ function BabyApp({
             {tab === "settings" ? (
               settingsPage === "privacy" ? (
                 <PrivacySupport onBack={() => setSettingsPage("main")} />
+              ) : settingsPage === "family-demo" && familyDemoEnabled ? (
+                <FamilyDemoScreen
+                  onBack={() => {
+                    setSettingsPage("main");
+                    mainScroll.current?.scrollTo({ y: 0, animated: false });
+                  }}
+                />
               ) : settingsPage === "family" ? (
                 <FamilyScreen
                   onBack={() => {
@@ -1013,6 +1022,7 @@ function BabyApp({
                 />
               ) : (
                 <Settings
+                  familyUiPreview={familyDemoEnabled}
                   initialProfileExpanded={openProfile}
                   state={state}
                   avatarUri={avatarUri}
@@ -1031,7 +1041,9 @@ function BabyApp({
                   onLanguageChange={changeLanguage}
                   onOpenPrivacy={() => setSettingsPage("privacy")}
                   onOpenFamily={() => {
-                    setSettingsPage("family");
+                    setSettingsPage(
+                      familyDemoEnabled ? "family-demo" : "family",
+                    );
                     mainScroll.current?.scrollTo({ y: 0, animated: false });
                   }}
                   onDarkMode={async (v) => {

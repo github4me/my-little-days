@@ -38,6 +38,8 @@
 
 先按 [Azure 试点设置指南](docs/AZURE-FAMILY-PILOT-SETUP.md) 配置 .NET 10 API、Azure SQL、客户身份租户和核对后的账户绑定；[服务端说明](server/README.md) 包含运行与测试命令。未配置时显示设置未完成，浏览器不提供生产登录。代码、配置模板和自动检查不代表 Azure 已运行或两部 iPhone 已验证。范围以 [试点契约](docs/FAMILY-PILOT-CONTRACT.md) 为准；[完整家庭共享技术计划](docs/FAMILY-SHARING-TECH-PLAN.md) 中的其余内容仍是路线图。
 
+无需 Azure 或登录即可使用专用的 [iPhone 界面预览](docs/FAMILY-UI-PREVIEW.md)：八种样例场景复用实际家庭界面，所有操作只在内存中模拟，退出即重置。`ui-preview` 构建使用独立更新频道，不会绕过真实登录。
+
 ## Windows 上启动
 
 1. 安装 Node.js LTS（建议 Node 24 LTS）、Git、VS Code。

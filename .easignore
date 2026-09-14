@@ -4,6 +4,11 @@ node_modules/
 dist/
 dist-ios/
 dist-web/
+dist-ui-demo/
+server/
+**/bin/
+**/obj/
+**/TestResults/
 *.log
 .env*
 .DS_Store

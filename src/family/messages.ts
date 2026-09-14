@@ -3,6 +3,14 @@ import type { AppLocale } from "../i18n";
 const messages = {
   title: ["家庭邀请试点", "Family invitation pilot"],
   back: ["返回", "Back"],
+  demoNotice: [
+    "仅供界面预览 · 所有账户和记录均为样例。不登录、不联网、不保存；退出或切换场景会重置，真实资料不受影响。",
+    "UI preview only · All accounts and records are samples. No sign-in, network requests or storage. Leaving or changing scenarios resets the demo; real data is untouched.",
+  ],
+  demoConfirmation: [
+    "模拟操作：只改变当前样例画面，不会操作真实账户或记录。",
+    "Simulated action: changes only this sample screen, never real accounts or records.",
+  ],
   pilotNotice: [
     "这是独立的测试空间。请只填写虚构的宝宝资料和瓶喂记录；现有宝宝记录不会上传或共享。",
     "This is a separate test space. Use a fictional baby and bottle feeds only. Your existing baby records are never uploaded or shared.",
