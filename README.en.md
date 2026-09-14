@@ -38,6 +38,8 @@ Follow the [Azure pilot setup guide](docs/AZURE-FAMILY-PILOT-SETUP.md) for the .
 
 The [Bicep deployment guide](docs/AZURE-BICEP-DEPLOYMENT.md) provisions a separate Web App, managed identity and free-offer-only Azure SQL database while reusing the existing Linux B1 plan, without Key Vault. The script defaults to local validation and requires preview/review and explicit deployment approval; identity registration, database initialization and API publication are separate. SQL pauses when its free allowance is exhausted, with no paid fallback. The existing cleanup worker's SQL polling still needs adjustment and live validation.
 
+The [GitHub infrastructure workflow](docs/AZURE-GITHUB-INFRA.md) automatically compiles/tests relevant pushes and PRs. Once configured, trusted-branch pushes also run a read-only Azure preview and wait for environment approval before deployment. Preview and apply use separate OIDC identities without stored Azure secrets; PRs receive no Azure access. Azure identity/permission setup, GitHub variables and actual environment protection rules remain one-time operator steps.
+
 First-invitation setup now reviews the baby profile and feeding, nappy, sleep, growth, milestone and daily-care counts, then up to three family emails and explicit confirmation. In the signed-in native pilot it saves an account-scoped **local-only, not-sent setup**: no family creation or history upload; original records stay unchanged. Running timers block preparation and changed source data requires a new review. The full-history API and main-app sharing integration remain unimplemented; see [the mobile/Azure handoff](docs/FAMILY-OWNER-ONBOARDING.md).
 
 For layout review without Azure or login, use the dedicated [iPhone UI preview](docs/FAMILY-UI-PREVIEW.md). Its nine sample scenarios reuse the real family screens, starting with **First invitation** and a complete fictional seed dataset; all actions are simulated in memory and reset on exit. The `ui-preview` build has its own update channel and does not bypass live authentication.
@@ -127,7 +129,7 @@ With .NET 10, run `dotnet test server/LittleDays.FamilyApi.Tests`. SQL tests run
 - `src/growth.ts`, `assets/who/` — bundled growth references.
 - `src/family/` — separate pilot UI, authentication, wire contracts, cache, drafts, and durable queue.
 - `server/LittleDays.FamilyApi/`, `server/LittleDays.FamilyApi.Tests/` — .NET 10 API, EF SQL migrations, and backend tests.
-- `infra/`, `.github/workflows/` — setup templates, SQL permissions, CI, and manual deployment through a protected environment. Merges do not deploy.
+- `infra/`, `.github/workflows/` — setup templates, SQL permissions and CI; infrastructure changes automatically check/preview then await approval, while API-code deployment remains a separate manual workflow.
 - `src/*.test.ts`, `tests/family-controller.mjs`, `tests/browser.mjs` — unit, pilot controller, and browser tests.
 
 See [Repository Guidelines](AGENTS.md) for contributor conventions.

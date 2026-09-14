@@ -144,8 +144,8 @@ function global:Remove-Item {
     }
     Microsoft.PowerShell.Management\Remove-Item @PSBoundParameters
 }
-function Invoke-Pilot([string]$Mode = 'Validate', [switch]$Approve, [switch]$Capacity) {
-    & $script:fixtureScript -Mode $Mode -ParametersFile $script:fixtureParameters -ApproveDeployment:$Approve -ConfirmExistingPlanCapacity:$Capacity 3>$null
+function Invoke-Pilot([string]$Mode = 'Validate', [switch]$Approve, [switch]$Capacity, [switch]$ReadOnlyPreview) {
+    & $script:fixtureScript -Mode $Mode -ParametersFile $script:fixtureParameters -ApproveDeployment:$Approve -ConfirmExistingPlanCapacity:$Capacity -ReadOnlyPreview:$ReadOnlyPreview 3>$null
 }
 function Assert-Rejected([scriptblock]$Action, [string]$Expected) {
     $rejected = $false
@@ -180,7 +180,38 @@ try {
             Assert-True ($call -notcontains 'register' -and $call -notcontains 'set') 'Unexpected account/provider mutation.'
         }
         Assert-True ($global:pilotAzCalls[-1] -contains 'ResourceIdOnly') 'What-if must use ResourceIdOnly.'
+        Assert-True ($global:pilotAzCalls[-1] -notcontains '--validation-level') 'Default preview validation must remain unchanged.'
         Assert-True ($result.mode -eq 'WhatIf') 'WhatIf should return a preview.'
+    }
+    Test-Case 'ReadOnlyPreview adds ProviderNoRbac to a fresh what-if' {
+        $null = Invoke-Pilot 'WhatIf' -ReadOnlyPreview
+        $preview = $global:pilotAzCalls[-1]
+        Assert-True ($preview -contains '--validation-level') 'Read-only preview must set its validation level explicitly.'
+        Assert-True ($preview[[array]::IndexOf($preview, '--validation-level') + 1] -ceq 'ProviderNoRbac') 'Wrong read-only validation level.'
+    }
+    Test-Case 'ReadOnlyPreview applies to both discovery and actual rerun previews' {
+        Set-ExistingPilot
+        $null = Invoke-Pilot 'WhatIf' -ReadOnlyPreview
+        $previews = @($global:pilotAzCalls | Where-Object { $_[0..2] -join ' ' -eq 'deployment sub what-if' })
+        Assert-True ($previews.Count -eq 2) 'Expected both discovery and actual previews.'
+        foreach ($preview in $previews) {
+            Assert-True ($preview -contains '--validation-level' -and
+                $preview[[array]::IndexOf($preview, '--validation-level') + 1] -ceq 'ProviderNoRbac') 'Every read-only preview must use ProviderNoRbac.'
+        }
+    }
+    Test-Case 'ReadOnlyPreview rejects Validate before invoking az' {
+        Assert-Rejected { Invoke-Pilot 'Validate' -ReadOnlyPreview } 'only with -Mode WhatIf'
+        Assert-True ($global:pilotAzCalls.Count -eq 0) 'Invalid mode must stop before any az call.'
+    }
+    Test-Case 'ReadOnlyPreview rejects Deploy even with both deployment approvals' {
+        Assert-Rejected { Invoke-Pilot 'Deploy' -Approve -Capacity -ReadOnlyPreview } 'only with -Mode WhatIf'
+        Assert-True ($global:pilotAzCalls.Count -eq 0) 'Read-only preview must never enter deployment mode.'
+    }
+    Test-Case 'ReadOnlyPreview failure stops without falling back to Provider validation' {
+        $global:pilotFake.failedCommand = 'deployment sub'
+        Assert-Rejected { Invoke-Pilot 'WhatIf' -ReadOnlyPreview } 'stopped without fallback'
+        $previews = @($global:pilotAzCalls | Where-Object { $_[0..2] -join ' ' -eq 'deployment sub what-if' })
+        Assert-True ($previews.Count -eq 1 -and $previews[0] -contains 'ProviderNoRbac') 'Read-only preview must not retry with a different validation level.'
     }
     Test-Case 'Deploy rejects absent approvals before invoking az' {
         Assert-Rejected { Invoke-Pilot 'Deploy' } 'requires both'
@@ -348,6 +379,7 @@ try {
         $null = Invoke-Pilot 'Deploy' -Approve -Capacity
         $previews = @($global:pilotAzCalls | Where-Object { $_[0..2] -join ' ' -eq 'deployment sub what-if' })
         Assert-True ($previews.Count -eq 2) 'Rerun should validate deterministic IDs and preview actual changes.'
+        Assert-True (@($previews | Where-Object { $_ -contains '--validation-level' }).Count -eq 0) 'Default deployment previews must retain their original validation level.'
         $create = @($global:pilotAzCalls | Where-Object { $_[0..2] -join ' ' -eq 'deployment sub create' })[0]
         Assert-True ($create -contains 'webAppAlreadyExists=true' -and $create -contains 'sqlServerAlreadyExists=true') 'Rerun must skip PUT of existing app/server.'
     }

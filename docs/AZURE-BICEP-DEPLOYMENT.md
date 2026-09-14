@@ -2,6 +2,8 @@
 
 This provisions **hosting infrastructure only**. It does not create customer accounts, publish API code, initialize database tables, enable real-history sharing or release a mobile build. No Key Vault is used. Run the commands yourself only after reviewing the target subscription, permissions, costs and shared-plan capacity. Do not use real baby records for the current controlled pilot.
 
+**Preferred execution is now GitHub Actions:** see [automatic checks and approved deployment](AZURE-GITHUB-INFRA.md). Relevant pushes/PRs trigger checks; configured trusted-branch pushes also preview Azure changes and queue deployment for approval. The commands below remain available locally. Do not run local and GitHub deployments concurrently. The GitHub read-only preview uses `-ReadOnlyPreview` with Azure CLI 2.76+; the ordinary local preview still uses full deployment-permission validation.
+
 ## What is created and reused
 
 | Item                      | Initial deployment                                                                                                                      |

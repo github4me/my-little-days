@@ -1,5 +1,12 @@
 # 验证记录
 
+## GitHub 自动基础设施工作流 · 2026-09-14
+
+- 新增 `Family infrastructure`：相关文件 push/PR 自动编译与测试；配置后，可信分支 push 自动使用独立只读 OIDC 身份进行 Azure 预览，受保护环境审批后由另一身份部署。PR 无 Azure 登录/OIDC 权限；默认云端步骤关闭，不创建 GitHub 环境、Azure 身份或权限。API 代码发布保持原有手动流程。
+- 本机验证通过：8 项实际 Bicep 编译检查、58 项部署脚本模拟测试、20 项 GitHub helper 模拟测试、11 项解析实际 YAML/预览角色的契约检查。测试覆盖 `ProviderNoRbac` 仅用于预览、CLI 版本拦截、事件/分支隔离、身份分离、准确 SHA、跨 job 配置指纹、审批开关、JSON 转义、临时文件清理及不输出管理员详情/令牌。未执行 Azure 资源操作。
+- 独立复核未发现阻塞问题。明确记录环境名称不等于审批保护、预览不等于不可变执行计划、旧审批和配置变化须重新预览。预览角色没有资源写入或数据平面权限；默认预览要求部署权限的问题通过 CLI 2.76+ `ProviderNoRbac` 解决，禁止降级回退。
+- 更新中英文 README 与 [GitHub 设置指南](AZURE-GITHUB-INFRA.md)，保留本机执行作为备用。真实 OIDC 信任、环境审批、RBAC、免费 SQL 可用性及 Azure 部署尚待用户完成一次性设置后验收。本轮无手机/API 逻辑修改，也没有 Expo 或 TestFlight 发布。
+
 ## Bicep 基础设施与部署脚本 · 2026-09-14
 
 - 新增订阅级 Bicep、独立资源组模块、精确出站 IP 的 SQL 防火墙模块，以及默认仅本机验证的 PowerShell 部署脚本。复用 `ProdRG/reticelASP`，不创建或调整计划；新增 Web App/托管身份与免费额度用尽即暂停的 SQL，不创建 Key Vault、付费网络或额外监控资源。

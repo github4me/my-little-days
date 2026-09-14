@@ -4,6 +4,8 @@ Status: setup instructions and deployment templates, not a deployed or device-va
 
 **Bicep hosting setup is available:** use [the deployment guide](AZURE-BICEP-DEPLOYMENT.md) and `infra/deploy-pilot.ps1` to reuse the existing `ProdRG/reticelASP` Linux B1 plan in Australia Southeast and provision a separate Web App/free-offer SQL environment without Key Vault. Validate is local-only; WhatIf is read-only; Deploy requires explicit approval flags. Identity registration, SQL initialization, App Service settings and API-code deployment below are still required. No Azure resources have been deployed or validated by adding these files.
 
+**GitHub execution:** [configure the infrastructure workflow](AZURE-GITHUB-INFRA.md) to check relevant pushes/PRs automatically, preview trusted-branch changes with a read-only identity and apply after environment approval. This is separate from the manual API-code workflow in section 7; neither workflow creates its own Azure permissions or GitHub protections.
+
 **Initial-release secret storage:** no Key Vault resource or vault access role is required. Enter the directory-deletion credential directly in restricted App Service settings (section 6a). SQL uses managed identity and GitHub deployment uses OIDC. Account deletion and its release gates remain required; only secret storage is simplified.
 
 **First-invitation update:** mobile now reviews the owner's current profile/history and can save an account-scoped local setup, without sending it. The new [mobile/Azure handoff](FAMILY-OWNER-ONBOARDING.md) lists configuration values to return and the additional API/mobile activation work. Deploying this guide's feed-only API will **not** enable full-history migration.
@@ -147,7 +149,7 @@ To enable the separate manual deployment workflow:
 4. Complete SQL bootstrap/migrations and App Service settings first. Dispatch **Deploy family pilot manually** with the full reviewed 40-character commit SHA and the explicit database-readiness checkbox. It reruns CI for that SHA, downloads that run's published artifact, waits at the protected environment, then deploys it. It does not run migrations or provision resources. The reviewer should compare SHA, CI, migration record and target Web App before approving.
 5. The final `/health/live` check proves only process liveness. Complete authenticated SQL and two-device checks below before admitting the pilot as usable. Retain the previous API artifact/release SHA for rollback; a code rollback is safe only when the database remains compatible. The invitation-v2 migration explicitly refuses downgrade because removing deletion barriers could restore access. Any database restore requires a reviewed procedure that replays deletions and revocations before traffic resumes.
 
-There are no deployment triggers for `push`, `master`, `main`, PR merge, release or schedule. These templates have not been exercised against your Azure subscription. Leave `FAMILY_PILOT_DEPLOY_ENABLED` unset until the environment protections and exact resource scope have been checked.
+The API-code deployment workflow has no triggers for `push`, `master`, `main`, PR merge, release or schedule. The separate infrastructure workflow can start on relevant pushes, with Azure apply gated by its own protected environment. These templates have not been exercised against your Azure subscription. Leave `FAMILY_PILOT_DEPLOY_ENABLED` unset until the API environment protections and exact resource scope have been checked.
 
 ## 8. Make a new native pilot build
 

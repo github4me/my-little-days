@@ -7,7 +7,8 @@ param(
     [string]$SubscriptionId = '4768a858-f23f-4a39-bb64-eabc9c142627',
     [string]$DeploymentName = 'my-little-days-pilot',
     [switch]$ApproveDeployment,
-    [switch]$ConfirmExistingPlanCapacity
+    [switch]$ConfirmExistingPlanCapacity,
+    [switch]$ReadOnlyPreview
 )
 
 $ErrorActionPreference = 'Stop'
@@ -47,6 +48,7 @@ function Normalize-Location([string]$Value) { return ($Value -replace '\s', '').
 
 Assert-Guid $SubscriptionId 'SubscriptionId'
 if ($DeploymentName -notmatch '^[A-Za-z0-9][A-Za-z0-9._()-]{0,63}$') { throw 'DeploymentName is invalid.' }
+if ($ReadOnlyPreview -and $Mode -ne 'WhatIf') { throw '-ReadOnlyPreview is supported only with -Mode WhatIf.' }
 if ($Mode -eq 'Deploy' -and (-not $ApproveDeployment -or -not $ConfirmExistingPlanCapacity)) {
     throw 'Deploy requires both -ApproveDeployment and -ConfirmExistingPlanCapacity. Run WhatIf and review the shared plan capacity first.'
 }
@@ -239,7 +241,9 @@ if ($groupExists) {
 $deploymentArguments = @('--name', $DeploymentName, '--location', $values.location, '--template-file', $frozenTemplateFile,
     '--parameters', "@$frozenParametersFile")
 function Get-PreviewChanges([string[]]$Arguments) {
-    $preview = Invoke-CloudJson (@('deployment', 'sub', 'what-if') + $Arguments + @('--no-pretty-print', '--result-format', 'ResourceIdOnly'))
+    $previewArguments = @('deployment', 'sub', 'what-if') + $Arguments + @('--no-pretty-print', '--result-format', 'ResourceIdOnly')
+    if ($ReadOnlyPreview) { $previewArguments += @('--validation-level', 'ProviderNoRbac') }
+    $preview = Invoke-CloudJson $previewArguments
     if ($preview['status'] -cne 'Succeeded' -or $null -eq $preview['changes']) { throw 'Azure what-if did not return a successful resource preview. Deployment stopped.' }
     if (@($preview.changes | Where-Object { $_.changeType -eq 'Delete' }).Count -gt 0) { throw 'What-if proposes deletion. Deployment stopped for review.' }
     return $preview.changes

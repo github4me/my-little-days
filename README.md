@@ -40,6 +40,8 @@
 
 基础设施可按 [Bicep 部署指南](docs/AZURE-BICEP-DEPLOYMENT.md) 创建：复用现有 Linux B1 计划，单独建立 Web App、托管身份及仅免费额度的 Azure SQL，不使用 Key Vault。脚本默认只做本机验证，部署须先预览并明确确认；身份注册、数据库初始化和 API 发布另行完成。免费 SQL 耗尽即暂停，不自动转付费；现有清理任务的数据库轮询仍需调整及真实环境验证。
 
+[GitHub 基础设施工作流](docs/AZURE-GITHUB-INFRA.md) 会在相关文件推送或 PR 更新后自动编译、测试；配置完成后，可信分支的推送会自动只读预览 Azure 变更，待环境审批后部署。预览与部署使用不同 OIDC 身份，不保存 Azure 密钥；PR 不获得 Azure 权限。首次仍需设置 Azure 身份/权限、GitHub 变量及真正的环境审批规则。
+
 首次邀请现可查看宝宝资料及喂养、尿布、睡眠、成长、里程碑和日常照护记录数量，填写最多三个邮箱并确认。正常原生试点登录后只能保存为账户隔离的**本机准备内容，尚未发送**；不创建家庭、不上传历史，原有记录不变。进行中的计时须先结束，确认前资料变化须重新查看。完整历史 API 和主应用共享数据接入尚未实现，详见 [手机端与 Azure 交接说明](docs/FAMILY-OWNER-ONBOARDING.md)。
 
 无需 Azure 或登录即可使用专用的 [iPhone 界面预览](docs/FAMILY-UI-PREVIEW.md)：九种样例场景复用实际家庭界面，默认从「首次邀请」查看完整虚构历史的创建流程。所有操作只在内存中模拟，退出即重置。`ui-preview` 构建使用独立更新频道，不会绕过真实登录。
@@ -141,7 +143,7 @@ npm run export:web
 - `src/growth.ts`、`assets/who/`：本地 WHO 参考数据。
 - `src/family/`：独立试点界面、身份认证、网络契约、缓存、草稿和持久队列。
 - `server/LittleDays.FamilyApi/`、`server/LittleDays.FamilyApi.Tests/`：.NET 10 API、EF SQL 迁移与后端测试。
-- `infra/`、`.github/workflows/`：设置模板、SQL 权限脚本、CI 和受保护环境下的手动试点部署；不会因合并代码自动部署。
+- `infra/`、`.github/workflows/`：设置模板、SQL 权限脚本、CI；基础设施改动自动检查及预览后等待审批，API 代码仍单独手动部署。
 
 ## 当前范围
 

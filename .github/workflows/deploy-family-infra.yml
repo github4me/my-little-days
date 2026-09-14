@@ -1,0 +1,162 @@
+name: Family infrastructure
+
+on:
+  push:
+    paths:
+      - "infra/bicep/**"
+      - "infra/deploy-pilot.ps1"
+      - "infra/github-infra.ps1"
+      - "infra/github-infra-preview-role.example.json"
+      - "infra/tests/**"
+      - ".github/workflows/deploy-family-infra.yml"
+  pull_request:
+    paths:
+      - "infra/bicep/**"
+      - "infra/deploy-pilot.ps1"
+      - "infra/github-infra.ps1"
+      - "infra/github-infra-preview-role.example.json"
+      - "infra/tests/**"
+      - ".github/workflows/deploy-family-infra.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Compile and test without Azure credentials
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Install the reviewed Bicep compiler
+        run: az bicep install --version v0.46.1
+      - name: Check compiled resources and deployment guards
+        shell: pwsh
+        run: |
+          ./infra/tests/bicep.Tests.ps1
+          ./infra/tests/deploy-pilot.Tests.ps1
+          ./infra/tests/github-infra.Tests.ps1
+      - name: Check workflow permissions and triggers
+        run: node --test infra/tests/github-workflow.test.cjs
+
+  preview:
+    name: Preview Azure changes with a read-only identity
+    needs: validate
+    if: >-
+      github.event_name != 'pull_request' &&
+      github.ref == format('refs/heads/{0}', vars.FAMILY_INFRA_BRANCH || github.event.repository.default_branch) &&
+      vars.FAMILY_INFRA_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    environment: family-infra-preview
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      configuration_hash: ${{ steps.preview.outputs.configuration_hash }}
+    env:
+      FAMILY_INFRA_BRANCH: ${{ vars.FAMILY_INFRA_BRANCH || github.event.repository.default_branch }}
+      FAMILY_INFRA_ENABLED: ${{ vars.FAMILY_INFRA_ENABLED }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      AZURE_INFRA_PREVIEW_CLIENT_ID: ${{ vars.AZURE_INFRA_PREVIEW_CLIENT_ID }}
+      AZURE_INFRA_DEPLOY_CLIENT_ID: ${{ vars.AZURE_INFRA_DEPLOY_CLIENT_ID }}
+      SQL_ADMIN_OBJECT_ID: ${{ vars.SQL_ADMIN_OBJECT_ID }}
+      SQL_ADMIN_DISPLAY_NAME: ${{ vars.SQL_ADMIN_DISPLAY_NAME }}
+      SQL_ADMIN_PRINCIPAL_TYPE: ${{ vars.SQL_ADMIN_PRINCIPAL_TYPE || 'User' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Check current revision and show only OIDC binding claims
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const current = await github.rest.git.getRef({ ...context.repo, ref: `heads/${process.env.FAMILY_INFRA_BRANCH}` });
+            if (current.data.object.sha !== context.sha) throw new Error('This run is stale. Use the current trusted-branch revision.');
+            const token = await core.getIDToken('api://AzureADTokenExchange');
+            const claims = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8'));
+            core.info(JSON.stringify({ issuer: claims.iss, subject: claims.sub, audience: claims.aud }));
+      - name: Check configuration before Azure login
+        shell: pwsh
+        run: ./infra/github-infra.ps1 -Mode WhatIf -CheckOnly
+      - name: Install the reviewed Bicep compiler
+        run: az bicep install --version v0.46.1
+      - uses: azure/login@935127ca5bb3c4b02c9c2c10060028383878f33f # v3
+        with:
+          client-id: ${{ vars.AZURE_INFRA_PREVIEW_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Run read-only ARM preview and write the review summary
+        id: preview
+        shell: pwsh
+        run: ./infra/github-infra.ps1 -Mode WhatIf
+
+  deploy:
+    name: Apply infrastructure after environment approval
+    needs: preview
+    if: >-
+      github.event_name != 'pull_request' &&
+      github.ref == format('refs/heads/{0}', vars.FAMILY_INFRA_BRANCH || github.event.repository.default_branch) &&
+      vars.FAMILY_INFRA_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    # Configure required reviewers and the exact allowed branch in GitHub Settings.
+    # Merely naming an environment does NOT create its approval protection.
+    environment: family-infra
+    concurrency:
+      group: family-infrastructure
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      FAMILY_INFRA_BRANCH: ${{ vars.FAMILY_INFRA_BRANCH || github.event.repository.default_branch }}
+      FAMILY_INFRA_ENABLED: ${{ vars.FAMILY_INFRA_ENABLED }}
+      FAMILY_INFRA_APPLY_ENABLED: ${{ vars.FAMILY_INFRA_APPLY_ENABLED }}
+      FAMILY_INFRA_CAPACITY_CONFIRMED: ${{ vars.FAMILY_INFRA_CAPACITY_CONFIRMED }}
+      EXPECTED_CONFIGURATION_HASH: ${{ needs.preview.outputs.configuration_hash }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      AZURE_INFRA_PREVIEW_CLIENT_ID: ${{ vars.AZURE_INFRA_PREVIEW_CLIENT_ID }}
+      AZURE_INFRA_DEPLOY_CLIENT_ID: ${{ vars.AZURE_INFRA_DEPLOY_CLIENT_ID }}
+      SQL_ADMIN_OBJECT_ID: ${{ vars.SQL_ADMIN_OBJECT_ID }}
+      SQL_ADMIN_DISPLAY_NAME: ${{ vars.SQL_ADMIN_DISPLAY_NAME }}
+      SQL_ADMIN_PRINCIPAL_TYPE: ${{ vars.SQL_ADMIN_PRINCIPAL_TYPE || 'User' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Reject stale approvals and show only OIDC binding claims
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const current = await github.rest.git.getRef({ ...context.repo, ref: `heads/${process.env.FAMILY_INFRA_BRANCH}` });
+            if (current.data.object.sha !== context.sha) throw new Error('A newer commit exists. Review and approve its run instead.');
+            const token = await core.getIDToken('api://AzureADTokenExchange');
+            const claims = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8'));
+            core.info(JSON.stringify({ issuer: claims.iss, subject: claims.sub, audience: claims.aud }));
+      - name: Check approval settings and unchanged preview configuration
+        shell: pwsh
+        run: ./infra/github-infra.ps1 -Mode Deploy -CheckOnly
+      - name: Install the reviewed Bicep compiler
+        run: az bicep install --version v0.46.1
+      - uses: azure/login@935127ca5bb3c4b02c9c2c10060028383878f33f # v3
+        with:
+          client-id: ${{ vars.AZURE_INFRA_DEPLOY_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Apply the reviewed revision with existing deployment guards
+        shell: pwsh
+        run: ./infra/github-infra.ps1 -Mode Deploy
