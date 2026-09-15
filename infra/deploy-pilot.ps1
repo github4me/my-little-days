@@ -46,6 +46,18 @@ function Assert-Owned([System.Collections.IDictionary]$Resource) {
 
 function Normalize-Location([string]$Value) { return ($Value -replace '\s', '').ToLowerInvariant() }
 
+function Test-DotNet10LinuxRuntime([object]$Runtime) {
+    # Older CLI versions return names; 2.90 returns structured catalogue entries.
+    # Match exact configurations, never version prefixes or preview releases.
+    if ($Runtime -is [string]) {
+        return $Runtime -in @('DOTNETCORE:10.0', 'DOTNETCORE|10.0')
+    }
+    if ($Runtime -isnot [System.Collections.IDictionary]) { return $false }
+    return ($Runtime['os'] -is [string] -and $Runtime['os'] -eq 'Linux' -and
+        $Runtime['config'] -is [string] -and $Runtime['config'] -eq 'DOTNETCORE|10.0' -and
+        $Runtime['support'] -is [string] -and $Runtime['support'] -in @('Active', 'Near'))
+}
+
 Assert-Guid $SubscriptionId 'SubscriptionId'
 if ($DeploymentName -notmatch '^[A-Za-z0-9][A-Za-z0-9._()-]{0,63}$') { throw 'DeploymentName is invalid.' }
 if ($ReadOnlyPreview -and $Mode -ne 'WhatIf') { throw '-ReadOnlyPreview is supported only with -Mode WhatIf.' }
@@ -156,7 +168,9 @@ if ($planErrors.Count) {
 }
 Write-Warning "The existing B1 instance hosts $($plan.numberOfSites) app(s). Little Days shares its CPU and memory; this script does not resize the plan."
 $runtimes = @(Invoke-CloudJson @('webapp', 'list-runtimes', '--os', 'linux'))
-if ($runtimes -notcontains 'DOTNETCORE:10.0') { throw 'The selected subscription does not advertise the .NET 10 Linux App Service runtime. Deployment stopped.' }
+if (@($runtimes | Where-Object { Test-DotNet10LinuxRuntime $_ }).Count -eq 0) {
+    throw 'Could not confirm a supported .NET 10 Linux App Service runtime in the Azure CLI catalogue. Deployment stopped.'
+}
 
 $existing = @()
 $sites = @()

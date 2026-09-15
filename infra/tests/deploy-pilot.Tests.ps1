@@ -285,6 +285,58 @@ try {
         $global:pilotFake.runtimes = @('DOTNETCORE:8.0')
         Assert-Rejected { Invoke-Pilot 'Deploy' -Approve -Capacity } 'runtime'
     }
+    foreach ($runtime in @('DOTNETCORE:10.0', 'DOTNETCORE|10.0')) {
+        Test-Case "Legacy Linux runtime catalogue accepts exact $runtime" {
+            $global:pilotFake.runtimes = @($runtime)
+            Assert-True ((Invoke-Pilot 'WhatIf' -ReadOnlyPreview).mode -eq 'WhatIf') 'Supported runtime should reach read-only preview.'
+        }
+    }
+    foreach ($support in @('Active', 'Near')) {
+        Test-Case "Structured CLI runtime catalogue accepts supported Linux .NET 10 ($support)" {
+            $global:pilotFake.runtimes = @(@{
+                os = 'Linux'; runtime = '.NET'; version = '10.0'; config = 'DOTNETCORE|10.0'
+                support = $support; end_of_life = '2028-11-14'
+            })
+            Assert-True ((Invoke-Pilot 'WhatIf' -ReadOnlyPreview).mode -eq 'WhatIf') 'Structured supported runtime should reach read-only preview.'
+        }
+    }
+    Test-Case 'Mixed catalogue finds the supported runtime without accepting other stacks' {
+        $global:pilotFake.runtimes = @(
+            'PYTHON:3.13', $null,
+            @{ os = 'Windows'; config = 'DOTNETCORE|10.0'; support = 'Active' },
+            @{ os = 'Linux'; config = 'DOTNETCORE|10.0'; support = 'Active' }
+        )
+        Assert-True ((Invoke-Pilot 'WhatIf').mode -eq 'WhatIf') 'Mixed catalogue lost its valid Linux entry.'
+    }
+    foreach ($runtime in @('DOTNETCORE|8.0', 'DOTNETCORE:11.0', 'DOTNETCORE|10.0-preview.1', 'DOTNETCORE|10.0.1', 'DOTNETCORE|10.0x')) {
+        Test-Case "Unsupported legacy runtime remains blocked: $runtime" {
+            $global:pilotFake.runtimes = @($runtime)
+            Assert-Rejected { Invoke-Pilot 'Deploy' -Approve -Capacity } 'runtime'
+        }
+    }
+    foreach ($invalid in @(
+        @{ name = 'Windows'; value = @{ os = 'Windows'; config = 'DOTNETCORE|10.0'; support = 'Active' } },
+        @{ name = 'EOL'; value = @{ os = 'Linux'; config = 'DOTNETCORE|10.0'; support = 'EOL' } },
+        @{ name = 'unknown support'; value = @{ os = 'Linux'; config = 'DOTNETCORE|10.0'; support = 'n/a' } },
+        @{ name = 'missing support'; value = @{ os = 'Linux'; config = 'DOTNETCORE|10.0' } },
+        @{ name = 'missing OS'; value = @{ config = 'DOTNETCORE|10.0'; support = 'Active' } },
+        @{ name = 'missing config'; value = @{ os = 'Linux'; version = '10.0'; support = 'Active' } },
+        @{ name = 'preview'; value = @{ os = 'Linux'; config = 'DOTNETCORE|10.0-preview.1'; support = 'Active' } },
+        @{ name = 'array config'; value = @{ os = 'Linux'; config = @('DOTNETCORE|10.0'); support = 'Active' } },
+        @{ name = 'array OS'; value = @{ os = @('Linux'); config = 'DOTNETCORE|10.0'; support = 'Active' } },
+        @{ name = 'array support'; value = @{ os = 'Linux'; config = 'DOTNETCORE|10.0'; support = @('Active') } },
+        @{ name = 'null'; value = $null },
+        @{ name = 'number'; value = 10 }
+    )) {
+        Test-Case "Invalid structured runtime remains blocked: $($invalid.name)" {
+            $global:pilotFake.runtimes = @($invalid.value)
+            Assert-Rejected { Invoke-Pilot 'Deploy' -Approve -Capacity } 'runtime'
+        }
+    }
+    Test-Case 'Empty runtime catalogue remains blocked' {
+        $global:pilotFake.runtimes = @()
+        Assert-Rejected { Invoke-Pilot 'Deploy' -Approve -Capacity } 'runtime'
+    }
     Test-Case 'Unowned existing resource group is rejected' {
         $global:pilotFake.groupExists = $true
         $global:pilotFake.group.tags = @{}
