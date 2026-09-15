@@ -118,6 +118,8 @@ function Bars({
   );
 }
 type RecordsProps = {
+  authorLabel?: (id: string) => string;
+  canEdit?: (id: string) => boolean;
   entries: Entry[];
   now: number;
   onEdit: (e: Entry) => void;
@@ -260,12 +262,9 @@ function BarRecords({
   now,
   onEdit,
   onDelete,
-}: {
-  entries: Entry[];
-  now: number;
-  onEdit: (e: Entry) => void;
-  onDelete: (e: Entry) => void;
-}) {
+  authorLabel,
+  canEdit,
+}: RecordsProps) {
   const c = useContext(Theme),
     [kind, setKind] = useState<Kind>("feed"),
     [unit, setUnit] = useState("mL"),
@@ -683,6 +682,11 @@ function BarRecords({
                                 })}
                               </T>
                             ) : null}
+                            {authorLabel ? (
+                              <T raw style={{ fontSize: 11, color: c.muted }}>
+                                {authorLabel(e.id)}
+                              </T>
+                            ) : null}
                             {e.note ? (
                               <T
                                 numberOfLines={1}
@@ -715,6 +719,7 @@ function BarRecords({
                                 ),
                               })}
                               onPress={() => onEdit(e)}
+                              disabled={canEdit && !canEdit(e.id)}
                               style={{
                                 minHeight: 36,
                                 justifyContent: "center",
@@ -737,6 +742,7 @@ function BarRecords({
                                 ),
                               })}
                               onPress={() => onDelete(e)}
+                              disabled={canEdit && !canEdit(e.id)}
                               style={{
                                 minHeight: 36,
                                 justifyContent: "center",

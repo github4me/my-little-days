@@ -19,6 +19,7 @@ import type { FeedDraft } from "./pilotState";
 import {
   familyErrorMessage,
   familyMessage,
+  fullFamilyMessage,
   familyNoticeMessage,
   type FamilyMessageKey,
 } from "./messages";
@@ -425,7 +426,10 @@ export default function FamilyScreenView({
 }) {
   const c = useContext(Theme);
   const { locale } = useI18n();
-  const m: Translate = (key, values) => familyMessage(locale, key, values);
+  const m: Translate = (key, values) =>
+    demo
+      ? familyMessage(locale, key, values)
+      : fullFamilyMessage(locale, key, values);
   const [babyName, setBabyName] = useState("");
   const [createConsent, setCreateConsent] = useState(false);
   const [profileName, setProfileName] = useState("");
@@ -716,7 +720,7 @@ export default function FamilyScreenView({
             <Button
               label={m("signOut")}
               secondary
-              disabled={busy}
+              disabled={busy || pilot.activationPending}
               onPress={() =>
                 confirm(
                   "signOutTitle",
@@ -798,7 +802,7 @@ export default function FamilyScreenView({
             <Button
               label={m("signOut")}
               secondary
-              disabled={busy}
+              disabled={busy || pilot.activationPending}
               onPress={() =>
                 confirm(
                   "signOutTitle",
@@ -849,6 +853,19 @@ export default function FamilyScreenView({
               </T>
               <Button
                 label={m(pilot.syncing ? "refreshing" : "refresh")}
+                disabled={busy || pilot.syncing}
+                onPress={() => void run(pilot.refresh)}
+              />
+            </Card>
+          ) : !demo && pilot.sharedMode && !pilot.ready ? (
+            <Card>
+              <T raw>
+                {locale === "zh-CN"
+                  ? "家庭记录暂不可见。请联网刷新权限与完整记录后继续。"
+                  : "Family records are hidden until access and the complete history have been refreshed."}
+              </T>
+              <Button
+                label={m("refresh")}
                 disabled={busy || pilot.syncing}
                 onPress={() => void run(pilot.refresh)}
               />
@@ -914,34 +931,35 @@ export default function FamilyScreenView({
                   ))
                 )}
               </Disclosure>
-              {ownerSetup ?? (
-                <Disclosure title={m("createSection")}>
-                  <T raw style={styles.muted(c.muted)}>
-                    {m("oneFamily")}
-                  </T>
-                  <Input
-                    label={m("babyName")}
-                    value={babyName}
-                    onChangeText={setBabyName}
-                    placeholder={m("babyNamePlaceholder")}
-                    maxLength={60}
-                    editable={!busy}
-                  />
-                  <Consent
-                    checked={createConsent}
-                    onChange={setCreateConsent}
-                    disabled={busy}
-                    label={m("createConsent")}
-                  />
-                  <Button
-                    label={m("createFamily")}
-                    disabled={busy || !babyName.trim() || !createConsent}
-                    onPress={() =>
-                      void run(() => pilot.createFamily(babyName.trim()))
-                    }
-                  />
-                </Disclosure>
-              )}
+              {ownerSetup ??
+                (demo ? (
+                  <Disclosure title={m("createSection")}>
+                    <T raw style={styles.muted(c.muted)}>
+                      {m("oneFamily")}
+                    </T>
+                    <Input
+                      label={m("babyName")}
+                      value={babyName}
+                      onChangeText={setBabyName}
+                      placeholder={m("babyNamePlaceholder")}
+                      maxLength={60}
+                      editable={!busy}
+                    />
+                    <Consent
+                      checked={createConsent}
+                      onChange={setCreateConsent}
+                      disabled={busy}
+                      label={m("createConsent")}
+                    />
+                    <Button
+                      label={m("createFamily")}
+                      disabled={busy || !babyName.trim() || !createConsent}
+                      onPress={() =>
+                        void run(() => pilot.createFamily(babyName.trim()))
+                      }
+                    />
+                  </Disclosure>
+                ) : null)}
             </>
           ) : (
             <>
@@ -1013,29 +1031,45 @@ export default function FamilyScreenView({
                 </View>
               ) : null}
 
-              {draftEditor}
-              <Card style={styles.card}>
-                <T raw accessibilityRole="header" style={styles.sectionTitle}>
-                  {m("feedSection")}
-                </T>
-                <T raw style={styles.muted(c.muted)}>
-                  {m("feedDescription")}
-                </T>
-                {!pilot.draft ? (
-                  <Button
-                    label={m("addFeed")}
-                    disabled={busy}
-                    onPress={() => void run(() => pilot.beginFeed())}
-                  />
-                ) : null}
-                {!pilot.feeds.length ? (
-                  <T raw style={styles.muted(c.muted)}>
-                    {m("noFeeds")}
+              {demo ? (
+                <>
+                  {draftEditor}
+                  <Card style={styles.card}>
+                    <T
+                      raw
+                      accessibilityRole="header"
+                      style={styles.sectionTitle}
+                    >
+                      {m("feedSection")}
+                    </T>
+                    <T raw style={styles.muted(c.muted)}>
+                      {m("feedDescription")}
+                    </T>
+                    {!pilot.draft ? (
+                      <Button
+                        label={m("addFeed")}
+                        disabled={busy}
+                        onPress={() => void run(() => pilot.beginFeed())}
+                      />
+                    ) : null}
+                    {!pilot.feeds.length ? (
+                      <T raw style={styles.muted(c.muted)}>
+                        {m("noFeeds")}
+                      </T>
+                    ) : (
+                      pilot.feeds.map(feedItem)
+                    )}
+                  </Card>
+                </>
+              ) : (
+                <Card>
+                  <T raw>
+                    {locale === "zh-CN"
+                      ? "所有家庭记录已连接到首页、记录、成长和照护。返回主界面即可记录。"
+                      : "All family records are connected to Today, Records, Growth and Care. Return to the main app to add or edit records."}
                   </T>
-                ) : (
-                  pilot.feeds.map(feedItem)
-                )}
-              </Card>
+                </Card>
+              )}
             </>
           )}
 
@@ -1186,7 +1220,7 @@ export default function FamilyScreenView({
                 <T raw style={styles.muted(c.muted)}>
                   {m("profileDescription")}
                 </T>
-                {owner ? (
+                {owner && demo ? (
                   <>
                     <Input
                       label={m("babyName")}

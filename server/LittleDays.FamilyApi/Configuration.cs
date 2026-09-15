@@ -27,7 +27,7 @@ public sealed class PilotIdentity
 public sealed class PilotSettings
 {
     public PilotIdentity[] Identities { get; set; } = [];
-    public int MaxMembers { get; set; } = 4;
+    public int MaxMembers { get; set; } = 20;
     public int MaxFeeds { get; set; } = 1000;
     public int MaxOperationsPerFamily { get; set; } = 100000;
     public int MaxNoteLength { get; set; } = 500;
@@ -38,11 +38,15 @@ public sealed class PilotSettings
 
 public sealed record PilotConfiguration(EntraSettings Entra, FamilySettings Family, PilotSettings Pilot)
 {
+    // Direct constructors support isolated fixtures; deployed configuration must choose its mode.
+    public PublicIdentitySettings Admission { get; init; } = new() { Mode = "Static" };
+
     public static PilotConfiguration Load(IConfiguration configuration)
     {
         var entra = configuration.GetSection("Entra").Get<EntraSettings>() ?? new();
         var family = configuration.GetSection("Family").Get<FamilySettings>() ?? new();
         var pilot = configuration.GetSection("Pilot").Get<PilotSettings>() ?? new();
+        var admission = PublicIdentitySettings.Load(configuration);
         if (entra.TenantId == Guid.Empty || entra.Audience == Guid.Empty || entra.MobileClientId == Guid.Empty ||
             family.HistoryId == Guid.Empty || !Uri.TryCreate(family.PublicBaseUrl, UriKind.Absolute, out var uri) ||
             uri.Scheme != "https" || uri.UserInfo.Length != 0 || uri.Query.Length != 0 || uri.Fragment.Length != 0 ||
@@ -68,11 +72,12 @@ public sealed record PilotConfiguration(EntraSettings Entra, FamilySettings Fami
             pilot.Identities.Select(x => x.Email).Distinct(StringComparer.Ordinal).Count() != pilot.Identities.Length)
             throw new InvalidOperationException("Pilot object IDs and recipient emails must be unique.");
         family.PublicBaseUrl = uri.GetLeftPart(UriPartial.Authority);
-        return new(entra, family, pilot);
+        return new(entra, family, pilot) { Admission = admission };
     }
 
     public PilotIdentity Admit(ClaimsPrincipal principal)
     {
+        if (Admission.Mode != "Static") throw new ApiException(503, "identity_unavailable");
         // Only immutable object IDs in an already validated tenant identify an account.
         // Generic email/preferred_username claims are intentionally ignored.
         if (!Guid.TryParse(principal.FindFirstValue("oid"), out var objectId))

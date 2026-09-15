@@ -2,6 +2,19 @@ using Microsoft.EntityFrameworkCore;
 
 namespace LittleDays.FamilyApi;
 
+public sealed class DeletionWorkerSettings
+{
+    public int PollIntervalMinutes { get; set; } = 120;
+    public TimeSpan PollInterval => TimeSpan.FromMinutes(PollIntervalMinutes);
+    public static DeletionWorkerSettings Load(IConfiguration configuration)
+    {
+        var settings = configuration.GetSection("AccountDeletion").Get<DeletionWorkerSettings>() ?? new();
+        if (settings.PollIntervalMinutes is < 120 or > 1440)
+            throw new InvalidOperationException("AccountDeletion:PollIntervalMinutes must be between 120 and 1440.");
+        return settings;
+    }
+}
+
 // SQL content cleanup is independent from directory availability. A crash after Graph succeeds
 // is safe: the identity adapter verifies absence on retry before we mark the durable job complete.
 public sealed class DeletionProcessor(PilotDatabase db, PilotConfiguration config, TimeProvider clock,
@@ -16,19 +29,21 @@ public sealed class DeletionProcessor(PilotDatabase db, PilotConfiguration confi
             foreach (var family in closed)
             {
                 await db.Feeds.Where(x => x.FamilyId == family.Id).ExecuteDeleteAsync(ct);
+                await db.FamilyRecords.Where(x => x.FamilyId == family.Id).ExecuteDeleteAsync(ct);
                 await db.Invitations.Where(x => x.FamilyId == family.Id).ExecuteDeleteAsync(ct);
                 await db.OwnershipTransfers.Where(x => x.FamilyId == family.Id).ExecuteDeleteAsync(ct);
                 await db.Operations.Where(x => x.FamilyId == family.Id).ExecuteDeleteAsync(ct);
                 await db.Memberships.Where(x => x.FamilyId == family.Id).ExecuteDeleteAsync(ct);
-                family.BabyName = ""; family.BabyBirthDate = null;
+                family.BabyName = ""; family.BabyBirthDate = null; family.BabySex = "unspecified";
             }
             var jobs = await db.AccountDeletions.Where(x => x.Status == "pending").ToArrayAsync(ct);
             foreach (var job in jobs)
             {
                 var memberEmails = await db.Memberships.Where(x => x.UserId == job.UserId).Select(x => x.Email).ToArrayAsync(ct);
                 var bindingEmail = config.Pilot.Identities.SingleOrDefault(x => x.ObjectId == job.UserId)?.Email;
-                var emails = memberEmails.Append(bindingEmail ?? "").Where(x => x.Length > 0).Distinct().ToArray();
+                var emails = memberEmails.Append(bindingEmail ?? "").Append(job.PendingEmail ?? "").Where(x => x.Length > 0).Distinct().ToArray();
                 var familyIds = await db.Feeds.Where(x => x.RecordedBy == job.UserId || x.LastEditedBy == job.UserId).Select(x => x.FamilyId)
+                    .Union(db.FamilyRecords.Where(x => x.RecordedBy == job.UserId || x.LastEditedBy == job.UserId).Select(x => x.FamilyId))
                     .Union(db.Memberships.Where(x => x.UserId == job.UserId).Select(x => x.FamilyId))
                     .Union(db.Invitations.Where(x => x.RecipientUserId == job.UserId || emails.Contains(x.Email)).Select(x => x.FamilyId))
                     .Union(db.OwnershipTransfers.Where(x => x.FromUserId == job.UserId || x.ToUserId == job.UserId).Select(x => x.FamilyId))
@@ -36,12 +51,14 @@ public sealed class DeletionProcessor(PilotDatabase db, PilotConfiguration confi
                 // The pilot has no earlier-version archive: deleting the current content is
                 // safer than claiming an edited note was erased by zeroing its attribution.
                 await db.Feeds.Where(x => x.RecordedBy == job.UserId || x.LastEditedBy == job.UserId).ExecuteDeleteAsync(ct);
+                await db.FamilyRecords.Where(x => x.RecordedBy == job.UserId || x.LastEditedBy == job.UserId).ExecuteDeleteAsync(ct);
                 await db.Invitations.Where(x => x.RecipientUserId == job.UserId || emails.Contains(x.Email)).ExecuteDeleteAsync(ct);
                 await db.OwnershipTransfers.Where(x => x.FromUserId == job.UserId || x.ToUserId == job.UserId).ExecuteDeleteAsync(ct);
                 await db.Operations.Where(x => x.UserId == job.UserId).ExecuteDeleteAsync(ct);
                 await db.Memberships.Where(x => x.UserId == job.UserId).ExecuteDeleteAsync(ct);
                 foreach (var family in await db.Families.Where(x => familyIds.Contains(x.Id) && x.DeletedAt == null).ToArrayAsync(ct)) family.Revision++;
                 job.Status = "awaiting_identity_deletion";
+                job.PendingEmail = null;
             }
             await db.SaveChangesAsync(ct);
             return await db.AccountDeletions.Where(x => x.Status == "awaiting_identity_deletion").Select(x => x.UserId).ToArrayAsync(ct);
@@ -66,11 +83,14 @@ public sealed class DeletionProcessor(PilotDatabase db, PilotConfiguration confi
     }
 }
 
-public sealed class DeletionWorker(IServiceScopeFactory scopes, ILogger<DeletionWorker> logger) : BackgroundService
+public sealed class DeletionWorker(IServiceScopeFactory scopes, ILogger<DeletionWorker> logger,
+    DeletionWorkerSettings settings, TimeProvider clock) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        using var timer = new PeriodicTimer(TimeSpan.FromMinutes(1));
+        // Immediate startup recovery, then a bounded cadence that allows serverless SQL to sleep.
+        // Access is revoked synchronously; pending content/directory purge retries every interval.
+        using var timer = new PeriodicTimer(settings.PollInterval, clock);
         do
         {
             try

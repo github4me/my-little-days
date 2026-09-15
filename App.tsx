@@ -13,7 +13,13 @@ import {
 } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
-import { Entry, State, summarize, validateState } from "./src/domain";
+import {
+  Entry,
+  State,
+  initialState,
+  summarize,
+  validateState,
+} from "./src/domain";
 import {
   loadState,
   saveState,
@@ -26,6 +32,7 @@ import {
   saveLanguage,
   loadRecordView,
   saveRecordView,
+  setPersonalStorageBlocked,
 } from "./src/storage";
 import { importBackup } from "./src/backup";
 import EntryEditor, { newEntry } from "./src/EntryEditor";
@@ -36,6 +43,8 @@ import type { RecordView } from "./src/recordCalendar";
 import Settings from "./src/Settings";
 import PrivacySupport from "./src/PrivacySupport";
 import FamilyScreen from "./src/family/FamilyScreen";
+import { useFamilyPilot } from "./src/family/useFamilyPilot";
+import { familyErrorMessage } from "./src/family/messages";
 import FamilyDemoScreen from "./src/family/FamilyDemoScreen";
 import { familyDemoEnabled } from "./src/family/demoConfig";
 import FeedStopButton from "./src/FeedStopButton";
@@ -151,8 +160,8 @@ function BabyApp({
   const [activeRecordView, setActiveRecordView] = useState<RecordView>("bars");
   const darkMode = themePreference ?? systemTheme === "dark";
   const c = darkMode ? dark : light;
-  const [state, setState] = useState<State | null>(null),
-    [avatarUri, setAvatarUri] = useState<string | null>(null),
+  const [offlineState, setState] = useState<State | null>(null),
+    [privateAvatarUri, setAvatarUri] = useState<string | null>(null),
     [avatarFailed, setAvatarFailed] = useState(false),
     [fatal, setFatal] = useState(""),
     [message, setMessage] = useState(""),
@@ -166,6 +175,68 @@ function BabyApp({
     [deleting, setDeleting] = useState<Entry | null>(null);
   const stateRef = useRef<State | null>(null),
     lock = useRef(false);
+  const privateDataGeneration = useRef(0);
+  const family = useFamilyPilot();
+  const sharingRef = useRef(family.sharedMode || family.booting);
+  sharingRef.current = family.sharedMode || family.booting;
+  setPersonalStorageBlocked(family.booting || family.sharedMode);
+  const state = family.sharedMode ? family.sharedState : offlineState;
+  const avatarUri = family.sharedMode ? null : privateAvatarUri;
+  stateRef.current = state;
+  const familyContext = family.fullSnapshot
+    ? `${family.user?.id}|${family.fullSnapshot.family.id}|${family.fullSnapshot.family.membershipId}|${family.fullSnapshot.historyId}`
+    : family.sharedMode
+      ? "family-unavailable"
+      : "private";
+  const editVersion = useRef<{
+    id: string;
+    version?: string;
+    context: string;
+  } | null>(null);
+  const deleteVersion = useRef<string | undefined>(undefined);
+  const versionFor = (id: string) =>
+    family.fullSnapshot?.entries.find((r) => r.entry.id === id)?.version;
+  const authorLabel = (id: string) => {
+    const record = family.fullSnapshot?.entries.find((r) => r.entry.id === id);
+    const name =
+      family.fullSnapshot?.members.find((m) => m.id === record?.recordedBy)
+        ?.displayName ??
+      (resolveLocale(language) === "zh-CN" ? "家庭成员" : "Family member");
+    return resolveLocale(language) === "zh-CN"
+      ? `记录人：${name}`
+      : `Recorded by ${name}`;
+  };
+  function beginEditor(entry: Entry) {
+    if (family.sharedMode && !family.canEditRecord("entry", entry.id)) return;
+    editVersion.current = {
+      id: entry.id,
+      version: versionFor(entry.id),
+      context: familyContext,
+    };
+    setEditor(entry);
+  }
+  function beginDelete(entry: Entry) {
+    if (family.sharedMode && !family.canEditRecord("entry", entry.id)) return;
+    deleteVersion.current = versionFor(entry.id);
+    setDeleting(entry);
+  }
+  useEffect(() => {
+    setEditor(null);
+    setDeleting(null);
+    setFinishingFeed(null);
+    setRescue(null);
+    setOpenProfile(false);
+    setMessage("");
+    editVersion.current = null;
+  }, [familyContext]);
+  useEffect(() => {
+    if (family.activationSerial) {
+      privateDataGeneration.current++;
+      setState(initialState);
+      setAvatarUri(null);
+      setRescue(null);
+    }
+  }, [family.activationSerial]);
   const [rescue, setRescue] = useState<State | null>(null);
   const [metric, setMetric] = useState<Metric>("weight");
   const [growthHistoryExpanded, setGrowthHistoryExpanded] = useState(false);
@@ -174,6 +245,7 @@ function BabyApp({
   const [finishingFeed, setFinishingFeed] = useState<{
     entry: Entry;
     stoppedAt: string;
+    baseVersion?: string;
   } | null>(null);
   function showProfile() {
     setOpenProfile(true);
@@ -184,7 +256,7 @@ function BabyApp({
   }
   async function changeLanguage(next: LanguagePreference) {
     await onLanguageChange(next);
-    if (stateRef.current) {
+    if (stateRef.current && !family.sharedMode) {
       try {
         await rescheduleAutoFeedReminders(stateRef.current.entries);
       } catch {
@@ -193,6 +265,7 @@ function BabyApp({
     }
   }
   async function init() {
+    const generation = privateDataGeneration.current;
     try {
       const [s, preference, savedAvatarUri, savedRecordView] =
         await Promise.all([
@@ -201,13 +274,15 @@ function BabyApp({
           loadAvatarUri(),
           loadRecordView(),
         ]);
-      stateRef.current = s;
+      if (generation !== privateDataGeneration.current) return;
+      if (!sharingRef.current) stateRef.current = s;
       setState(s);
       setAvatarUri(savedAvatarUri);
       setFatal("");
       setThemePreference(preference);
       setRecordView(savedRecordView);
     } catch (e) {
+      if (generation !== privateDataGeneration.current) return;
       setFatal(
         `${t("无法读取本地数据，原数据没有被覆盖。")} ${(e as Error).message}`,
       );
@@ -225,7 +300,27 @@ function BabyApp({
     };
   }, []);
   useEffect(() => setAvatarFailed(false), [avatarUri]);
-  async function commit(next: State, recovery = false) {
+  async function commit(
+    next: State,
+    recovery = false,
+    profileVersion?: string,
+  ) {
+    if (family.sharedMode) {
+      if (recovery || !family.sharedState || !family.fullSnapshot)
+        throw new Error("refresh_required");
+      if (
+        JSON.stringify(next.entries) !==
+          JSON.stringify(family.sharedState.entries) ||
+        JSON.stringify(next.careRecords ?? []) !==
+          JSON.stringify(family.sharedState.careRecords ?? [])
+      )
+        throw new Error("shared_backup_disabled");
+      await family.saveFullProfile(
+        next.profile,
+        profileVersion ?? family.fullSnapshot.family.profileVersion,
+      );
+      return;
+    }
     if (lock.current) throw new Error("正在保存，请稍后再试");
     lock.current = true;
     setBusy(true);
@@ -235,6 +330,7 @@ function BabyApp({
       stateRef.current = checked;
       setState(checked);
       try {
+        if (sharingRef.current) return;
         await rescheduleAutoFeedReminders(checked.entries);
       } catch {
         // Saving a record must not fail just because a previously configured notification cannot refresh.
@@ -244,21 +340,33 @@ function BabyApp({
       setBusy(false);
     }
   }
-  async function upsert(e: Entry) {
+  async function upsert(e: Entry, explicitVersion?: string) {
     const current = stateRef.current!;
     if (
       current.profile.birthDate &&
       localDay(new Date(e.start)) < current.profile.birthDate
     )
       throw new Error("记录日期不能早于出生日期");
-    await commit({
-      ...current,
-      entries: [...current.entries.filter((x) => x.id !== e.id), e],
-    });
+    if (family.sharedMode) {
+      const draft =
+        editVersion.current?.id === e.id ? editVersion.current : null;
+      if (draft && draft.context !== familyContext)
+        throw new Error("membership_changed");
+      await family.saveRecord(
+        "entry",
+        e,
+        explicitVersion ?? draft?.version ?? versionFor(e.id),
+      );
+    } else
+      await commit({
+        ...current,
+        entries: [...current.entries.filter((x) => x.id !== e.id), e],
+      });
     setEditor(null);
-    setMessage("已保存到本机");
+    setMessage(family.sharedMode ? "已保存，等待家庭同步" : "已保存到本机");
   }
   async function updateAvatar(uri: string | null) {
+    if (family.sharedMode) throw new Error("shared_photo_unavailable");
     await saveAvatarUri(uri);
     setAvatarUri(uri);
   }
@@ -266,9 +374,31 @@ function BabyApp({
     try {
       await fn();
     } catch (e) {
-      setMessage((e as Error).message);
+      setMessage(
+        family.sharedMode
+          ? familyErrorMessage(resolveLocale(language), (e as Error).message)
+          : (e as Error).message,
+      );
     }
   }
+  if (family.booting || (family.sharedMode && !state))
+    return (
+      <Theme.Provider value={c}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }}>
+          <ScrollView contentContainerStyle={{ padding: 20, gap: 16 }}>
+            {family.booting ? (
+              <ActivityIndicator />
+            ) : (
+              <FamilyScreen
+                pilot={family}
+                source={initialState}
+                onBack={() => {}}
+              />
+            )}
+          </ScrollView>
+        </SafeAreaView>
+      </Theme.Provider>
+    );
   if (!state)
     return (
       <Theme.Provider value={c}>
@@ -354,8 +484,25 @@ function BabyApp({
   const growthHistoryLabel = growthHistoryExpanded
     ? t("收起历史记录")
     : t("显示 {count} 条历史记录", { count: olderGrowthEntries.length });
-  const active = entries.find((e) => e.type === "sleep" && !e.end);
-  const activeFeed = entries.find((e) => e.type === "feed" && e.feedRunning);
+  const owned = (id: string) =>
+    family.fullSnapshot?.entries.find((r) => r.entry.id === id)?.recordedBy ===
+    family.user?.id;
+  const activeCandidates = entries.filter(
+    (e) =>
+      e.type === "sleep" &&
+      !e.end &&
+      (!family.sharedMode || family.canEditRecord("entry", e.id)),
+  );
+  const feedCandidates = entries.filter(
+    (e) =>
+      e.type === "feed" &&
+      e.feedRunning &&
+      (!family.sharedMode || family.canEditRecord("entry", e.id)),
+  );
+  const active =
+    activeCandidates.find((e) => owned(e.id)) ?? activeCandidates[0];
+  const activeFeed =
+    feedCandidates.find((e) => owned(e.id)) ?? feedCandidates[0];
   const feedSeconds = activeFeed
     ? Math.floor(Math.max(0, now - Date.parse(activeFeed.start)) / 1000)
     : 0;
@@ -421,6 +568,11 @@ function BabyApp({
             <T style={{ fontSize: 11, lineHeight: 16, color: c.muted }}>
               {localDay(new Date(e.start))} · {time(e.start)}
             </T>
+            {family.sharedMode ? (
+              <T raw style={{ fontSize: 11, color: c.muted }}>
+                {authorLabel(e.id)}
+              </T>
+            ) : null}
           </View>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
             <Pressable
@@ -428,7 +580,10 @@ function BabyApp({
               accessibilityLabel={t("编辑{kind}", {
                 kind: t(kinds[e.type].label),
               })}
-              onPress={() => setEditor(e)}
+              disabled={
+                family.sharedMode && !family.canEditRecord("entry", e.id)
+              }
+              onPress={() => beginEditor(e)}
               style={{
                 minHeight: 36,
                 justifyContent: "center",
@@ -442,7 +597,10 @@ function BabyApp({
               accessibilityLabel={t("删除{kind}", {
                 kind: t(kinds[e.type].label),
               })}
-              onPress={() => setDeleting(e)}
+              disabled={
+                family.sharedMode && !family.canEditRecord("entry", e.id)
+              }
+              onPress={() => beginDelete(e)}
               style={{
                 minHeight: 36,
                 justifyContent: "center",
@@ -545,6 +703,42 @@ function BabyApp({
                 <T style={{ fontSize: 13 }}>{t(message)}　×</T>
               </Pressable>
             ) : null}
+            {family.sharedMode ? (
+              <Card>
+                <T raw>
+                  {resolveLocale(language) === "zh-CN"
+                    ? `家庭共享 · ${family.recordPending.length} 条待同步`
+                    : `Family sharing · ${family.recordPending.length} pending`}
+                </T>
+                {family.recordConflicts.length ? (
+                  <>
+                    <T raw>
+                      {resolveLocale(language) === "zh-CN"
+                        ? "部分修改未共享：其他人已先保存，或记录权限发生变化。已刷新最新内容；请重新打开记录查看后修改。"
+                        : "Some changes were not shared because another save arrived first or access changed. The latest records are refreshed. Reopen a record to review before editing again."}
+                    </T>
+                    {family.recordConflicts.map((q) => (
+                      <Button
+                        key={q.operation.operationId}
+                        secondary
+                        label={
+                          resolveLocale(language) === "zh-CN"
+                            ? "清除此条冲突草稿"
+                            : "Dismiss this conflict draft"
+                        }
+                        onPress={() =>
+                          void act(() =>
+                            family.discardRecordConflict(
+                              q.operation.operationId,
+                            ),
+                          )
+                        }
+                      />
+                    ))}
+                  </>
+                ) : null}
+              </Card>
+            ) : null}
             {deleting ? (
               <Modal
                 transparent
@@ -589,12 +783,21 @@ function BabyApp({
                           onPress={() =>
                             void act(async () => {
                               const e = deleting;
-                              await commit({
-                                ...stateRef.current!,
-                                entries: stateRef.current!.entries.filter(
-                                  (x) => x.id !== e.id,
-                                ),
-                              });
+                              if (family.sharedMode) {
+                                if (!deleteVersion.current)
+                                  throw new Error("record_pending");
+                                await family.deleteRecord(
+                                  "entry",
+                                  e.id,
+                                  deleteVersion.current,
+                                );
+                              } else
+                                await commit({
+                                  ...stateRef.current!,
+                                  entries: stateRef.current!.entries.filter(
+                                    (x) => x.id !== e.id,
+                                  ),
+                                });
                               setDeleting(null);
                             })
                           }
@@ -780,10 +983,15 @@ function BabyApp({
                         </View>
                         {type === "feed" && activeFeed ? (
                           <FeedStopButton
-                            disabled={busy}
+                            disabled={
+                              busy ||
+                              (family.sharedMode &&
+                                !family.canEditRecord("entry", activeFeed.id))
+                            }
                             onPress={() =>
                               setFinishingFeed({
                                 entry: activeFeed,
+                                baseVersion: versionFor(activeFeed.id),
                                 stoppedAt: new Date(
                                   Math.max(
                                     Date.now(),
@@ -816,7 +1024,7 @@ function BabyApp({
                                       : newEntry("sleep"),
                                   );
                                 });
-                              else setEditor(newEntry(type));
+                              else beginEditor(newEntry(type));
                             }}
                           />
                         )}
@@ -829,7 +1037,7 @@ function BabyApp({
                       {type === "sleep" ? (
                         <Pressable
                           accessibilityRole="button"
-                          onPress={() => setEditor(newEntry("sleep"))}
+                          onPress={() => beginEditor(newEntry("sleep"))}
                           style={{
                             alignSelf: "flex-start",
                             minHeight: 36,
@@ -848,11 +1056,18 @@ function BabyApp({
             ) : null}
             {tab === "records" ? (
               <Records
+                key={familyContext}
+                authorLabel={family.sharedMode ? authorLabel : undefined}
+                canEdit={
+                  family.sharedMode
+                    ? (id) => family.canEditRecord("entry", id)
+                    : undefined
+                }
                 view={activeRecordView}
                 entries={entries}
                 now={now}
-                onEdit={setEditor}
-                onDelete={setDeleting}
+                onEdit={beginEditor}
+                onDelete={beginDelete}
               />
             ) : null}
             {tab === "growth" ? (
@@ -863,7 +1078,7 @@ function BabyApp({
                     <Button
                       label="＋测量"
                       secondary
-                      onPress={() => setEditor(newEntry("growth"))}
+                      onPress={() => beginEditor(newEntry("growth"))}
                     />
                   </View>
                   <View style={{ flexDirection: "row", gap: 6 }}>
@@ -977,10 +1192,25 @@ function BabyApp({
             ) : null}
             {tab === "play" ? (
               <PlayLearning
+                key={familyContext}
+                sharedMode={family.sharedMode}
+                careVersions={Object.fromEntries(
+                  family.fullSnapshot?.careRecords.map((r) => [
+                    r.record.id,
+                    r.version,
+                  ]) ?? [],
+                )}
+                canEditCare={(id) =>
+                  !family.sharedMode || family.canEditRecord("care", id)
+                }
                 birthDate={state.profile.birthDate}
                 now={now}
                 careRecords={state.careRecords ?? []}
-                onSaveCare={async (record) => {
+                onSaveCare={async (record, baseVersion) => {
+                  if (family.sharedMode) {
+                    await family.saveRecord("care", record, baseVersion);
+                    return;
+                  }
                   const current = stateRef.current!;
                   await commit({
                     ...current,
@@ -992,7 +1222,12 @@ function BabyApp({
                     ],
                   });
                 }}
-                onDeleteCare={async (id) => {
+                onDeleteCare={async (id, baseVersion) => {
+                  if (family.sharedMode) {
+                    if (!baseVersion) throw new Error("record_pending");
+                    await family.deleteRecord("care", id, baseVersion);
+                    return;
+                  }
                   const current = stateRef.current!;
                   await commit({
                     ...current,
@@ -1015,7 +1250,8 @@ function BabyApp({
                 />
               ) : settingsPage === "family" ? (
                 <FamilyScreen
-                  source={state}
+                  source={offlineState ?? initialState}
+                  pilot={family}
                   onBack={() => {
                     setSettingsPage("main");
                     mainScroll.current?.scrollTo({ y: 0, animated: false });
@@ -1023,13 +1259,17 @@ function BabyApp({
                 />
               ) : (
                 <Settings
+                  key={familyContext}
+                  sharedMode={family.sharedMode}
+                  sharedOwner={family.fullSnapshot?.family.role === "owner"}
+                  profileVersion={family.fullSnapshot?.family.profileVersion}
                   familyUiPreview={familyDemoEnabled}
                   initialProfileExpanded={openProfile}
                   state={state}
                   avatarUri={avatarUri}
                   onAvatarChange={updateAvatar}
-                  onCommit={async (next, recovery) => {
-                    await commit(next, recovery);
+                  onCommit={async (next, recovery, baseVersion) => {
+                    await commit(next, recovery, baseVersion);
                   }}
                   themePreference={themePreference}
                   recordView={recordView}
@@ -1148,6 +1388,7 @@ function BabyApp({
               if (!current) throw new Error("喂养计时状态无效");
               await upsert(
                 finishFeed(current, finishingFeed.stoppedAt, amount),
+                finishingFeed.baseVersion,
               );
               setFinishingFeed(null);
             }}

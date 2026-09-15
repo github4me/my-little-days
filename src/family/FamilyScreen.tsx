@@ -1,17 +1,18 @@
 import React from "react";
 import FamilyScreenView from "./FamilyScreenView";
-import { useFamilyPilot } from "./useFamilyPilot";
+import type { useFamilyPilot } from "./useFamilyPilot";
 import type { State } from "../domain";
 import OwnerSetup from "./OwnerSetup";
 
 export default function FamilyScreen({
   onBack,
   source,
+  pilot,
 }: {
   onBack: () => void;
   source: State;
+  pilot: ReturnType<typeof useFamilyPilot>;
 }) {
-  const pilot = useFamilyPilot();
   return (
     <FamilyScreenView
       onBack={onBack}

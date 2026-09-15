@@ -129,6 +129,9 @@ function wrapperWorld() {
       accountDeletion: null,
       busy: false,
       syncing: false,
+      createFamilyFromSeed: async (draft) => {
+        world.saves.push({ key: account, draft: plain(draft) });
+      },
     },
     stored: null,
     loads: [],
@@ -258,11 +261,11 @@ function wrapperWorld() {
   return world;
 }
 
-test("owner mobile preparation saves a detached full local snapshot only after explicit Save", async () => {
+test("owner mobile preparation submits the exact detached full snapshot only after explicit confirmation", async () => {
   const world = wrapperWorld();
   const original = plain(world.source);
   const card = await world.ready();
-  assert.equal(card.mode, "local-only");
+  assert.equal(card.mode, "full");
   const draft = await card.onPrepare(recipient);
   assert.equal(world.saves.length, 0);
   await card.onSave(draft);
@@ -271,10 +274,8 @@ test("owner mobile preparation saves a detached full local snapshot only after e
   assert.equal(world.saves[0].draft.counts.total, 10);
   assert.deepEqual(world.source, original);
   assert.equal(world.pilot.snapshot, null);
-  world.render();
-  assert.deepEqual(plain(world.card().pending), plain(draft));
-  await world.card().onDiscard();
-  assert.deepEqual(world.clears, [account]);
+  assert.equal(world.loads.length, 0);
+  assert.equal(world.clears.length, 0);
   assert.deepEqual(world.source, original);
 });
 
@@ -338,19 +339,15 @@ test("owner mobile stale callbacks cannot save after account, session or family 
   }
 });
 
-test("owner mobile failed load exposes retry without silently replacing a stored draft", async () => {
+test("owner full setup always reviews current source without replaying a stale saved setup", async () => {
   const world = wrapperWorld();
   world.stored = { corrupt: true };
   world.loadError = true;
   await world.ready();
-  assert.equal(world.card(), undefined);
+  assert.equal(world.card().mode, "full");
   assert.equal(world.saves.length, 0);
-  const button = world.render().find((node) => node.type === "Button");
-  assert.match(button.props.label, /Retry loading/);
-  button.props.onPress();
-  await world.ready();
-  assert.equal(world.loads.length, 2);
-  assert.equal(world.card(), undefined);
+  assert.equal(world.loads.length, 0);
+  assert.equal(world.card().pending, undefined);
   assert.deepEqual(world.stored, { corrupt: true });
   assert.equal(world.clears.length, 0);
 });

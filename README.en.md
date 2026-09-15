@@ -2,7 +2,7 @@
 
 English | [简体中文](README.md)
 
-An offline baby-care and growth tracker built with Expo, React Native, and TypeScript. The original local features record feeds, sleep, diaper changes, and measurements without an account or backend. The repository also contains a separate, controlled family invitation pilot that requires configured infrastructure and admitted accounts. The app supports English and Simplified Chinese, including a system-language option.
+An offline baby-care and growth tracker built with Expo, React Native, and TypeScript. The original local features record feeds, sleep, diaper changes, and measurements without an account or backend. Optional family sharing connects the main app to a .NET API, Azure SQL and Entra External ID after infrastructure is configured. The app supports English and Simplified Chinese, including a system-language option.
 
 ## Features
 
@@ -24,25 +24,23 @@ An offline baby-care and growth tracker built with Expo, React Native, and TypeS
 - **Privacy, support, and credits:** More has separate expandable Privacy & support and Credits sections. Credits thanks Trista from FPH and Mia, Violet, and Bill in her group for their suggestions and ideas, and the group's mums and dads for their support. More parents are welcome to join in. Activity guidance is for parents, not a screen-based course for babies or a developmental assessment.
 - **Backups:** export and import validated JSON files. Imports replace the current records after confirmation rather than merging them.
 
-## Family invitation pilot — implemented source, not deployed
+## Family sharing — full record integration, live deployment checks remain
 
-Open **More → Family invitation pilot**. This is a separate test space for two checked accounts and fictional baby names and **completed bottle feeds**. It is not full family synchronization or a public beta. Existing profiles, feeds, sleep, diapers, growth, daily care, timers, learning, settings, photos, and backups are never migrated or uploaded.
+Open **More → Family sharing**. Offline use needs no account. After optional sign-in, create a family or accept an invitation; shared records appear directly in Home, Records (calendar and bars), Growth and Daily care.
 
-- Native sign-in uses Entra External ID email one-time passcodes. Admins can store invitations before recipients register, without notifications. Checked recipients see an Accept/Decline inbox; invitations expire after 30 days. One active family per account; public verified onboarding remains gated.
-- Members create test feeds and edit/delete their own; admins may change any record and manage invitations, membership and the pilot baby profile. Typing stays private until explicit Save durably queues it before networking.
-- First server commit wins for a record version; independent overlapping records remain separate. Conflict review stays within the same account/family/grant/history. Leaving, removal and context changes purge old cache/drafts/queues; recovery cannot copy them to another family.
-- Ownership transfers only when the nominated member accepts. Other members must be removed before family closure; an admin must close or transfer before account deletion. Ordinary departure retains contributions; account deletion runs separate SQL/directory cleanup with a secure device status receipt. Live Azure/Graph and configuration/backup cleanup remain release gates.
-- Sign-out warns about unsent work, then clears this device's pilot cache, drafts, queue, and credentials after confirmation. Original local records remain. Pilot export/import and history migration are not included.
+- First-time admins review their baby profile and complete feed, nappy, sleep, growth, legacy milestone and daily-care history before uploading. Family creation, imported history and invitations commit atomically. Finish running timers before migration.
+- Admins enter family members’ email addresses. **No invitation email or push is sent.** Recipients install independently, opt into registration/sign-in and accept or decline their matched invitation. One active family per account.
+- Joining downloads the admin’s history; the joiner’s original records are never uploaded or merged. Only after server acknowledgment and a verified full snapshot does activation clear original local records, recovery copies, photos, reminders and learning check-ins. Failed or uncertain transitions preserve the source and retry the same operation.
+- Explicit saves use a durable, context-bound queue. First successful server commit wins for a record version; conflicts notify and refresh, while separate overlapping entries are retained. Members change their own records; admins may edit/delete any record and manage the profile, invitations and membership.
+- Leaving or removal revokes server access immediately; contributions remain with the family. Devices purge family cache and unsent work when revocation is detected. Admins can remove members without advance notice. Local import/export is unavailable in shared mode, and old family content cannot be copied into a new family.
+- A nominated member must accept ownership transfer. An admin must transfer, or remove other members and close the family, before deleting their account. Account deletion differs from ordinary departure: associated content and directory identity enter deletion processing, with a secure status receipt.
+- Photos, local notification schedules, activity selections/check-ins and personal display preferences are not shared. Parent activity guides remain readable; saved daily-care sessions use the family source. The separate development-only UI demo does not bypass real authentication.
 
-Follow the [Azure pilot setup guide](docs/AZURE-FAMILY-PILOT-SETUP.md) for the .NET 10 API, Azure SQL, customer identity tenant, and operator-verified account bindings. [Server instructions](server/README.md) cover running and testing. Unconfigured builds show setup as incomplete; production browser sign-in is disabled. Source and automated checks do not establish a working Azure deployment or two-iPhone validation. The [pilot contract](docs/FAMILY-PILOT-CONTRACT.md) defines this slice; the rest of the [family-sharing technical plan](docs/FAMILY-SHARING-TECH-PLAN.md) remains a roadmap.
+Follow [full Azure setup](docs/AZURE-FAMILY-SETUP.md) and [server instructions](server/README.md). Bicep reuses the existing Linux B1 plan and provisions a separate Web App, managed identity and free-offer-only SQL without requiring Key Vault. SQL pauses at free-limit exhaustion with no paid fallback. Cleanup retries every 120 minutes by default; capacity and costs still need measurement.
 
-The [Bicep deployment guide](docs/AZURE-BICEP-DEPLOYMENT.md) provisions a separate Web App, managed identity and free-offer-only Azure SQL database while reusing the existing Linux B1 plan, without Key Vault. The script defaults to local validation and requires preview/review and explicit deployment approval; identity registration, database initialization and API publication are separate. SQL pauses when its free allowance is exhausted, with no paid fallback. The existing cleanup worker's SQL polling still needs adjustment and live validation.
+The [GitHub infrastructure workflow](docs/AZURE-GITHUB-INFRA.md) checks relevant pushes/PRs; trusted-branch Azure preview is read-only and apply still requires environment approval. API-code deployment remains a separate manual workflow. Existing resource names, SQL roles and environments containing `pilot` are retained for deployment compatibility, not as feature limitations.
 
-The [GitHub infrastructure workflow](docs/AZURE-GITHUB-INFRA.md) automatically compiles/tests relevant pushes and PRs. Once configured, trusted-branch pushes also run a read-only Azure preview and wait for environment approval before deployment. Preview and apply use separate OIDC identities without stored Azure secrets; PRs receive no Azure access. Azure identity/permission setup, GitHub variables and actual environment protection rules remain one-time operator steps.
-
-First-invitation setup now reviews the baby profile and feeding, nappy, sleep, growth, milestone and daily-care counts, then up to three family emails and explicit confirmation. In the signed-in native pilot it saves an account-scoped **local-only, not-sent setup**: no family creation or history upload; original records stay unchanged. Running timers block preparation and changed source data requires a new review. The full-history API and main-app sharing integration remain unimplemented; see [the mobile/Azure handoff](docs/FAMILY-OWNER-ONBOARDING.md).
-
-For layout review without Azure or login, use the dedicated [iPhone UI preview](docs/FAMILY-UI-PREVIEW.md). Its nine sample scenarios reuse the real family screens, starting with **First invitation** and a complete fictional seed dataset; all actions are simulated in memory and reset on exit. The `ui-preview` build has its own update channel and does not bypass live authentication.
+Source and local checks do not establish a live release. Customer-tenant setup, Graph consent/credentials, managed-identity SQL, protected GitHub environments, a new native build and two-iPhone validation remain required.
 
 ## Run locally
 
@@ -61,13 +59,13 @@ For a browser preview:
 npm run web
 ```
 
-The browser stores original local data in localStorage, separate from the installed mobile app. The pilot page provides information but does not enable production account sign-in. Native reminders, photo storage, and file-sharing behavior need testing on a phone. Expo Go may preview the original local features when compatible with this SDK; pilot authentication requires a new signed native build. The mobile pilot uses its own SQLite database and account/family keyspace.
+The browser stores original local data in localStorage, separate from the installed mobile app. The family page provides information but does not enable production account sign-in. Native reminders, photo storage, and file-sharing behavior need testing on a phone. Expo Go may preview the original local features when compatible with this SDK; family authentication requires a new signed native build. Shared cache and queues use a separate SQLite database and account/family/grant/history keyspace.
 
 ## iPhone builds and updates
 
 The repository includes `preview` and `production` EAS build profiles. Preview uses internal distribution and the `preview` update channel; production uses the `production` channel and automatic build-number increments.
 
-The current source version is **0.2.0**. Added authentication, browser-session and SecureStore dependencies plus the `mylittledays` URL scheme require a new native binary. The version bump separates its `appVersion` update runtime from older 0.1.1 installations: do not publish pilot JavaScript to that old runtime. No new IPA, TestFlight build, or OTA release was produced in this implementation. Configure the pilot's public environment values and complete two-phone validation before distribution.
+The current source version is **0.2.0**. Added authentication, browser-session and SecureStore dependencies plus the `mylittledays` URL scheme require a new native binary. The version bump separates its `appVersion` update runtime from older 0.1.1 installations: do not publish family-sharing JavaScript to that old runtime. No new IPA, TestFlight build, or OTA release was produced in this implementation. Configure the family-sharing public environment values and complete two-phone validation before distribution.
 
 With access to the Expo project and the required Apple signing credentials:
 
@@ -79,7 +77,7 @@ npx eas-cli build --platform ios --profile preview
 
 Install using the link provided by EAS. An installed build can run independently of the development computer. Keep the existing application identity when updating an installation containing records.
 
-After installing and validating the new native pilot runtime, a subsequent compatible JavaScript update can use the matching preview environment and channel:
+After installing and validating the new native family-sharing runtime, a subsequent compatible JavaScript update can use the matching preview environment and channel:
 
 ```sh
 npx eas-cli update --channel preview --environment preview --message "Describe the update"
@@ -89,11 +87,11 @@ Further native dependency or configuration changes may require another build. Pu
 
 ## Data and privacy
 
-Original mobile records remain local in SQLite and require no account. Signing in to the pilot does not upload or synchronize them. The separate pilot stores an account/family cache, private drafts, and a durable queue; after service configuration, explicit family/invitation commands and saved test feeds are sent to its API. It does not share existing timers, notifications, charts, photos, or history backups. Baby photos are copied into local app storage when selected. Notifications remain local.
+Offline records remain in local SQLite without an account. Signing in alone does not upload them. Explicit family creation migrates the reviewed history; joining another family downloads that family and clears the original local content only after verified activation. Shared cache and saved queues are isolated from the personal database and unavailable for local export. Photos and notifications are not shared.
 
 The app uses Expo's update service to check for and download software updates. This can exchange technical metadata with that service; baby records and photos are not included in the app's update requests.
 
-Backups are unencrypted JSON containing the original local baby profile, tracking entries, and daily-care records. They do not include the local avatar, theme/language preferences, reminder schedules, activity selections/check-ins, or separate pilot data and credentials. Export a local backup before uninstalling or changing phones. Backup files leave the app when you explicitly export/share them; selecting a cloud destination uses the service you choose.
+Backups are unencrypted JSON containing the original local baby profile, tracking entries, and daily-care records. They do not include the local avatar, theme/language preferences, reminder schedules, activity selections/check-ins, or family data and credentials. Shared mode disables local import/export. Export a local backup before uninstalling or changing phones. Backup files leave the app when you explicitly export/share them; selecting a cloud destination uses the service you choose.
 
 ## Time and growth calculations
 
@@ -110,7 +108,7 @@ npx playwright install chromium
 npm run test:browser
 ```
 
-`verify` runs TypeScript checking, local-domain and pilot unit tests, `test:family-controller`, and bilingual permission/confirmation checks in `test:family-ui`. These exercise the real controller and screen with deterministic identity, HTTP, SQLite and native-control boundaries, not live authentication or the device database. Browser regression exercises the web implementation. `npm run export:ios` exports the iOS JavaScript bundle; it does not compile or sign an IPA.
+`verify` runs TypeScript checking, local-domain and family unit tests, `test:family-controller`, and bilingual permission/confirmation checks in `test:family-ui`. These exercise the real controller and screen with deterministic identity, HTTP, SQLite and native-control boundaries, not live authentication or the device database. Browser regression exercises the web implementation. `npm run export:ios` exports the iOS JavaScript bundle; it does not compile or sign an IPA.
 
 With .NET 10, run `dotnet test server/LittleDays.FamilyApi.Tests`. SQL tests run only when `FAMILY_TEST_SQL_CONNECTION` points to a disposable SQL Server `master` connection; never use the pilot or production database. See [server instructions](server/README.md). Azure managed identity, live Entra login, SQLite persistence, notifications, photos, file sharing, and two-iPhone offline/conflict/removal behavior remain device/infrastructure checks. See [validation notes](docs/VALIDATION.md).
 
@@ -127,10 +125,10 @@ With .NET 10, run `dotnet test server/LittleDays.FamilyApi.Tests`. SQL tests run
 - `src/domain.ts` — data validation and summary calculations.
 - `src/storage.ts`, `src/backup.ts`, `src/reminders.ts` — native persistence, backups, and notifications; `.web.ts` files provide browser variants.
 - `src/growth.ts`, `assets/who/` — bundled growth references.
-- `src/family/` — separate pilot UI, authentication, wire contracts, cache, drafts, and durable queue.
+- `src/family/` — family management and main-app data integration, authentication, wire contracts, cache, drafts, and durable queue.
 - `server/LittleDays.FamilyApi/`, `server/LittleDays.FamilyApi.Tests/` — .NET 10 API, EF SQL migrations, and backend tests.
 - `infra/`, `.github/workflows/` — setup templates, SQL permissions and CI; infrastructure changes automatically check/preview then await approval, while API-code deployment remains a separate manual workflow.
-- `src/*.test.ts`, `tests/family-controller.mjs`, `tests/browser.mjs` — unit, pilot controller, and browser tests.
+- `src/*.test.ts`, `tests/family-controller.mjs`, `tests/browser.mjs` — unit, family controller, and browser tests.
 
 See [Repository Guidelines](AGENTS.md) for contributor conventions.
 

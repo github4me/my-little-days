@@ -1,5 +1,7 @@
 # First invitation — mobile and Azure handoff
 
+> Archived pre-release design. The v2 implementation now supports real-history creation and shared main-app activation. Use [full Azure setup](AZURE-FAMILY-SETUP.md), [the current README](../README.en.md#family-sharing--full-record-integration-live-deployment-checks-remain) and the v2 API contract. Statements below about local-only preparation describe the earlier pilot, not current release behavior.
+
 Status (14 September 2026): **mobile review/local preparation implemented; real-history upload and shared main-app activation are not implemented.** Deploying the current API or setting environment variables does not enable them. No Azure resources were changed for this iteration.
 
 ## Available on mobile now

@@ -11,9 +11,17 @@
     "PublicBaseUrl": "https://REPLACE_APP.azurewebsites.net",
     "HistoryId": "REPLACE_NEW_HISTORY_GUID"
   },
+  "Admission": {
+    "Mode": "Directory",
+    "LocalAccountIssuer": "REPLACE_CUSTOMER_TENANT.onmicrosoft.com",
+    "EmailOtpOnly": false,
+    "UseAccountDeletionCredentials": false,
+    "GraphClientId": "",
+    "GraphClientSecret": ""
+  },
   "Pilot": {
     "Identities": [],
-    "MaxMembers": 4,
+    "MaxMembers": 20,
     "MaxFeeds": 1000,
     "MaxOperationsPerFamily": 100000,
     "MaxNoteLength": 500,
@@ -23,6 +31,8 @@
   },
   "AccountDeletion": {
     "GraphClientId": "",
-    "GraphClientSecret": ""
+    "GraphClientSecret": "",
+    "WorkerEnabled": true,
+    "PollIntervalMinutes": 120
   }
 }

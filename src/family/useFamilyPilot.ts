@@ -1,13 +1,41 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AppState, Platform } from "react-native";
-import { randomUUID } from "expo-crypto";
+import {
+  randomUUID,
+  digestStringAsync,
+  CryptoDigestAlgorithm,
+} from "expo-crypto";
 import type {
   FamilySnapshot,
   SharedFeed,
   FeedReceipt,
   FeedOperation,
   AccountDeletion,
+  FullFamilySnapshot,
+  FamilyCapabilities,
+  FamilyActivation,
+  FamilySummary,
+  RecordOperation,
 } from "./contracts";
+import type { State, Entry, CareRecord } from "../domain";
+import { serializeOwnerSeed, type OwnerSeedDraft } from "./ownerSeed";
+import {
+  clearPersonalForFamilyActivation,
+  setPersonalStorageBlocked,
+  drainPersonalStorageWrites,
+  loadState,
+} from "../storage";
+import {
+  acceptRecordReceipt,
+  applyFullSnapshot,
+  canEditRecord,
+  enqueueRecord,
+  isFullSnapshot,
+  projectedFullState,
+  recordsForSend,
+  requireFullCapabilities,
+  validateFullSnapshot,
+} from "./fullState";
 import type { PilotIdentity } from "./identity";
 import { familyConfig } from "./config";
 import * as auth from "./auth";
@@ -56,6 +84,14 @@ export function useFamilyPilot() {
     null,
   );
   const [state, setState] = useState<PilotState>(emptyPilotState);
+  const [ready, setReady] = useState(false);
+  const verified = useRef(false);
+  const [booting, setBooting] = useState(configured && !webUnsupported);
+  const [activationSerial, setActivationSerial] = useState(0);
+  const markReady = (value: boolean) => {
+    verified.current = value;
+    if (mounted.current) setReady(value);
+  };
   const [busy, setBusy] = useState(false),
     [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null),
@@ -94,6 +130,14 @@ export function useFamilyPilot() {
     if (mounted.current) setState(value);
   }
   function family() {
+    if (
+      !state.snapshot ||
+      !matchesOrigin(
+        originForSnapshot(state.snapshot),
+        current.current.snapshot,
+      )
+    )
+      throw new Error("membership_changed");
     if (current.current.transition) throw new Error("transition_pending");
     if (who.current?.accountDeletion) throw new Error("account_deleted");
     const f = current.current.snapshot?.family;
@@ -180,8 +224,8 @@ export function useFamilyPilot() {
     return result;
   }
   async function snapshot(e: number, familyId: string) {
-    const result = await familyRequest<FamilySnapshot>(
-      `/v1/families/${familyId}/snapshot`,
+    const result = await familyRequest<FullFamilySnapshot>(
+      `/v2/families/${familyId}/snapshot`,
       undefined,
       requests.current.signal,
     );
@@ -199,7 +243,8 @@ export function useFamilyPilot() {
     const previous = current.current.snapshot;
     // Once the server has disproved the old grant/history, a local disk error
     // must not make that old family or obsolete admin permissions return.
-    await persist((s) => applySnapshot(s, result), e, false);
+    await persist((s) => applyFullSnapshot(s, result), e, false);
+    markReady(true);
     if (
       previous &&
       (previous.historyId !== result.historyId ||
@@ -212,6 +257,7 @@ export function useFamilyPilot() {
     const f = me.families[0];
     if (me.accountDeletion || !f) {
       await persist(revokeCache, e, false);
+      markReady(true);
     } else {
       await snapshot(e, f.id);
     }
@@ -223,6 +269,23 @@ export function useFamilyPilot() {
     if (intent.userId !== who.current?.user.id)
       throw new Error("account_mismatch");
     if (intent.phase === "pending") {
+      if (["create", "join"].includes(intent.kind)) {
+        setPersonalStorageBlocked(true);
+        await drainPersonalStorageWrites();
+        if (!intent.dispatched && intent.path === "/v2/families") {
+          const seed = intent.body.seed as OwnerSeedDraft;
+          const latest = { ...seed, source: await loadState() };
+          if (serializeOwnerSeed(latest) !== serializeOwnerSeed(seed)) {
+            await persist((s) => ({ ...s, transition: null }), e, false, true);
+            throw new Error("owner_source_changed");
+          }
+        }
+        if (!intent.dispatched)
+          await persist(
+            (s) => ({ ...s, transition: { ...intent, dispatched: true } }),
+            e,
+          );
+      }
       if (intent.origin) {
         const me = await identify(e);
         const grant = me.families.find(
@@ -315,12 +378,51 @@ export function useFamilyPilot() {
           check(e);
           setDeletionStatus(response);
         }
+        let activation: PilotTransition["activation"];
+        if (intent.path === "/v2/families") {
+          const activated = response as unknown as FamilyActivation;
+          validateFullSnapshot(activated.snapshot);
+          const digest = await digestStringAsync(
+            CryptoDigestAlgorithm.SHA256,
+            serializeOwnerSeed(intent.body.seed as OwnerSeedDraft),
+          );
+          if (
+            activated.operationId !== intent.operationId ||
+            activated.snapshot.family.id !== activated.familyId ||
+            activated.snapshot.family.membershipId !== activated.membershipId ||
+            activated.snapshot.historyId !== activated.historyId ||
+            activated.seedDigest?.toLowerCase() !== digest.toLowerCase()
+          )
+            throw new Error("invalid_response");
+          activation = {
+            familyId: activated.familyId,
+            membershipId: activated.membershipId,
+            historyId: activated.historyId,
+          };
+        } else if (intent.kind === "join") {
+          const joined = response as unknown as FamilySummary;
+          if (
+            !joined.id ||
+            !joined.membershipId ||
+            joined.id !== intent.familyId
+          )
+            throw new Error("invalid_response");
+          activation = {
+            familyId: joined.id,
+            membershipId: joined.membershipId,
+          };
+        }
         await persist(
           (s) => ({
             ...(["leave", "close", "delete-account"].includes(intent.kind)
               ? revokeCache(s)
               : s),
-            transition: { ...intent, phase: "committed" },
+            transition: {
+              ...intent,
+              dispatched: true,
+              phase: "committed",
+              ...(activation ? { activation, body: {} } : {}),
+            },
           }),
           e,
           false,
@@ -356,7 +458,36 @@ export function useFamilyPilot() {
     // verified membership and its full snapshot are durably refreshed.
     await refreshMembership(e);
     const failure = current.current.transition?.error;
-    await persist((s) => ({ ...s, transition: null }), e, false);
+    if (!failure && ["create", "join"].includes(intent.kind)) {
+      // A journal survives a crash between server commit and local replacement.
+      // Retrying repeats this idempotent cleanup before exposing the family.
+      const expected = current.current.transition?.activation;
+      const actual = current.current.snapshot;
+      if (
+        !expected ||
+        !isFullSnapshot(actual) ||
+        actual.family.id !== expected.familyId ||
+        actual.family.membershipId !== expected.membershipId ||
+        (expected.historyId && actual.historyId !== expected.historyId)
+      )
+        throw new Error("membership_changed");
+      if (!expected.historyId)
+        await persist(
+          (s) => ({
+            ...s,
+            transition: {
+              ...s.transition!,
+              activation: { ...expected, historyId: actual.historyId },
+            },
+          }),
+          e,
+          false,
+        );
+      await clearPersonalForFamilyActivation();
+      check(e);
+      setActivationSerial((value) => value + 1);
+    }
+    await persist((s) => ({ ...s, transition: null }), e, false, true);
     if (failure) throw new Error(failure);
   }
   async function runSync() {
@@ -386,17 +517,65 @@ export function useFamilyPilot() {
         if (
           current.current.snapshot ||
           current.current.draft ||
-          current.current.queue.length
+          current.current.queue.length ||
+          current.current.records?.length
         ) {
           await persist(revokeCache, e, false);
           setNotice("membership_revoked");
         }
         failures.current = 0;
         nextRefresh.current = Date.now() + 30000;
+        markReady(true);
         return;
       }
       // Refresh grants/history before sending offline work, not merely after it.
       await snapshot(e, f.id);
+      for (const queued of recordsForSend(durable.current, current.current)) {
+        check(e);
+        if (!foreground.current) break;
+        const item = recordsForSend(durable.current, current.current).find(
+          (q) => q.operation.operationId === queued.operation.operationId,
+        );
+        if (!item) continue;
+        try {
+          const receipt = await familyRequest<FeedReceipt>(
+            `/v2/families/${f.id}/record-operations`,
+            item.operation,
+            requests.current.signal,
+          );
+          await persist(
+            (s) => acceptRecordReceipt(s, item.operation.operationId, receipt),
+            e,
+          );
+        } catch (cause) {
+          check(e);
+          const code = errorCode(cause);
+          if (
+            retryable(cause) ||
+            [
+              "sign_in_required",
+              "unauthorized",
+              "membership_revoked",
+              "membership_changed",
+              "history_changed",
+              "forbidden",
+            ].includes(code)
+          )
+            throw cause;
+          await persist(
+            (s) => ({
+              ...s,
+              records: (s.records ?? []).map((q) =>
+                q.operation.operationId === item.operation.operationId
+                  ? { ...q, status: "failed", error: code }
+                  : q,
+              ),
+            }),
+            e,
+          );
+          setNotice("change_not_shared");
+        }
+      }
       const work = pendingForSend(durable.current, current.current);
       for (const q of work) {
         check(e);
@@ -428,9 +607,12 @@ export function useFamilyPilot() {
           await persist((s) => rejectOperation(s, op.operationId, code), e);
           setNotice("change_not_shared");
           if (
-            ["forbidden", "membership_revoked", "pilot_not_admitted"].includes(
-              code,
-            )
+            [
+              "forbidden",
+              "membership_revoked",
+              "pilot_not_admitted",
+              "identity_not_supported",
+            ].includes(code)
           ) {
             await persist(revokeCache, e, false);
             throw cause;
@@ -447,14 +629,34 @@ export function useFamilyPilot() {
     } catch (cause) {
       if (!isCurrent(e)) return;
       const code = errorCode(cause);
+      if (
+        [
+          "sign_in_required",
+          "unauthorized",
+          "invalid_response",
+          "full_sharing_unavailable",
+          "family_schema_unsupported",
+          "membership_changed",
+          "history_changed",
+          "identity_not_supported",
+        ].includes(code)
+      )
+        markReady(false);
       if (code === "sign_in_required" || code === "unauthorized")
         authPaused.current = true;
       if (
-        ["forbidden", "membership_revoked", "pilot_not_admitted"].includes(
-          code,
-        ) &&
+        [
+          "forbidden",
+          "membership_revoked",
+          "pilot_not_admitted",
+          "identity_not_supported",
+        ].includes(code) &&
         who.current
       ) {
+        markReady(false);
+        const denied = { ...who.current, families: [], pendingInvitations: [] };
+        showIdentity(denied);
+        await auth.saveIdentity(denied).catch(() => {});
         await persist(revokeCache, e, false).catch(() => {});
       }
       failures.current = Math.min(5, failures.current + 1);
@@ -535,12 +737,23 @@ export function useFamilyPilot() {
           grantMatches || stored.transition ? cachedState : revokeCache(stored),
           true,
         );
+        if (
+          grantMatches &&
+          isFullSnapshot(cachedState.snapshot) &&
+          !stored.transition &&
+          !cached.accountDeletion
+        ) {
+          validateFullSnapshot(cachedState.snapshot);
+          markReady(true);
+        }
         if (cached.accountDeletion || (!grantMatches && !stored.transition))
           await persist(revokeCache, e, false, true);
       }
       await sync();
     } catch (cause) {
       if (isCurrent(e)) setError(errorCode(cause));
+    } finally {
+      if (isCurrent(e)) setBooting(false);
     }
   }, []);
   useEffect(() => {
@@ -572,6 +785,7 @@ export function useFamilyPilot() {
     body: Record<string, unknown>,
     e: number,
     kind: PilotTransition["kind"] = "manage",
+    activationFamilyId?: string,
   ) {
     lifecycleActive.current = true;
     try {
@@ -586,13 +800,14 @@ export function useFamilyPilot() {
         body,
         kind,
         userId: who.current.user.id,
-        familyId: current.current.snapshot?.family.id,
+        familyId: activationFamilyId ?? current.current.snapshot?.family.id,
         ...(["manage", "leave", "close"].includes(kind) &&
         current.current.snapshot
           ? { origin: originForSnapshot(current.current.snapshot) }
           : {}),
         phase: "pending",
       };
+      if (["create", "join"].includes(kind)) setPersonalStorageBlocked(true);
       await persist((s) => ({ ...s, transition: intent }), e);
       await resumeTransition(e);
     } finally {
@@ -600,10 +815,131 @@ export function useFamilyPilot() {
     }
   }
   return {
+    activationSerial,
+    activationPending:
+      !!state.transition && ["create", "join"].includes(state.transition.kind),
+    booting,
+    ready,
+    sharedMode:
+      !!state.snapshot || !!identity?.families.length || !!state.transition,
+    sharedState: ready && !state.transition ? projectedFullState(state) : null,
+    fullSnapshot:
+      ready && !state.transition && isFullSnapshot(state.snapshot)
+        ? state.snapshot
+        : null,
+    recordPending: state.records?.filter((q) => q.status !== "failed") ?? [],
+    recordConflicts: state.records?.filter((q) => q.status === "failed") ?? [],
+    canEditRecord: (collection: "entry" | "care", id: string) =>
+      ready &&
+      !state.transition &&
+      isFullSnapshot(state.snapshot) &&
+      canEditRecord(state.snapshot, collection, id) &&
+      !(state.records ?? []).some(
+        (q) =>
+          q.operation.collection === collection &&
+          q.operation.recordId === id &&
+          q.status !== "failed",
+      ),
+    saveRecord: (
+      collection: "entry" | "care",
+      value: Entry | CareRecord,
+      baseVersion?: string,
+    ) =>
+      action(async (e) => {
+        if (!verified.current) throw new Error("refresh_required");
+        const f = family(),
+          snapshot = current.current.snapshot;
+        if (!isFullSnapshot(snapshot))
+          throw new Error("full_sharing_unavailable");
+        const op: RecordOperation = {
+          operationId: randomUUID(),
+          recordId: value.id,
+          membershipId: f.membershipId,
+          historyId: snapshot.historyId,
+          collection,
+          kind: baseVersion ? "update" : "create",
+          ...(baseVersion ? { baseVersion } : {}),
+          ...(collection === "entry"
+            ? { entry: value as Entry }
+            : { careRecord: value as CareRecord }),
+        };
+        await persist((s) => enqueueRecord(s, op), e);
+        setNotice("saved_locally");
+        void refreshNow();
+      }),
+    deleteRecord: (
+      collection: "entry" | "care",
+      id: string,
+      baseVersion: string,
+    ) =>
+      action(async (e) => {
+        if (!verified.current) throw new Error("refresh_required");
+        const f = family(),
+          snapshot = current.current.snapshot;
+        if (!isFullSnapshot(snapshot))
+          throw new Error("full_sharing_unavailable");
+        await persist(
+          (s) =>
+            enqueueRecord(s, {
+              operationId: randomUUID(),
+              recordId: id,
+              membershipId: f.membershipId,
+              historyId: snapshot.historyId,
+              collection,
+              kind: "delete",
+              baseVersion,
+            }),
+          e,
+        );
+        void refreshNow();
+      }),
+    discardRecordConflict: (operationId: string) =>
+      action(async (e) => {
+        await persist(
+          (s) => ({
+            ...s,
+            records: (s.records ?? []).filter(
+              (q) =>
+                q.operation.operationId !== operationId ||
+                q.status !== "failed",
+            ),
+          }),
+          e,
+        );
+      }),
+    saveFullProfile: (profile: State["profile"], baseVersion: string) =>
+      action(async (e) => {
+        if (!verified.current) throw new Error("refresh_required");
+        const f = ownerFamily();
+        await mutate(
+          `/v2/families/${f.id}/profile`,
+          { profile, baseVersion },
+          e,
+        );
+      }),
+    createFamilyFromSeed: (seed: OwnerSeedDraft) =>
+      action(async (e) => {
+        if (who.current?.families.length || current.current.snapshot)
+          throw new Error("already_in_family");
+        requireFullCapabilities(
+          await familyRequest<FamilyCapabilities>(
+            "/v2/capabilities",
+            undefined,
+            requests.current.signal,
+          ),
+        );
+        const checked = JSON.parse(serializeOwnerSeed(seed)) as OwnerSeedDraft;
+        await mutate(
+          "/v2/families",
+          { consentRevision: "family-sharing-v1", seed: checked },
+          e,
+          "create",
+        );
+      }),
     configured,
     webUnsupported,
     user: identity?.user ?? null,
-    snapshot: state.transition ? null : state.snapshot,
+    snapshot: state.transition || !ready ? null : state.snapshot,
     feeds: projectedFeeds(state, identity?.user.id ?? ""),
     draft: state.transition ? null : state.draft,
     pending: state.transition
@@ -704,7 +1040,9 @@ export function useFamilyPilot() {
     error,
     notice,
     hasPrivateWork:
-      !!state.draft || state.queue.some((q) => q.status !== "accepted"),
+      !!state.draft ||
+      state.queue.some((q) => q.status !== "accepted") ||
+      !!state.records?.some((q) => q.status !== "accepted"),
     signIn: () =>
       action(async (e) => {
         if (cleanupPending.current) throw new Error("sign_out_failed");
@@ -722,6 +1060,7 @@ export function useFamilyPilot() {
           authPaused.current = false;
           // Preserve previous work on disk, but don't show it under a new identity.
           showIdentity(null);
+          markReady(false);
           showState(emptyPilotState(), true);
           await identify(e, previous?.user.id);
         } finally {
@@ -731,6 +1070,11 @@ export function useFamilyPilot() {
       }, true),
     signOut: () =>
       action(async (beforeLogoutEpoch) => {
+        if (
+          current.current.transition &&
+          ["create", "join"].includes(current.current.transition.kind)
+        )
+          throw new Error("transition_pending");
         lifecycleActive.current = true;
         try {
           await syncLock.current;
@@ -755,6 +1099,7 @@ export function useFamilyPilot() {
           requests.current = new AbortController();
           syncLock.current = null;
           showIdentity(null);
+          markReady(false);
           showState(emptyPilotState(), true);
           setSyncing(false);
           const results = await Promise.allSettled([
@@ -791,7 +1136,24 @@ export function useFamilyPilot() {
       }),
     acceptInvitation: (id: string) =>
       action(async (e) => {
-        await mutate(`/v1/invitations/${id}/accept`, {}, e, "join");
+        requireFullCapabilities(
+          await familyRequest<FamilyCapabilities>(
+            "/v2/capabilities",
+            undefined,
+            requests.current.signal,
+          ),
+        );
+        const invitation = who.current?.pendingInvitations.find(
+          (item) => item.id === id,
+        );
+        if (!invitation) throw new Error("invitation_unavailable");
+        await mutate(
+          `/v1/invitations/${id}/accept`,
+          {},
+          e,
+          "join",
+          invitation.familyId,
+        );
       }),
     declineInvitation: (id: string) =>
       action(async (e) => {

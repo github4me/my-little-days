@@ -1,4 +1,40 @@
-// Invitation pilot wire contract. This space never reads/writes the local baby State.
+import type { State, Entry, CareRecord } from "../domain";
+import type { OwnerSeedDraft } from "./ownerSeed";
+
+export type SharedRecord<T> = {
+  version: string;
+  recordedBy: string;
+  lastEditedBy: string;
+} & T;
+export type FullFamilySnapshot = FamilySnapshot & {
+  schemaVersion: 2;
+  profile: State["profile"];
+  entries: SharedRecord<{ entry: Entry }>[];
+  careRecords: SharedRecord<{ record: CareRecord }>[];
+};
+export type FamilyCapabilities = {
+  schemaVersion: 2;
+  recordKinds: string[];
+  maxSeedBytes: number;
+};
+export type FamilyActivation = {
+  operationId: string;
+  familyId: string;
+  membershipId: string;
+  historyId: string;
+  seedDigest: string;
+  snapshot: FullFamilySnapshot;
+};
+export type CreateFullFamily = {
+  operationId: string;
+  consentRevision: "family-sharing-v1";
+  seed: OwnerSeedDraft;
+};
+export type RecordOperation = Omit<FeedOperation, "feed"> & {
+  collection: "entry" | "care";
+  entry?: Entry;
+  careRecord?: CareRecord;
+};
 export type FamilyRole = "owner" | "caregiver";
 export type FamilyUser = { id: string; displayName: string; email: string };
 export type FamilySummary = {

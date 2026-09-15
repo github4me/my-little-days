@@ -1,4 +1,4 @@
-name: Deploy family pilot manually
+name: Deploy family API manually
 
 # No push, merge, release, schedule, or workflow_run deployment trigger.
 on:
@@ -9,7 +9,7 @@ on:
         type: string
         required: true
       database_ready:
-        description: I reviewed and separately applied required migrations; this is the synthetic-data pilot
+        description: I reviewed and separately applied all required migrations and runtime SQL grants for this release
         type: boolean
         required: true
         default: false
@@ -52,7 +52,8 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - name: Require configured protected pilot environment
+      # Keep this existing environment/flag and its OIDC subject stable across upgrades.
+      - name: Require configured protected family environment
         shell: bash
         env:
           ENABLED: ${{ vars.FAMILY_PILOT_DEPLOY_ENABLED }}
@@ -65,9 +66,9 @@ jobs:
           set -euo pipefail
           [ "$ENABLED" = true ] || { echo 'Configure and protect the family-pilot environment before enabling deployment.' >&2; exit 1; }
           for value in "$WEBAPP" "$PUBLIC_URL" "$CLIENT_ID" "$TENANT_ID" "$SUBSCRIPTION_ID"; do
-            [ -n "$value" ] || { echo 'A required pilot environment variable is missing.' >&2; exit 1; }
+            [ -n "$value" ] || { echo 'A required family API environment variable is missing.' >&2; exit 1; }
           done
-          [[ "$PUBLIC_URL" == https://* ]] || { echo 'The pilot API URL must use HTTPS.' >&2; exit 1; }
+          [[ "$PUBLIC_URL" == https://* ]] || { echo 'The family API URL must use HTTPS.' >&2; exit 1; }
       - uses: actions/download-artifact@v4
         with:
           name: family-api-${{ github.run_id }}

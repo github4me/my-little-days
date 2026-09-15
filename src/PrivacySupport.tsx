@@ -1,7 +1,7 @@
 import React, { useContext } from "react";
 import { Linking, Pressable, View } from "react-native";
 import { Card, Theme, T, heading, row } from "./ui";
-import { t } from "./i18n";
+import { t, useI18n } from "./i18n";
 
 const supportEmail = "contact@reticle.com.au";
 
@@ -53,6 +53,8 @@ function PrivacySection({
 
 export default function PrivacySupport({ onBack }: { onBack: () => void }) {
   const c = useContext(Theme);
+  const { locale } = useI18n();
+  const copy = (zh: string, en: string) => (locale === "zh-CN" ? zh : en);
   return (
     <View style={{ gap: 18 }}>
       <Pressable
@@ -80,26 +82,41 @@ export default function PrivacySupport({ onBack }: { onBack: () => void }) {
 
       <View style={{ gap: 4 }}>
         <T style={[heading, { fontSize: 28, lineHeight: 36 }]}>隐私与支持</T>
-        <T style={{ color: c.muted }}>了解数据如何留在本机</T>
+        <T raw style={{ color: c.muted }}>
+          {copy(
+            "了解本机记录与可选家庭共享",
+            "Understand offline records and optional family sharing",
+          )}
+        </T>
       </View>
 
       <Card style={{ backgroundColor: c.soft }}>
         <T style={{ color: c.primary, fontSize: 18, fontWeight: "700" }}>
           你的数据，由你掌控
         </T>
-        <T style={{ color: c.muted, fontSize: 13 }}>
-          本机记录无需账号，不会自动上传。可选的家庭邀请试点使用独立登录和服务器，仅用于主动保存的虚构测试资料。
+        <T raw style={{ color: c.muted, fontSize: 13 }}>
+          {copy(
+            "离线记录无需账户，也不会自动上传。只有登录并确认创建或加入家庭，才会启用共享。",
+            "Offline records need no account and are not uploaded automatically. Sharing begins only after you sign in and confirm creating or joining a family.",
+          )}
         </T>
       </Card>
 
       <Card>
-        <T style={{ fontSize: 18, fontWeight: "700" }}>家庭邀请试点</T>
-        <T style={{ color: c.muted, fontSize: 13 }}>
-          试点通过 Microsoft Entra External ID
-          登录。创建测试家庭、发送邀请、接受邀请和保存测试记录时，相关资料会发送到配置的试点服务。原有宝宝档案、历史、计时器、照片、早教打卡和备份不会上传。
+        <T raw style={{ fontSize: 18, fontWeight: "700" }}>
+          {copy("家庭共享", "Family sharing")}
         </T>
-        <T style={{ color: c.muted, fontSize: 13 }}>
-          试点仅限获准的测试账户，请勿填写真实宝宝资料。退出会清除这台设备的试点缓存和草稿；服务端数据仍保留。账户删除、保留期限和正式隐私披露完成前，不对外发布家庭共享。
+        <T raw style={{ color: c.muted, fontSize: 13 }}>
+          {copy(
+            "家庭账户通过 Microsoft Entra External ID 登录。首次创建会上传你审核并确认的宝宝档案和全部已保存喂养、尿布、睡眠、成长、里程碑与照护记录。加入家庭会下载管理员的完整资料，你的个人记录不会合并。激活成功后会清理原离线资料与恢复副本。",
+            "Family accounts use Microsoft Entra External ID. Creating a family uploads the profile and all saved feeding, nappy, sleep, growth, milestone and care records you review and confirm. Joining downloads the admin’s complete records without merging personal records. Successful activation clears the original offline data and recovery copies.",
+          )}
+        </T>
+        <T raw style={{ color: c.muted, fontSize: 13 }}>
+          {copy(
+            "家庭成员可以查看全部记录并编辑自己的记录；管理员可编辑任意记录。离开、被移除或退出登录会清理本机家庭数据和草稿；已经共享的贡献仍留在家庭。照片、设备偏好、提醒和早教打卡不上传，共享期间不提供本机备份导出或导入。",
+            "Members can view all records and edit their own; admins can edit any record. Leaving, removal or sign-out clears family data and drafts from this device; shared contributions remain with the family. Photos, device preferences, reminders and play check-ins are not uploaded. Local backup export and import are unavailable while sharing.",
+          )}
         </T>
       </Card>
 

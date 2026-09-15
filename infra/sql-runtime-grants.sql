@@ -13,6 +13,7 @@ IF OBJECT_ID(N'dbo.Families', N'U') IS NULL OR OBJECT_ID(N'dbo.Memberships', N'U
     OR OBJECT_ID(N'dbo.Operations', N'U') IS NULL
     OR OBJECT_ID(N'dbo.OwnershipTransfers', N'U') IS NULL
     OR OBJECT_ID(N'dbo.AccountDeletions', N'U') IS NULL
+    OR OBJECT_ID(N'dbo.FamilyRecords', N'U') IS NULL
     THROW 50006, 'Apply the application migration before runtime grants.', 1;
 
 BEGIN TRANSACTION;
@@ -20,6 +21,7 @@ GRANT SELECT, INSERT, UPDATE ON OBJECT::dbo.Families TO [family_pilot_runtime];
 GRANT SELECT, INSERT, UPDATE, DELETE ON OBJECT::dbo.Memberships TO [family_pilot_runtime];
 GRANT SELECT, INSERT, UPDATE, DELETE ON OBJECT::dbo.Invitations TO [family_pilot_runtime];
 GRANT SELECT, INSERT, UPDATE, DELETE ON OBJECT::dbo.Feeds TO [family_pilot_runtime];
+GRANT SELECT, INSERT, UPDATE, DELETE ON OBJECT::dbo.FamilyRecords TO [family_pilot_runtime];
 GRANT SELECT, INSERT, UPDATE, DELETE ON OBJECT::dbo.Operations TO [family_pilot_runtime];
 GRANT SELECT, INSERT, UPDATE, DELETE ON OBJECT::dbo.OwnershipTransfers TO [family_pilot_runtime];
 GRANT SELECT, INSERT, UPDATE ON OBJECT::dbo.AccountDeletions TO [family_pilot_runtime];

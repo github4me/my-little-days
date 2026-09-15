@@ -104,7 +104,7 @@ async function openDemo(page, zh) {
     .click();
   const disclosure = button(
     page,
-    zh ? "展开家庭邀请试点" : "Expand Family invitation pilot",
+    zh ? "展开家庭共享" : "Expand Family sharing",
   );
   if (await disclosure.isVisible()) await disclosure.click();
   await button(

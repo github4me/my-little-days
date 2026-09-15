@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 
 namespace LittleDays.FamilyApi;
 
@@ -15,16 +16,19 @@ public static class AccountIdentityDeletionRegistration
     public static IServiceCollection AddAccountIdentityDeletion(this IServiceCollection services,
         IConfiguration configuration, PilotConfiguration pilot)
     {
+        services.AddSingleton(DeletionWorkerSettings.Load(configuration));
         var clientId = configuration["AccountDeletion:GraphClientId"];
         var secret = configuration["AccountDeletion:GraphClientSecret"];
-        if (string.IsNullOrWhiteSpace(clientId) && string.IsNullOrWhiteSpace(secret))
+        if (string.IsNullOrWhiteSpace(clientId) && string.IsNullOrWhiteSpace(secret) && pilot.Admission.Mode == "Static")
             return services.AddSingleton<IAccountIdentityDeletion, UnconfiguredAccountIdentityDeletion>();
         if (!Guid.TryParse(clientId, out var id) || id == Guid.Empty || string.IsNullOrWhiteSpace(secret) ||
             secret.StartsWith("@Microsoft.KeyVault(", StringComparison.Ordinal))
             throw new InvalidOperationException("Account deletion directory credentials are incomplete.");
 
+        var directoryMode = pilot.Admission.Mode == "Directory";
+        if (directoryMode) services.AddScoped<IAccountDeletionAuthorization, DurableAccountDeletionAuthorization>();
         services.AddSingleton(new AccountDeletionDirectorySettings(pilot.Entra.TenantId, id, secret,
-            pilot.Pilot.Identities.Select(x => x.ObjectId).ToHashSet()));
+            pilot.Pilot.Identities.Select(x => x.ObjectId).ToHashSet(), directoryMode));
         services.AddHttpClient<IAccountIdentityDeletion, GraphAccountIdentityDeletion>(client =>
         {
             client.Timeout = TimeSpan.FromSeconds(20);
@@ -46,23 +50,42 @@ public sealed class UnconfiguredAccountIdentityDeletion : IAccountIdentityDeleti
 
 // Server-only settings. Initial release uses restricted App Service settings; never serialize or log this object.
 public sealed class AccountDeletionDirectorySettings(Guid tenantId, Guid clientId, string clientSecret,
-    IReadOnlySet<Guid> admittedUsers)
+    IReadOnlySet<Guid> admittedUsers, bool directoryMode = false)
 {
     public Guid TenantId { get; } = tenantId;
     public Guid ClientId { get; } = clientId;
     public string ClientSecret { get; } = clientSecret;
     public IReadOnlySet<Guid> AdmittedUsers { get; } = admittedUsers;
+    public bool DirectoryMode { get; } = directoryMode;
 }
 
-public sealed class GraphAccountIdentityDeletion(HttpClient http, AccountDeletionDirectorySettings settings)
+public interface IAccountDeletionAuthorization
+{
+    Task<bool> HasPendingRequestAsync(Guid objectId, CancellationToken ct);
+}
+
+public sealed class DurableAccountDeletionAuthorization(PilotDatabase db) : IAccountDeletionAuthorization
+{
+    // This tombstone is created by authenticated DeleteAccount, never from a client-supplied user ID.
+    public Task<bool> HasPendingRequestAsync(Guid objectId, CancellationToken ct) =>
+        db.AccountDeletions.AnyAsync(x => x.UserId == objectId && x.Status == "awaiting_identity_deletion", ct);
+}
+
+public sealed class GraphAccountIdentityDeletion(HttpClient http, AccountDeletionDirectorySettings settings,
+    IAccountDeletionAuthorization? authorization = null)
     : IAccountIdentityDeletion
 {
     public async Task DeleteIdentityAsync(Guid objectId, CancellationToken ct)
     {
-        // The controlled pilot can delete only a verified customer identity admitted to this app.
+        // Directory mode requires the exact authenticated account's durable cleanup job.
+        // Static fixture mode retains the explicit allowlist.
         // No endpoint, tenant, user principal name, or object ID comes from a deletion request body.
-        if (objectId == Guid.Empty || !settings.AdmittedUsers.Contains(objectId) ||
+        if (objectId == Guid.Empty ||
             settings.TenantId == Guid.Empty || settings.ClientId == Guid.Empty)
+            throw new InvalidOperationException("identity_deletion_not_admitted");
+        if (settings.DirectoryMode
+            ? authorization is null || !await authorization.HasPendingRequestAsync(objectId, ct)
+            : !settings.AdmittedUsers.Contains(objectId))
             throw new InvalidOperationException("identity_deletion_not_admitted");
         try
         {

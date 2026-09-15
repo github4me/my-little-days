@@ -12,7 +12,7 @@ import ts from "typescript";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
-function fixture(overrides = {}, locale = "en") {
+function fixture(overrides = {}, locale = "en", demo = false) {
   let active = "",
     slot = 0,
     nodes = [];
@@ -109,6 +109,7 @@ function fixture(overrides = {}, locale = "en") {
     error: null,
     notice: null,
     transitionPending: false,
+    activationPending: false,
     accountDeletion: null,
     deletionStatus: null,
     draft: null,
@@ -213,7 +214,9 @@ function fixture(overrides = {}, locale = "en") {
     controller,
     render() {
       nodes = [];
-      visit(react.createElement(Screen, { onBack() {}, pilot: controller }));
+      visit(
+        react.createElement(Screen, { onBack() {}, pilot: controller, demo }),
+      );
       return nodes;
     },
     buttons(label) {
@@ -297,9 +300,7 @@ test("invitation acceptance requires explicit warning acknowledgement in both la
     );
     assert.match(
       screen.text(),
-      locale === "en"
-        ? /never uploads, replaces or deletes/
-        : /不会上传、替换或删除/,
+      locale === "en" ? /never uploaded or merged/ : /不会上传或合并/,
     );
     assert.equal(screen.buttons(label).at(-1).props.disabled, true);
     assert.equal(screen.calls.length, 0);
@@ -319,11 +320,15 @@ test("invitation acceptance requires explicit warning acknowledgement in both la
   }
 });
 
-test("ordinary members see edit/delete only for their own records and no admin writes", () => {
-  const screen = fixture({
-    snapshot: snapshot(),
-    feeds: [feed("own", "user"), feed("other", "another")],
-  });
+test("isolated demo members see edit/delete only for their own records and no admin writes", () => {
+  const screen = fixture(
+    {
+      snapshot: snapshot(),
+      feeds: [feed("own", "user"), feed("other", "another")],
+    },
+    "en",
+    true,
+  );
   screen.render();
   assert.equal(screen.buttons("Edit").length, 1);
   assert.equal(screen.buttons("Delete").length, 1);
@@ -331,11 +336,15 @@ test("ordinary members see edit/delete only for their own records and no admin w
   assert.equal(screen.buttons("Add invitation").length, 0);
 });
 
-test("admins can change any feed and profile but cannot delete their account while owning a family", () => {
-  const screen = fixture({
-    snapshot: snapshot("owner"),
-    feeds: [feed("own", "user"), feed("other", "another")],
-  });
+test("isolated demo admins can change any feed and profile but cannot delete their account while owning a family", () => {
+  const screen = fixture(
+    {
+      snapshot: snapshot("owner"),
+      feeds: [feed("own", "user"), feed("other", "another")],
+    },
+    "en",
+    true,
+  );
   screen.render();
   assert.equal(screen.buttons("Edit").length, 2);
   assert.equal(screen.buttons("Delete").length, 2);
@@ -390,7 +399,7 @@ test("unresolved transitions still allow explicit sign-out, including a pending 
     assert.equal(screen.buttons("Sign out")[0].props.disabled, false);
     screen.buttons("Sign out")[0].props.onPress();
     screen.render();
-    assert.match(screen.text(), /does not undo a server action/);
+    assert.match(screen.text(), /may have completed on the server/);
     assert.equal(screen.calls.length, 0);
     const confirmation = screen.buttons("Sign out").at(-1);
     assert.equal(confirmation.props.disabled, false);
@@ -401,4 +410,32 @@ test("unresolved transitions still allow explicit sign-out, including a pending 
       1,
     );
   }
+});
+
+test("real family management never offers the legacy test feed editor or synthetic create fallback", () => {
+  for (const role of ["caregiver", "owner"]) {
+    const screen = fixture({
+      snapshot: snapshot(role),
+      feeds: [feed("old", "user")],
+    });
+    screen.render();
+    assert.equal(screen.buttons("Edit").length, 0);
+    assert.equal(screen.buttons("Save baby profile").length, 0);
+    assert.equal(screen.buttons("Add test bottle feed").length, 0);
+    assert.equal(
+      screen.buttons("Add invitation").length,
+      role === "owner" ? 1 : 0,
+    );
+  }
+  const noFamily = fixture();
+  noFamily.render();
+  assert.doesNotMatch(noFamily.text(), /Create a test family|fictional data/);
+});
+
+test("unresolved create and join keep sign-out blocked so their activation journals can recover", () => {
+  const screen = fixture({ transitionPending: true, activationPending: true });
+  screen.render();
+  assert(screen.buttons("Sign out").length > 0);
+  assert(screen.buttons("Sign out").every((button) => button.props.disabled));
+  assert(screen.buttons("Refresh").length > 0);
 });

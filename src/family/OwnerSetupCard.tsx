@@ -13,7 +13,11 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import type { State } from "../domain";
 import { useI18n } from "../i18n";
 import { Button, Card, T, Theme } from "../ui";
-import { familyMessage, type FamilyMessageKey } from "./messages";
+import {
+  familyMessage,
+  fullFamilyMessage,
+  type FamilyMessageKey,
+} from "./messages";
 import type { OwnerSeedDraft, OwnerSeedSummary } from "./ownerSeed";
 
 const countLabels = [
@@ -49,7 +53,7 @@ export function OwnerSeedCountsView({
 }
 
 export type OwnerSetupCardProps = {
-  mode: "demo" | "local-only";
+  mode: "demo" | "local-only" | "full";
   profile: State["profile"];
   summary: OwnerSeedSummary;
   pending?: OwnerSeedDraft | null;
@@ -71,7 +75,10 @@ export default function OwnerSetupCard({
 }: OwnerSetupCardProps) {
   const c = useContext(Theme);
   const { locale } = useI18n();
-  const m = (key: FamilyMessageKey) => familyMessage(locale, key);
+  const m = (key: FamilyMessageKey) =>
+    mode === "full"
+      ? fullFamilyMessage(locale, key)
+      : familyMessage(locale, key);
   const [emails, setEmails] = useState(
     () => pending?.inviteeEmails.join("\n") ?? "",
   );
@@ -187,7 +194,7 @@ export default function OwnerSetupCard({
           keyboardType="email-address"
           autoCapitalize="none"
           autoCorrect={false}
-          maxLength={800}
+          maxLength={mode === "full" ? 4900 : 800}
           value={emails}
           onChangeText={setEmails}
           editable={!busy}
@@ -224,6 +231,8 @@ export default function OwnerSetupCard({
         onPress={() =>
           void act(async () => {
             const prepared = await onPrepare(emails);
+            if (mode === "demo" && prepared.inviteeEmails.length > 3)
+              throw new Error("owner_recipient_limit");
             if (mounted.current) {
               setReview(prepared);
               setConsent(false);
@@ -336,7 +345,7 @@ export default function OwnerSetupCard({
                       ? "working"
                       : discarding
                         ? "ownerDiscardSaved"
-                        : mode === "demo"
+                        : mode === "demo" || mode === "full"
                           ? "ownerCreateDemo"
                           : "ownerSaveLocal",
                   )}

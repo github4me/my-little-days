@@ -140,10 +140,20 @@ test("owner seed rejects malformed, missing, self or excess recipients with safe
     () =>
       prepareOwnerSeed(
         initialState,
-        "a@example.test,b@example.test,c@example.test,d@example.test",
+        Array.from({ length: 20 }, (_, i) => `family${i}@example.test`).join(
+          ",",
+        ),
         ownEmail,
       ),
     { message: "owner_recipient_limit" },
+  );
+  assert.equal(
+    prepareOwnerSeed(
+      initialState,
+      Array.from({ length: 19 }, (_, i) => `family${i}@example.test`).join(","),
+      ownEmail,
+    ).inviteeEmails.length,
+    19,
   );
 });
 

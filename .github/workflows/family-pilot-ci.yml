@@ -1,4 +1,4 @@
-name: Family pilot CI
+name: Family sharing CI
 
 on:
   pull_request:

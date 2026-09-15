@@ -5,6 +5,7 @@ import type {
   SharedFeed,
   SharedFeedInput,
 } from "./contracts";
+import type { QueuedRecord } from "./fullState";
 
 export type FeedDraft = {
   recordId: string;
@@ -33,6 +34,8 @@ export type PilotTransition = {
   origin?: SharingOrigin;
   phase: "pending" | "committed" | "rejected";
   error?: string;
+  dispatched?: boolean;
+  activation?: { familyId: string; membershipId: string; historyId?: string };
 };
 export type QueuedFeed = {
   origin: SharingOrigin;
@@ -53,6 +56,7 @@ export type PilotState = {
   queue: QueuedFeed[];
   acknowledgedRevision: string | null;
   transition: PilotTransition | null;
+  records?: QueuedRecord[];
 };
 export const emptyPilotState = (): PilotState => ({
   schema: 2,
@@ -61,6 +65,7 @@ export const emptyPilotState = (): PilotState => ({
   queue: [],
   acknowledgedRevision: null,
   transition: null,
+  records: [],
 });
 export function originForSnapshot(snapshot: FamilySnapshot): SharingOrigin {
   const member = snapshot.members.find(
@@ -371,17 +376,37 @@ export function parseStoredPilot(raw: string | null): PilotState {
       !["pending", "accepted", "failed"].includes(q.status)
     )
       throw new Error("local_data_invalid");
+  if (
+    state.records !== undefined &&
+    (!Array.isArray(state.records) || state.records.length > 200)
+  )
+    throw new Error("local_data_invalid");
+  for (const q of state.records ?? [])
+    if (
+      !q.operation?.operationId ||
+      !q.operation.recordId ||
+      !q.operation.membershipId ||
+      !q.operation.historyId ||
+      !q.origin ||
+      !["entry", "care"].includes(q.operation.collection) ||
+      !["create", "update", "delete"].includes(q.operation.kind) ||
+      !["pending", "accepted", "failed"].includes(q.status)
+    )
+      throw new Error("local_data_invalid");
   if (state.snapshot) revision(state.snapshot.revision);
   if (
     state.transition &&
     (!state.transition.operationId ||
       !state.transition.userId ||
-      !state.transition.path?.startsWith("/v1/") ||
+      !/^\/v[12]\//.test(state.transition.path ?? "") ||
       !["pending", "committed", "rejected"].includes(state.transition.phase))
   )
     throw new Error("local_data_invalid");
   return {
     ...state,
+    records: (state.records ?? []).filter((q) =>
+      matchesOrigin(q.origin, state.snapshot),
+    ),
     transition: state.transition ?? null,
     draft: matchesOrigin(state.draft?.origin, state.snapshot)
       ? state.draft

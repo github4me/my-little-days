@@ -16,14 +16,14 @@ export async function familyRequest<T>(
   signal?: AbortSignal,
 ): Promise<T> {
   if (!familyConfig) throw new PilotApiError("not_configured");
-  if (!path.startsWith("/v1/") || path.includes("://"))
+  if (!/^\/v[12]\//.test(path) || path.includes("://"))
     throw new PilotApiError("invalid_request");
   const token = await getAccessToken();
   const timeout = new AbortController();
   const abort = () => timeout.abort();
   signal?.addEventListener("abort", abort, { once: true });
   if (signal?.aborted) timeout.abort();
-  const timer = setTimeout(abort, 15000);
+  const timer = setTimeout(abort, path === "/v2/families" ? 120000 : 15000);
   try {
     const response = await fetch(`${familyConfig.apiUrl}${path}`, {
       method: body === undefined ? "GET" : "POST",

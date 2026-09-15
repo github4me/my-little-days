@@ -676,7 +676,135 @@ const errorMessages: Record<string, FamilyMessageKey> = {
 };
 
 export function familyErrorMessage(locale: AppLocale, code: string): string {
+  if (["full_sharing_unavailable", "family_schema_unsupported"].includes(code))
+    return locale === "zh-CN"
+      ? "服务或家庭尚未支持完整记录。请更新服务后重试。"
+      : "The service or family does not support complete records yet. Update the service and retry.";
+  if (code === "running_timers")
+    return familyMessage(locale, "ownerTimerError");
+  if (code === "identity_not_supported")
+    return locale === "zh-CN"
+      ? "此账户不可访问家庭服务。已清除此设备的家庭缓存。"
+      : "This account cannot access family services. Family data cached on this device has been cleared.";
+  if (code === "refresh_required")
+    return locale === "zh-CN"
+      ? "请联网刷新家庭权限后继续。"
+      : "Connect and refresh family access to continue.";
   return familyMessage(locale, errorMessages[code] ?? "errorGeneric");
+}
+
+const fullMessages: Partial<Record<FamilyMessageKey, [string, string]>> = {
+  ownerEmails: ["家人邮箱（最多 19 个）", "Family emails (up to 19)"],
+  ownerEmailError: [
+    "请填写 1–19 个有效且不同的家人邮箱。",
+    "Enter 1–19 valid, different family email addresses.",
+  ],
+  title: ["家庭共享", "Family sharing"],
+  account: ["家庭账户", "Family account"],
+  deleteAccountDescription: [
+    "服务接受删除申请后会立即停用账户访问，并处理关联资料及身份账户的永久删除。账户删除会清理你创建或最后编辑的家庭记录（包括最初由别人创建的记录）；普通退出则保留家庭贡献。身份删除只有在服务确认后才算完成。已迁移的原本机资料不会恢复。",
+    "Once accepted, account access stops and associated data and identity enter permanent deletion processing. Account deletion removes family records you created or last edited, including records originally created by someone else; ordinary departure retains contributions. Identity deletion is complete only when the service confirms it. Previously migrated local data is not restored.",
+  ],
+  signIn: ["登录家庭账户", "Sign in"],
+  leave: ["离开家庭", "Leave family"],
+  leaveTitle: ["离开这个家庭？", "Leave this family?"],
+  leaveDescription: [
+    "你将失去此家庭全部记录的访问权，包括自己添加的记录。本设备的家庭缓存、草稿和未发送修改会清理；已被服务器接受的记录留在家庭。重新加入需要新邀请，已迁移的原本机资料不会恢复。",
+    "You will lose access to every family record, including your own. This device’s family cache, drafts and unsent changes will be cleared; accepted records remain with the family. Rejoining requires a new invitation. Previously migrated local data is not restored.",
+  ],
+  removeDescription: [
+    "{name} 将立即失去家庭访问权，未使用邀请同时失效；已共享记录仍保留。",
+    "{name} will immediately lose family access and unused invitations will be revoked. Shared records remain.",
+  ],
+  closeFamily: ["关闭家庭", "Close family"],
+  closeFamilyTitle: ["关闭这个家庭？", "Close this family?"],
+  closeFamilyDescription: [
+    "家庭访问将立即停止，家庭进入删除处理，全部家庭记录（包括已离开成员的贡献）会被清理。本机缓存、草稿和未发送修改也会清除，已迁移的原本机资料不会恢复。",
+    "Family access stops immediately and the family enters deletion processing. All family records, including former members’ contributions, will be purged. Local cache, drafts and unsent work will also be cleared. Previously migrated local data is not restored.",
+  ],
+  closeFamilyConsent: [
+    "我了解这会关闭并删除整个家庭，而不是仅退出登录。",
+    "I understand this closes and deletes the whole family, rather than only signing me out.",
+  ],
+  deletion: ["删除账户", "Delete account"],
+  deleteAccountTitle: ["删除你的账户？", "Delete your account?"],
+  pilotNotice: [
+    "首次创建将共享你确认的完整宝宝记录；加入家庭将下载管理员的记录。之后在主界面记录和照护。",
+    "Creating a family shares the complete baby history you review. Joining downloads the admin’s family records. Continue recording in the main app.",
+  ],
+  signInDescription: [
+    "登录后可邀请家人，或接受家庭邀请。",
+    "Sign in to invite family members or accept a family invitation.",
+  ],
+  unconfigured: ["家庭服务尚未配置", "Family service is not configured"],
+  unconfiguredDescription: [
+    "此版本尚未连接家庭服务。离线记录仍可正常使用。",
+    "This build is not connected to family services. Offline records remain available.",
+  ],
+  nativeOnlyDescription: [
+    "家庭登录与共享在手机应用中提供。",
+    "Family sign-in and sharing are available in the mobile app.",
+  ],
+  signOutTitle: ["退出家庭账户？", "Sign out of your family account?"],
+  signOutDescription: [
+    "将清除此设备上的全部家庭数据、草稿和登录信息。已共享记录仍留在家庭。",
+    "All family data, drafts and sign-in details will be cleared from this device. Shared records remain with the family.",
+  ],
+  signOutWithWork: [
+    "退出将丢弃本设备上的未发送修改和草稿，并清除全部家庭缓存。已共享记录仍留在家庭。",
+    "Signing out discards unsent changes and drafts and clears all family data from this device. Shared records remain with the family.",
+  ],
+  signOutDuringTransition: [
+    "上次家庭操作尚未确认，服务端可能已经完成。请刷新以继续同一次操作。",
+    "The previous family action is unconfirmed and may have completed on the server. Refresh to continue the same operation.",
+  ],
+  oneFamily: [
+    "每个账户只能加入一个家庭。",
+    "Each account can belong to one family.",
+  ],
+  family: ["家庭", "Family"],
+  babyName: ["宝宝名字", "Baby name"],
+  ownerSetupLocalNotice: [
+    "确认后将上传下面全部资料、创建家庭并保存邀请。照片、提醒和打卡不会上传；激活成功后会清理本机旧资料和恢复副本。",
+    "Confirmation uploads all data below, creates the family and saves invitations. Photos, reminders and check-ins are excluded. Successful activation clears the old local data and recovery copies.",
+  ],
+  ownerConsent: [
+    "我已查看全部初始资料和邀请邮箱，同意上传并与家人共享；激活后清理本机旧资料，受邀人的个人记录不会合并。",
+    "I reviewed the starting data and invitation emails and agree to upload and share them. Activation clears the old local data. Invitees’ personal records are not merged.",
+  ],
+  ownerExclusions: [
+    "照片、设备偏好、提醒和早教打卡不包含在上传中。请先结束正在计时的喂养或睡眠。",
+    "Photos, device preferences, reminders and play check-ins are excluded from upload. Finish running feeding or sleep timers first.",
+  ],
+  ownerGenericError: [
+    "暂时无法完成设置。请查看家庭操作状态并刷新；未确认结果时不要重新创建。",
+    "Setup could not finish. Check the family action status and refresh; do not create another family while the result is unconfirmed.",
+  ],
+  joinConsent: [
+    "我了解加入后会下载此家庭完整记录并清理本机旧资料；我创建的共享记录也会在离开后留在家庭。",
+    "I understand that joining downloads this family’s complete records and clears old local data. My shared contributions remain with the family after I leave.",
+  ],
+  acceptInviteTitle: ["加入这个家庭？", "Join this family?"],
+  joinWarning: [
+    "加入将下载管理员的完整记录，并删除此设备的原离线资料、恢复副本、照片、提醒和打卡；你的个人记录不会上传或合并。\n\n管理员可随时移除成员，无需提前通知，服务端访问立即停止；管理员也可编辑或删除任何记录。离开或被移除后，你将失去全部家庭记录的访问权，包括自己创建的记录；已共享内容仍留在家庭。本设备检测到撤销时会清除家庭缓存和草稿。",
+    "Joining downloads the admin’s complete history and clears this device’s original offline data, recovery copies, photos, reminders and check-ins. Your personal records are never uploaded or merged.\n\nThe admin can remove members at any time without advance notice. Server access ends immediately. Admins can edit or delete any record. Leaving or removal ends access to all family records, including your contributions, which remain with the family. This device clears family data and drafts when revocation is detected.",
+  ],
+  localCache: ["已验证家庭权限与记录。", "Family access and records verified."],
+};
+export function fullFamilyMessage(
+  locale: AppLocale,
+  key: FamilyMessageKey,
+  values?: Record<string, string | number>,
+): string {
+  const pair = fullMessages[key];
+  if (!pair)
+    return familyMessage(locale, key, values)
+      .replaceAll("试点", "家庭共享")
+      .replaceAll("pilot", "family sharing");
+  let value = pair[locale === "zh-CN" ? 0 : 1];
+  for (const [name, replacement] of Object.entries(values ?? {}))
+    value = value.replaceAll(`{${name}}`, String(replacement));
+  return value;
 }
 
 const noticeMessages: Record<string, FamilyMessageKey> = {

@@ -86,7 +86,6 @@ function global:az {
         'bicep build' { @{ resources = @() } }
         'account show' { $global:pilotFake.account }
         'provider show' { $global:pilotFake.registered }
-        'appservice plan' { $global:pilotFake.plan }
         'group exists' { $global:pilotFake.groupExists }
         'group show' { $global:pilotFake.group }
         'webapp list-runtimes' { ,$global:pilotFake.runtimes }
@@ -102,6 +101,13 @@ function global:az {
         }
         'rest --method' {
             $url = $Arguments[[array]::IndexOf($Arguments, '--url') + 1]
+            if ($url -ceq "https://management.azure.com$($script:planId)?api-version=2025-03-01") {
+                Assert-True ($Arguments[2] -ceq 'get') 'The hosting plan must be read only.'
+                $query = $Arguments[[array]::IndexOf($Arguments, '--query') + 1]
+                Assert-True ($query -match 'properties.reserved' -and $query -match 'properties.provisioningState') 'Read documented ARM properties, not flattened CLI fields.'
+                $global:pilotFake.plan
+                break
+            }
             $expectedUrl = 'https://management.azure.com' + $global:pilotFake.serverId + '?api-version=2023-08-01&$expand=administrators/activedirectory'
             if ($Arguments[2] -cne 'get' -or $url -cne $expectedUrl) {
                 throw 'SQL administrator read must use the exact selected server GET with administrators/activedirectory expansion.'
@@ -253,11 +259,11 @@ try {
     }
     Test-Case 'Wrong operating system is rejected' {
         $global:pilotFake.plan.reserved = $false
-        Assert-Rejected { Invoke-Pilot 'Deploy' -Approve -Capacity } 'Linux B1'
+        Assert-Rejected { Invoke-Pilot 'Deploy' -Approve -Capacity } 'reserved=False'
     }
     Test-Case 'Unexpected plan tier is rejected' {
         $global:pilotFake.plan.sku.name = 'P1v3'
-        Assert-Rejected { Invoke-Pilot 'Deploy' -Approve -Capacity } 'Linux B1'
+        Assert-Rejected { Invoke-Pilot 'Deploy' -Approve -Capacity } 'expected B1 Basic'
     }
     Test-Case 'Unexpected instance count is rejected' {
         $global:pilotFake.plan.sku.capacity = 2
@@ -266,6 +272,14 @@ try {
     Test-Case 'Wrong plan region is rejected' {
         $global:pilotFake.plan.location = 'Australia East'
         Assert-Rejected { Invoke-Pilot 'Deploy' -Approve -Capacity } 'requested region'
+    }
+    Test-Case 'Missing provisioning state fails closed with a field-specific diagnostic' {
+        $global:pilotFake.plan.provisioningState = $null
+        Assert-Rejected { Invoke-Pilot 'WhatIf' } 'provisioningState=.*missing value'
+    }
+    Test-Case 'Failed provisioning state is not accepted' {
+        $global:pilotFake.plan.provisioningState = 'Failed'
+        Assert-Rejected { Invoke-Pilot 'WhatIf' } 'provisioningState=Failed'
     }
     Test-Case 'Unavailable .NET 10 runtime blocks deployment' {
         $global:pilotFake.runtimes = @('DOTNETCORE:8.0')
@@ -299,7 +313,7 @@ try {
     Test-Case 'Rerun requests the documented expanded SQL server GET with explicit subscription' {
         Set-ExistingPilot
         $null = Invoke-Pilot 'WhatIf'
-        $reads = @($global:pilotAzCalls | Where-Object { $_[0] -eq 'rest' })
+        $reads = @($global:pilotAzCalls | Where-Object { $_[0] -eq 'rest' -and ($_[ [array]::IndexOf($_, '--url') + 1 ] -match '/Microsoft.Sql/servers/') })
         Assert-True ($reads.Count -eq 1) 'Expected one expanded SQL server read.'
         Assert-True ($reads[0] -contains '--subscription' -and $reads[0] -contains $script:subscription) 'REST request did not select the subscription.'
         Assert-True ($reads[0][2] -ceq 'get') 'SQL administrator REST request must be read-only.'

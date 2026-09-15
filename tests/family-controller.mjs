@@ -5,6 +5,7 @@ import vm from "node:vm";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
+import { createHash } from "node:crypto";
 
 // Exercise the real hook and native persistence module with deterministic React,
 // identity, HTTP and SQLite boundaries. No network, secrets or device are used.
@@ -51,12 +52,23 @@ function fixture() {
     identity: {
       user: member,
       families: [family],
-      pendingInvitations: [],
+      pendingInvitations: [
+        {
+          id: "invite-b",
+          familyId: "family-b",
+          ownerDisplayName: "Owner",
+          expiresAt: "2027-01-01T00:00:00Z",
+        },
+      ],
       accountDeletion: null,
     },
     state: {
       schema: 2,
       snapshot: {
+        schemaVersion: 2,
+        profile: { name: "Baby", birthDate: "", sex: "unspecified" },
+        entries: [],
+        careRecords: [],
         family,
         historyId: "history-a",
         revision: "0",
@@ -134,6 +146,16 @@ function makeWorld({ offline = true, queued = false } = {}) {
     mutationReceipts: new Map(),
     deletionReceipt: null,
     beforeReceiptSave: async () => {},
+    personalClears: 0,
+    beforePersonalClear: async () => {},
+    recordsSent: [],
+    beforeRecord: async () => {},
+    recordReceipts: new Map(),
+    personalSource: {
+      schemaVersion: 1,
+      profile: { name: "Baby", birthDate: "", sex: "unspecified" },
+      entries: [],
+    },
   };
   const contexts = new Map();
   let activeReact;
@@ -197,6 +219,17 @@ function makeWorld({ offline = true, queued = false } = {}) {
     },
   };
   const overrides = {
+    storage: {
+      clearPersonalForFamilyActivation: async () => {
+        await world.beforePersonalClear();
+        world.personalClears++;
+      },
+      setPersonalStorageBlocked: (value) => {
+        world.personalBlocked = value;
+      },
+      drainPersonalStorageWrites: async () => {},
+      loadState: async () => structuredClone(world.personalSource),
+    },
     react: {
       useState: (...args) => activeReact.useState(...args),
       useRef: (...args) => activeReact.useRef(...args),
@@ -211,6 +244,9 @@ function makeWorld({ offline = true, queued = false } = {}) {
       },
     },
     "expo-crypto": {
+      CryptoDigestAlgorithm: { SHA256: "sha256" },
+      digestStringAsync: async (_, value) =>
+        createHash("sha256").update(value).digest("hex"),
       randomUUID: () =>
         `00000000-0000-4000-8000-${String(++operationSequence).padStart(12, "0")}`,
     },
@@ -255,7 +291,69 @@ function makeWorld({ offline = true, queued = false } = {}) {
       familyRequest: async (url, operation) => {
         world.http.push({ url, operation });
         if (world.offline) throw new PilotApiError("network_unavailable");
-        if (url === "/v1/me") return structuredClone(world.identity);
+        if (url === "/v1/me") {
+          if (world.identityDenied)
+            throw new PilotApiError("identity_not_supported", 403);
+          return structuredClone(world.identity);
+        }
+        if (url === "/v2/capabilities")
+          return (
+            world.capabilities ?? {
+              schemaVersion: 2,
+              recordKinds: [
+                "feed",
+                "diaper",
+                "sleep",
+                "growth",
+                "milestone",
+                "care",
+              ],
+              maxSeedBytes: 10485760,
+            }
+          );
+        if (url.endsWith("/record-operations")) {
+          const durable = JSON.parse(world.disk.get(account));
+          world.recordsSent.push({
+            operation: structuredClone(operation),
+            durablySaved: durable.records.some(
+              (q) => q.operation.operationId === operation.operationId,
+            ),
+          });
+          if (world.recordReceipts.has(operation.operationId))
+            return structuredClone(
+              world.recordReceipts.get(operation.operationId),
+            );
+          const collection =
+              operation.collection === "entry" ? "entries" : "careRecords",
+            field = collection === "entries" ? "entry" : "record";
+          const found = world.server[collection].find(
+            (r) => r[field].id === operation.recordId,
+          );
+          if (
+            operation.kind !== "create" &&
+            found?.version !== operation.baseVersion
+          )
+            throw new PilotApiError("record_changed", 412);
+          world.server[collection] = world.server[collection].filter(
+            (r) => r[field].id !== operation.recordId,
+          );
+          world.server.revision = String(Number(world.server.revision) + 1);
+          if (operation.kind !== "delete")
+            world.server[collection].push({
+              [field]: operation.entry ?? operation.careRecord,
+              version: world.server.revision,
+              recordedBy: found?.recordedBy ?? world.identity.user.id,
+              lastEditedBy: world.identity.user.id,
+            });
+          const receipt = {
+            operationId: operation.operationId,
+            historyId: world.server.historyId,
+            revision: world.server.revision,
+          };
+          world.recordReceipts.set(operation.operationId, receipt);
+          await world.beforeRecord(operation);
+          return receipt;
+        }
         if (url.endsWith("/snapshot")) {
           if (world.snapshotOffline)
             throw new PilotApiError("network_unavailable");
@@ -308,6 +406,27 @@ function makeWorld({ offline = true, queued = false } = {}) {
             url.startsWith("/v1/invitations/")
           ) {
             world.identity.families = [structuredClone(world.server.family)];
+          } else if (url === "/v2/families") {
+            world.server.profile = structuredClone(
+              operation.seed.source.profile,
+            );
+            world.server.entries = operation.seed.source.entries.map(
+              (entry) => ({
+                entry: structuredClone(entry),
+                version: "1",
+                recordedBy: "user-a",
+                lastEditedBy: "user-a",
+              }),
+            );
+            world.server.careRecords = (
+              operation.seed.source.careRecords ?? []
+            ).map((record) => ({
+              record: structuredClone(record),
+              version: "1",
+              recordedBy: "user-a",
+              lastEditedBy: "user-a",
+            }));
+            world.identity.families = [structuredClone(world.server.family)];
           } else if (url === "/v1/account/delete") {
             world.identity.families = [];
             world.identity.accountDeletion = {
@@ -321,7 +440,20 @@ function makeWorld({ offline = true, queued = false } = {}) {
                   deletionId: operation.operationId,
                   ...world.identity.accountDeletion,
                 }
-              : { ok: true };
+              : url === "/v2/families"
+                ? {
+                    operationId: operation.operationId,
+                    familyId: world.server.family.id,
+                    membershipId: world.server.family.membershipId,
+                    historyId: world.server.historyId,
+                    seedDigest: createHash("sha256")
+                      .update(JSON.stringify(operation.seed))
+                      .digest("hex"),
+                    snapshot: structuredClone(world.server),
+                  }
+                : url.startsWith("/v1/invitations/") && url.endsWith("/accept")
+                  ? structuredClone(world.server.family)
+                  : { ok: true };
           world.mutationReceipts.set(operation.operationId, receipt);
           await world.beforeMutation(url, operation);
           return world.corruptMutationResponse ? {} : receipt;
@@ -344,7 +476,11 @@ function makeWorld({ offline = true, queued = false } = {}) {
       if (overrides[specifier]) return overrides[specifier];
       if (specifier.startsWith(".")) {
         const basename = path.basename(specifier);
-        if (["auth", "api", "config", "deletionReceipt"].includes(basename))
+        if (
+          ["auth", "api", "config", "deletionReceipt", "storage"].includes(
+            basename,
+          )
+        )
           return overrides[basename];
         const base = path.resolve(path.dirname(filename), specifier);
         const next = [".native.ts", ".ts"]
@@ -475,6 +611,200 @@ async function boot(world) {
   return controller;
 }
 
+test("full record offline save survives restart and sends exactly the durably saved operation", async () => {
+  const world = makeWorld();
+  const first = await boot(world);
+  const entry = {
+    id: "growth-full",
+    type: "growth",
+    start: "2026-09-01T01:00:00.000Z",
+    weight: 3.725,
+    note: "Original precise value",
+  };
+  await first.result().saveRecord("entry", entry);
+  assert.equal(world.recordsSent.length, 0);
+  const op = world.read().records[0].operation;
+  first.unmount();
+  world.offline = false;
+  const next = world.mount();
+  await until(
+    () => world.recordsSent.length === 1 && !next.result().syncing,
+    "full record restart sync",
+  );
+  assert.equal(world.recordsSent[0].durablySaved, true);
+  assert.deepEqual(world.recordsSent[0].operation, op);
+  assert.equal(next.result().sharedState.entries[0].weight, 3.725);
+  assert.equal(world.read().records.length, 0);
+  next.unmount();
+});
+test("directory revocation stays hidden after restart even when family SQLite purge fails", async () => {
+  const world = makeWorld({ offline: false });
+  const first = await boot(world);
+  assert.ok(first.result().sharedState);
+  world.identityDenied = true;
+  world.beforeCommit = async () => {
+    throw new Error("disk_full");
+  };
+  await first.result().refresh();
+  assert.equal(first.result().sharedState, null);
+  assert.deepEqual(world.cachedIdentity.families, []);
+  first.unmount();
+  world.offline = true;
+  const next = world.mount();
+  await until(() => !next.result().booting, "revoked restart");
+  assert.equal(next.result().sharedState, null);
+  next.unmount();
+});
+test("full record conflict refreshes winner and preserves failed operation without overwriting", async () => {
+  const world = makeWorld({ offline: false });
+  const entry = {
+    id: "full",
+    type: "diaper",
+    start: "2026-09-01T01:00:00.000Z",
+    diaperKind: "wet",
+    note: "winner",
+  };
+  world.server.entries = [
+    { entry, version: "2", recordedBy: "user-a", lastEditedBy: "other" },
+  ];
+  const c = await boot(world);
+  await c.result().saveRecord("entry", { ...entry, note: "loser" }, "1");
+  await until(
+    () => c.result().recordConflicts.length === 1 && !c.result().syncing,
+    "conflict refresh",
+  );
+  assert.equal(c.result().sharedState.entries[0].note, "winner");
+  assert.equal(c.result().recordConflicts[0].error, "record_changed");
+  c.unmount();
+});
+function ownerWorld() {
+  const world = makeWorld({ offline: false });
+  world.identity.families = [];
+  world.cachedIdentity.families = [];
+  world.data.state.snapshot = null;
+  world.data.state.draft = null;
+  world.disk.set(world.account, JSON.stringify(world.data.state));
+  world.personalSource.entries = [
+    {
+      id: "first",
+      type: "feed",
+      feedKind: "expressed",
+      start: "2026-09-01T01:00:00.000Z",
+      amount: 81.125,
+      note: "Owner history",
+    },
+  ];
+  return world;
+}
+function ownerSeed(world) {
+  return {
+    schemaVersion: 1,
+    source: structuredClone(world.personalSource),
+    inviteeEmails: ["family@example.test"],
+    counts: {
+      feed: 1,
+      diaper: 0,
+      sleep: 0,
+      growth: 0,
+      milestone: 0,
+      care: 0,
+      total: 1,
+    },
+  };
+}
+test("lost full creation response restarts the same reviewed seed operation before activation cleanup", async () => {
+  const world = ownerWorld();
+  const c = await boot(world);
+  world.ownerSetupDisk.set(world.account, "private-source-draft");
+  world.beforeMutation = async () => {
+    throw new Error("network_unavailable");
+  };
+  await assert.rejects(
+    c.result().createFamilyFromSeed(ownerSeed(world)),
+    /network_unavailable/,
+  );
+  const operation = world.read().transition.operationId;
+  assert.equal(world.personalClears, 0);
+  assert.equal(c.result().sharedState, null);
+  await assert.rejects(c.result().signOut(), /transition_pending/);
+  c.unmount();
+  world.beforeMutation = async () => {};
+  const reopened = world.mount();
+  await until(
+    () => world.read().transition === null && !reopened.result().syncing,
+    "full activation replay",
+  );
+  const sent = world.http.filter((q) => q.url === "/v2/families");
+  assert.equal(sent.length, 2);
+  assert.equal(sent[1].operation.operationId, operation);
+  assert.equal(world.personalClears, 1);
+  assert.equal(world.ownerSetupDisk.has(world.account), false);
+  assert.equal(reopened.result().sharedState.entries[0].amount, 81.125);
+  reopened.unmount();
+});
+test("activation stays frozen across restart when local cleanup fails and retries without another create", async () => {
+  const world = ownerWorld();
+  const c = await boot(world);
+  world.beforePersonalClear = async () => {
+    throw new Error("cleanup_failed");
+  };
+  await assert.rejects(
+    c.result().createFamilyFromSeed(ownerSeed(world)),
+    /cleanup_failed/,
+  );
+  assert.equal(world.read().transition.phase, "committed");
+  assert.deepEqual(world.read().transition.body, {});
+  assert.equal(c.result().sharedState, null);
+  c.unmount();
+  world.beforePersonalClear = async () => {};
+  const next = world.mount();
+  await until(() => world.read().transition === null, "cleanup resumed");
+  assert.equal(world.http.filter((q) => q.url === "/v2/families").length, 1);
+  assert.equal(world.personalClears, 1);
+  next.unmount();
+});
+test("activation refuses an unrelated snapshot or corrupt seed receipt without clearing personal data", async () => {
+  for (const corruption of ["destination", "digest"]) {
+    const world = ownerWorld();
+    const c = await boot(world);
+    world.beforeMutation = async (_, op) => {
+      if (corruption === "digest")
+        world.mutationReceipts.get(op.operationId).seedDigest = "wrong";
+      else {
+        world.server.family.membershipId = "new-grant";
+        world.server.members[0].membershipId = "new-grant";
+        world.identity.families = [structuredClone(world.server.family)];
+      }
+    };
+    await assert.rejects(
+      c.result().createFamilyFromSeed(ownerSeed(world)),
+      /invalid_response|membership_changed/,
+    );
+    assert.equal(world.personalClears, 0);
+    assert.equal(c.result().sharedState, null);
+    assert.notEqual(world.read().transition, null);
+    c.unmount();
+  }
+});
+test("unsupported full capabilities never submit seed or clear private storage", async () => {
+  const world = ownerWorld();
+  world.capabilities = {
+    schemaVersion: 1,
+    recordKinds: ["feed"],
+    maxSeedBytes: 1,
+  };
+  const c = await boot(world);
+  await assert.rejects(
+    c.result().createFamilyFromSeed(ownerSeed(world)),
+    /full_sharing_unavailable/,
+  );
+  assert.equal(world.personalClears, 0);
+  assert.equal(
+    world.http.some((q) => q.url === "/v2/families"),
+    false,
+  );
+  c.unmount();
+});
 test("a sync in flight cannot send an optimistic outbox Save before SQLite commits", async () => {
   const world = makeWorld({ offline: false });
   const snapshotWrite = deferred();
@@ -862,7 +1192,8 @@ test("an uncertain leave is never replayed against a new membership grant", asyn
     await controller.result().refresh();
     assert.equal(world.http.filter((r) => r.url.endsWith("/leave")).length, 1);
     assert.equal(world.read().transition, null);
-    assert.equal(controller.result().snapshot.family.membershipId, "new-grant");
+    assert.equal(controller.result().snapshot, null);
+    assert.equal(world.read().snapshot.family.membershipId, "new-grant");
     assert.equal(controller.result().draft, null);
     assert.equal(controller.result().error, "membership_changed");
   } finally {

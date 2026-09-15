@@ -111,6 +111,34 @@ public sealed class AccountIdentityDeletionTests
     }
 
     [Fact]
+    public async Task DirectoryModeDeletesOnlyTheExactDurablePendingAccount()
+    {
+        using var handler = new ScriptedHandler(HttpStatusCode.NoContent, HttpStatusCode.NoContent);
+        using var http = new HttpClient(handler);
+        var authorization = new PendingAuthorization(userId);
+        var provider = new GraphAccountIdentityDeletion(http,
+            new(tenantId, clientId, "fixture-secret", new HashSet<Guid>(), directoryMode: true), authorization);
+        await provider.DeleteIdentityAsync(userId, default);
+        Assert.Equal(userId, authorization.Checked);
+        Assert.Equal(3, handler.Requests.Count);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DirectoryModeCannotFallBackToStaticAllowlistWithoutPendingJob(bool absentAuthorization)
+    {
+        using var handler = new ScriptedHandler();
+        using var http = new HttpClient(handler);
+        var provider = new GraphAccountIdentityDeletion(http,
+            new(tenantId, clientId, "fixture-secret", new HashSet<Guid> { userId }, directoryMode: true),
+            absentAuthorization ? null : new PendingAuthorization(Guid.NewGuid()));
+        Assert.Equal("identity_deletion_not_admitted", (await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            provider.DeleteIdentityAsync(userId, default))).Message);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
     public async Task MissingDirectoryConfigurationFailsClosed()
     {
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
@@ -127,6 +155,16 @@ public sealed class AccountIdentityDeletionTests
 
     private GraphAccountIdentityDeletion Provider(HttpClient http) =>
         new(http, new(tenantId, clientId, "fixture-only-not-a-real-secret", new HashSet<Guid> { userId }));
+
+    private sealed class PendingAuthorization(Guid pendingUser) : IAccountDeletionAuthorization
+    {
+        public Guid Checked { get; private set; }
+        public Task<bool> HasPendingRequestAsync(Guid id, CancellationToken ct)
+        {
+            Checked = id;
+            return Task.FromResult(id == pendingUser);
+        }
+    }
 
     private sealed class ScriptedHandler(params HttpStatusCode[] responses) : HttpMessageHandler
     {

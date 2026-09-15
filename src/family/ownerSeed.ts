@@ -1,7 +1,7 @@
 import { State, validateState } from "../domain";
 
 export const OWNER_SEED_MAX_BYTES = 10 * 1024 * 1024;
-const MAX_RECIPIENTS = 3;
+const MAX_RECIPIENTS = 19;
 
 export type OwnerSeedCounts = {
   feed: number;

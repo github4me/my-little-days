@@ -2021,23 +2021,19 @@ await page.screenshot({
     "little-days-calendar-filter-zh.png",
   ),
 });
-// An unconfigured family pilot must be usable as an explanation page without
+// An unconfigured family sharing must be usable as an explanation page without
 // touching existing local history or attempting a customer login on the web.
 const localHistoryBeforePilot = await page.evaluate(() =>
   localStorage.getItem("little-days-v1"),
 );
 await page.getByRole("tab", { name: "我的", exact: true }).click();
+await page.getByRole("button", { name: "展开家庭共享", exact: true }).click();
+await page.getByRole("button", { name: "管理家庭共享", exact: true }).click();
 await page
-  .getByRole("button", { name: "展开家庭邀请试点", exact: true })
-  .click();
-await page
-  .getByRole("button", { name: "打开家庭邀请试点", exact: true })
-  .click();
-await page
-  .getByRole("heading", { name: "试点尚未配置", exact: true })
+  .getByRole("heading", { name: "家庭服务尚未配置", exact: true })
   .waitFor();
 assert.equal(
-  await page.getByRole("button", { name: "登录试点账户", exact: true }).count(),
+  await page.getByRole("button", { name: "登录家庭账户", exact: true }).count(),
   0,
 );
 await page.setViewportSize({ width: 320, height: 740 });
@@ -2050,20 +2046,21 @@ assert.equal(
 await page.getByRole("button", { name: "返回", exact: true }).click();
 await chooseEnglish();
 const pilotDisclosure = page.getByRole("button", {
-  name: "Expand Family invitation pilot",
+  name: "Expand Family sharing",
   exact: true,
 });
 if (await pilotDisclosure.isVisible()) await pilotDisclosure.click();
 await page
-  .getByRole("button", { name: "Open family invitation pilot", exact: true })
+  .getByRole("button", { name: "Manage family sharing", exact: true })
   .click();
 await page
-  .getByRole("heading", { name: "Pilot setup is incomplete", exact: true })
+  .getByRole("heading", {
+    name: "Family service is not configured",
+    exact: true,
+  })
   .waitFor();
 assert.equal(
-  await page
-    .getByRole("button", { name: "Sign in to the pilot", exact: true })
-    .count(),
+  await page.getByRole("button", { name: "Sign in", exact: true }).count(),
   0,
 );
 assert.equal(
@@ -2090,6 +2087,6 @@ assert.equal(
 );
 assert.deepEqual(errors, []);
 console.log(
-  "PASS: existing local flows, calendar/history, dark/narrow layout, bilingual unconfigured family pilot and preserved local history.",
+  "PASS: existing local flows, calendar/history, dark/narrow layout, bilingual unconfigured family sharing and preserved local history.",
 );
 await browser.close();

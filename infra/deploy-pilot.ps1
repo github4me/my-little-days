@@ -137,13 +137,22 @@ foreach ($namespace in @('Microsoft.Web', 'Microsoft.Sql', 'Microsoft.Resources'
     $registration = Invoke-CloudJson @('provider', 'show', '--namespace', $namespace, '--query', 'registrationState')
     if ($registration -cne 'Registered') { throw "Provider $namespace is not registered. No provider registration was performed." }
 }
-$plan = Invoke-CloudJson @('appservice', 'plan', 'show', '--resource-group', $values.existingPlanResourceGroup,
-    '--name', $values.existingPlanName, '--query', '{id:id,location:location,reserved:reserved,sku:sku,numberOfSites:numberOfSites,provisioningState:provisioningState}')
 $planId = "/subscriptions/$SubscriptionId/resourceGroups/$($values.existingPlanResourceGroup)/providers/Microsoft.Web/serverfarms/$($values.existingPlanName)"
-if ($plan.id -ine $planId -or $plan.reserved -ne $true -or $plan.sku.name -cne 'B1' -or
-    $plan.sku.tier -cne 'Basic' -or $plan.sku.capacity -ne 1 -or
-    (Normalize-Location $plan.location) -ne $values.location -or $plan.provisioningState -cne 'Succeeded') {
-    throw 'The existing plan must be a healthy Linux B1 Basic plan with one instance in the requested region. No plan changes were made.'
+# Use the documented ARM property paths; CLI SDK flattening can omit fields.
+$plan = Invoke-CloudJson @('rest', '--method', 'get', '--url',
+    "https://management.azure.com${planId}?api-version=2025-03-01", '--query',
+    '{id:id,location:location,reserved:properties.reserved,sku:sku,numberOfSites:properties.numberOfSites,provisioningState:properties.provisioningState}')
+$planErrors = [System.Collections.Generic.List[string]]::new()
+if ($plan.id -ine $planId) { $planErrors.Add('id does not match the explicitly selected plan') }
+if ($plan.reserved -ne $true) { $planErrors.Add("reserved=$($plan.reserved) (expected true / Linux)") }
+if ($null -eq $plan.sku -or $plan.sku.name -cne 'B1' -or $plan.sku.tier -cne 'Basic') {
+    $planErrors.Add("sku=$($plan.sku | ConvertTo-Json -Compress) (expected B1 Basic)")
+}
+if ($null -eq $plan.sku -or $plan.sku.capacity -ne 1) { $planErrors.Add('sku.capacity is missing or not 1 (expected one instance)') }
+if ((Normalize-Location $plan.location) -ne $values.location) { $planErrors.Add("location=$($plan.location) (requested region $($values.location))") }
+if ($plan.provisioningState -cne 'Succeeded') { $planErrors.Add("provisioningState=$($plan.provisioningState) (expected Succeeded; a missing value is not assumed healthy)") }
+if ($planErrors.Count) {
+    throw "Existing plan preflight failed: $($planErrors -join '; '). No plan changes were made."
 }
 Write-Warning "The existing B1 instance hosts $($plan.numberOfSites) app(s). Little Days shares its CPU and memory; this script does not resize the plan."
 $runtimes = @(Invoke-CloudJson @('webapp', 'list-runtimes', '--os', 'linux'))

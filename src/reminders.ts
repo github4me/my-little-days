@@ -13,6 +13,7 @@ import {
   saveAutoFeedReminder,
 } from "./storage";
 import { formatDate, t } from "./i18n";
+import { personalStorageIsBlocked, reminderWrite } from "./personalWrites";
 
 export type Reminder = {
   id: string;
@@ -24,9 +25,10 @@ const autoFeedMode = "after-feed";
 
 Notifications.setNotificationHandler({
   handleNotification: async (notification) => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: !!notification.request.content.sound,
+    shouldShowBanner: !personalStorageIsBlocked(),
+    shouldShowList: !personalStorageIsBlocked(),
+    shouldPlaySound:
+      !personalStorageIsBlocked() && !!notification.request.content.sound,
     shouldSetBadge: false,
   }),
 });
@@ -111,33 +113,37 @@ export async function listReminders(): Promise<Reminder[]> {
 }
 
 export async function cancelReminder(id: string) {
-  const reminder = (
-    await Notifications.getAllScheduledNotificationsAsync()
-  ).find((item) => item.identifier === id);
-  if (reminder?.content.data?.reminderMode === autoFeedMode)
-    await clearAutoFeedReminder();
-  await Notifications.cancelScheduledNotificationAsync(id);
+  return reminderWrite(async () => {
+    const reminder = (
+      await Notifications.getAllScheduledNotificationsAsync()
+    ).find((item) => item.identifier === id);
+    if (reminder?.content.data?.reminderMode === autoFeedMode)
+      await clearAutoFeedReminder();
+    await Notifications.cancelScheduledNotificationAsync(id);
+  });
 }
 
 export async function updateReminderSilent(id: string, silent: boolean) {
-  const reminder = (
-    await Notifications.getAllScheduledNotificationsAsync()
-  ).find((item) => item.identifier === id);
-  if (!reminder || !reminder.trigger || typeof reminder.trigger !== "object")
-    return;
-  const channelId = await prepareChannel(silent);
-  await Notifications.cancelScheduledNotificationAsync(id);
-  await Notifications.scheduleNotificationAsync({
-    content: {
-      title: reminder.content.title ?? t("照护提醒"),
-      body: reminder.content.body ?? t("按宝宝当下的需要安排照护。"),
-      sound: silent ? false : "default",
-      data: { ...(reminder.content.data ?? {}), silent },
-    },
-    trigger: {
-      ...reminder.trigger,
-      channelId,
-    } as Notifications.NotificationTriggerInput,
+  return reminderWrite(async () => {
+    const reminder = (
+      await Notifications.getAllScheduledNotificationsAsync()
+    ).find((item) => item.identifier === id);
+    if (!reminder || !reminder.trigger || typeof reminder.trigger !== "object")
+      return;
+    const channelId = await prepareChannel(silent);
+    await Notifications.cancelScheduledNotificationAsync(id);
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title: reminder.content.title ?? t("照护提醒"),
+        body: reminder.content.body ?? t("按宝宝当下的需要安排照护。"),
+        sound: silent ? false : "default",
+        data: { ...(reminder.content.data ?? {}), silent },
+      },
+      trigger: {
+        ...reminder.trigger,
+        channelId,
+      } as Notifications.NotificationTriggerInput,
+    });
   });
 }
 
@@ -148,53 +154,55 @@ export async function addReminder(
   silent = true,
   kind: ReminderKind = "feed",
 ) {
-  const channelId = await prepareChannel(silent);
-  await requirePermission();
-  let trigger: Notifications.NotificationTriggerInput;
-  let detail: string;
-  if (dailyTime) {
-    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(dailyTime))
-      throw new Error(t("时间格式应为 HH:mm"));
-    const [hour, minute] = dailyTime.split(":").map(Number);
-    trigger = {
-      type: Notifications.SchedulableTriggerInputTypes.DAILY,
-      hour,
-      minute,
-      channelId,
-    };
-    detail = t("每天 {time}", { time: dailyTime });
-  } else {
-    validMinutes(minutes);
-    const date = new Date(Date.now() + minutes * 60000);
-    trigger = {
-      type: Notifications.SchedulableTriggerInputTypes.DATE,
-      date,
-      channelId,
-    };
-    detail = formatDate(date, {
-      year: "numeric",
-      month: "numeric",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    });
-  }
-  await Notifications.scheduleNotificationAsync({
-    content: {
-      title,
-      body: t("按宝宝当下的需要安排照护。"),
-      sound: silent ? false : "default",
-      data: {
-        detail,
-        reminderMode: dailyTime ? "daily" : "once",
-        reminderKind: kind,
-        minutes,
-        dailyTime: dailyTime ?? "",
-        silent,
+  return reminderWrite(async () => {
+    const channelId = await prepareChannel(silent);
+    await requirePermission();
+    let trigger: Notifications.NotificationTriggerInput;
+    let detail: string;
+    if (dailyTime) {
+      if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(dailyTime))
+        throw new Error(t("时间格式应为 HH:mm"));
+      const [hour, minute] = dailyTime.split(":").map(Number);
+      trigger = {
+        type: Notifications.SchedulableTriggerInputTypes.DAILY,
+        hour,
+        minute,
+        channelId,
+      };
+      detail = t("每天 {time}", { time: dailyTime });
+    } else {
+      validMinutes(minutes);
+      const date = new Date(Date.now() + minutes * 60000);
+      trigger = {
+        type: Notifications.SchedulableTriggerInputTypes.DATE,
+        date,
+        channelId,
+      };
+      detail = formatDate(date, {
+        year: "numeric",
+        month: "numeric",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      });
+    }
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title,
+        body: t("按宝宝当下的需要安排照护。"),
+        sound: silent ? false : "default",
+        data: {
+          detail,
+          reminderMode: dailyTime ? "daily" : "once",
+          reminderKind: kind,
+          minutes,
+          dailyTime: dailyTime ?? "",
+          silent,
+        },
       },
-    },
-    trigger,
+      trigger,
+    });
   });
 }
 
@@ -204,22 +212,29 @@ export async function addAutoFeedReminder(
   silent: boolean,
   entries: Entry[],
 ) {
-  validMinutes(minutes);
-  const time = feedReminderTime(entries, minutes);
-  if (time === null) throw new Error(t("请先保存一条喂养记录，再启用自动提醒"));
-  await requirePermission();
-  await saveAutoFeedReminder({
-    kind: "feed",
-    mode: "after-feed",
-    title,
-    minutes,
-    dailyTime: "",
-    silent,
+  return reminderWrite(async () => {
+    validMinutes(minutes);
+    const time = feedReminderTime(entries, minutes);
+    if (time === null)
+      throw new Error(t("请先保存一条喂养记录，再启用自动提醒"));
+    await requirePermission();
+    await saveAutoFeedReminder({
+      kind: "feed",
+      mode: "after-feed",
+      title,
+      minutes,
+      dailyTime: "",
+      silent,
+    });
+    await rescheduleAutoFeedRemindersCore(entries);
   });
-  await rescheduleAutoFeedReminders(entries);
 }
 
 export async function rescheduleAutoFeedReminders(entries: Entry[]) {
+  return reminderWrite(() => rescheduleAutoFeedRemindersCore(entries));
+}
+
+async function rescheduleAutoFeedRemindersCore(entries: Entry[]) {
   const scheduled = await Notifications.getAllScheduledNotificationsAsync();
   const automatic = scheduled.filter(
     (reminder) => reminder.content.data?.reminderMode === autoFeedMode,

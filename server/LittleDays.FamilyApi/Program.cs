@@ -13,7 +13,7 @@ var builder = WebApplication.CreateBuilder(args.Where(x => x != "--migrate").ToA
 builder.Logging.AddFilter("Microsoft.AspNetCore", LogLevel.Warning);
 builder.Logging.AddFilter("Microsoft.EntityFrameworkCore", LogLevel.None);
 builder.Logging.AddFilter("Microsoft.AspNetCore.Authentication", LogLevel.None);
-builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = 16 * 1024);
+builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = FullDomainValidation.MaxSeedBytes + 64 * 1024);
 builder.Services.ConfigureHttpJsonOptions(options =>
 {
     options.SerializerOptions.UnmappedMemberHandling = System.Text.Json.Serialization.JsonUnmappedMemberHandling.Disallow;
@@ -38,6 +38,7 @@ var config = PilotConfiguration.Load(builder.Configuration);
 builder.Services.AddSingleton(config);
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<FamilyService>();
+builder.Services.AddPublicIdentityAdmission(builder.Configuration, config);
 builder.Services.AddAccountIdentityDeletion(builder.Configuration, config);
 builder.Services.AddScoped<DeletionProcessor>();
 if (builder.Configuration.GetValue("AccountDeletion:WorkerEnabled", true)) builder.Services.AddHostedService<DeletionWorker>();
@@ -72,7 +73,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJw
                 !Guid.TryParse(principal.FindFirstValue("oid"), out var objectId) || objectId == Guid.Empty ||
                 principal.FindFirstValue("ver") != "2.0" ||
                 !(principal.FindFirstValue("scp") ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries).Contains("Family.ReadWrite", StringComparer.Ordinal))
-                context.Fail("Token not authorized for the family pilot.");
+                context.Fail("Token not authorized for family sharing.");
             return Task.CompletedTask;
         },
         OnChallenge = async context =>
@@ -92,7 +93,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJw
 builder.Services.AddAuthorization();
 builder.Services.AddRateLimiter(options =>
 {
-    // Finite partition count: one aggregate limit, plus one sensitive limit per admitted pilot account.
+    // Finite partition count: one aggregate limit and 256 authenticated-account buckets.
     // These availability limits are per instance; SQL limits and authorization remain cross-instance.
     options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(_ =>
         RateLimitPartition.GetFixedWindowLimiter("pilot-global", _ => new FixedWindowRateLimiterOptions
@@ -100,7 +101,7 @@ builder.Services.AddRateLimiter(options =>
     options.AddPolicy("sensitive", context =>
     {
         var oid = context.User.FindFirstValue("oid");
-        var key = config.Pilot.Identities.Any(x => x.ObjectId.ToString("D") == oid) ? oid! : "anonymous";
+        var key = Guid.TryParse(oid, out var account) ? (account.GetHashCode() & 255).ToString(System.Globalization.CultureInfo.InvariantCulture) : "anonymous";
         return RateLimitPartition.GetFixedWindowLimiter(key, _ => new FixedWindowRateLimiterOptions
         { PermitLimit = config.Pilot.SensitiveRequestsPerMinute, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 });
     });
@@ -120,7 +121,11 @@ app.Use(async (context, next) =>
     context.Response.Headers.XContentTypeOptions = "nosniff";
     try
     {
-        if (context.Request.ContentLength > 16 * 1024) throw new ApiException(422, "invalid_input");
+        var limit = context.Request.Method == "POST" && context.Request.Path == "/v2/families"
+            ? FullDomainValidation.MaxSeedBytes + 64 * 1024 : context.Request.Path.StartsWithSegments("/v2") ? 128 * 1024 : 16 * 1024;
+        var bodyLimit = context.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>();
+        if (bodyLimit is { IsReadOnly: false }) bodyLimit.MaxRequestBodySize = limit;
+        if (context.Request.ContentLength > limit) throw new ApiException(422, "invalid_input");
         await next(context);
     }
     catch (ApiException error) { await Error(context, error.Status, error.Code); }
@@ -143,46 +148,68 @@ app.MapPost("/v1/account-deletion-status", (DeletionStatusRequest request, Famil
 var api = app.MapGroup("/v1").RequireAuthorization();
 api.AddEndpointFilter(async (context, next) =>
 {
-    config.Admit(context.HttpContext.User);
+    var admission = context.HttpContext.RequestServices.GetRequiredService<IPublicIdentityAdmission>();
+    PublicIdentityAdmission.Set(context.HttpContext, await admission.AdmitAsync(context.HttpContext.User, context.HttpContext.RequestAborted));
     return await next(context);
 });
-api.MapGet("/me", (ClaimsPrincipal user, FamilyService service, CancellationToken ct) => service.Me(config.Admit(user), ct));
-api.MapPost("/families", (ClaimsPrincipal user, CreateFamilyRequest request, FamilyService service, CancellationToken ct) =>
-    service.CreateFamily(config.Admit(user), request, ct)).RequireRateLimiting("sensitive");
+api.MapGet("/me", (HttpContext context, FamilyService service, CancellationToken ct) => service.Me(PublicIdentityAdmission.Get(context), ct));
+api.MapPost("/families", (HttpContext context, CreateFamilyRequest request, FamilyService service, CancellationToken ct) =>
+    service.CreateFamily(PublicIdentityAdmission.Get(context), request, ct)).RequireRateLimiting("sensitive");
 api.MapGet("/families/{familyId:guid}/snapshot", async (Guid familyId, HttpContext context, FamilyService service, CancellationToken ct) =>
 {
     // Authorization is performed transactionally before any conditional-response comparison.
-    var snapshot = await service.Snapshot(config.Admit(context.User), familyId, ct);
+    var snapshot = await service.Snapshot(PublicIdentityAdmission.Get(context), familyId, ct);
     var etag = $"\"{snapshot.HistoryId:D}:{snapshot.Revision}:{snapshot.Family.MembershipId:D}\"";
     context.Response.Headers.ETag = etag;
     return context.Request.Headers.IfNoneMatch.ToString() == etag ? Results.StatusCode(304) : Results.Json(snapshot);
 });
-api.MapPost("/families/{familyId:guid}/invitations", (Guid familyId, ClaimsPrincipal user, CreateInvitationRequest request, FamilyService service, CancellationToken ct) =>
-    service.CreateInvitation(config.Admit(user), familyId, request, ct)).RequireRateLimiting("sensitive");
-api.MapPost("/invitations/{invitationId:guid}/accept", (Guid invitationId, ClaimsPrincipal user, OperationRequest request, FamilyService service, CancellationToken ct) =>
-    service.AcceptInvitation(config.Admit(user), invitationId, request, ct)).RequireRateLimiting("sensitive");
-api.MapPost("/invitations/{invitationId:guid}/decline", (Guid invitationId, ClaimsPrincipal user, OperationRequest request, FamilyService service, CancellationToken ct) =>
-    service.DeclineInvitation(config.Admit(user), invitationId, request, ct)).RequireRateLimiting("sensitive");
-api.MapPost("/families/{familyId:guid}/invitations/{invitationId:guid}/revoke", (Guid familyId, Guid invitationId, ClaimsPrincipal user, OperationRequest request, FamilyService service, CancellationToken ct) =>
-    service.RevokeInvitation(config.Admit(user), familyId, invitationId, request, ct));
-api.MapPost("/families/{familyId:guid}/members/{userId:guid}/remove", (Guid familyId, Guid userId, ClaimsPrincipal user, OperationRequest request, FamilyService service, CancellationToken ct) =>
-    service.RemoveMember(config.Admit(user), familyId, userId, request, ct));
-api.MapPost("/families/{familyId:guid}/leave", (Guid familyId, ClaimsPrincipal user, OperationRequest request, FamilyService service, CancellationToken ct) =>
-    service.Leave(config.Admit(user), familyId, request, ct));
-api.MapPost("/families/{familyId:guid}/feed-operations", (Guid familyId, ClaimsPrincipal user, FeedOperation request, FamilyService service, CancellationToken ct) =>
-    service.ApplyFeed(config.Admit(user), familyId, request, ct));
-api.MapPost("/families/{familyId:guid}/profile", (Guid familyId, ClaimsPrincipal user, ProfileRequest request, FamilyService service, CancellationToken ct) =>
-    service.UpdateProfile(config.Admit(user), familyId, request, ct));
-api.MapPost("/families/{familyId:guid}/ownership-transfer", (Guid familyId, ClaimsPrincipal user, NominateOwnerRequest request, FamilyService service, CancellationToken ct) =>
-    service.NominateOwner(config.Admit(user), familyId, request, ct));
-api.MapPost("/families/{familyId:guid}/ownership-transfer/{transferId:guid}/accept", (Guid familyId, Guid transferId, ClaimsPrincipal user, OperationRequest request, FamilyService service, CancellationToken ct) =>
-    service.AcceptOwnership(config.Admit(user), familyId, transferId, request, ct));
-api.MapPost("/families/{familyId:guid}/ownership-transfer/{transferId:guid}/cancel", (Guid familyId, Guid transferId, ClaimsPrincipal user, OperationRequest request, FamilyService service, CancellationToken ct) =>
-    service.CancelOwnership(config.Admit(user), familyId, transferId, request, ct));
-api.MapPost("/families/{familyId:guid}/close", (Guid familyId, ClaimsPrincipal user, OperationRequest request, FamilyService service, CancellationToken ct) =>
-    service.CloseFamily(config.Admit(user), familyId, request, ct)).RequireRateLimiting("sensitive");
-api.MapPost("/account/delete", (ClaimsPrincipal user, DeleteAccountRequest request, FamilyService service, CancellationToken ct) =>
-    service.DeleteAccount(config.Admit(user), request, ct)).RequireRateLimiting("sensitive");
+api.MapPost("/families/{familyId:guid}/invitations", (Guid familyId, HttpContext context, CreateInvitationRequest request, FamilyService service, CancellationToken ct) =>
+    service.CreateInvitation(PublicIdentityAdmission.Get(context), familyId, request, ct)).RequireRateLimiting("sensitive");
+api.MapPost("/invitations/{invitationId:guid}/accept", (Guid invitationId, HttpContext context, OperationRequest request, FamilyService service, CancellationToken ct) =>
+    service.AcceptInvitation(PublicIdentityAdmission.Get(context), invitationId, request, ct)).RequireRateLimiting("sensitive");
+api.MapPost("/invitations/{invitationId:guid}/decline", (Guid invitationId, HttpContext context, OperationRequest request, FamilyService service, CancellationToken ct) =>
+    service.DeclineInvitation(PublicIdentityAdmission.Get(context), invitationId, request, ct)).RequireRateLimiting("sensitive");
+api.MapPost("/families/{familyId:guid}/invitations/{invitationId:guid}/revoke", (Guid familyId, Guid invitationId, HttpContext context, OperationRequest request, FamilyService service, CancellationToken ct) =>
+    service.RevokeInvitation(PublicIdentityAdmission.Get(context), familyId, invitationId, request, ct));
+api.MapPost("/families/{familyId:guid}/members/{userId:guid}/remove", (Guid familyId, Guid userId, HttpContext context, OperationRequest request, FamilyService service, CancellationToken ct) =>
+    service.RemoveMember(PublicIdentityAdmission.Get(context), familyId, userId, request, ct));
+api.MapPost("/families/{familyId:guid}/leave", (Guid familyId, HttpContext context, OperationRequest request, FamilyService service, CancellationToken ct) =>
+    service.Leave(PublicIdentityAdmission.Get(context), familyId, request, ct));
+api.MapPost("/families/{familyId:guid}/feed-operations", (Guid familyId, HttpContext context, FeedOperation request, FamilyService service, CancellationToken ct) =>
+    service.ApplyFeed(PublicIdentityAdmission.Get(context), familyId, request, ct));
+api.MapPost("/families/{familyId:guid}/profile", (Guid familyId, HttpContext context, ProfileRequest request, FamilyService service, CancellationToken ct) =>
+    service.UpdateProfile(PublicIdentityAdmission.Get(context), familyId, request, ct));
+api.MapPost("/families/{familyId:guid}/ownership-transfer", (Guid familyId, HttpContext context, NominateOwnerRequest request, FamilyService service, CancellationToken ct) =>
+    service.NominateOwner(PublicIdentityAdmission.Get(context), familyId, request, ct));
+api.MapPost("/families/{familyId:guid}/ownership-transfer/{transferId:guid}/accept", (Guid familyId, Guid transferId, HttpContext context, OperationRequest request, FamilyService service, CancellationToken ct) =>
+    service.AcceptOwnership(PublicIdentityAdmission.Get(context), familyId, transferId, request, ct));
+api.MapPost("/families/{familyId:guid}/ownership-transfer/{transferId:guid}/cancel", (Guid familyId, Guid transferId, HttpContext context, OperationRequest request, FamilyService service, CancellationToken ct) =>
+    service.CancelOwnership(PublicIdentityAdmission.Get(context), familyId, transferId, request, ct));
+api.MapPost("/families/{familyId:guid}/close", (Guid familyId, HttpContext context, OperationRequest request, FamilyService service, CancellationToken ct) =>
+    service.CloseFamily(PublicIdentityAdmission.Get(context), familyId, request, ct)).RequireRateLimiting("sensitive");
+api.MapPost("/account/delete", (HttpContext context, DeleteAccountRequest request, FamilyService service, CancellationToken ct) =>
+    service.DeleteAccount(PublicIdentityAdmission.Get(context), request, ct)).RequireRateLimiting("sensitive");
+var fullApi = app.MapGroup("/v2").RequireAuthorization();
+fullApi.AddEndpointFilter(async (context, next) =>
+{
+    var admission = context.HttpContext.RequestServices.GetRequiredService<IPublicIdentityAdmission>();
+    PublicIdentityAdmission.Set(context.HttpContext, await admission.AdmitAsync(context.HttpContext.User, context.HttpContext.RequestAborted));
+    return await next(context);
+});
+fullApi.MapGet("/capabilities", () => new FullFamilyCapabilities(2, FullDomainValidation.RecordKinds, FullDomainValidation.MaxSeedBytes));
+fullApi.MapPost("/families", (HttpContext context, CreateFullFamilyRequest request, FamilyService service, CancellationToken ct) =>
+    service.CreateFullFamily(PublicIdentityAdmission.Get(context), request, ct)).RequireRateLimiting("sensitive");
+fullApi.MapGet("/families/{familyId:guid}/snapshot", async (Guid familyId, HttpContext context, FamilyService service, CancellationToken ct) =>
+{
+    var snapshot = await service.FullSnapshot(PublicIdentityAdmission.Get(context), familyId, ct);
+    var etag = $"\"v2:{snapshot.HistoryId:D}:{snapshot.Revision}:{snapshot.Family.MembershipId:D}\"";
+    context.Response.Headers.ETag = etag;
+    return context.Request.Headers.IfNoneMatch.ToString() == etag ? Results.StatusCode(304) : Results.Json(snapshot);
+});
+fullApi.MapPost("/families/{familyId:guid}/record-operations", (Guid familyId, HttpContext context, FullRecordOperation request, FamilyService service, CancellationToken ct) =>
+    service.ApplyFullRecord(PublicIdentityAdmission.Get(context), familyId, request, ct));
+fullApi.MapPost("/families/{familyId:guid}/profile", (Guid familyId, HttpContext context, FullProfileRequest request, FamilyService service, CancellationToken ct) =>
+    service.UpdateFullProfile(PublicIdentityAdmission.Get(context), familyId, request, ct));
 app.Run();
 
 static async Task Error(HttpContext context, int status, string code)

@@ -48,6 +48,20 @@ export function useFamilyDemo(scenario: FamilyDemoScenario): ReturnType<
     throw new Error("record_changed");
   }
   return {
+    activationSerial: 0,
+    activationPending: false,
+    booting: false,
+    ready: true,
+    sharedMode: !!state.snapshot,
+    sharedState: null,
+    fullSnapshot: null,
+    recordPending: [],
+    recordConflicts: [],
+    canEditRecord: () => false,
+    saveRecord: unavailable,
+    deleteRecord: unavailable,
+    discardRecordConflict: unavailable,
+    saveFullProfile: unavailable,
     demoSource,
     initialDataSummary: state.seededSource
       ? summarizeOwnerSeed(state.seededSource)

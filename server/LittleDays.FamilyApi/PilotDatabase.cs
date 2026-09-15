@@ -9,6 +9,7 @@ public sealed class PilotDatabase(DbContextOptions<PilotDatabase> options) : DbC
     public DbSet<MembershipRow> Memberships => Set<MembershipRow>();
     public DbSet<InvitationRow> Invitations => Set<InvitationRow>();
     public DbSet<FeedRow> Feeds => Set<FeedRow>();
+    public DbSet<FamilyRecordRow> FamilyRecords => Set<FamilyRecordRow>();
     public DbSet<OperationRow> Operations => Set<OperationRow>();
     public DbSet<OwnershipTransferRow> OwnershipTransfers => Set<OwnershipTransferRow>();
     public DbSet<AccountDeletionRow> AccountDeletions => Set<AccountDeletionRow>();
@@ -18,8 +19,11 @@ public sealed class PilotDatabase(DbContextOptions<PilotDatabase> options) : DbC
         model.Entity<FamilyRow>(entity =>
         {
             entity.HasKey(x => x.Id);
-            entity.Property(x => x.BabyName).HasMaxLength(60);
+            entity.Property(x => x.BabyName).HasMaxLength(100);
             entity.Property(x => x.BabyBirthDate).HasMaxLength(10);
+            entity.Property(x => x.BabySex).HasMaxLength(11).HasDefaultValue("unspecified");
+            entity.Property(x => x.SchemaVersion).HasDefaultValue(1);
+            entity.Property(x => x.ProfileVersion).IsRowVersion();
         });
         model.Entity<MembershipRow>(entity =>
         {
@@ -52,6 +56,7 @@ public sealed class PilotDatabase(DbContextOptions<PilotDatabase> options) : DbC
             entity.HasKey(x => x.UserId);
             entity.Property(x => x.Status).HasMaxLength(32);
             entity.Property(x => x.ReceiptHash).HasMaxLength(64).IsUnicode(false);
+            entity.Property(x => x.PendingEmail).HasMaxLength(254);
             entity.HasIndex(x => x.OperationId).IsUnique();
         });
         model.Entity<FeedRow>(entity =>
@@ -73,6 +78,20 @@ public sealed class PilotDatabase(DbContextOptions<PilotDatabase> options) : DbC
             entity.HasIndex(x => x.FamilyId);
             entity.HasOne<FamilyRow>().WithMany().HasForeignKey(x => x.FamilyId).OnDelete(DeleteBehavior.Restrict);
         });
+        model.Entity<FamilyRecordRow>(entity =>
+        {
+            // SQL string equality ignores trailing spaces. Hash the source ID for the key,
+            // keeping its exact spelling and case in Id and RecordJson.
+            entity.HasKey(x => new { x.FamilyId, x.Collection, x.IdHash });
+            entity.Property(x => x.Collection).HasMaxLength(5).IsUnicode(false);
+            entity.Property(x => x.IdHash).HasMaxLength(64).IsUnicode(false);
+            entity.Property(x => x.Id).HasMaxLength(128).IsRequired();
+            entity.Property(x => x.RecordJson).HasColumnType("nvarchar(max)");
+            entity.Property(x => x.Version).IsRowVersion();
+            entity.HasOne<FamilyRow>().WithMany().HasForeignKey(x => x.FamilyId).OnDelete(DeleteBehavior.Restrict);
+            entity.ToTable(t => t.HasCheckConstraint("CK_FamilyRecords_Collection", "[Collection] IN ('entry', 'care')"));
+            entity.ToTable(t => t.HasCheckConstraint("CK_FamilyRecords_Json", "ISJSON([RecordJson]) = 1 AND DATALENGTH([RecordJson]) <= 131072"));
+        });
     }
 }
 
@@ -83,6 +102,9 @@ public sealed class FamilyRow
     public long Revision { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public string? BabyBirthDate { get; set; }
+    public string BabySex { get; set; } = "unspecified";
+    public int SchemaVersion { get; set; } = 1;
+    public byte[] ProfileVersion { get; set; } = [];
     public DateTimeOffset? DeletedAt { get; set; }
     public Guid? DeletedBy { get; set; }
     public Guid? DeleteOperationId { get; set; }
@@ -132,6 +154,7 @@ public sealed class AccountDeletionRow
     public DateTimeOffset RequestedAt { get; set; }
     public DateTimeOffset? CompletedAt { get; set; }
     public string ReceiptHash { get; set; } = "";
+    public string? PendingEmail { get; set; }
 }
 public sealed class FeedRow
 {
@@ -157,6 +180,19 @@ public sealed class OperationRow
     public string Fingerprint { get; set; } = "";
     public string ResultJson { get; set; } = "";
     public DateTimeOffset CreatedAt { get; set; }
+}
+
+public sealed class FamilyRecordRow
+{
+    public Guid FamilyId { get; set; }
+    public string Collection { get; set; } = "entry";
+    public string IdHash { get; set; } = "";
+    public string Id { get; set; } = "";
+    public string RecordJson { get; set; } = "{}";
+    public Guid RecordedBy { get; set; }
+    public Guid LastEditedBy { get; set; }
+    public bool Deleted { get; set; }
+    public byte[] Version { get; set; } = [];
 }
 
 // Used by explicit EF tooling only. Never invent a deployment connection string.

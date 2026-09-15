@@ -7,12 +7,12 @@ using Microsoft.EntityFrameworkCore;
 
 namespace LittleDays.FamilyApi;
 
-public sealed class FamilyService(PilotDatabase db, PilotConfiguration config, TimeProvider clock)
+public sealed partial class FamilyService(PilotDatabase db, PilotConfiguration config, TimeProvider clock)
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private DateTimeOffset Now => clock.GetUtcNow();
 
-    // This intentionally small pilot uses ONE SQL transaction-owned application lock.
+    // All families currently share ONE SQL transaction-owned application lock.
     // Every authenticated data read/write participates, including snapshot and retries.
     // This serializes across processes/replicas, makes removal and receipt checks atomic,
     // and prevents a one-family-per-account race between different families. No process lock.
@@ -146,6 +146,7 @@ public sealed class FamilyService(PilotDatabase db, PilotConfiguration config, T
         ValidateId(request.OperationId);
         var grant = await RequireOwner(user, familyId, ct);
         RequireContext(request, grant);
+        RequireLegacyFamily(await Family(familyId, ct));
         if (request.BabyName is null || request.BabyName.Trim().Length < 1 || request.BabyName.Length > config.Pilot.MaxBabyNameLength || request.BabyName.Any(char.IsControl)) Invalid();
         if (request.BabyBirthDate is not null && (!DateOnly.TryParseExact(request.BabyBirthDate, "yyyy-MM-dd", CultureInfo.InvariantCulture,
             DateTimeStyles.None, out var birthDate) || birthDate < new DateOnly(1970, 1, 1) || birthDate > DateOnly.FromDateTime(Now.UtcDateTime.AddDays(1)))) Invalid();
@@ -277,7 +278,7 @@ public sealed class FamilyService(PilotDatabase db, PilotConfiguration config, T
         await Receipt(user, request.OperationId, Fingerprint("delete-account", new { request.OperationId, receiptHash }), ct);
         if (await db.Memberships.AnyAsync(x => x.UserId == user.ObjectId && x.Active && x.Role == "owner", ct))
             throw new ApiException(409, "family_owner_cannot_delete");
-        var row = new AccountDeletionRow { UserId = user.ObjectId, OperationId = request.OperationId, RequestedAt = Now, ReceiptHash = receiptHash };
+        var row = new AccountDeletionRow { UserId = user.ObjectId, OperationId = request.OperationId, RequestedAt = Now, ReceiptHash = receiptHash, PendingEmail = user.Email };
         db.AccountDeletions.Add(row);
         foreach (var grant in await db.Memberships.Where(x => x.UserId == user.ObjectId && x.Active).ToArrayAsync(ct))
         {
@@ -433,6 +434,7 @@ public sealed class FamilyService(PilotDatabase db, PilotConfiguration config, T
     {
         ValidateFeed(operation);
         var grant = await RequireGrant(user, familyId, operation.MembershipId, ct);
+        RequireLegacyFamily(await Family(familyId, ct));
         if (operation.HistoryId != config.Family.HistoryId) throw new ApiException(409, "history_changed");
         var hash = Fingerprint("feed", new { familyId, operation });
         var old = await Receipt(user, operation.OperationId, hash, ct);
@@ -511,7 +513,8 @@ public sealed class FamilyService(PilotDatabase db, PilotConfiguration config, T
     private void EndGrant(MembershipRow grant, string status) { grant.Active = false; grant.EndedAt = Now; grant.Status = status; }
     private async Task RevokePending(Guid familyId, Guid recipientId, CancellationToken ct)
     {
-        var email = config.Pilot.Identities.SingleOrDefault(x => x.ObjectId == recipientId)?.Email;
+        var email = await db.Memberships.Where(x => x.FamilyId == familyId && x.UserId == recipientId)
+            .OrderByDescending(x => x.GrantedAt).Select(x => x.Email).FirstOrDefaultAsync(ct);
         foreach (var invite in await db.Invitations.Where(x => x.FamilyId == familyId && (x.RecipientUserId == recipientId || x.Email == email) && x.Status == "pending").ToArrayAsync(ct))
             invite.Status = "revoked";
     }
@@ -544,10 +547,11 @@ public sealed class FamilyService(PilotDatabase db, PilotConfiguration config, T
         });
     }
     private static T ReadResult<T>(OperationRow row) => JsonSerializer.Deserialize<T>(row.ResultJson, Json)!;
-    private static FamilySummary Summary(FamilyRow family, MembershipRow grant) => new(family.Id, family.BabyName, grant.Role, grant.Id, family.BabyBirthDate, Revision(family));
+    private static FamilySummary Summary(FamilyRow family, MembershipRow grant) => new(family.Id, family.BabyName, grant.Role, grant.Id, family.BabyBirthDate,
+        family.SchemaVersion == 2 ? Convert.ToBase64String(family.ProfileVersion) : Revision(family));
     private FamilyMember Member(MembershipRow row, bool owner)
     {
-        var binding = config.Pilot.Identities.SingleOrDefault(x => x.ObjectId == row.UserId);
+        var binding = config.Admission.Mode == "Static" ? config.Pilot.Identities.SingleOrDefault(x => x.ObjectId == row.UserId) : null;
         return new(row.UserId, binding?.DisplayName ?? row.DisplayName, owner ? binding?.Email ?? row.Email : null, row.Role, row.Id, row.Status, row.EndedAt);
     }
     private static FamilyInvitation Invitation(InvitationRow row) => new(row.Id, row.Email, row.ExpiresAt, row.Status);

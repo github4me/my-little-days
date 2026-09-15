@@ -82,12 +82,18 @@ export default function PlayLearning({
   careRecords,
   onSaveCare,
   onDeleteCare,
+  sharedMode = false,
+  careVersions,
+  canEditCare,
 }: {
   birthDate: string;
   now: number;
   careRecords: CareRecord[];
-  onSaveCare: (record: CareRecord) => Promise<void>;
-  onDeleteCare: (id: string) => Promise<void>;
+  onSaveCare: (record: CareRecord, baseVersion?: string) => Promise<void>;
+  onDeleteCare: (id: string, baseVersion?: string) => Promise<void>;
+  sharedMode?: boolean;
+  careVersions?: Record<string, string>;
+  canEditCare?: (id: string) => boolean;
 }) {
   const c = useContext(Theme);
   const { locale } = useI18n();
@@ -128,6 +134,10 @@ export default function PlayLearning({
     let active = true;
     setCheckins(null);
     setCheckinError(null);
+    if (sharedMode) {
+      setCheckins({ day, ids: [] });
+      return;
+    }
     void loadPlayCheckins(day)
       .then((ids) => {
         if (active) setCheckins({ day, ids });
@@ -138,9 +148,9 @@ export default function PlayLearning({
     return () => {
       active = false;
     };
-  }, [day, checkinRetry]);
+  }, [day, checkinRetry, sharedMode]);
   async function toggleCheckin(id: string) {
-    if (!checkinsReady || checkinLock.current) return;
+    if (sharedMode || !checkinsReady || checkinLock.current) return;
     checkinLock.current = true;
     setChecking(true);
     const next = doneToday.includes(id)
@@ -162,6 +172,11 @@ export default function PlayLearning({
   useEffect(() => {
     let active = true;
     setReady(false);
+    if (sharedMode) {
+      setSelection({ included: [], excluded: [] });
+      setReady(true);
+      return;
+    }
     void loadPlaySelection()
       .then((value) => {
         if (active) {
@@ -176,7 +191,7 @@ export default function PlayLearning({
     return () => {
       active = false;
     };
-  }, [retry]);
+  }, [retry, sharedMode]);
   useEffect(() => {
     setManualMonths(null);
     setExpanded(null);
@@ -194,6 +209,7 @@ export default function PlayLearning({
       ? activitiesForBand(months)
       : playActivities.filter((a) => selectedIds.includes(a.id));
   function requestSelection(id: string) {
+    if (sharedMode) return;
     if (!ready || lock.current) return;
     const a = playActivities.find((v) => v.id === id)!;
     if (
@@ -206,6 +222,7 @@ export default function PlayLearning({
     void updateSelection(id, !selectedIds.includes(id));
   }
   async function updateSelection(id: string, selected: boolean) {
+    if (sharedMode) return;
     if (!ready || lock.current) return;
     lock.current = true;
     setSaving(true);
@@ -231,6 +248,14 @@ export default function PlayLearning({
   }
   return (
     <View style={{ gap: 16 }}>
+      {sharedMode ? (
+        <T raw style={{ color: c.muted, fontSize: 12 }}>
+          {text(
+            "日常照护记录与家庭共享。早教指南可阅读，个人设置和打卡不会带入共享家庭。",
+            "Daily care records are shared with your family. Play guides remain readable; personal settings and check-ins are not carried into a shared family.",
+          )}
+        </T>
+      ) : null}
       <Modal
         visible={!!pendingActivity}
         transparent
@@ -456,6 +481,9 @@ export default function PlayLearning({
           now={now}
           onSave={onSaveCare}
           onDelete={onDeleteCare}
+          sharedMode={sharedMode}
+          versions={careVersions}
+          canEdit={canEditCare}
         />
       ) : (
         <>
@@ -662,7 +690,7 @@ export default function PlayLearning({
                         checked: doneToday.includes(a.id),
                         disabled: !checkinsReady || checking,
                       }}
-                      disabled={!checkinsReady || checking}
+                      disabled={sharedMode || !checkinsReady || checking}
                       onPress={() => void toggleCheckin(a.id)}
                       style={{
                         minHeight: 44,
@@ -700,7 +728,7 @@ export default function PlayLearning({
                       checked: saved,
                       disabled: !ready || saving,
                     }}
-                    disabled={!ready || saving}
+                    disabled={sharedMode || !ready || saving}
                     onPress={() => requestSelection(a.id)}
                     style={{
                       minHeight: 44,

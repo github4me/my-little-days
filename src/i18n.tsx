@@ -9,6 +9,7 @@ type TranslationValues = Record<string, string | number>;
 // Chinese source text remains the fallback. Keeping translations together makes
 // adding another language a data change rather than a screen-by-screen rewrite.
 const english: Record<string, string> = {
+  "已保存，等待家庭同步": "Saved; waiting for family sync",
   家庭邀请试点: "Family invitation pilot",
   打开家庭邀请试点: "Open family invitation pilot",
   "界面预览（无需登录）": "Preview screens — no login",

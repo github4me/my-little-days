@@ -220,6 +220,7 @@ public sealed class TestHost(PilotConfiguration config, string? connection = nul
     {
         var values = new Dictionary<string, string?>
         {
+            ["Admission:Mode"] = "Static",
             ["Entra:TenantId"] = config.Entra.TenantId.ToString(),
             ["Entra:Audience"] = config.Entra.Audience.ToString(),
             ["Entra:MobileClientId"] = config.Entra.MobileClientId.ToString(),

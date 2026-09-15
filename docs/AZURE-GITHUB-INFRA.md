@@ -1,5 +1,7 @@
 # Automatic Bicep checks and approved GitHub deployment
 
+The full family-sharing release retains existing `pilot` resource names, ownership tags and environment identifiers so existing RBAC/OIDC setup remains valid. This workflow provisions hosting only; after it succeeds follow [full Azure activation](AZURE-FAMILY-SETUP.md) for Directory admission, Graph consent, SQL migrations/grants, native configuration and manual API deployment. Do not enter customer email allowlists for the Directory release.
+
 The **Family infrastructure** workflow runs when Bicep, its deployment helpers, infrastructure tests or this workflow change. It is separate from the manual API-code deployment workflow. No GitHub environments, Azure identities, role assignments or resources have been configured by adding these files.
 
 ## What runs automatically

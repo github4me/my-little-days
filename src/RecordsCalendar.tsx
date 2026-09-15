@@ -72,11 +72,15 @@ export default function RecordsCalendar({
   now,
   onEdit,
   onDelete,
+  authorLabel,
+  canEdit,
 }: {
   entries: Entry[];
   now: number;
   onEdit: (entry: Entry) => void;
   onDelete: (entry: Entry) => void;
+  authorLabel?: (id: string) => string;
+  canEdit?: (id: string) => boolean;
 }) {
   const c = useContext(Theme);
   const [chosenDay, setChosenDay] = useState<string | null>(null);
@@ -736,6 +740,11 @@ export default function RecordsCalendar({
                     {formatDate(selectedEntry.start)} ·{" "}
                     {formatTime(selectedEntry.start)}
                   </T>
+                  {authorLabel ? (
+                    <T raw style={{ fontSize: 12, color: c.muted }}>
+                      {authorLabel(selectedEntry.id)}
+                    </T>
+                  ) : null}
                   {selectedEntry.end ? (
                     <T>
                       {t("结束：{date} · {time}", {
@@ -763,10 +772,12 @@ export default function RecordsCalendar({
                 </ScrollView>
                 <Button
                   label="编辑记录"
+                  disabled={canEdit && !canEdit(selectedEntry.id)}
                   onPress={() => act(() => onEdit(selectedEntry))}
                 />
                 <Button
                   label="删除记录"
+                  disabled={canEdit && !canEdit(selectedEntry.id)}
                   secondary
                   onPress={() => act(() => onDelete(selectedEntry))}
                 />

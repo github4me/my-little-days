@@ -1,5 +1,7 @@
 # Family invitation pilot — revised contract
 
+> Historical v1 contract only. The current release uses v2 full-domain history and main-app sharing; owner creation migrates data and successful joining clears old personal data after verified activation. Use [full Azure setup](AZURE-FAMILY-SETUP.md) and [server documentation](../server/README.md). The synthetic-only/no-migration promises below do not apply to v2.
+
 Updated 14 September 2026. Supersedes the token-link/all-caregivers-edit contract and conflicting roadmap sections.
 
 Mobile first-invitation review now supports an account-scoped **local-only setup draft**. It does not call the synthetic family-create endpoint or upload original records. The [owner-onboarding handoff](FAMILY-OWNER-ONBOARDING.md) describes this boundary and the unimplemented full-history API/activation work.

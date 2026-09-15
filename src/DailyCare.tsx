@@ -20,12 +20,18 @@ export default function DailyCare({
   now,
   onSave,
   onDelete,
+  sharedMode = false,
+  versions = {},
+  canEdit = () => true,
 }: {
   records: CareRecord[];
   birthDate: string;
   now: number;
-  onSave: (record: CareRecord) => Promise<void>;
-  onDelete: (id: string) => Promise<void>;
+  onSave: (record: CareRecord, baseVersion?: string) => Promise<void>;
+  onDelete: (id: string, baseVersion?: string) => Promise<void>;
+  sharedMode?: boolean;
+  versions?: Record<string, string>;
+  canEdit?: (id: string) => boolean;
 }) {
   const c = useContext(Theme);
   const { locale } = useI18n();
@@ -45,6 +51,8 @@ export default function DailyCare({
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<LearningText | null>(null);
   const lock = useRef(false);
+  const editingVersion = useRef<string | undefined>(undefined);
+  const deleteVersion = useRef<string | undefined>(undefined);
   const option = careOptions.find((o) => o.id === kind)!;
   const history = records
     .filter((r) => r.kind === kind)
@@ -55,11 +63,19 @@ export default function DailyCare({
     setMethod(defaultTemperatureMethod);
     setNote("");
     setEditing(null);
+    editingVersion.current = undefined;
     setDate(playDayKey(new Date(now)));
     setTime(new Date(now).toTimeString().slice(0, 5));
   }
   async function save() {
     if (lock.current) return;
+    if (editing && !canEdit(editing)) {
+      setMessage({
+        zh: "你只能修改自己创建的记录；管理员可以修改所有记录。",
+        en: "You can edit your own records; the admin can edit all records.",
+      });
+      return;
+    }
     setMessage(null);
     let record: CareRecord;
     try {
@@ -83,7 +99,7 @@ export default function DailyCare({
     lock.current = true;
     setBusy(true);
     try {
-      await onSave(record);
+      await onSave(record, editingVersion.current);
       reset();
       setMessage({ zh: "照护记录已保存", en: "Care record saved" });
     } catch {
@@ -97,11 +113,11 @@ export default function DailyCare({
     }
   }
   async function remove(id: string) {
-    if (lock.current) return;
+    if (lock.current || !canEdit(id)) return;
     lock.current = true;
     setBusy(true);
     try {
-      await onDelete(id);
+      await onDelete(id, deleteVersion.current);
       setConfirm(null);
       if (editing === id) reset();
       setMessage({ zh: "照护记录已删除", en: "Care record deleted" });
@@ -368,8 +384,11 @@ export default function DailyCare({
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={text("编辑照护记录", "Edit care record")}
-                disabled={busy}
+                accessibilityState={{ disabled: busy || !canEdit(r.id) }}
+                disabled={busy || !canEdit(r.id)}
                 onPress={() => {
+                  if (!canEdit(r.id)) return;
+                  editingVersion.current = versions[r.id];
                   setEditing(r.id);
                   setDate(playDayKey(new Date(r.time)));
                   setTime(new Date(r.time).toTimeString().slice(0, 5));
@@ -393,8 +412,14 @@ export default function DailyCare({
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={text("删除照护记录", "Delete care record")}
-                disabled={busy}
-                onPress={() => setConfirm(r.id)}
+                accessibilityState={{ disabled: busy || !canEdit(r.id) }}
+                disabled={busy || !canEdit(r.id)}
+                onPress={() => {
+                  if (canEdit(r.id)) {
+                    deleteVersion.current = versions[r.id];
+                    setConfirm(r.id);
+                  }
+                }}
                 style={{
                   minHeight: 44,
                   justifyContent: "center",
@@ -421,7 +446,7 @@ export default function DailyCare({
                 </T>
                 <Button
                   label={text("确认删除照护记录", "Confirm care deletion")}
-                  disabled={busy}
+                  disabled={busy || !canEdit(r.id)}
                   onPress={() => void remove(r.id)}
                 />
                 <Button
@@ -460,8 +485,12 @@ export default function DailyCare({
       </Pressable>
       <T raw style={{ fontSize: 12, color: c.muted }}>
         {text(
-          "照护历史保存在本机并包含在记录备份中；每天可记多次，不替代医疗评估。",
-          "Care history stays locally and is included in record backups. Multiple sessions per day are supported; this is not a medical assessment.",
+          sharedMode
+            ? "照护记录保存到家庭服务器，不允许本机导出；每天可记多次，不替代医疗评估。"
+            : "照护历史保存在本机并包含在记录备份中；每天可记多次，不替代医疗评估。",
+          sharedMode
+            ? "Care records are saved to the family server; local export is unavailable. Multiple sessions per day are supported; this is not a medical assessment."
+            : "Care history stays locally and is included in record backups. Multiple sessions per day are supported; this is not a medical assessment.",
         )}
       </T>
     </View>
