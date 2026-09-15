@@ -8,10 +8,6 @@ name: Deploy family API and database
 on:
   workflow_dispatch:
     inputs:
-      release_sha:
-        description: Reviewed full 40-character commit SHA from this repository
-        type: string
-        required: true
       database_bootstrapped:
         description: SQL identities and runtime role are bootstrapped; I reviewed this release's SQL changes
         type: boolean
@@ -33,6 +29,6 @@ jobs:
       - name: Prevent deployment from this registration-only revision
         shell: bash
         run: |
-          echo '::error::This revision only registers the manual workflow. Open Run workflow, select feature/family-invitations in the Branch selector, and enter its reviewed full release SHA.'
+          echo '::error::This revision only registers the manual workflow. Open Run workflow and select feature/family-invitations in the Branch selector. Its commit is selected automatically.'
           echo 'The selected release branch runs its own workflow, including trusted-branch checks, database approval and API approval. No Azure or database changes were made by this run.'
           exit 1
