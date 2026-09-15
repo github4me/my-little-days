@@ -12,6 +12,11 @@ test('only manual reviewed release can reach migration then API', () => {
   assert.deepEqual(Object.keys(release.on), ['workflow_dispatch']);
   assert.equal(release.on.workflow_dispatch.inputs.database_bootstrapped.default, false);
   assert.equal(release.on.workflow_dispatch.inputs.adopt_ef.default, false);
+  assert.equal(release.on.workflow_dispatch.inputs.release_sha, undefined);
+  assert.equal(release.jobs.verify.with.revision, '${{ github.sha }}');
+  assert.equal(release.jobs.migrate.env.RELEASE_SHA, '${{ github.sha }}');
+  assert.equal(release.jobs.validate.steps[0].env.RELEASE_SHA, '${{ github.sha }}');
+  assert.ok(!JSON.stringify(release).includes('inputs.release_sha'));
   assert.equal(release.jobs.verify.needs, 'validate');
   assert.equal(release.jobs.migrate.needs, 'verify');
   assert.equal(release.jobs.deploy.needs, 'migrate');
@@ -27,7 +32,7 @@ test('migration uses a separate OIDC identity, reviewed artifact and always-clea
   const login = steps.find(x => x.uses?.startsWith('azure/login@'));
   assert.equal(login.with['client-id'], '${{ vars.AZURE_DB_MIGRATION_CLIENT_ID }}');
   assert.notEqual(login.with['client-id'], release.jobs.deploy.steps.find(x => x.uses?.startsWith('azure/login@')).with['client-id']);
-  assert.equal(steps.find(x => x.uses?.startsWith('actions/checkout@')).with.ref, '${{ inputs.release_sha }}');
+  assert.equal(steps.find(x => x.uses?.startsWith('actions/checkout@')).with.ref, '${{ github.sha }}');
   assert.equal(steps.find(x => x.uses?.startsWith('actions/download-artifact@')).with.name, 'family-database-${{ github.run_id }}');
   assert.match(steps.find(x => x.run?.includes('-Mode Cleanup')).if, /always\(\).*azure-login.outcome == 'success'/);
   assert.equal(release.jobs.migrate.permissions['id-token'], 'write');

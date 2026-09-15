@@ -4,10 +4,6 @@ name: Deploy family API and database
 on:
   workflow_dispatch:
     inputs:
-      release_sha:
-        description: Reviewed full 40-character commit SHA from this repository
-        type: string
-        required: true
       database_bootstrapped:
         description: SQL identities and runtime role are bootstrapped; I reviewed this release's SQL changes
         type: boolean
@@ -33,23 +29,24 @@ jobs:
       - name: Require reviewed current trusted-branch revision and SQL bootstrap
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         env:
-          RELEASE_SHA: ${{ inputs.release_sha }}
+          RELEASE_SHA: ${{ github.sha }}
           DATABASE_BOOTSTRAPPED: ${{ inputs.database_bootstrapped }}
           TRUSTED_BRANCH: ${{ vars.FAMILY_INFRA_BRANCH || github.event.repository.default_branch }}
         with:
           script: |
             const sha = process.env.RELEASE_SHA;
-            if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error('Supply a full lowercase commit SHA.');
+            if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error('The workflow commit SHA is invalid.');
+            core.info(`Automatically selected release commit: ${sha}`);
             if (process.env.DATABASE_BOOTSTRAPPED !== 'true') throw new Error('Complete the one-time SQL bootstrap and review migrations first.');
             if (context.ref !== `refs/heads/${process.env.TRUSTED_BRANCH}`) throw new Error('Run the workflow from the trusted release branch.');
             const current = await github.rest.git.getRef({ ...context.repo, ref: `heads/${process.env.TRUSTED_BRANCH}` });
-            if (current.data.object.sha !== sha || context.sha !== sha) throw new Error('Workflow, source and reviewed SHA must be the current trusted-branch revision.');
+            if (current.data.object.sha !== sha || context.sha !== sha) throw new Error('This run is stale. Start a new run from the trusted release branch.');
 
   verify:
     needs: validate
     uses: ./.github/workflows/family-pilot-ci.yml
     with:
-      revision: ${{ inputs.release_sha }}
+      revision: ${{ github.sha }}
 
   migrate:
     needs: verify
@@ -68,11 +65,11 @@ jobs:
       FAMILY_DB_NAME: ${{ vars.FAMILY_DB_NAME }}
       FAMILY_DB_MIGRATIONS_ENABLED: ${{ vars.FAMILY_DB_MIGRATIONS_ENABLED }}
       TRUSTED_BRANCH: ${{ vars.FAMILY_INFRA_BRANCH || github.event.repository.default_branch }}
-      RELEASE_SHA: ${{ inputs.release_sha }}
+      RELEASE_SHA: ${{ github.sha }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: ${{ inputs.release_sha }}
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: actions/setup-dotnet@v4
         with:

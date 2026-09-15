@@ -67,14 +67,14 @@ Add these **environment variables**, not secrets:
 | `FAMILY_DB_NAME` | `little-days-family` |
 | `FAMILY_DB_MIGRATIONS_ENABLED` | `true`, only after bootstrap and protection |
 
-Keep repository variable `FAMILY_INFRA_BRANCH=feature/family-invitations`. The workflow, source and reviewed release SHA must initially match the current head of this trusted branch; it rechecks after database approval. No database password, connection-string secret or customer Graph secret is used here.
+Keep repository variable `FAMILY_INFRA_BRANCH=feature/family-invitations`. The workflow automatically pins its selected branch's commit (`github.sha`) for validation, CI and deployment. It must initially match the current head of this trusted branch and is checked again after database approval. You do not enter a SHA. No database password, connection-string secret or customer Graph secret is used here.
 
 The existing **family-pilot** environment remains the API deployment gate. Configure its separate OIDC deployment identity and variables as described in [Azure setup, section 6](AZURE-FAMILY-SETUP.md#6-release-api-code-manually). Its identity needs Web App deployment rights, not SQL rights. App Service customer-auth/Graph settings must still be configured before the API can start.
 
 ## 5. GitHub: run the initial release
 
 1. Commit/push the reviewed code and SQL files. Run from the trusted branch at its latest commit. The workflow must exist on the repository's default branch for GitHub's normal manual **Run workflow** discovery; if it is not listed, first review and merge the workflow onto the default branch. Do not bypass the trusted-branch check.
-2. Under **Actions → Deploy family API and database → Run workflow**, choose the trusted branch and paste its full lowercase 40-character SHA into `release_sha`.
+2. Under **Actions → Deploy family API and database → Run workflow**, choose `feature/family-invitations` in GitHub's branch selector. The commit is selected automatically; there is no SHA input. The run logs its pinned commit so it can be reviewed before approval.
 3. Check `database_bootstrapped` after step 3 above and SQL review. This acknowledges identity setup, **not** that schema has already been created.
 4. Leave `adopt_ef=false` for the newly provisioned empty database. Use `true` only for a reviewed database already initialized with this app's historical EF migrations. Unknown tables/history fail closed; no automatic baseline or dropping/recreating the database.
 5. CI builds the API and migrator from that same SHA and tests against disposable SQL Server. Approve **family-database** only after reviewing the SQL diff.
