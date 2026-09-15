@@ -1,0 +1,38 @@
+name: Deploy family API and database
+
+# Register the manual workflow on the default branch so GitHub shows its native
+# "Run workflow -> Use workflow from -> Branch" selector. Dispatching against
+# feature/family-invitations executes THAT branch's full workflow at this path.
+# Keep these input definitions aligned with the release branch.
+# No application code, cloud credentials or automatic deployment is added here.
+on:
+  workflow_dispatch:
+    inputs:
+      release_sha:
+        description: Reviewed full 40-character commit SHA from this repository
+        type: string
+        required: true
+      database_bootstrapped:
+        description: SQL identities and runtime role are bootstrapped; I reviewed this release's SQL changes
+        type: boolean
+        required: true
+        default: false
+      adopt_ef:
+        description: Adopt a reviewed existing database with legacy EF history (leave false for a new database)
+        type: boolean
+        default: false
+
+permissions: {}
+
+jobs:
+  select-release-branch:
+    name: Select the branch containing the family release
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Prevent deployment from this registration-only revision
+        shell: bash
+        run: |
+          echo '::error::This revision only registers the manual workflow. Open Run workflow, select feature/family-invitations in the Branch selector, and enter its reviewed full release SHA.'
+          echo 'The selected release branch runs its own workflow, including trusted-branch checks, database approval and API approval. No Azure or database changes were made by this run.'
+          exit 1
