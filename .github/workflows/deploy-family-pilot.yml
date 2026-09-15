@@ -1,4 +1,4 @@
-name: Deploy family API manually
+name: Deploy family API and database
 
 # No push, merge, release, schedule, or workflow_run deployment trigger.
 on:
@@ -8,32 +8,42 @@ on:
         description: Reviewed full 40-character commit SHA from this repository
         type: string
         required: true
-      database_ready:
-        description: I reviewed and separately applied all required migrations and runtime SQL grants for this release
+      database_bootstrapped:
+        description: SQL identities and runtime role are bootstrapped; I reviewed this release's SQL changes
         type: boolean
         required: true
+        default: false
+      adopt_ef:
+        description: Adopt a reviewed existing database with legacy EF history (leave false for a new database)
+        type: boolean
         default: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: deploy-family-pilot
+  # Serialize the entire release with infrastructure apply (including SQL firewall changes).
+  group: family-infrastructure
   cancel-in-progress: false
 
 jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
-      - name: Require explicit reviewed revision and database readiness
-        shell: bash
+      - name: Require reviewed current trusted-branch revision and SQL bootstrap
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         env:
           RELEASE_SHA: ${{ inputs.release_sha }}
-          DATABASE_READY: ${{ inputs.database_ready }}
-        run: |
-          set -euo pipefail
-          [[ "$RELEASE_SHA" =~ ^[0-9a-fA-F]{40}$ ]] || { echo 'Supply a full commit SHA.' >&2; exit 1; }
-          [ "$DATABASE_READY" = true ] || { echo 'Review and apply migrations separately before deployment.' >&2; exit 1; }
+          DATABASE_BOOTSTRAPPED: ${{ inputs.database_bootstrapped }}
+          TRUSTED_BRANCH: ${{ vars.FAMILY_INFRA_BRANCH || github.event.repository.default_branch }}
+        with:
+          script: |
+            const sha = process.env.RELEASE_SHA;
+            if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error('Supply a full lowercase commit SHA.');
+            if (process.env.DATABASE_BOOTSTRAPPED !== 'true') throw new Error('Complete the one-time SQL bootstrap and review migrations first.');
+            if (context.ref !== `refs/heads/${process.env.TRUSTED_BRANCH}`) throw new Error('Run the workflow from the trusted release branch.');
+            const current = await github.rest.git.getRef({ ...context.repo, ref: `heads/${process.env.TRUSTED_BRANCH}` });
+            if (current.data.object.sha !== sha || context.sha !== sha) throw new Error('Workflow, source and reviewed SHA must be the current trusted-branch revision.');
 
   verify:
     needs: validate
@@ -41,8 +51,65 @@ jobs:
     with:
       revision: ${{ inputs.release_sha }}
 
-  deploy:
+  migrate:
     needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: family-database
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      AZURE_DB_MIGRATION_CLIENT_ID: ${{ vars.AZURE_DB_MIGRATION_CLIENT_ID }}
+      FAMILY_DB_RESOURCE_GROUP: ${{ vars.FAMILY_DB_RESOURCE_GROUP }}
+      FAMILY_DB_SERVER_NAME: ${{ vars.FAMILY_DB_SERVER_NAME }}
+      FAMILY_DB_NAME: ${{ vars.FAMILY_DB_NAME }}
+      FAMILY_DB_MIGRATIONS_ENABLED: ${{ vars.FAMILY_DB_MIGRATIONS_ENABLED }}
+      TRUSTED_BRANCH: ${{ vars.FAMILY_INFRA_BRANCH || github.event.repository.default_branch }}
+      RELEASE_SHA: ${{ inputs.release_sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.release_sha }}
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - uses: actions/download-artifact@v4
+        with:
+          name: family-database-${{ github.run_id }}
+          path: artifacts/database
+      - name: Recheck approved revision and show only federation binding claims
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            if (process.env.FAMILY_DB_MIGRATIONS_ENABLED !== 'true') throw new Error('Configure and protect family-database before enabling migrations.');
+            const current = await github.rest.git.getRef({ ...context.repo, ref: `heads/${process.env.TRUSTED_BRANCH}` });
+            if (current.data.object.sha !== process.env.RELEASE_SHA) throw new Error('Approval is stale; review the new release.');
+            const token = await core.getIDToken('api://AzureADTokenExchange');
+            const claims = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8'));
+            core.info(JSON.stringify({ issuer: claims.iss, subject: claims.sub, audience: claims.aud }));
+      - uses: azure/login@935127ca5bb3c4b02c9c2c10060028383878f33f # v3
+        id: azure-login
+        with:
+          client-id: ${{ vars.AZURE_DB_MIGRATION_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Apply DbUp with temporary exact runner-IP access
+        shell: pwsh
+        env:
+          ADOPT_EF: ${{ inputs.adopt_ef }}
+        run: ./infra/github-database.ps1 -Mode Migrate -AdoptEf:($env:ADOPT_EF -ceq 'true')
+      - name: Recover this run's firewall cleanup
+        if: ${{ always() && steps.azure-login.outcome == 'success' }}
+        shell: pwsh
+        run: ./infra/github-database.ps1 -Mode Cleanup
+
+  deploy:
+    # Failed SQL or cleanup blocks API deployment. No automatic schema rollback.
+    needs: migrate
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment:

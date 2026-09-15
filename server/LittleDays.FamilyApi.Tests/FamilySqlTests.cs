@@ -31,7 +31,7 @@ public sealed class FamilySqlTests(SqlFixture sql) : IClassFixture<SqlFixture>
     }
 
     [SqlFact]
-    public async Task MigrationCommandRunsSeparatelyWithOnlyDatabaseConfiguration()
+    public async Task ApiRejectsObsoleteMigrationCommand()
     {
         var start = new System.Diagnostics.ProcessStartInfo("dotnet")
         {
@@ -52,7 +52,8 @@ public sealed class FamilySqlTests(SqlFixture sql) : IClassFixture<SqlFixture>
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         await process.WaitForExitAsync(timeout.Token);
         await Task.WhenAll(stdout, stderr);
-        Assert.Equal(0, process.ExitCode);
+        Assert.NotEqual(0, process.ExitCode);
+        Assert.Contains("DatabaseMigrator", await stderr);
     }
 
     [SqlFact]

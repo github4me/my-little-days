@@ -89,9 +89,9 @@ This uses incremental deployment, not complete-mode deletion. Unknown manually n
 Continue the [Azure setup guide](AZURE-FAMILY-PILOT-SETUP.md), using the deployment outputs instead of creating hosting resources manually:
 
 1. Configure the customer external tenant, mobile/API registrations and email-OTP flow; grant the reviewed consent. This does not send family-invitation emails.
-2. Temporarily allow your operator IP to SQL. As the hosting-directory SQL administrator, create the separate migration group/runtime contained users, apply reviewed migrations and runtime grants, then remove the temporary firewall rule. See sections 5 and 10 of the guide for migration/restore safeguards.
+2. Temporarily allow your operator IP to SQL. As the hosting-directory SQL administrator, bootstrap separate migration/runtime contained users, then remove the temporary rule. Follow [database/API deployment](AZURE-DATABASE-DEPLOYMENT.md): the protected DbUp workflow now performs initial and future schema changes and runtime grants before API deployment.
 3. Enter non-secret server configuration, checked synthetic identities and a once-generated `Family__HistoryId` in App Service. Set the dedicated directory-deletion app credential directly there, with expiry/rotation tracking. Never put it in Bicep, Git, mobile/EAS or logs.
 4. Configure the protected GitHub OIDC deployment environment and run the manual API-code deployment for a reviewed commit. Liveness alone is not proof of functioning SQL/authentication.
 5. Configure the native pilot build with the API origin/customer tenant/mobile client/API scope, then complete two-iPhone login/invitation/conflict/deletion testing with synthetic data.
 
-The existing API is a restricted bottle-feed/family-lifecycle pilot. Full-history owner migration, full-domain sharing and public verified onboarding remain separate implementation work; provisioning Azure does not activate them. [Mobile/API handoff](FAMILY-OWNER-ONBOARDING.md).
+The full family API supports owner-history import, full-domain sharing and verified public admission. Provisioning Azure alone does not activate them: customer authentication, server settings, database/API release and installed-device acceptance remain necessary. [Current activation guide](AZURE-FAMILY-SETUP.md).

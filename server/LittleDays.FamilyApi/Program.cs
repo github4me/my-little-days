@@ -7,8 +7,9 @@ using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 
-var migrateOnly = args.Contains("--migrate", StringComparer.Ordinal);
-var builder = WebApplication.CreateBuilder(args.Where(x => x != "--migrate").ToArray());
+if (args.Contains("--migrate", StringComparer.Ordinal))
+    throw new InvalidOperationException("Schema changes use LittleDays.DatabaseMigrator, not the API runtime.");
+var builder = WebApplication.CreateBuilder(args);
 // Request bodies, query strings, tokens, identities and SQL parameter values are never logged here.
 builder.Logging.AddFilter("Microsoft.AspNetCore", LogLevel.Warning);
 builder.Logging.AddFilter("Microsoft.EntityFrameworkCore", LogLevel.None);
@@ -24,15 +25,6 @@ var connection = builder.Configuration.GetConnectionString("FamilyDatabase");
 if (string.IsNullOrWhiteSpace(connection))
     throw new InvalidOperationException("ConnectionStrings:FamilyDatabase is required.");
 builder.Services.AddDbContext<PilotDatabase>(options => options.UseSqlServer(connection, sql => sql.CommandTimeout(20)));
-
-// Migrations are a separate operator action, never run under the web app runtime identity.
-if (migrateOnly)
-{
-    await using var migrationApp = builder.Build();
-    await using var scope = migrationApp.Services.CreateAsyncScope();
-    await scope.ServiceProvider.GetRequiredService<PilotDatabase>().Database.MigrateAsync();
-    return;
-}
 
 var config = PilotConfiguration.Load(builder.Configuration);
 builder.Services.AddSingleton(config);

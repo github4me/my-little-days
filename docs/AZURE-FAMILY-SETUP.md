@@ -50,26 +50,15 @@ SQL uses Entra-only authentication. With public networking, allow only reviewed 
 
 Free SQL can pause when idle or at monthly allowance exhaustion. Cold starts, active-device polling, worker activity and shared B1 capacity affect responsiveness and usage. Deployment success and free-tier selection are not production performance or availability guarantees. Review real usage and retries; there is no paid fallback. [Azure SQL free-offer behavior](https://learn.microsoft.com/en-us/azure/azure-sql/database/free-offer?view=azuresql).
 
-## 4. Bootstrap SQL, migrate, then grant runtime access
+## 4. Bootstrap SQL identities; release schema through DbUp
 
 Separate interactive SQL administration, migration operators and API runtime. Azure control-plane Contributor access is not SQL data-plane permission. GitHub's API deployer needs neither SQL access nor schema privileges.
 
-1. As the **hosting tenant's SQL Entra administrator**, connect to the exact dedicated database. In an untracked copy of [sql-bootstrap.sql](../infra/sql-bootstrap.sql), replace the database, managed-identity name and migration-operator group; review and execute it. It creates contained users and separate roles. Resolve directory lookup failures with the hosting/SQL administrator, without adding Graph permissions to API runtime.
-2. Review migrations at the release SHA, including `20260915091021_FullDomainFamiliesV2`, which adds full record storage and profile/deletion metadata. As a migration-group operator with .NET 10 installed, run from the repository root:
+Follow [Database migrations and API release](AZURE-DATABASE-DEPLOYMENT.md) for the exact Azure/GitHub steps and deployed resource names. Create the dedicated hosting migration identity, assign SQL-server-scoped firewall permissions, and run [sql-bootstrap.sql](../infra/sql-bootstrap.sql) once as SQL administrator. Remove temporary operator access afterward.
 
-   ```powershell
-   $env:ConnectionStrings__FamilyDatabase = 'Server=tcp:REPLACE_SERVER.database.windows.net,1433;Database=REPLACE_DATABASE;Authentication=Active Directory Interactive;User Id=REPLACE_OPERATOR_UPN;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;'
-   try {
-     dotnet run --project server/LittleDays.FamilyApi --configuration Release -- --migrate
-     if ($LASTEXITCODE -ne 0) { throw 'Migration failed; do not release the API.' }
-   } finally {
-     Remove-Item Env:ConnectionStrings__FamilyDatabase
-   }
-   ```
+The protected `family-database` job runs the separate **LittleDays.DatabaseMigrator** project using DbUp. It initializes or upgrades schema and grants per-table runtime access in one transaction before API deployment. It temporarily opens only the current runner's exact IPv4 and removes its own rule afterward. No broad GitHub/Azure ranges, SQL passwords or runtime schema privileges are needed.
 
-   Confirm the interactive hosting-directory account. Migration mode needs the connection string, not customer credentials; normal startup does not migrate.
-3. As SQL administrator, apply [sql-runtime-grants.sql](../infra/sql-runtime-grants.sql) after replacing its database placeholder. Grants include `FamilyRecords` and content cleanup; security/status tombstones remain. Runtime receives no schema ownership, `db_owner`, `db_ddladmin` or writes to `__EFMigrationsHistory`. Verify its connection and transaction-owned application locks.
-4. Remove temporary operator firewall access and restrict migration-group membership. Record migration ID, release SHA and outcome privately. Existing synthetic families are not silently converted into real-history families.
+Do not use the former API `--migrate` command or manually apply runtime grants as a normal release step. Existing EF-initialized databases require explicit reviewed adoption; existing synthetic families are not silently converted to full-history families.
 
 ## 5. Enter server secrets and build configuration
 
@@ -115,7 +104,7 @@ Protect existing GitHub environment **`family-pilot`** with required reviewers a
 
 Set `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `AZURE_WEBAPP_NAME`, `FAMILY_API_PUBLIC_URL`, and finally `FAMILY_PILOT_DEPLOY_ENABLED=true` once ready. The last name is retained compatibility configuration.
 
-Run **Deploy family API manually** (`.github/workflows/deploy-family-pilot.yml`) with the reviewed full 40-character `release_sha`; acknowledge `database_ready` only after migration/grants succeed. It verifies that revision through `family-pilot-ci.yml`, builds the artifact, waits for environment approval, deploys and checks `/health/live`. It does not deploy on pushes/merges, migrate SQL or configure customer applications. Avoid concurrent infrastructure apply and API deployment.
+Run **Deploy family API and database** (`.github/workflows/deploy-family-pilot.yml`) with the reviewed full 40-character `release_sha`; acknowledge `database_bootstrapped` only after the one-time identity bootstrap and SQL review. Leave `adopt_ef=false` for a new database. It verifies the same revision through `family-pilot-ci.yml`, builds both artifacts, waits for database approval, applies DbUp and cleans up firewall access, then waits for API approval, deploys and checks `/health/live`. SQL or cleanup failure blocks API deployment. It does not deploy on pushes/merges or configure customer applications. Infrastructure apply shares the release concurrency lock. See the [database guide](AZURE-DATABASE-DEPLOYMENT.md) for initial setup and failure recovery.
 
 Liveness proves only that the process responds. Verify authenticated identity, capabilities, full snapshots, SQL permissions, native flows and deletion separately. Keep private request bodies, tokens, SQL parameters and Graph responses out of diagnostics.
 

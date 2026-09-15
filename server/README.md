@@ -9,17 +9,19 @@ See the [current API contract](../docs/FAMILY-API-CONTRACT.md) for JSON shapes a
 Run from the repository root with the .NET 10 SDK:
 
 ```powershell
-dotnet build server/LittleDays.FamilyApi/LittleDays.FamilyApi.csproj
+dotnet build server/LittleDays.slnx
 
 # Disposable/local SQL Server only; target master with CREATE DATABASE permission.
 # The fixture creates and drops only its own LittleDaysPilotTests_<GUID> databases.
 $env:FAMILY_TEST_SQL_CONNECTION = 'Server=localhost;Database=master;Integrated Security=true;TrustServerCertificate=true'
-dotnet test server/LittleDays.FamilyApi.Tests/LittleDays.FamilyApi.Tests.csproj
+dotnet test server/LittleDays.slnx
 ```
 
 Without the SQL environment variable, SQL tests report explicit skips. There is no in-memory/SQLite substitute for rowversion, transaction-lock, filtered-index or migration tests. HTTP tests supply signed JWT metadata within the test assembly; the deployed API has no authentication bypass. Graph tests use scripted HTTP responses, not a live tenant.
 
 Local verification on 2026-09-15: 106 tests passed, zero failed and zero skipped against actual local SQL Server 15.0.2190.7. Coverage includes full-history import and seed commit digests, concurrent retries/writes, rowversion conflicts, HTTP conditional snapshots, legacy isolation and deletion cleanup. Fixtures removed their generated databases afterward.
+
+The separate DbUp suite adds 10 passing tests, including real SQL initialization/adoption, rollback, journal integrity and restricted permissions (116 backend tests total, no skips). Both projects publish independently. Live Azure federation and deployment still require the operator setup below.
 
 ## Configuration and admission
 
@@ -44,32 +46,16 @@ JWT checks require a signed unexpired v2 token with exact issuer/audience, custo
 
 ## Migrations and running
 
-Run migrations under a separate operator identity:
+Schema deployment is now a separate [DbUp console project](LittleDays.DatabaseMigrator/README.md), in the same solution. Follow [Azure database deployment](../docs/AZURE-DATABASE-DEPLOYMENT.md) for initial identity bootstrap and the GitHub build → DbUp → API flow. No new permanently running Azure service is needed.
 
 ```powershell
-$env:ConnectionStrings__FamilyDatabase = '<migration-identity connection string>'
-dotnet run --project server/LittleDays.FamilyApi/LittleDays.FamilyApi.csproj -- --migrate
 # Set runtime connection plus Entra, Family, Admission and AccountDeletion settings.
 dotnet run --project server/LittleDays.FamilyApi/LittleDays.FamilyApi.csproj
 ```
 
-Migration-only mode requires database configuration, applies EF migrations and exits. Normal startup never migrates. Current migration order:
+The API rejects the obsolete `--migrate` command and does not compile historical EF migrations. EF remains its ORM. DbUp's numbered SQL scripts initialize or explicitly adopt the three known EF migration stages, validate baseline invariants, and grant runtime DML. Applied files are immutable; future schema changes are new SQL files under `LittleDays.DatabaseMigrator/Scripts`. Historical EF source is retained only for adoption tests.
 
-1. `20260913173137_InitialPilot`
-2. `20260914032522_InvitationLifecycleV2`
-3. `20260915091021_FullDomainFamiliesV2`
-
-The latest migration adds the full-record table, schema/sex/profile-version fields and transient deletion-job email. Existing families keep schema 1; migration does not convert them. Apply the reviewed [runtime grants](../infra/sql-runtime-grants.sql), including full-record SELECT/INSERT/UPDATE/DELETE for writes and durable cleanup. Runtime has no schema permission or database ownership. A down migration removes full-history data and must not be used on populated full families.
-
-To generate a reviewable SQL script using the existing server tool manifest:
-
-```powershell
-Push-Location server
-dotnet tool restore
-# Set an explicit design/migration connection. This command generates, not executes, SQL.
-dotnet ef migrations script --idempotent --project LittleDays.FamilyApi/LittleDays.FamilyApi.csproj
-Pop-Location
-```
+The migrator uses a separate hosting identity, an exclusive SQL lock and transactional checksum journal. Runtime has no schema control or journal access. Existing schema-1 families remain schema 1; upgrading SQL does not convert their content. No automatic down migrations are run. Database changes must remain compatible with the currently deployed API until its replacement succeeds.
 
 ## Limits and concurrency
 

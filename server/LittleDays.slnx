@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="LittleDays.FamilyApi/LittleDays.FamilyApi.csproj" />
+  <Project Path="LittleDays.DatabaseMigrator/LittleDays.DatabaseMigrator.csproj" />
+  <Project Path="LittleDays.FamilyApi.Tests/LittleDays.FamilyApi.Tests.csproj" />
+  <Project Path="LittleDays.DatabaseMigrator.Tests/LittleDays.DatabaseMigrator.Tests.csproj" />
+</Solution>

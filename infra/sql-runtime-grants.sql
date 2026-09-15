@@ -1,4 +1,6 @@
--- Run manually as the Azure SQL Microsoft Entra administrator AFTER migration.
+-- LEGACY REFERENCE / administrator repair only. Normal releases now apply these
+-- grants through DatabaseMigrator/Scripts/0002_VerifyBaselineAndRuntimeGrants.sql.
+-- Do not run this as a second normal deployment mechanism.
 -- No schema changes or membership in db_owner/db_ddladmin are granted to the API.
 SET NOCOUNT ON;
 SET XACT_ABORT ON;

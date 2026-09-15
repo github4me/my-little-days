@@ -1,0 +1,15 @@
+{
+  "Name": "My Little Days migration firewall",
+  "IsCustom": true,
+  "Description": "Read the selected SQL server and manage temporary migration firewall rules. Assign ONLY on the dedicated SQL server. SQL schema grants are separate.",
+  "Actions": [
+    "Microsoft.Sql/servers/read",
+    "Microsoft.Sql/servers/firewallRules/read",
+    "Microsoft.Sql/servers/firewallRules/write",
+    "Microsoft.Sql/servers/firewallRules/delete"
+  ],
+  "NotActions": [],
+  "DataActions": [],
+  "NotDataActions": [],
+  "AssignableScopes": ["/subscriptions/4768a858-f23f-4a39-bb64-eabc9c142627"]
+}

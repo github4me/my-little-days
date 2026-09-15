@@ -80,7 +80,23 @@ jobs:
           echo "::add-mask::$sql_connection"
           printf 'FAMILY_TEST_SQL_CONNECTION=%s\n' "$sql_connection" >> "$GITHUB_ENV"
       - name: Run unit and real SQL tests
-        run: dotnet test server/LittleDays.FamilyApi.Tests/LittleDays.FamilyApi.Tests.csproj --configuration Release
+        run: dotnet test server/LittleDays.slnx --configuration Release
+      - name: Check migration firewall lifecycle without Azure access
+        shell: pwsh
+        run: ./infra/tests/github-database.Tests.ps1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: npm ci --ignore-scripts
+      - run: node --test infra/tests/database-workflow.test.cjs
+      - name: Publish reviewed database artifact
+        run: dotnet publish server/LittleDays.DatabaseMigrator/LittleDays.DatabaseMigrator.csproj --configuration Release --output artifacts/database
+      - uses: actions/upload-artifact@v4
+        with:
+          name: family-database-${{ github.run_id }}
+          path: artifacts/database
+          if-no-files-found: error
+          retention-days: 14
       - name: Publish reviewed API artifact
         run: dotnet publish server/LittleDays.FamilyApi/LittleDays.FamilyApi.csproj --configuration Release --output artifacts/family-api
       - uses: actions/upload-artifact@v4

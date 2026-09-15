@@ -7,7 +7,9 @@ SET XACT_ABORT ON;
 
 DECLARE @ExpectedDatabase sysname = N'REPLACE_PILOT_DATABASE';
 DECLARE @RuntimeIdentity sysname = N'REPLACE_APP_SERVICE_MANAGED_IDENTITY_NAME';
-DECLARE @MigrationGroup sysname = N'REPLACE_ENTRA_MIGRATION_OPERATOR_GROUP';
+-- Hosting-tenant service principal for the protected family-database workflow.
+-- An operator group may be used for an explicitly reviewed manual deployment.
+DECLARE @MigrationGroup sysname = N'REPLACE_ENTRA_MIGRATION_IDENTITY_NAME';
 
 IF @ExpectedDatabase LIKE N'REPLACE_%' OR @RuntimeIdentity LIKE N'REPLACE_%'
     OR @MigrationGroup LIKE N'REPLACE_%'
@@ -36,17 +38,16 @@ SET @Sql = N'GRANT CONNECT TO ' + QUOTENAME(@RuntimeIdentity) + N';';
 EXEC sys.sp_executesql @Sql;
 SET @Sql = N'ALTER ROLE [family_pilot_runtime] ADD MEMBER ' + QUOTENAME(@RuntimeIdentity) + N';';
 EXEC sys.sp_executesql @Sql;
--- Migration permissions are limited to this database and this operator group.
--- Runtime and GitHub deployment identities must never join these roles.
-SET @Sql = N'GRANT CONNECT TO ' + QUOTENAME(@MigrationGroup) + N';';
+-- Schema control permits DDL, data migrations and per-table runtime grants.
+-- This is a privileged identity: protect its workflow. It is NOT db_owner,
+-- a database/security administrator or the API runtime/deployment identity.
+SET @Sql = N'ALTER USER ' + QUOTENAME(@MigrationGroup) + N' WITH DEFAULT_SCHEMA=dbo;';
 EXEC sys.sp_executesql @Sql;
-SET @Sql = N'ALTER ROLE [db_ddladmin] ADD MEMBER ' + QUOTENAME(@MigrationGroup) + N';';
+SET @Sql = N'GRANT CONNECT, CREATE TABLE TO ' + QUOTENAME(@MigrationGroup) + N';';
 EXEC sys.sp_executesql @Sql;
-SET @Sql = N'ALTER ROLE [db_datareader] ADD MEMBER ' + QUOTENAME(@MigrationGroup) + N';';
-EXEC sys.sp_executesql @Sql;
-SET @Sql = N'ALTER ROLE [db_datawriter] ADD MEMBER ' + QUOTENAME(@MigrationGroup) + N';';
+SET @Sql = N'GRANT CONTROL ON SCHEMA::dbo TO ' + QUOTENAME(@MigrationGroup) + N';';
 EXEC sys.sp_executesql @Sql;
 COMMIT;
 
--- Next: run the approved --migrate command as a member of the migration group,
--- then apply sql-runtime-grants.sql as the Entra administrator.
+-- Next: run the protected DbUp release workflow. Its numbered scripts initialize
+-- schema and grant runtime access. No separate runtime-grants step is needed.

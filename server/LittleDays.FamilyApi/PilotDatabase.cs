@@ -1,5 +1,4 @@
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Design;
 
 namespace LittleDays.FamilyApi;
 
@@ -193,15 +192,4 @@ public sealed class FamilyRecordRow
     public Guid LastEditedBy { get; set; }
     public bool Deleted { get; set; }
     public byte[] Version { get; set; } = [];
-}
-
-// Used by explicit EF tooling only. Never invent a deployment connection string.
-public sealed class PilotDatabaseFactory : IDesignTimeDbContextFactory<PilotDatabase>
-{
-    public PilotDatabase CreateDbContext(string[] args)
-    {
-        var connection = Environment.GetEnvironmentVariable("ConnectionStrings__FamilyDatabase")
-            ?? throw new InvalidOperationException("Set ConnectionStrings__FamilyDatabase for EF tooling.");
-        return new(new DbContextOptionsBuilder<PilotDatabase>().UseSqlServer(connection).Options);
-    }
 }

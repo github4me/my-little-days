@@ -35,8 +35,11 @@ public sealed class SqlFixture : IAsyncLifetime
         created = true;
         builder.InitialCatalog = databaseName;
         ConnectionString = builder.ConnectionString;
-        await using var db = Open();
-        await db.Database.MigrateAsync();
+        await using var bootstrap = new SqlConnection(ConnectionString);
+        await bootstrap.OpenAsync();
+        await using var role = new SqlCommand("CREATE ROLE [family_pilot_runtime] AUTHORIZATION [dbo];", bootstrap);
+        await role.ExecuteNonQueryAsync();
+        new LittleDays.DatabaseMigrator.MigrationRunner(() => new SqlConnection(ConnectionString), databaseName).Apply();
     }
 
     public PilotDatabase Open() => new(new DbContextOptionsBuilder<PilotDatabase>().UseSqlServer(ConnectionString).Options);
