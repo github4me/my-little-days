@@ -1805,6 +1805,11 @@ for (const [label, count] of [
 }
 await compactFilter.click();
 await page.getByRole("button", { name: "Close filters", exact: true }).click();
+// The modal and inline toolbar reuse filter labels. Finish dismissing the
+// modal before resizing, or the next locator can resolve a departing button.
+await page
+  .getByRole("button", { name: "Close filters", exact: true })
+  .waitFor({ state: "detached" });
 assert.equal(
   await page.getByRole("button", { name: /^View record:/ }).count(),
   7,
