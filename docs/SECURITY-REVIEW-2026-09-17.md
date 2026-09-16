@@ -217,6 +217,14 @@ A locally evaluated rule named `legacy-range`, from `1.0.0.0` to `223.255.255.25
 
 **Acceptance:** reject broad ranges and unknown exceptions in fixture tests; accept approved exact IPs. Have an authorized operator compare actual Azure rules to that policy before the next release, without copying credentials into evidence.
 
+**Subsequent operator decision (17 September):** the manually maintained GitHub
+allowlist was declined to avoid duplicating Azure's IP configuration. The updated
+helper retains checks for exact canonical public IPs, broad/all-Azure access,
+duplicate names and stale runner rules, plus cleanup limited to its own run.
+It accepts other existing exact-IP rules without separately approving each
+address. The broad-range validation gap is addressed; detecting an unexpected
+but valid single IP remains an operator responsibility, not an automated control.
+
 ## Product and family-flow review
 
 The source and current user disclosures generally agree on these important boundaries:

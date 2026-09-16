@@ -4,7 +4,7 @@ Last updated: 17 September 2026 (Australia/Sydney).
 
 This is the operator's step-by-step reference for infrastructure, SQL bootstrap, customer authentication, API settings and releases. It records known values without storing secrets. Existing names containing `pilot` are compatibility identifiers: do not rename them or create replacement resources just because the product now supports full family sharing.
 
-**Security release prerequisite (17 September):** follow the [security remediation and release checklist](SECURITY-REMEDIATION-2026-09-17.md) before the next database/API deployment. It documents the required `FAMILY_DB_APPROVED_FIREWALL_RULES_JSON` protected-environment variable, additive DbUp migration 0004, the restore maintenance gate and the new native-only preview runtime. No live firewall/settings changes or production restore were performed by that code remediation. Independent recovery evidence remains required; a maintenance flag is not a recovery ledger.
+**Security release prerequisite (17 September):** follow the [security remediation and release checklist](SECURITY-REMEDIATION-2026-09-17.md) before the next database/API deployment. It documents automatic exact-IP firewall checks, additive DbUp migration 0004, the restore maintenance gate and the new native-only preview runtime. A manually maintained GitHub IP list is no longer required. No live firewall/settings changes or production restore were performed by that code remediation. Independent recovery evidence remains required; a maintenance flag is not a recovery ledger.
 
 ## 1. Current status and where to resume
 
@@ -224,6 +224,16 @@ In **Settings → Environments → family-database → Environment variables**, 
 | `FAMILY_DB_SERVER_NAME` | `little-days-sql-522fpstfbtds2` |
 | `FAMILY_DB_NAME` | `little-days-family` |
 | `FAMILY_DB_MIGRATIONS_ENABLED` | `true` only after bootstrap and environment protection |
+
+Do not add a manual IP-list variable. If `FAMILY_DB_APPROVED_FIREWALL_RULES_JSON`
+was already added, it is unused by the updated workflow and may be removed.
+Existing exact-IP rules, including the retained operator address, stay unchanged.
+The helper automatically rejects broad ranges, all-Azure access, malformed or
+non-public addresses, duplicate names and stale runner rules, before and after
+adding its own temporary runner rule. It does not verify ownership or continued
+need for other exact IPs. Review SQL server **Networking → Public access** against
+App Service **Properties** when the network changes. No new secret or Azure
+resource is needed. See the [step-by-step security checklist](SECURITY-REMEDIATION-2026-09-17.md#required-githubazure-steps-before-deploying-the-api).
 
 DbUp, not the API, initializes and upgrades schema. Do not run the old API `--migrate` command or manually apply table-grant scripts. See [database deployment](AZURE-DATABASE-DEPLOYMENT.md) for transaction, journal and adoption details.
 

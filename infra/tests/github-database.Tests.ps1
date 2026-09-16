@@ -24,7 +24,7 @@ function Reset-Test {
     $env:FAMILY_DB_SERVER_NAME='little-days-sql-522fpstfbtds2'
     $env:FAMILY_DB_NAME='little-days-family'; $env:FAMILY_DB_MIGRATIONS_ENABLED='true'
     $env:FAMILY_DB_RULE_CREATED=$null
-    $env:FAMILY_DB_APPROVED_FIREWALL_RULES_JSON='{}'
+    $env:FAMILY_DB_APPROVED_FIREWALL_RULES_JSON=$null
 }
 function global:az {
     $global:LASTEXITCODE=0
@@ -96,42 +96,37 @@ try {
     Run-Case { $env:FAMILY_DB_MIGRATIONS_ENABLED='false' } $true { Assert ($global:dbTest.Rules.Count -eq 0) 'Disabled migration opened rule' }
     Run-Case { $global:dbTest.Rules=@(@{name='github-db-previous';startIpAddress='20.20.20.20';endIpAddress='20.20.20.20'}) } $true {
         Assert ($global:dbTest.Rules[0].name -ceq 'github-db-previous') 'Touched previous run rule'
+        Assert-NoMigrationWrites
     }
-    Run-Case { $global:dbTest.Rules=@(@{name='AllowAzure';startIpAddress='0.0.0.0';endIpAddress='0.0.0.0'}) } $true {}
+    Run-Case { $global:dbTest.Rules=@(@{name='AllowAzure';startIpAddress='0.0.0.0';endIpAddress='0.0.0.0'}) } $true { Assert-NoMigrationWrites }
     Run-Case {
-        $env:FAMILY_DB_APPROVED_FIREWALL_RULES_JSON='{"app-outbound":"20.21.22.23"}'
-        $global:dbTest.Rules=@(@{name='app-outbound';startIpAddress='20.21.22.23';endIpAddress='20.21.22.23'})
+        $global:dbTest.Rules=@(@{name='app-outbound';startIpAddress='20.21.22.23';endIpAddress='20.21.22.23'},
+            @{name='ClientIPAddress_2026-9-15_22-43-19';startIpAddress='20.21.22.24';endIpAddress='20.21.22.24'})
     } $false {
-        Assert ($global:dbTest.Rules.Count -eq 1 -and $global:dbTest.Rules[0].name -ceq 'app-outbound') 'Changed unrelated app firewall rule'
+        Assert ($global:dbTest.Rules.Count -eq 2) 'Changed retained exact-IP rules'
+        Assert ($global:dbTest.Rules[0].name -ceq 'app-outbound' -and $global:dbTest.Rules[0].startIpAddress -ceq '20.21.22.23') 'Changed unrelated app firewall rule'
+        Assert ($global:dbTest.Rules[1].name -ceq 'ClientIPAddress_2026-9-15_22-43-19' -and $global:dbTest.Rules[1].startIpAddress -ceq '20.21.22.24') 'Changed retained operator firewall rule'
     }
     Run-Case { $global:dbTest.Rules=@(@{name='legacy-range';startIpAddress='1.0.0.0';endIpAddress='223.255.255.255'}) } $true { Assert-NoMigrationWrites }
-    Run-Case { $global:dbTest.Rules=@(@{name='unknown-exact';startIpAddress='20.21.22.23';endIpAddress='20.21.22.23'}) } $true { Assert-NoMigrationWrites }
+    Run-Case { $global:dbTest.Rules=@(@{name='existing-exact';startIpAddress='20.21.22.23';endIpAddress='20.21.22.23'}) } $false {
+        Assert ($global:dbTest.Rules.Count -eq 1 -and $global:dbTest.Rules[0].name -ceq 'existing-exact') 'Changed existing exact-IP rule without a policy'
+    }
+    Run-Case { $global:dbTest.Rules=@(@{name='app-outbound';startIpAddress='20.21.22.23';endIpAddress='20.21.22.24'}) } $true { Assert-NoMigrationWrites }
+    foreach ($address in @('192.168.1.2','10.0.0.1','172.16.0.1','127.0.0.1','169.254.1.2','100.64.1.2','198.18.0.1','203.0.113.1','20.21.22.023','::ffff:20.21.22.23')) {
+        Run-Case { $global:dbTest.Rules=@(@{name='invalid-exact';startIpAddress=$address;endIpAddress=$address}) } $true { Assert-NoMigrationWrites }
+    }
     Run-Case {
-        $env:FAMILY_DB_APPROVED_FIREWALL_RULES_JSON='{"app-outbound":"20.21.22.23"}'
-        $global:dbTest.Rules=@(@{name='app-outbound';startIpAddress='20.21.22.23';endIpAddress='20.21.22.24'})
-    } $true { Assert-NoMigrationWrites }
-    Run-Case {
-        $env:FAMILY_DB_APPROVED_FIREWALL_RULES_JSON='{"app-outbound":"20.21.22.23"}'
-        $global:dbTest.Rules=@(@{name='app-outbound';startIpAddress='20.21.22.24';endIpAddress='20.21.22.24'})
-    } $true { Assert-NoMigrationWrites }
-    Run-Case {
-        $env:FAMILY_DB_APPROVED_FIREWALL_RULES_JSON='{"app-outbound":"20.21.22.23"}'
-        $global:dbTest.Rules=@(@{name='other-name';startIpAddress='20.21.22.23';endIpAddress='20.21.22.23'})
-    } $true { Assert-NoMigrationWrites }
-    Run-Case {
-        $env:FAMILY_DB_APPROVED_FIREWALL_RULES_JSON='{"app-outbound":"20.21.22.23"}'
         $global:dbTest.Rules=@(@{name='app-outbound';startIpAddress='20.21.22.23';endIpAddress='20.21.22.23'},
-            @{name='unknown-exact';startIpAddress='20.21.22.24';endIpAddress='20.21.22.24'})
+            @{name='APP-OUTBOUND';startIpAddress='20.21.22.23';endIpAddress='20.21.22.23'})
     } $true { Assert-NoMigrationWrites }
-    Run-Case {
-        $env:FAMILY_DB_APPROVED_FIREWALL_RULES_JSON='{"app-outbound":"20.21.22.23"}'
-        $global:dbTest.Rules=@(@{name='app-outbound';startIpAddress='20.21.22.23';endIpAddress='20.21.22.23'},
-            @{name='app-outbound';startIpAddress='20.21.22.23';endIpAddress='20.21.22.23'})
-    } $true { Assert-NoMigrationWrites }
-    foreach ($policy in @('', '[]', '{', '{"app":"0.0.0.0"}', '{"app":"20.21.22.0/24"}', '{"app":"20.21.22.23-20.21.22.24"}',
-        '{"app":"192.168.1.2"}', '{"app":123}', '{"app":"20.21.22.23","app":"20.21.22.24"}',
-        '{"app":"20.21.22.23","APP":"20.21.22.24"}', '{"github-db-old":"20.21.22.23"}')) {
-        Run-Case { $env:FAMILY_DB_APPROVED_FIREWALL_RULES_JSON=$policy } $true { Assert-NoMigrationWrites }
+    foreach ($policy in @('', '[]', '{', '{"app-outbound":"20.21.22.24"}')) {
+        Run-Case {
+            $env:FAMILY_DB_APPROVED_FIREWALL_RULES_JSON=$policy
+            $global:dbTest.Rules=@(@{name='app-outbound';startIpAddress='20.21.22.23';endIpAddress='20.21.22.23'})
+        } $false {
+            Assert ($global:dbTest.Rules.Count -eq 1 -and $global:dbTest.Rules[0].startIpAddress -ceq '20.21.22.23') 'Obsolete approval variable blocked migration or changed an existing rule'
+            Assert (@($global:dbTest.Calls | Where-Object { $_ -match '--apply' }).Count -eq 1) 'Migration did not apply when obsolete approval variable was present'
+        }
     }
     Run-Case { $global:dbTest.DriftOnCreate=$true } $true {
         Assert ($global:dbTest.Rules.Count -eq 1 -and $global:dbTest.Rules[0].name -ceq 'unknown-range') 'Deleted an unrelated drift rule'
@@ -143,7 +138,7 @@ try {
     $global:dbTest.Rules=@(@{name='github-db-123-2';startIpAddress='20.30.40.50';endIpAddress='20.30.40.50'},
         @{name='unrelated';startIpAddress='1.0.0.0';endIpAddress='223.255.255.255'})
     & $helper -Mode Cleanup
-    Assert ($global:dbTest.Rules.Count -eq 1 -and $global:dbTest.Rules[0].name -ceq 'unrelated') 'Cleanup must ignore approval policy and remove only its own run rule'
+    Assert ($global:dbTest.Rules.Count -eq 1 -and $global:dbTest.Rules[0].name -ceq 'unrelated') 'Cleanup must ignore unrelated rule safety and remove only its own run rule'
     Write-Output "PASS: $script:caseCount migration firewall cases plus two cleanup recovery checks; no Azure requests were made."
 } finally {
     foreach ($name in $names) { [Environment]::SetEnvironmentVariable($name,$saved[$name]) }

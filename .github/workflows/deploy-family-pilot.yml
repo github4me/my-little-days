@@ -64,8 +64,6 @@ jobs:
       FAMILY_DB_SERVER_NAME: ${{ vars.FAMILY_DB_SERVER_NAME }}
       FAMILY_DB_NAME: ${{ vars.FAMILY_DB_NAME }}
       FAMILY_DB_MIGRATIONS_ENABLED: ${{ vars.FAMILY_DB_MIGRATIONS_ENABLED }}
-      # Protected environment approval: map every existing rule name to its reviewed exact public IPv4.
-      FAMILY_DB_APPROVED_FIREWALL_RULES_JSON: ${{ vars.FAMILY_DB_APPROVED_FIREWALL_RULES_JSON }}
       TRUSTED_BRANCH: ${{ vars.FAMILY_INFRA_BRANCH || github.event.repository.default_branch }}
       RELEASE_SHA: ${{ github.sha }}
     steps:

@@ -67,6 +67,15 @@ Add these **environment variables**, not secrets:
 | `FAMILY_DB_NAME` | `little-days-family` |
 | `FAMILY_DB_MIGRATIONS_ENABLED` | `true`, only after bootstrap and protection |
 
+No manually maintained IP list is required in GitHub. The migration helper checks
+live SQL rules before and after adding its temporary runner rule: every rule must
+use one canonical public IPv4, and broad ranges, all-Azure access, duplicate names
+and stale runner rules block deployment. Existing exact-IP app and operator rules
+are retained. This checks rule shape, not whether each address is still needed or
+belongs to the app; review that separately after network changes. If previously
+configured, `FAMILY_DB_APPROVED_FIREWALL_RULES_JSON` is now unused and can be removed.
+See the [security deployment preflight](SECURITY-REMEDIATION-2026-09-17.md#required-githubazure-steps-before-deploying-the-api).
+
 Keep repository variable `FAMILY_INFRA_BRANCH=feature/family-invitations`. The workflow automatically pins its selected branch's commit (`github.sha`) for validation, CI and deployment. It must initially match the current head of this trusted branch and is checked again after database approval. You do not enter a SHA. No database password, connection-string secret or customer Graph secret is used here.
 
 The existing **family-pilot** environment remains the API deployment gate. Configure its separate OIDC deployment identity and variables as described in [Azure setup, section 6](AZURE-FAMILY-SETUP.md#6-release-api-code-manually). Its identity needs Web App deployment rights, not SQL rights. App Service customer-auth/Graph settings must still be configured before the API can start.
@@ -76,14 +85,14 @@ The existing **family-pilot** environment remains the API deployment gate. Confi
 1. Commit/push the reviewed code and SQL files. Run from the trusted branch at its latest commit. The workflow must exist on the repository's default branch for GitHub's normal manual **Run workflow** discovery; if it is not listed, first review and merge the workflow onto the default branch. Do not bypass the trusted-branch check.
 2. Under **Actions → Deploy family API and database → Run workflow**, choose `feature/family-invitations` in GitHub's branch selector. The commit is selected automatically; there is no SHA input. The run logs its pinned commit so it can be reviewed before approval.
 3. Check `database_bootstrapped` after step 3 above and SQL review. This acknowledges identity setup, **not** that schema has already been created.
-4. Leave `adopt_ef=false` for the newly provisioned empty database. Use `true` only for a reviewed database already initialized with this app's historical EF migrations. Unknown tables/history fail closed; no automatic baseline or dropping/recreating the database.
+4. Leave `adopt_ef=false` for both a newly provisioned empty database and the existing DbUp-managed database. Use `true` only for a reviewed database initialized with this app's historical EF migrations that has not already been adopted. Unknown tables/history fail closed; no automatic baseline or dropping/recreating the database.
 5. CI builds the API and migrator from that same SHA and tests against disposable SQL Server. Approve **family-database** only after reviewing the SQL diff.
 6. The helper opens one firewall rule named `github-db-<run-id>-<attempt>`, for that runner's exact public IPv4. It performs a read-only pending check, applies DbUp once, then removes its own rule. Migration and cleanup must succeed before the API job becomes eligible.
 7. Approve **family-pilot**. It deploys the already-built API artifact and checks `/health/live`. Verify authenticated `/v2/capabilities`, database access and two-device family flows separately: liveness is not end-to-end acceptance.
 
 ## Future changes and failure recovery
 
-- After the existing `0003_FamilySharedExtras.sql`, add `0004_DescriptiveChange.sql`, then `0005_...` under `server/LittleDays.DatabaseMigrator/Scripts`. They are embedded automatically. Never edit, rename, delete or insert before applied migrations. Add a test for the intended schema/data behavior.
+- The security release adds `0004_FamilyAvailabilityBounds.sql` after `0003_FamilySharedExtras.sql`; deploy it before the matching API. Future migrations start with `0005_DescriptiveChange.sql` under `server/LittleDays.DatabaseMigrator/Scripts`. They are embedded automatically. Never edit, rename, delete or insert before applied migrations. Add a test for the intended schema/data behavior.
 - `dbo.DatabaseMigrations` stores ordered script names, normalized SHA-256 checksums and applied timestamps. Repeated runs skip already-applied scripts. CRLF/LF checkout differences are normalized. Checksums detect changed files, not all possible out-of-band schema drift; SQL changes must remain controlled and reviewed.
 - Each run uses an exclusive SQL application lock and a single transaction covering all pending scripts and journal entries. A failed run rolls back that run; it never automatically runs destructive down migrations. Scripts must be transaction-compatible: no explicit COMMIT/ROLLBACK or nontransactional operations. Split long transformations across compatible releases.
 - Database changes run **before** the API is replaced. Use additive, backward-compatible changes so the existing API remains usable during deployment or after an API-deployment failure. Remove old columns only in a later reviewed release after all consumers have stopped using them. Back up/review recovery before destructive changes.

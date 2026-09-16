@@ -65,7 +65,7 @@ test("migration uses a separate OIDC identity, reviewed artifact and always-clea
   assert.equal(release.jobs.migrate.permissions["id-token"], "write");
   assert.equal(
     release.jobs.migrate.env.FAMILY_DB_APPROVED_FIREWALL_RULES_JSON,
-    "${{ vars.FAMILY_DB_APPROVED_FIREWALL_RULES_JSON }}",
+    undefined,
   );
   assert.ok(!JSON.stringify(release).includes("continue-on-error"));
 });

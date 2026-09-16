@@ -17,7 +17,7 @@ real families or restore a production database as a smoke test.
 | SEC-06 | Picked and migrated avatars pass bounded native decode/orientation/resize/re-encode plus metadata stripping. Original bytes never become a new shared upload. | New native image-manipulator dependency requires rebuild; synthetic metadata/orientation test on Android/iOS. Existing server photos are not silently rewritten. |
 | SEC-07 | Every workflow action pinned to an official full commit SHA, including artifact tools; regression policy rejects mutable/unreviewed refs. | Review actual GitHub protections/permissions; review upstream changes before future pin updates. |
 | SEC-08 | New native runtime disables remote OTA execution by default. Only a new signed native app build delivers code until an approved signed-OTA rollout. | Existing 0.2.0 installations must upgrade. Enabling signed OTA requires an eligible Expo plan, privately held key, new embedded certificate/runtime and device signature tests. No plan upgrade or key creation performed. |
-| SEC-09 | Migration preflight validates every firewall rule against an explicit protected exact-IP policy, before and after adding the temporary runner rule. | Configure the new GitHub variable after reviewing live Azure rules; unrelated rules are never automatically removed. |
+| SEC-09 | Migration preflight rejects broad ranges, all-Azure access, noncanonical/non-public IPs, duplicate rule names and stale runner rules, before and after adding its own exact-IP rule. | The operator declined a manually maintained GitHub allowlist. Existing exact-IP rules are accepted without independent address approval; ownership/continued need remains an operator review responsibility. Unrelated rules are never automatically removed. |
 
 The vulnerable `xcode` transitive `uuid` is narrowly overridden to patched
 CommonJS-compatible `11.1.1`. Regression tests exercise xcode's PBX ID generation
@@ -32,18 +32,19 @@ account-deletion attribution policy is retained, not silently redesigned.
    Open **Networking → Firewall rules**. Privately record each rule's name,
    start IP and end IP. Do not change or delete rules as part of inspection.
 2. Open App Service **little-days-api-522fpstfbtds2 → Properties** and inspect its
-   current outbound IP addresses. Confirm which exact SQL rules are needed for
-   those addresses. Review any operator rule separately with its purpose/expiry.
+   current and possible outbound IP addresses. The existing Bicep intentionally
+   creates exact rules for `possibleOutboundIpAddresses`; compare against that
+   reviewed scope, not only the smaller current subset. Review any operator rule
+   separately with its purpose/expiry.
    Reject ranges and `0.0.0.0` (“Allow Azure services”), and investigate stale
    `github-db-*` rules. Do not approve the observed list blindly.
-3. On GitHub open **github4me/my-little-days → Settings → Environments →
-   family-database → Environment variables → Add environment variable**.
-   Name: `FAMILY_DB_APPROVED_FIREWALL_RULES_JSON`.
-   Value: a JSON object mapping each reviewed rule name to its exact public IPv4.
-   Example shape only: `{"app-20-21-22-23":"20.21.22.23"}`.
-   Use actual reviewed addresses, not this example. `{}` means no existing rules
-   are approved and works only when none exist. Missing/invalid policy blocks
-   migration. Policy changes require the same review as network access changes.
+3. No new GitHub firewall variable is required. The updated helper reads live
+   rules and automatically rejects unsafe rule shapes and stale runner access.
+   If `FAMILY_DB_APPROVED_FIREWALL_RULES_JSON` was already added under
+   **Settings → Environments → family-database → Environment variables**, it can
+   be removed or left unused. The helper no longer reads it. Existing exact-IP
+   app and operator rules are preserved; this is not automatic approval of their
+   ownership or continued need. Do not broaden SQL access to bypass a failure.
 4. Verify protected environments, reviewers, trusted branch and OIDC bindings
    from the existing runbook remain in place. The new action pins do not grant
    permissions or bypass approvals.
@@ -62,8 +63,9 @@ account-deletion attribution policy is retained, not silently redesigned.
    must run before the new API code. Do not edit an already-applied migration.
 7. Confirm migration success and that the run's own `github-db-*` rule was
    removed, then approve the API deployment. Check `/health/live` and
-   `/health/ready`, plus authorized synthetic read/write isolation. A healthy
-   liveness endpoint alone is not security acceptance.
+   `/health/ready`, plus authorized synthetic read/write isolation. Readiness
+   currently checks the recovery gate, not SQL/Graph connectivity; neither health
+   endpoint alone is security acceptance.
 8. Record deployed commit, migration journal result, redacted firewall review,
    identity/role checks and alert ownership. Never put access tokens, credentials,
    deletion receipts or actual child records in the evidence document.
@@ -121,8 +123,9 @@ or claim of a per-account hard cleanup-time bound is made here.
 
 ## Preview/mobile rollout
 
-1. Install a new iOS preview binary for version **0.2.1**, build **19**, runtime
+1. Install a new iOS preview binary for version **0.2.1**, build **19 or later**, runtime
    **0.2.1**, using the existing preview environment and registered phones.
+   The latest verified build is **21** ([installation](https://expo.dev/accounts/expo4chao/projects/little-days/builds/4277a9b9-8ece-47cc-a495-a79f4fd00c39)); it includes the security changes and later authentication recovery fixes. Do not downgrade to build 19.
    Publishing JavaScript to the old 0.2.0 runtime cannot add the backup module or
    image-manipulator dependency. Do not uninstall the data-bearing old app first.
 2. The candidate has `updates.enabled=false`: preview means an internal native
@@ -165,6 +168,32 @@ No subscription upgrade is assumed. After approving that route:
 Apple's [backup-exclusion guidance](https://developer.apple.com/documentation/foundation/optimizing-your-app-s-data-for-icloud-backup)
 supports the directory attribute; source/VM tests are not a substitute for the
 signed-device checks above.
+
+## Backend deployment preflight — 17 September 2026 (Sydney)
+
+Read-only Azure/GitHub inspection found 33 exact-IP server firewall rules: 32
+match the App Service possible outbound set provisioned by Bicep, and one is an
+operator-style client rule. After considering removal, the operator explicitly
+chose to retain that exact client-IP rule for SQL administration. The live set
+was rechecked unchanged on 17 September; no rule was removed or broadened.
+The operator subsequently declined the duplicate GitHub IP-list requirement.
+The updated helper accepts all 33 existing exact-IP rules without such a list,
+while still rejecting broad access and stale runner rules. No automatic expiry
+was requested; review continued need before each release and whenever the
+operator's network address changes.
+No broad ranges, all-Azure rule or stale `github-db-*` rule were present at this
+inspection. The operator address is intentionally not committed to this public
+document. Recheck live rules before deployment; this is not approval of an
+unexplained rule or proof of database-level firewall/RBAC settings.
+
+The latest successful GitHub API/database release found was
+[35066678308](https://github.com/github4me/my-little-days/actions/runs/35066678308),
+commit `7cf0dab71ad3ed3a8668d26c573d893e5ec0d73b`, before the security release.
+No new deployment or cloud change was performed during this preflight. Next:
+publish/use the updated workflow without the IP-list requirement, review
+aggregate history sizes and migration 0004, then start the reviewed workflow.
+Do not rerun Bicep, rotate `Family__HistoryId`, or enable `Recovery__Blocked` for
+this ordinary in-place upgrade. SEC-03 remains open for any future restore.
 
 ## Release evidence — 17 September 2026 (Sydney)
 
