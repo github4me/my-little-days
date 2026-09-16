@@ -207,21 +207,34 @@ async function englishFlows(page) {
   await confirm(page, "Remove");
   await expect(button(page, "Remove")).toHaveCount(0);
   await expect(button(page, "Hide Family members (1)")).toBeVisible();
+  await expect(button(page, "Show Invitations")).toHaveAttribute(
+    "aria-expanded",
+    "false",
+  );
   await expect(
-    button(page, "Show Departure and removal history (3)"),
-  ).toHaveAttribute("aria-expanded", "false");
+    page.getByRole("button", { name: /Departure and removal history/ }),
+  ).toHaveCount(0);
   await expect(
     page.getByText("sample.member@example.com", { exact: true }),
   ).toHaveCount(0);
-  await button(page, "Show Departure and removal history (3)").click();
+  await button(page, "Show Invitations").click();
   await expect(
     page.getByText("sample.member@example.com", { exact: true }),
-  ).toBeVisible();
-  await button(page, "Hide Departure and removal history (3)").click();
-  await button(page, "Show Invite a caregiver").click();
+  ).toHaveCount(1);
   await expect(
     page.getByText("Accepted · later removed", { exact: true }),
   ).toBeVisible();
+  await expect(
+    page.getByText("Unlinked membership history", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Sample Removed Member", { exact: true }),
+  ).toHaveCount(1);
+  await button(page, "Hide Invitations").click();
+  await button(page, "Show Invite a caregiver").click();
+  await expect(
+    page.getByText("Accepted · later removed", { exact: true }),
+  ).toHaveCount(0);
   await page
     .getByLabel("Recipient email", { exact: true })
     .fill("sample.member@example.com");
@@ -230,15 +243,17 @@ async function englishFlows(page) {
     page.getByText("Invitation saved; no notification sent", { exact: true }),
   ).toBeVisible();
   await expect(
+    page.getByText("Waiting for acceptance", { exact: true }),
+  ).toHaveCount(0);
+  await button(page, "Show Invitations").click();
+  await expect(
     page.getByText("Accepted · later removed", { exact: true }),
   ).toHaveCount(1);
   await expect(
     page.getByText("Waiting for acceptance", { exact: true }),
   ).toHaveCount(2);
   await expect(button(page, "Hide Family members (1)")).toBeVisible();
-  await expect(
-    button(page, "Show Departure and removal history (3)"),
-  ).toBeVisible();
+  await expect(button(page, "Hide Invitations")).toBeVisible();
   await expect(page.getByText("135 mL", { exact: true })).toBeVisible();
   await button(page, "Reset samples").click();
   await expect(button(page, "Edit")).toHaveCount(2);
@@ -249,6 +264,11 @@ async function englishFlows(page) {
   await button(page, "Show Family members (2)").click();
   await expect(
     page.getByRole("button", { name: /Departure and removal history/ }),
+  ).toHaveCount(0);
+  await expect(button(page, "Show Invitations")).toHaveCount(0);
+  await expect(button(page, "Hide Invitations")).toHaveCount(0);
+  await expect(
+    page.getByText("Unlinked membership history", { exact: true }),
   ).toHaveCount(0);
   await expect(
     page.getByText("Sample Removed Member", { exact: true }),
@@ -567,6 +587,11 @@ async function firstInvitationFlow(page, zh, width) {
     page,
     label("Show Invite a caregiver", "展开邀请照护者"),
   ).click();
+  await expect(button(page, label("Revoke", "撤销"))).toHaveCount(0);
+  await expect(
+    button(page, label("Show Invitations", "展开邀请记录")),
+  ).toHaveAttribute("aria-expanded", "false");
+  await button(page, label("Show Invitations", "展开邀请记录")).click();
   await expect(button(page, label("Revoke", "撤销"))).toHaveCount(5);
   await expect(
     page.getByText("family.one@example.com", { exact: true }),

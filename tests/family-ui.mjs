@@ -418,7 +418,7 @@ const snapshotWithMemberHistory = (role) => {
   return family;
 };
 
-test("removal reduces current member count and moves the member to collapsed admin-only history", () => {
+test("removal reduces member count and keeps unlinked history inside collapsed invitations", () => {
   for (const locale of ["en", "zh-CN"]) {
     const family = snapshotWithMemberHistory("owner");
     const departing = {
@@ -450,16 +450,22 @@ test("removal reduces current member count and moves the member to collapsed adm
       view.text(),
       /Departing caregiver|Removed caregiver|Former caregiver/,
     );
-    const history = findToggle(
-      "Show Departure and removal history (3)",
-      "展开退出与移除历史（3）",
+    assert.doesNotMatch(
+      view.text(),
+      /Departure and removal history|退出与移除历史/,
     );
+    const history = findToggle("Show Invitations", "展开邀请记录");
     assert.equal(history?.props.accessibilityState.expanded, false);
     history.props.onPress();
     view.render();
     assert.match(view.text(), /Departing caregiver/);
     assert.match(view.text(), /removed@example.invalid/);
     assert.match(view.text(), /former@example.invalid/);
+    assert.match(
+      view.text(),
+      locale === "en" ? /Unlinked membership history/ : /未关联邀请的成员历史/,
+    );
+    assert.doesNotMatch(view.text(), /No invitations sent yet|还没有发出邀请/);
     assert.match(view.text(), locale === "en" ? /Access ended/ : /结束访问/);
     assert.match(
       view.text(),
@@ -475,22 +481,23 @@ test("removal reduces current member count and moves the member to collapsed adm
     });
     view.render();
     assert.ok(findToggle("Hide Family members (2)", "收起家庭成员（2）"));
-    assert.ok(
-      findToggle(
-        "Hide Departure and removal history (3)",
-        "收起退出与移除历史（3）",
-      ),
-    );
+    assert.ok(findToggle("Hide Invitations", "收起邀请记录"));
     assert.equal(view.buttons(locale === "en" ? "Remove" : "移除").length, 1);
   }
 });
 
 test("ordinary members never see former-member history even if cached snapshot contains it", () => {
   for (const locale of ["en", "zh-CN"]) {
-    const view = fixture(
-      { snapshot: snapshotWithMemberHistory("caregiver") },
-      locale,
-    );
+    const data = snapshotWithMemberHistory("caregiver");
+    data.invitations = [
+      {
+        id: "private-invite",
+        email: "invited@example.invalid",
+        status: "pending",
+        expiresAt: "2027-01-01T00:00:00Z",
+      },
+    ];
+    const view = fixture({ snapshot: data }, locale);
     view.render();
     assert.match(
       view.text(),
@@ -498,11 +505,11 @@ test("ordinary members never see former-member history even if cached snapshot c
     );
     assert.doesNotMatch(
       view.text(),
-      /Removed caregiver|Former caregiver|removed@example.invalid|former@example.invalid/,
+      /Removed caregiver|Former caregiver|removed@example.invalid|former@example.invalid|invited@example.invalid/,
     );
     assert.doesNotMatch(
       view.text(),
-      /Departure and removal history|退出与移除历史/,
+      /Departure and removal history|退出与移除历史|Invitations|邀请记录/,
     );
   }
 });
@@ -1287,7 +1294,16 @@ test("accepted invitations show the outcome of their own membership without rela
       { ...accepted("new-pending", null), status: "pending" },
       accepted("legacy-accepted", undefined),
     ];
-    const view = fixture({ snapshot: data }, locale);
+    const view = fixture({ snapshot: data }, locale, false, "family", false);
+    view.render();
+    view
+      .nodes()
+      .find(
+        (node) =>
+          node.props?.accessibilityLabel ===
+          (locale === "en" ? "Show Invitations" : "展开邀请记录"),
+      )
+      .props.onPress();
     view.render();
     const lines = view.text().split("\n");
     for (const [message, count] of [
@@ -1302,12 +1318,83 @@ test("accepted invitations show the outcome of their own membership without rela
         message,
       );
     assert.equal(view.buttons(locale === "en" ? "Revoke" : "撤销").length, 1);
+    assert.doesNotMatch(view.text(), /Removed caregiver|Former caregiver/);
+    assert.doesNotMatch(
+      view.text(),
+      /Unlinked membership history|未关联邀请的成员历史/,
+    );
     assert.equal(
       lines.filter((line) =>
         line.startsWith(locale === "en" ? "Expires " : "到期："),
       ).length,
-      3,
+      1,
     );
+  }
+});
+
+test("invitation history stays collapsed when the invite form opens and preserves unbound legacy membership rows", () => {
+  for (const locale of ["en", "zh-CN"]) {
+    const data = snapshotWithMemberHistory("owner");
+    data.invitations = [
+      {
+        id: "legacy-accepted",
+        email: "removed@example.invalid",
+        status: "accepted",
+        expiresAt: "2027-01-01T00:00:00Z",
+      },
+      {
+        id: "reinvite",
+        email: "removed@example.invalid",
+        status: "pending",
+        expiresAt: "2027-01-01T00:00:00Z",
+      },
+    ];
+    const view = fixture({ snapshot: data }, locale, false, "family", false);
+    const toggle = (en, zh) =>
+      view
+        .nodes()
+        .find(
+          (node) =>
+            node.props?.accessibilityLabel === (locale === "en" ? en : zh),
+        );
+    view.render();
+    toggle("Show Invite a caregiver", "展开邀请照护者").props.onPress();
+    view.render();
+    assert.equal(
+      toggle("Show Invitations", "展开邀请记录")?.props.accessibilityState
+        .expanded,
+      false,
+    );
+    assert.doesNotMatch(
+      view.text(),
+      /removed@example.invalid|Removed caregiver|Former caregiver/,
+    );
+    toggle("Show Invitations", "展开邀请记录").props.onPress();
+    view.render();
+    const lines = view.text().split("\n");
+    assert.equal(
+      lines.filter((line) => line === (locale === "en" ? "Accepted" : "已接受"))
+        .length,
+      1,
+    );
+    assert.doesNotMatch(
+      view.text(),
+      /Accepted · later removed|已接受 · 后已移除/,
+    );
+    assert.match(view.text(), /Removed caregiver/);
+    assert.match(view.text(), /Former caregiver/);
+    assert.equal(view.buttons(locale === "en" ? "Revoke" : "撤销").length, 1);
+    toggle("Hide Invitations", "收起邀请记录").props.onPress();
+    view.render();
+    assert.doesNotMatch(
+      view.text(),
+      /removed@example.invalid|Removed caregiver|Former caregiver/,
+    );
+    assert.equal(
+      view.buttons(locale === "en" ? "Add invitation" : "添加邀请").length,
+      1,
+    );
+    assert.equal(view.calls.length, 0);
   }
 });
 

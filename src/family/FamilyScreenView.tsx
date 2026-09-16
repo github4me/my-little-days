@@ -499,6 +499,16 @@ export default function FamilyScreenView({
   const formerMembers = owner
     ? (snapshot?.members.filter((member) => member.status !== "active") ?? [])
     : [];
+  // Older responses, capped invitation lists and original admins may have no
+  // matching invitation. Keep their history without guessing from an email.
+  const unlinkedFormerMembers = formerMembers.filter(
+    (member) =>
+      !snapshot?.invitations.some(
+        (invitation) =>
+          invitation.status === "accepted" &&
+          invitation.acceptedMembershipId === member.membershipId,
+      ),
+  );
   const successors = activeMembers.filter(
     (member) => member.id !== pilot.user?.id,
   );
@@ -1391,48 +1401,6 @@ export default function FamilyScreenView({
                 ) : null}
               </Disclosure>
 
-              {owner && formerMembers.length ? (
-                <Disclosure
-                  title={m("memberHistoryCount", {
-                    count: formerMembers.length,
-                  })}
-                >
-                  <T raw style={styles.muted(c.muted)}>
-                    {m("memberHistoryDescription")}
-                  </T>
-                  {formerMembers.map((member) => (
-                    <View
-                      key={member.membershipId}
-                      style={[styles.listItem, { borderColor: c.line }]}
-                    >
-                      <T raw style={{ fontWeight: "600" }}>
-                        {member.displayName}
-                      </T>
-                      <T raw style={styles.muted(c.muted)}>
-                        {m(member.role)} ·{" "}
-                        {m(
-                          member.status === "left"
-                            ? "leftMember"
-                            : "removedMember",
-                        )}
-                      </T>
-                      {member.email ? (
-                        <T raw style={styles.muted(c.muted)}>
-                          {member.email}
-                        </T>
-                      ) : null}
-                      {member.endedAt ? (
-                        <T raw style={styles.muted(c.muted)}>
-                          {m("endedAt", {
-                            time: displayDate(member.endedAt, locale),
-                          })}
-                        </T>
-                      ) : null}
-                    </View>
-                  ))}
-                </Disclosure>
-              ) : null}
-
               {demo ? (
                 <Disclosure title={m("profile")}>
                   <T raw style={styles.muted(c.muted)}>
@@ -1543,10 +1511,12 @@ export default function FamilyScreenView({
                       <T raw>{createdInvite}</T>
                     </View>
                   ) : null}
-                  <T raw style={{ fontWeight: "600" }}>
-                    {m("invitations")}
-                  </T>
-                  {!snapshot.invitations.length ? (
+                </Disclosure>
+              ) : null}
+              {owner ? (
+                <Disclosure title={m("invitations")}>
+                  {!snapshot.invitations.length &&
+                  !unlinkedFormerMembers.length ? (
                     <T raw style={styles.muted(c.muted)}>
                       {m("noInvitations")}
                     </T>
@@ -1601,22 +1571,23 @@ export default function FamilyScreenView({
                                   : statusLabel[status],
                             )}
                           </T>
-                          <T raw style={styles.muted(c.muted)}>
-                            {acceptedMember?.endedAt &&
-                            acceptedMember.status !== "active"
-                              ? m("endedAt", {
-                                  time: displayDate(
-                                    acceptedMember.endedAt,
-                                    locale,
-                                  ),
-                                })
-                              : m("expiresAt", {
-                                  time: displayDate(
-                                    invitation.expiresAt,
-                                    locale,
-                                  ),
-                                })}
-                          </T>
+                          {acceptedMember?.endedAt &&
+                          acceptedMember.status !== "active" ? (
+                            <T raw style={styles.muted(c.muted)}>
+                              {m("endedAt", {
+                                time: displayDate(
+                                  acceptedMember.endedAt,
+                                  locale,
+                                ),
+                              })}
+                            </T>
+                          ) : status === "pending" || status === "expired" ? (
+                            <T raw style={styles.muted(c.muted)}>
+                              {m("expiresAt", {
+                                time: displayDate(invitation.expiresAt, locale),
+                              })}
+                            </T>
+                          ) : null}
                           {pending ? (
                             <Button
                               label={m("revoke")}
@@ -1641,6 +1612,46 @@ export default function FamilyScreenView({
                       );
                     })
                   )}
+                  {unlinkedFormerMembers.length ? (
+                    <>
+                      <T raw style={{ fontWeight: "600" }}>
+                        {m("unlinkedMembershipHistory")}
+                      </T>
+                      <T raw style={styles.muted(c.muted)}>
+                        {m("memberHistoryDescription")}
+                      </T>
+                      {unlinkedFormerMembers.map((member) => (
+                        <View
+                          key={member.membershipId}
+                          style={[styles.listItem, { borderColor: c.line }]}
+                        >
+                          <T raw style={{ fontWeight: "600" }}>
+                            {member.displayName}
+                          </T>
+                          <T raw style={styles.muted(c.muted)}>
+                            {m(member.role)} ·{" "}
+                            {m(
+                              member.status === "left"
+                                ? "leftMember"
+                                : "removedMember",
+                            )}
+                          </T>
+                          {member.email ? (
+                            <T raw style={styles.muted(c.muted)}>
+                              {member.email}
+                            </T>
+                          ) : null}
+                          {member.endedAt ? (
+                            <T raw style={styles.muted(c.muted)}>
+                              {m("endedAt", {
+                                time: displayDate(member.endedAt, locale),
+                              })}
+                            </T>
+                          ) : null}
+                        </View>
+                      ))}
+                    </>
+                  ) : null}
                 </Disclosure>
               ) : null}
               {owner ? (

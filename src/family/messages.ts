@@ -256,9 +256,9 @@ const messages = {
   you: ["你", "You"],
   members: ["家庭成员", "Family members"],
   membersCount: ["家庭成员（{count}）", "Family members ({count})"],
-  memberHistoryCount: [
-    "退出与移除历史（{count}）",
-    "Departure and removal history ({count})",
+  unlinkedMembershipHistory: [
+    "未关联邀请的成员历史",
+    "Unlinked membership history",
   ],
   memberHistoryDescription: [
     "仅管理员可见，不计入当前成员人数。可通过「邀请照护者」再次邀请；对方接受后才会重新加入，历史记录仍会保留。",
