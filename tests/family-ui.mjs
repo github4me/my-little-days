@@ -1484,6 +1484,7 @@ test("real family management never offers the legacy test feed editor or synthet
     assert.equal(screen.buttons("Edit").length, 0);
     assert.equal(screen.buttons("Save baby profile").length, 0);
     assert.equal(screen.buttons("Add test bottle feed").length, 0);
+    assert.doesNotMatch(screen.text(), /All family records are connected/);
     assert.equal(
       screen.buttons("Add invitation").length,
       role === "owner" ? 1 : 0,

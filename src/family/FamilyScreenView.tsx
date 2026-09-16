@@ -1250,15 +1250,7 @@ export default function FamilyScreenView({
                     )}
                   </Card>
                 </>
-              ) : (
-                <Card>
-                  <T raw>
-                    {locale === "zh-CN"
-                      ? "所有家庭记录已连接到首页、记录、成长和照护。返回主界面即可记录。"
-                      : "All family records are connected to Today, Records, Growth and Care. Return to the main app to add or edit records."}
-                  </T>
-                </Card>
-              )}
+              ) : null}
             </>
           )}
 
