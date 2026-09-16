@@ -1033,7 +1033,6 @@ await page.getByRole("button", { name: "早教活动", exact: true }).click();
 await page
   .getByRole("checkbox", { name: "今天做过：看看黑白卡", checked: true })
   .waitFor();
-const nextDay = new Date();
 // A failed daily check-in write must still preserve the previous checked state.
 await page.evaluate(() => {
   window.checkinSetItem = Storage.prototype.setItem;
@@ -1054,8 +1053,14 @@ await page.evaluate(() => {
   Storage.prototype.setItem = window.checkinSetItem;
   delete window.checkinSetItem;
 });
-nextDay.setDate(nextDay.getDate() + 1);
-nextDay.setHours(0, 1, 0, 0);
+// The browser uses Melbourne time; the CI Node process may use UTC. Advance
+// the browser's calendar day, not the host's potentially different "tomorrow".
+const nextDay = await page.evaluate(() => {
+  const next = new Date();
+  next.setDate(next.getDate() + 1);
+  next.setHours(0, 1, 0, 0);
+  return next.getTime();
+});
 await page.clock.setFixedTime(nextDay);
 await page
   .getByRole("checkbox", { name: "今天做过：看看黑白卡", checked: false })

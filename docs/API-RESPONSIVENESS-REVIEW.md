@@ -133,6 +133,20 @@ review release is prepared as iOS 0.2.1 / build 20 on the preview profile, with
 unsigned OTA still disabled. Build completion and installation need separate
 confirmation; no API, database or Azure deployment is part of this follow-up.
 
+Release CI exposed an unrelated midnight fixture issue: the browser uses
+Melbourne time, but the test calculated "tomorrow" in the Node runner's timezone.
+Reproduced locally with `TZ=UTC`; at the reported time that did not advance the
+browser's calendar day. The fixture now derives next midnight inside the browser.
+This changes tests only, not the signed preview's application behavior.
+After rebuilding the Web bundle for build 20, the complete browser regression
+passed locally with the Node runner set to `TZ=UTC` as well.
+
+[Native preview build 20](https://expo.dev/accounts/expo4chao/projects/little-days/builds/4ec5e7f4-454b-47d4-acc9-e53625c9d0ce)
+uses application commit `2c2c57f94edb209397db31ff12028dcc461ade71` and the existing
+two registered iPhones. The later timezone fixture/documentation commit does not
+change the application. Confirm the build page says finished before installing;
+install over the existing app rather than deleting its local data first.
+
 Device follow-up (no Azure/GitHub configuration change is needed):
 
 1. Install a build containing this follow-up over the existing app. This is a
