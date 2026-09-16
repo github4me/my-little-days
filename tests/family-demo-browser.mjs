@@ -170,6 +170,14 @@ async function englishFlows(page) {
       /The admin can remove you at any time without advance notice/,
     ),
   ).toBeVisible();
+  await expect(
+    page.getByText(
+      /Joining will automatically decline all other pending invitations/,
+    ),
+  ).toBeVisible();
+  await button(page, "Cancel").click();
+  await expect(button(page, "Accept invitation")).toHaveCount(2);
+  await button(page, "Accept invitation").first().click();
   await confirmationPainted(page);
   await page.screenshot({
     path: path.join(screenshots, "join-consent-en-390.png"),
@@ -190,7 +198,7 @@ async function englishFlows(page) {
     .fill("135");
   await button(page, "Save and share").click();
   await expect(page.getByText("135 mL", { exact: true })).toBeVisible();
-  await button(page, "Show Pilot account").click();
+  await button(page, "Show My account").click();
   await expect(button(page, "Request account deletion")).toBeDisabled();
   await button(page, "Show Family members (4)").click();
   await button(page, "Remove").click();
@@ -233,7 +241,7 @@ async function englishFlows(page) {
   await expect(button(page, "Edit")).toHaveCount(0);
 
   await button(page, "Member").click();
-  await button(page, "Show Pilot account").click();
+  await button(page, "Show My account").click();
   await button(page, "Request account deletion").click();
   await confirm(page, "Request account deletion", true);
   await expect(
@@ -267,7 +275,7 @@ async function englishFlows(page) {
   await openDemo(page, false);
   await expect(
     page.getByRole("heading", {
-      name: "Start a family with your records",
+      name: "Create a family group",
       exact: true,
     }),
   ).toBeVisible();
@@ -275,12 +283,56 @@ async function englishFlows(page) {
   await expect(button(page, "Accept invitation")).toHaveCount(2);
 }
 
+async function receivedInvitationCreationFlow(page, zh) {
+  const label = (en, chinese) => (zh ? chinese : en);
+  await button(page, label("Invitations", "收到邀请")).click();
+  const accept = label("Accept invitation", "接受邀请");
+  await expect(button(page, accept)).toHaveCount(2);
+  await button(
+    page,
+    label("Show Create a family group", "展开创建家庭群组"),
+  ).click();
+  await page
+    .getByLabel(label("Family emails (up to 3)", "家人邮箱（最多 3 个）"), {
+      exact: true,
+    })
+    .fill("new.family@example.com");
+  await button(page, label("Review setup", "查看并确认")).click();
+  const create = label(
+    "Create family and decline invitations",
+    "创建家庭并拒绝收到的邀请",
+  );
+  await expect(button(page, create)).toBeDisabled();
+  await expect(
+    page.getByText(
+      label(
+        "You have 2 pending family invitation(s).",
+        "你有 2 条待处理的家庭邀请。",
+      ),
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await button(page, label("Cancel", "取消")).click();
+  await expect(button(page, accept)).toHaveCount(2);
+  await button(page, label("Review setup", "查看并确认")).click();
+  await page.getByRole("checkbox").last().click();
+  await button(page, create).click();
+  await expect(button(page, accept)).toHaveCount(0);
+  await expect(
+    button(page, label("Show Create a family group", "展开创建家庭群组")),
+  ).toHaveCount(0);
+  await expect(
+    page.getByText(
+      zh
+        ? /你已加入一个家庭群组并担任管理员/
+        : /You already belong to a family group as its admin/,
+    ),
+  ).toBeVisible();
+}
+
 async function firstInvitationFlow(page, zh, width) {
   const label = (en, chinese) => (zh ? chinese : en);
-  const setupTitle = label(
-    "Start a family with your records",
-    "从现有记录建立家庭",
-  );
+  const setupTitle = label("Create a family group", "创建家庭群组");
   const reviewTitle = label(
     "Review the family’s starting data",
     "确认家庭初始资料",
@@ -292,6 +344,18 @@ async function firstInvitationFlow(page, zh, width) {
   await expect(
     page.getByRole("heading", { name: setupTitle, exact: true }),
   ).toBeVisible();
+  const showSetup = label(`Show ${setupTitle}`, `展开${setupTitle}`);
+  const hideSetup = label(`Hide ${setupTitle}`, `收起${setupTitle}`);
+  await expect(page.getByLabel(emailsLabel, { exact: true })).toHaveCount(0);
+  await expect(button(page, showSetup)).toHaveAttribute(
+    "aria-expanded",
+    "false",
+  );
+  await button(page, showSetup).click();
+  await expect(button(page, hideSetup)).toHaveAttribute(
+    "aria-expanded",
+    "true",
+  );
   await expect(button(page, reviewLabel)).toBeDisabled();
   await expect(page.getByText("Offline Fixture", { exact: true })).toHaveCount(
     0,
@@ -306,6 +370,12 @@ async function firstInvitationFlow(page, zh, width) {
     });
   }
   await page.getByLabel(emailsLabel, { exact: true }).fill("invalid-address");
+  await button(page, hideSetup).click();
+  await expect(page.getByLabel(emailsLabel, { exact: true })).toHaveCount(0);
+  await button(page, showSetup).click();
+  await expect(page.getByLabel(emailsLabel, { exact: true })).toHaveValue(
+    "invalid-address",
+  );
   await button(page, reviewLabel).click();
   await expect(page.getByRole("alert")).toContainText(
     label(
@@ -326,6 +396,17 @@ async function firstInvitationFlow(page, zh, width) {
     page.getByRole("heading", { name: reviewTitle, exact: true }),
   ).toBeVisible();
   await expect(button(page, createLabel)).toBeDisabled();
+  await expect(
+    page
+      .getByText(
+        label(
+          "Creating your own family group will automatically decline all pending invitations you have received, including any arriving before creation completes. If creation fails, they stay pending. To join another family later, leave or close your group and receive a new invitation.",
+          "创建自己的家庭群组后，系统将自动拒绝你收到的所有待处理邀请，包括创建完成前新收到的邀请。创建失败则保留邀请。以后如需加入其他家庭，请先退出或解散自己的群组，并获取新的邀请。",
+        ),
+        { exact: true },
+      )
+      .last(),
+  ).toBeVisible();
   await expect(
     page.getByText("family.one@example.com", { exact: true }),
   ).toHaveCount(1);
@@ -416,6 +497,8 @@ async function firstInvitationFlow(page, zh, width) {
   await expect(
     page.getByRole("heading", { name: setupTitle, exact: true }),
   ).toBeVisible();
+  await expect(page.getByLabel(emailsLabel, { exact: true })).toHaveCount(0);
+  await button(page, showSetup).click();
   await expect(page.getByLabel(emailsLabel, { exact: true })).toHaveValue("");
   await expect(
     page.getByRole("heading", { name: startingTitle, exact: true }),
@@ -512,6 +595,7 @@ try {
       page.getByText(zh ? /^仅供界面预览/ : /^UI preview only/),
     ).toBeVisible();
     await firstInvitationFlow(page, zh, width);
+    await receivedInvitationCreationFlow(page, zh);
     if (locale === "en" && width === 390) await englishFlows(page);
     for (const scenario of scenarios[locale]) {
       await button(page, scenario).click();
@@ -534,6 +618,12 @@ try {
     });
     if (zh) {
       await button(page, "收到邀请").click();
+      await button(page, "接受邀请").first().click();
+      await expect(
+        page.getByText(/加入成功时，系统将自动拒绝你收到的其他待处理邀请/),
+      ).toBeVisible();
+      await button(page, "取消").click();
+      await expect(button(page, "接受邀请")).toHaveCount(2);
       await button(page, "接受邀请").first().click();
       await noOverflow(page, `Chinese consent/${width}`);
       await confirm(page, "接受邀请", true, true);

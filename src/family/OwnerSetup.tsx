@@ -39,6 +39,11 @@ export default function OwnerSetup(context: {
   return (
     <OwnerSetupCard
       mode="full"
+      pendingInvitationCount={
+        context.pilot.inbox.filter(
+          (invite) => Date.parse(invite.expiresAt) > Date.now(),
+        ).length
+      }
       profile={context.source.profile}
       summary={summarizeOwnerSeed(context.source)}
       onPrepare={async (emails) =>

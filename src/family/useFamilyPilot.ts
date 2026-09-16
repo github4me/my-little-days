@@ -223,7 +223,11 @@ export function useFamilyPilot() {
       await persist(revokeCache, e, false, true);
     return result;
   }
-  async function snapshot(e: number, familyId: string) {
+  async function snapshot(
+    e: number,
+    familyId: string,
+    expected?: PilotTransition["activation"],
+  ) {
     const result = await familyRequest<FullFamilySnapshot>(
       `/v2/families/${familyId}/snapshot`,
       undefined,
@@ -240,6 +244,12 @@ export function useFamilyPilot() {
       )
     )
       throw new Error("invalid_response");
+    if (
+      expected &&
+      (result.family.membershipId !== expected.membershipId ||
+        (expected.historyId && result.historyId !== expected.historyId))
+    )
+      throw new Error("membership_changed");
     const previous = current.current.snapshot;
     // Once the server has disproved the old grant/history, a local disk error
     // must not make that old family or obsolete admin permissions return.
@@ -456,7 +466,45 @@ export function useFamilyPilot() {
     }
     // A response is not a replacement dataset. Keep the workspace frozen until
     // verified membership and its full snapshot are durably refreshed.
-    await refreshMembership(e);
+    const committed = current.current.transition;
+    if (
+      committed?.phase === "committed" &&
+      ["create", "join"].includes(committed.kind)
+    ) {
+      const expected = committed.activation;
+      if (!expected) throw new Error("membership_changed");
+      const me = await identify(e);
+      const grant = me.families.find(
+        (f) =>
+          f.id === expected.familyId &&
+          f.membershipId === expected.membershipId,
+      );
+      if (!grant || me.accountDeletion) {
+        // The server has disproved this activation's grant. Another membership
+        // must never supply its replacement data or authorize personal cleanup.
+        markReady(false);
+        await persist(() => emptyPilotState(), e);
+        markReady(true);
+        setNotice("membership_revoked");
+        return;
+      }
+      try {
+        await snapshot(e, grant.id, expected);
+      } catch (cause) {
+        if (
+          cause instanceof PilotApiError &&
+          !retryable(cause) &&
+          errorCode(cause) === "family_schema_unsupported"
+        ) {
+          // Older clients could commit a join to a legacy family. Verified
+          // schema rejection ends local activation without erasing personal
+          // records or leaving the family; explicit sign-out remains available.
+          markReady(false);
+          await persist(() => emptyPilotState(), e);
+        }
+        throw cause;
+      }
+    } else await refreshMembership(e);
     const failure = current.current.transition?.error;
     if (!failure && ["create", "join"].includes(intent.kind)) {
       // A journal survives a crash between server commit and local replacement.
@@ -931,7 +979,11 @@ export function useFamilyPilot() {
         const checked = JSON.parse(serializeOwnerSeed(seed)) as OwnerSeedDraft;
         await mutate(
           "/v2/families",
-          { consentRevision: "family-sharing-v1", seed: checked },
+          {
+            consentRevision: "family-sharing-v1",
+            declinePendingInvitations: true,
+            seed: checked,
+          },
           e,
           "create",
         );
@@ -1149,7 +1201,7 @@ export function useFamilyPilot() {
         if (!invitation) throw new Error("invitation_unavailable");
         await mutate(
           `/v1/invitations/${id}/accept`,
-          {},
+          { declineOtherInvitations: true, requiredSchemaVersion: 2 },
           e,
           "join",
           invitation.familyId,

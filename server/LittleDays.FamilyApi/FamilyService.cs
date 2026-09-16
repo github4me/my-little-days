@@ -47,7 +47,7 @@ public sealed partial class FamilyService(PilotDatabase db, PilotConfiguration c
             orderby invitation.CreatedAt descending
             select new PendingFamilyInvitation(invitation.Id, family.Id, owner.DisplayName, invitation.ExpiresAt)).ToArrayAsync(ct);
         return new MeResult(new(user.ObjectId, user.DisplayName, user.Email),
-            families.Select(x => Summary(x, memberships.Single(m => m.FamilyId == x.Id))).ToArray(), inbox, null);
+            families.Select(x => Summary(x, memberships.Single(m => m.FamilyId == x.Id))).ToArray(), families.Length == 0 ? inbox : [], null);
     }, ct);
 
     public Task<FamilySummary> CreateFamily(PilotIdentity user, CreateFamilyRequest request, CancellationToken ct) => Transaction(async () =>
@@ -65,6 +65,10 @@ public sealed partial class FamilyService(PilotDatabase db, PilotConfiguration c
         }
         if (await db.Memberships.AnyAsync(x => x.UserId == user.ObjectId && x.Active, ct))
             throw new ApiException(409, "already_in_family");
+        // The legacy creation contract has no consent option. Require the reviewed
+        // full-family flow when creating would also reject incoming invitations.
+        if (await LiveReceivedInvitations(user, Now).AnyAsync(ct))
+            throw new ApiException(409, "invitation_decline_consent_required");
         var family = new FamilyRow { Id = Guid.NewGuid(), BabyName = request.BabyName!.Trim(), Revision = 1, CreatedAt = Now };
         var membership = NewGrant(user, family.Id, "owner");
         db.Families.Add(family);
@@ -318,7 +322,10 @@ public sealed partial class FamilyService(PilotDatabase db, PilotConfiguration c
     {
         await RequireAccount(user, ct);
         ValidateId(request.OperationId);
-        var hash = Fingerprint("accept-invitation", new { request.OperationId, invitationId });
+        // Preserve old durable receipts when clients omit both new options.
+        var hash = request.DeclineOtherInvitations || request.RequiredSchemaVersion is not null
+            ? Fingerprint("accept-invitation", new { request.OperationId, invitationId, request.DeclineOtherInvitations, request.RequiredSchemaVersion })
+            : Fingerprint("accept-invitation", new { request.OperationId, invitationId });
         var old = await Receipt(user, request.OperationId, hash, ct);
         if (old is not null)
         {
@@ -332,9 +339,23 @@ public sealed partial class FamilyService(PilotDatabase db, PilotConfiguration c
             throw new ApiException(410, "invitation_unavailable");
         if (await db.Memberships.AnyAsync(x => x.UserId == user.ObjectId && x.Active, ct))
             throw new ApiException(409, "already_in_family");
+        var family = await Family(invitation.FamilyId, ct);
+        // A full-history client cannot use a legacy family. Reject before creating a
+        // membership or declining another invitation so it can choose a valid family.
+        if (request.RequiredSchemaVersion is not null && request.RequiredSchemaVersion != family.SchemaVersion)
+            throw new ApiException(409, "family_schema_unsupported");
         if (await db.Memberships.CountAsync(x => x.FamilyId == invitation.FamilyId && x.Active, ct) >= config.Pilot.MaxMembers) Invalid();
         await CheckCapacity(invitation.FamilyId, ct);
-        var family = await Family(invitation.FamilyId, ct);
+        var others = await LiveReceivedInvitations(user, Now).Where(x => x.Id != invitationId).ToArrayAsync(ct);
+        if (others.Length > 0 && !request.DeclineOtherInvitations)
+            throw new ApiException(409, "invitation_decline_consent_required");
+        foreach (var other in others)
+        {
+            other.Status = "joined_alt";
+            other.RecipientUserId = user.ObjectId;
+        }
+        foreach (var sourceFamilyId in others.Select(x => x.FamilyId).Distinct())
+            (await Family(sourceFamilyId, ct)).Revision++;
         var grant = NewGrant(user, family.Id, "caregiver");
         invitation.RecipientUserId = user.ObjectId;
         invitation.Status = "accepted";
@@ -490,6 +511,11 @@ public sealed partial class FamilyService(PilotDatabase db, PilotConfiguration c
     }
     private async Task<FamilyRow> Family(Guid id, CancellationToken ct) => await db.Families.SingleOrDefaultAsync(x => x.Id == id && x.DeletedAt == null, ct)
         ?? throw new ApiException(403, "membership_revoked");
+    private IQueryable<InvitationRow> LiveReceivedInvitations(PilotIdentity user, DateTimeOffset now) =>
+        from invitation in db.Invitations
+        join family in db.Families on invitation.FamilyId equals family.Id
+        where invitation.Email == user.Email && invitation.Status == "pending" && invitation.ExpiresAt > now && family.DeletedAt == null
+        select invitation;
     private async Task RequireAccount(PilotIdentity user, CancellationToken ct)
     {
         if (await db.AccountDeletions.AnyAsync(x => x.UserId == user.ObjectId, ct)) throw new ApiException(410, "account_deleted");
@@ -554,7 +580,9 @@ public sealed partial class FamilyService(PilotDatabase db, PilotConfiguration c
         var binding = config.Admission.Mode == "Static" ? config.Pilot.Identities.SingleOrDefault(x => x.ObjectId == row.UserId) : null;
         return new(row.UserId, binding?.DisplayName ?? row.DisplayName, owner ? binding?.Email ?? row.Email : null, row.Role, row.Id, row.Status, row.EndedAt);
     }
-    private static FamilyInvitation Invitation(InvitationRow row) => new(row.Id, row.Email, row.ExpiresAt, row.Status);
+    private static FamilyInvitation Invitation(InvitationRow row) => new(row.Id, row.Email, row.ExpiresAt,
+        row.Status is "own_family" or "joined_alt" ? "declined" : row.Status,
+        row.Status switch { "own_family" => "created_family", "joined_alt" => "joined_family", _ => null });
     private static string Revision(FamilyRow family) => family.Revision.ToString(CultureInfo.InvariantCulture);
     private static string Fingerprint<T>(string action, T value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(action + ":" + JsonSerializer.Serialize(value, Json))));
     private static void ValidateId(Guid id) { if (id == Guid.Empty) Invalid(); }

@@ -23,6 +23,98 @@ public sealed class FullHistorySqlTests(SqlFixture sql) : IClassFixture<SqlFixtu
         new(Guid.NewGuid(), entry.GetProperty("id").GetString()!, grant.MembershipId, s.Config.Family.HistoryId, "create", "entry", null, entry, null);
 
     [SqlFact]
+    public async Task PendingInvitationsRequireExplicitCreationConsentAndRemainUntouchedOnFailure()
+    {
+        var s = new Scenario(sql);
+        var family = await s.Create();
+        var invitation = await s.Invite(family.Id);
+        var request = Request([s.Other.Email]);
+        await Code("invitation_decline_consent_required", () => s.Call(x => x.CreateFullFamily(s.Caregiver, request, default)));
+        Assert.Single((await s.Call(x => x.Me(s.Caregiver, default))).PendingInvitations);
+        Assert.Empty((await s.Call(x => x.Me(s.Caregiver, default))).Families);
+        Assert.Equal("pending", Assert.Single((await s.Call(x => x.Snapshot(s.Owner, family.Id, default))).Invitations).Status);
+    }
+
+    [SqlFact]
+    public async Task CreationFailureAfterSqlFlushRollsBackFamilyAndAutomaticDeclines()
+    {
+        var s = new Scenario(sql);
+        var family = await s.Create();
+        await s.Invite(family.Id);
+        var before = await s.Call(x => x.Snapshot(s.Owner, family.Id, default));
+        await using (var db = sql.Open())
+        {
+            // Fail after SQL has written the new family, receipt and invitation state,
+            // but before the shared transaction commits. Nothing may escape rollback.
+            db.SavedChanges += (_, _) => throw new InvalidOperationException("Simulated post-flush failure");
+            var service = new FamilyService(db, s.Config, TimeProvider.System);
+            await Assert.ThrowsAsync<InvalidOperationException>(() => service.CreateFullFamily(s.Caregiver,
+                WithDeclineConsent(Request([s.Other.Email])), default));
+        }
+        var after = await s.Call(x => x.Snapshot(s.Owner, family.Id, default));
+        Assert.Equal(before.Revision, after.Revision);
+        Assert.Equal("pending", Assert.Single(after.Invitations).Status);
+        Assert.Empty((await s.Call(x => x.Me(s.Caregiver, default))).Families);
+        Assert.Single((await s.Call(x => x.Me(s.Caregiver, default))).PendingInvitations);
+    }
+
+    [SqlFact]
+    public async Task JoinedMemberCannotCreateASecondFamilyEvenWithDeclineConsent()
+    {
+        var s = new Scenario(sql);
+        var family = await s.Create();
+        await s.Accept(await s.Invite(family.Id));
+        await Code("already_in_family", () => s.Call(x => x.CreateFullFamily(s.Caregiver,
+            WithDeclineConsent(Request([s.Other.Email])), default)));
+        Assert.Equal(family.Id, Assert.Single((await s.Call(x => x.Me(s.Caregiver, default))).Families).Id);
+    }
+
+    private static CreateFullFamilyRequest WithDeclineConsent(CreateFullFamilyRequest request) =>
+        JsonSerializer.Deserialize<CreateFullFamilyRequest>(JsonSerializer.Serialize(new
+        {
+            request.OperationId, request.ConsentRevision, request.Seed, DeclinePendingInvitations = true
+        }))!;
+
+    [SqlFact]
+    public async Task CreatingFamilyDeclinesOnlyLiveReceivedInvitationsAtomicallyAndRetryDoesNotDeclineNewOnes()
+    {
+        var s = new Scenario(sql);
+        var family = await s.Create();
+        var invitation = await s.Invite(family.Id);
+        var expiredId = Guid.NewGuid();
+        var revokedId = Guid.NewGuid();
+        var otherId = Guid.NewGuid();
+        await using (var db = sql.Open())
+        {
+            db.Invitations.AddRange(
+                new InvitationRow { Id = expiredId, FamilyId = family.Id, Email = s.Caregiver.Email, Status = "expired", CreatedAt = DateTimeOffset.UtcNow.AddDays(-31), ExpiresAt = DateTimeOffset.UtcNow.AddDays(-1) },
+                new InvitationRow { Id = revokedId, FamilyId = family.Id, Email = s.Caregiver.Email, Status = "revoked", CreatedAt = DateTimeOffset.UtcNow, ExpiresAt = DateTimeOffset.UtcNow.AddDays(30) },
+                new InvitationRow { Id = otherId, FamilyId = family.Id, Email = s.Other.Email, CreatedAt = DateTimeOffset.UtcNow, ExpiresAt = DateTimeOffset.UtcNow.AddDays(30) });
+            await db.SaveChangesAsync();
+        }
+        var before = await s.Call(x => x.Snapshot(s.Owner, family.Id, default));
+        var request = WithDeclineConsent(Request([s.Other.Email]));
+        var created = await s.Call(x => x.CreateFullFamily(s.Caregiver, request, default));
+        var after = await s.Call(x => x.Snapshot(s.Owner, family.Id, default));
+        var declined = after.Invitations.Single(x => x.Id == invitation.Invitation.Id);
+        Assert.Equal("expired", after.Invitations.Single(x => x.Id == expiredId).Status);
+        Assert.Equal("revoked", after.Invitations.Single(x => x.Id == revokedId).Status);
+        Assert.Equal("pending", after.Invitations.Single(x => x.Id == otherId).Status);
+        Assert.Equal("declined", declined.Status);
+        Assert.Equal("created_family", JsonSerializer.SerializeToElement(declined).GetProperty("DeclineReason").GetString());
+        Assert.NotEqual(before.Revision, after.Revision);
+        Assert.Equal("pending", Assert.Single(created.Snapshot.Invitations).Status);
+        await Code("invitation_unavailable", () => s.Accept(invitation));
+        var fresh = await s.Invite(family.Id);
+        Assert.Empty((await s.Call(x => x.Me(s.Caregiver, default))).PendingInvitations);
+        var retried = await s.Call(x => x.CreateFullFamily(s.Caregiver, request, default));
+        Assert.Equal(created.FamilyId, retried.FamilyId);
+        Assert.Equal("pending", (await s.Call(x => x.Snapshot(s.Owner, family.Id, default))).Invitations.Single(x => x.Id == fresh.Invitation.Id).Status);
+        await Code("already_in_family", () => s.Call(x => x.CreateFullFamily(s.Caregiver, WithDeclineConsent(Request([s.Other.Email])), default)));
+        Assert.Equal("pending", (await s.Call(x => x.Snapshot(s.Owner, family.Id, default))).Invitations.Single(x => x.Id == fresh.Invitation.Id).Status);
+    }
+
+    [SqlFact]
     public async Task SeedAndConcurrentRetriesHaveOneAtomicDurableFamilyAndNoSnapshotInReceipt()
     {
         var s = new Scenario(sql);

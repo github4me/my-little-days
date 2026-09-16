@@ -270,6 +270,41 @@ const snapshot = (role = "caregiver") => ({
   revision: "1",
 });
 
+test("family members see why they cannot create another group", () => {
+  for (const locale of ["en", "zh-CN"]) {
+    for (const role of ["owner", "caregiver"]) {
+      const view = fixture({ snapshot: snapshot(role) }, locale);
+      view.render();
+      assert.match(
+        view.text(),
+        locale === "en"
+          ? /already belong to a family group/
+          : /已加入一个家庭群组/,
+      );
+      assert.match(
+        view.text(),
+        locale === "en"
+          ? /lose access to its records/
+          : /无法再查看该家庭的记录/,
+      );
+      assert.match(
+        view.text(),
+        locale === "en"
+          ? role === "owner"
+            ? /transfer administration/
+            : /leave your current family/
+          : role === "owner"
+            ? /转让管理员/
+            : /退出当前家庭/,
+      );
+      assert.equal(
+        view.buttons(locale === "en" ? "Create a family" : "创建家庭").length,
+        0,
+      );
+    }
+  }
+});
+
 test("invitation acceptance requires explicit warning acknowledgement in both languages", async () => {
   for (const locale of ["en", "zh-CN"]) {
     const label = locale === "en" ? "Accept invitation" : "接受邀请";
@@ -302,11 +337,36 @@ test("invitation acceptance requires explicit warning acknowledgement in both la
       screen.text(),
       locale === "en" ? /never uploaded or merged/ : /不会上传或合并/,
     );
+    assert.match(
+      screen.text(),
+      locale === "en"
+        ? /automatically decline all other pending invitations/
+        : /自动拒绝.*其他待处理邀请/,
+    );
     assert.equal(screen.buttons(label).at(-1).props.disabled, true);
     assert.equal(screen.calls.length, 0);
+    screen
+      .buttons(locale === "en" ? "Cancel" : "取消")
+      .at(-1)
+      .props.onPress();
+    screen.render();
+    assert.equal(
+      screen.calls.length,
+      0,
+      "Cancelling must not accept or decline any invitation",
+    );
+    screen.buttons(label)[0].props.onPress();
+    screen.render();
+    assert.equal(screen.buttons(label).at(-1).props.disabled, true);
     const consent = screen
       .nodes()
       .findLast((node) => node.props?.accessibilityRole === "checkbox");
+    assert.match(
+      consent.props.accessibilityLabel,
+      locale === "en"
+        ? /decline.*other pending invitations/
+        : /拒绝.*其他待处理邀请/,
+    );
     consent.props.onPress();
     screen.render();
     assert.equal(screen.buttons(label).at(-1).props.disabled, false);
@@ -317,6 +377,30 @@ test("invitation acceptance requires explicit warning acknowledgement in both la
       1,
     );
     assert.equal(screen.calls[0].args[0], "invite");
+  }
+});
+
+test("invitation history distinguishes automatic decline after joining from manual decline", () => {
+  for (const locale of ["en", "zh-CN"]) {
+    const data = snapshot("owner");
+    data.invitations = [
+      {
+        id: "declined-invite",
+        email: "relative@example.invalid",
+        expiresAt: "2027-01-01T00:00:00Z",
+        status: "declined",
+        declineReason: "joined_family",
+      },
+    ];
+    const screen = fixture({ snapshot: data }, locale);
+    screen.render();
+    assert.match(
+      screen.text(),
+      locale === "en"
+        ? /recipient joined another family group/
+        : /对方加入了其他家庭群组/,
+    );
+    assert.equal(screen.buttons(locale === "en" ? "Revoke" : "撤销").length, 0);
   }
 });
 

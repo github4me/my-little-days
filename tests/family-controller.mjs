@@ -357,6 +357,8 @@ function makeWorld({ offline = true, queued = false } = {}) {
         if (url.endsWith("/snapshot")) {
           if (world.snapshotOffline)
             throw new PilotApiError("network_unavailable");
+          if (world.snapshotUnsupported)
+            throw new PilotApiError("family_schema_unsupported", 409);
           return structuredClone(world.server);
         }
         if (url.endsWith("/feed-operations")) {
@@ -736,6 +738,8 @@ test("lost full creation response restarts the same reviewed seed operation befo
   );
   const sent = world.http.filter((q) => q.url === "/v2/families");
   assert.equal(sent.length, 2);
+  assert.equal(sent[0].operation.declinePendingInvitations, true);
+  assert.equal(sent[1].operation.declinePendingInvitations, true);
   assert.equal(sent[1].operation.operationId, operation);
   assert.equal(world.personalClears, 1);
   assert.equal(world.ownerSetupDisk.has(world.account), false);
@@ -763,7 +767,7 @@ test("activation stays frozen across restart when local cleanup fails and retrie
   assert.equal(world.personalClears, 1);
   next.unmount();
 });
-test("activation refuses an unrelated snapshot or corrupt seed receipt without clearing personal data", async () => {
+test("activation handles a revoked grant or corrupt seed receipt without clearing personal data", async () => {
   for (const corruption of ["destination", "digest"]) {
     const world = ownerWorld();
     const c = await boot(world);
@@ -776,13 +780,20 @@ test("activation refuses an unrelated snapshot or corrupt seed receipt without c
         world.identity.families = [structuredClone(world.server.family)];
       }
     };
-    await assert.rejects(
-      c.result().createFamilyFromSeed(ownerSeed(world)),
-      /invalid_response|membership_changed/,
-    );
+    if (corruption === "digest")
+      await assert.rejects(
+        c.result().createFamilyFromSeed(ownerSeed(world)),
+        /invalid_response/,
+      );
+    else await c.result().createFamilyFromSeed(ownerSeed(world));
     assert.equal(world.personalClears, 0);
     assert.equal(c.result().sharedState, null);
-    assert.notEqual(world.read().transition, null);
+    if (corruption === "digest") assert.notEqual(world.read().transition, null);
+    else {
+      assert.equal(world.read().transition, null);
+      assert.equal(world.read().snapshot, null);
+      assert.equal(c.result().notice, "membership_revoked");
+    }
     c.unmount();
   }
 });
@@ -1156,6 +1167,227 @@ test("join keeps old storage intact until the replacement snapshot is downloaded
     assert.equal(world.read().draft, null);
     assert.equal(world.read().queue.length, 0);
     assert.equal(world.feedsSent.length, 0);
+  } finally {
+    controller.unmount();
+  }
+});
+
+function joinWorld() {
+  const world = ownerWorld();
+  world.server.family.id = "family-b";
+  world.server.family.membershipId = "grant-b";
+  world.server.members[0].membershipId = "grant-b";
+  return world;
+}
+
+test("lost join response durably retries the same consent and required schema after restart", async () => {
+  const world = joinWorld();
+  const controller = await boot(world);
+  world.beforeMutation = async () => {
+    throw new Error("network_unavailable");
+  };
+  await assert.rejects(
+    controller.result().acceptInvitation("invite-b"),
+    /network_unavailable/,
+  );
+  const intent = world.read().transition;
+  assert.equal(intent.body.declineOtherInvitations, true);
+  assert.equal(intent.body.requiredSchemaVersion, 2);
+  assert.equal(intent.phase, "pending");
+  assert.equal(world.personalClears, 0);
+  controller.unmount();
+  world.offline = true;
+  const reopened = world.mount();
+  try {
+    await until(() => !reopened.result().booting, "offline join restart");
+    assert.equal(reopened.result().activationPending, true);
+    assert.equal(world.read().transition.operationId, intent.operationId);
+    await assert.rejects(reopened.result().signOut(), /transition_pending/);
+    world.beforeMutation = async () => {};
+    world.offline = false;
+    await reopened.result().refresh();
+    const calls = world.http.filter((r) => r.url.endsWith("/accept"));
+    assert.equal(calls.length, 2);
+    for (const call of calls)
+      assert.deepEqual(structuredClone(call.operation), {
+        declineOtherInvitations: true,
+        requiredSchemaVersion: 2,
+        operationId: intent.operationId,
+      });
+    assert.equal(world.read().transition, null);
+    assert.equal(world.personalClears, 1);
+    assert.equal(reopened.result().fullSnapshot.family.id, "family-b");
+  } finally {
+    reopened.unmount();
+  }
+});
+
+for (const recovery of ["refresh", "restart"])
+  test(`revoked committed join recovers on ${recovery} without deleting personal history`, async () => {
+    const world = joinWorld();
+    let controller = await boot(world);
+    const personal = structuredClone(world.personalSource);
+    world.snapshotOffline = true;
+    await assert.rejects(
+      controller.result().acceptInvitation("invite-b"),
+      /network_unavailable/,
+    );
+    assert.equal(world.read().transition.phase, "committed");
+    world.identity.families = [];
+    if (recovery === "restart") {
+      controller.unmount();
+      controller = world.mount();
+      await until(() => !controller.result().booting, "revoked join restart");
+    } else await controller.result().refresh();
+    try {
+      assert.equal(controller.result().activationPending, false);
+      assert.equal(controller.result().sharedMode, false);
+      assert.equal(controller.result().notice, "membership_revoked");
+      assert.equal(world.read().transition, null);
+      assert.equal(world.read().snapshot, null);
+      assert.equal(world.read().draft, null);
+      assert.equal(world.read().queue.length, 0);
+      assert.equal(world.personalClears, 0);
+      assert.deepEqual(world.personalSource, personal);
+      assert.equal(
+        world.http.filter((r) => r.url.endsWith("/accept")).length,
+        1,
+      );
+      await controller.result().signOut();
+      assert.equal(controller.result().user, null);
+      assert.equal(world.personalClears, 0);
+    } finally {
+      controller.unmount();
+    }
+  });
+
+for (const replacementFamilyId of ["family-b", "family-c"])
+  test(`committed join cannot activate a replacement grant in ${replacementFamilyId}`, async () => {
+    const world = joinWorld();
+    const controller = await boot(world);
+    world.snapshotOffline = true;
+    await assert.rejects(
+      controller.result().acceptInvitation("invite-b"),
+      /network_unavailable/,
+    );
+    world.snapshotOffline = false;
+    world.server.family.id = replacementFamilyId;
+    world.server.family.membershipId = "replacement-grant";
+    world.server.members[0].membershipId = "replacement-grant";
+    world.identity.families = [structuredClone(world.server.family)];
+    const beforeRefresh = world.http.length;
+    try {
+      await controller.result().refresh();
+      assert.equal(world.read().transition, null);
+      assert.equal(world.read().snapshot, null);
+      assert.equal(controller.result().fullSnapshot, null);
+      assert.equal(controller.result().notice, "membership_revoked");
+      assert.equal(world.personalClears, 0);
+      assert.equal(
+        world.http
+          .slice(beforeRefresh)
+          .some((r) => r.url.endsWith("/snapshot")),
+        false,
+      );
+      assert.equal(
+        world.http.filter((r) => r.url.endsWith("/accept")).length,
+        1,
+      );
+      await controller.result().signOut();
+      assert.equal(world.personalClears, 0);
+    } finally {
+      controller.unmount();
+    }
+  });
+
+test("revoked join waits for durable cleanup before releasing its activation journal", async () => {
+  const world = joinWorld();
+  const controller = await boot(world);
+  world.snapshotOffline = true;
+  await assert.rejects(
+    controller.result().acceptInvitation("invite-b"),
+    /network_unavailable/,
+  );
+  const operation = world.read().transition.operationId;
+  world.identity.families = [];
+  world.beforeCommit = async () => {
+    throw new Error("disk_full");
+  };
+  try {
+    await controller.result().refresh();
+    assert.equal(controller.result().activationPending, true);
+    assert.equal(world.read().transition.operationId, operation);
+    assert.equal(world.personalClears, 0);
+    world.beforeCommit = async () => {};
+    await controller.result().refresh();
+    assert.equal(controller.result().activationPending, false);
+    assert.equal(world.read().transition, null);
+    assert.equal(world.personalClears, 0);
+  } finally {
+    controller.unmount();
+  }
+});
+
+test("a grant changed between verification and snapshot cannot populate the activation cache", async () => {
+  const world = joinWorld();
+  const controller = await boot(world);
+  world.snapshotOffline = true;
+  await assert.rejects(
+    controller.result().acceptInvitation("invite-b"),
+    /network_unavailable/,
+  );
+  world.snapshotOffline = false;
+  world.server.family.membershipId = "replacement-grant";
+  world.server.members[0].membershipId = "replacement-grant";
+  try {
+    await controller.result().refresh();
+    assert.equal(controller.result().error, "membership_changed");
+    assert.equal(controller.result().activationPending, true);
+    assert.equal(controller.result().sharedState, null);
+    assert.equal(world.read().snapshot, null);
+    assert.equal(world.personalClears, 0);
+    world.identity.families = [structuredClone(world.server.family)];
+    await controller.result().refresh();
+    assert.equal(controller.result().activationPending, false);
+    assert.equal(world.read().snapshot, null);
+    assert.equal(world.personalClears, 0);
+  } finally {
+    controller.unmount();
+  }
+});
+
+test("an older committed unsupported join permits safe logout without deleting personal history", async () => {
+  const world = joinWorld();
+  world.identity.families = [structuredClone(world.server.family)];
+  world.cachedIdentity = structuredClone(world.identity);
+  world.data.state.transition = {
+    operationId: "legacy-join-operation",
+    kind: "join",
+    path: "/v1/invitations/invite-b/accept",
+    body: {},
+    userId: "user-a",
+    familyId: "family-b",
+    phase: "committed",
+    dispatched: true,
+    activation: { familyId: "family-b", membershipId: "grant-b" },
+  };
+  world.disk.set(world.account, JSON.stringify(world.data.state));
+  world.snapshotUnsupported = true;
+  const controller = await boot(world);
+  try {
+    assert.equal(controller.result().error, "family_schema_unsupported");
+    assert.equal(controller.result().activationPending, false);
+    assert.equal(controller.result().sharedMode, true);
+    assert.equal(controller.result().sharedState, null);
+    assert.equal(world.personalClears, 0);
+    assert.equal(world.read().transition, null);
+    assert.equal(
+      world.http.some((r) => r.url.endsWith("/accept")),
+      false,
+    );
+    await controller.result().signOut();
+    assert.equal(controller.result().sharedMode, false);
+    assert.equal(world.personalClears, 0);
   } finally {
     controller.unmount();
   }

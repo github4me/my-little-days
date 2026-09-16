@@ -905,7 +905,7 @@ export default function FamilyScreenView({
                           onPress={() =>
                             confirm(
                               "acceptInviteTitle",
-                              m("joinWarning"),
+                              `${m("joinWarning")}\n\n${m("joinDeclineWarning")}`,
                               "acceptInvite",
                               () => pilot.acceptInvitation(invitation.id),
                               "joinConsent",
@@ -992,6 +992,15 @@ export default function FamilyScreenView({
                   </T>
                 </Card>
               ) : null}
+
+              <Card style={styles.card}>
+                <T raw accessibilityRole="header" style={styles.sectionTitle}>
+                  {m("ownerSetup")}
+                </T>
+                <T raw style={styles.muted(c.muted)}>
+                  {m(owner ? "createBlockedOwner" : "createBlockedMember")}
+                </T>
+              </Card>
 
               {transfer?.toUserId === pilot.user.id ? (
                 <Card style={{ ...styles.card, borderColor: c.primary }}>
@@ -1338,7 +1347,15 @@ export default function FamilyScreenView({
                         >
                           <T raw>{invitation.email}</T>
                           <T raw style={styles.muted(c.muted)}>
-                            {m(statusLabel[status])}
+                            {m(
+                              status === "declined" &&
+                                invitation.declineReason === "created_family"
+                                ? "declinedCreatedFamily"
+                                : status === "declined" &&
+                                    invitation.declineReason === "joined_family"
+                                  ? "declinedJoinedFamily"
+                                  : statusLabel[status],
+                            )}
                           </T>
                           <T raw style={styles.muted(c.muted)}>
                             {m("expiresAt", {

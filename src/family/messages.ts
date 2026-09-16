@@ -15,7 +15,7 @@ const messages = {
     "这是独立的测试空间。请只填写虚构的宝宝资料和瓶喂记录；现有宝宝记录不会上传或共享。",
     "This is a separate test space. Use a fictional baby and bottle feeds only. Your existing baby records are never uploaded or shared.",
   ],
-  account: ["试点账户", "Pilot account"],
+  account: ["我的账户", "My account"],
   signIn: ["登录试点账户", "Sign in to the pilot"],
   signInDescription: [
     "使用已获准参与试点的邮箱登录，创建家庭或接受邀请。",
@@ -65,7 +65,35 @@ const messages = {
     "试点中，每个账户只能加入一个家庭。",
     "Each account can belong to one family in this pilot.",
   ],
-  ownerSetup: ["从现有记录建立家庭", "Start a family with your records"],
+  ownerSetup: ["创建家庭群组", "Create a family group"],
+  createBlockedMember: [
+    "你已加入一个家庭群组，暂时不能创建其他群组。请先退出当前家庭，再创建自己的群组。退出后将无法再查看该家庭的记录，你的共享记录仍留在原家庭。",
+    "You already belong to a family group, so you cannot create another. First leave your current family, then create your own group. You will lose access to its records; your shared contributions stay with that family.",
+  ],
+  createBlockedOwner: [
+    "你已加入一个家庭群组并担任管理员，不能再创建其他群组。请先转让管理员（需对方接受）并退出，或解散当前群组。退出后将无法再查看该家庭的记录；解散将删除整个家庭群组的数据。",
+    "You already belong to a family group as its admin and cannot create another. First transfer administration (the other member must accept) and leave, or close your group. Leaving means you lose access to its records; closing deletes the whole family’s data.",
+  ],
+  ownerDeclineWarning: [
+    "创建自己的家庭群组后，系统将自动拒绝你收到的所有待处理邀请，包括创建完成前新收到的邀请。创建失败则保留邀请。以后如需加入其他家庭，请先退出或解散自己的群组，并获取新的邀请。",
+    "Creating your own family group will automatically decline all pending invitations you have received, including any arriving before creation completes. If creation fails, they stay pending. To join another family later, leave or close your group and receive a new invitation.",
+  ],
+  ownerPendingCount: [
+    "你有 {count} 条待处理的家庭邀请。",
+    "You have {count} pending family invitation(s).",
+  ],
+  ownerDeclineConsent: [
+    "我同意创建成功时自动拒绝收到的待处理邀请。",
+    "I agree to decline received pending invitations when creation succeeds.",
+  ],
+  ownerCreateAndDecline: [
+    "创建家庭并拒绝收到的邀请",
+    "Create family and decline invitations",
+  ],
+  errorDeclineConsent: [
+    "请更新应用并重新查看创建或加入确认，确认是否拒绝收到的其他待处理邀请。尚未创建或加入家庭，也未拒绝邀请。",
+    "Update the app and review creating or joining the family again to confirm declining other received invitations. No family was created or joined, and no invitations were declined.",
+  ],
   ownerSetupDescription: [
     "首次邀请将以你的宝宝资料和已保存记录建立一个家庭，由你担任管理员。后续邀请加入同一家庭，不会重复导入。",
     "Your first invitation starts one family from your baby profile and saved records, with you as admin. Later invitations join that same family without importing the records again.",
@@ -154,8 +182,12 @@ const messages = {
     "Invitations appear here after you verify the invited email. No invitation notifications are sent. Signing in never joins a family automatically.",
   ],
   joinConsent: [
-    "我了解管理员的权限、被移除后的数据访问限制，以及这里只使用虚构数据。",
-    "I understand the admin’s permissions, loss of access after removal, and that this pilot is for fictional data only.",
+    "我了解管理员的权限、被移除后的数据访问限制，以及这里只使用虚构数据；同意加入成功时自动拒绝收到的其他待处理邀请。",
+    "I understand the admin’s permissions, loss of access after removal, and that this pilot is for fictional data only. I agree to decline my other pending invitations when joining succeeds.",
+  ],
+  joinDeclineWarning: [
+    "加入成功时，系统将自动拒绝你收到的其他待处理邀请，包括加入完成前新收到的邀请。仅在服务端确认加入成功时才会处理；确认前取消不会改变任何邀请。其他邀请人会看到你因加入另一个家庭群组而自动拒绝，但不会获知该群组的身份。以后加入其他家庭需要新的邀请。",
+    "Joining will automatically decline all other pending invitations you have received, including any arriving before joining completes. This happens only when the server accepts your join; cancelling before confirmation changes nothing. Other inviters can see that you joined another family group, but not which one. Joining those families later requires a new invitation.",
   ],
   acceptInvite: ["接受邀请", "Accept invitation"],
   acceptInviteTitle: ["加入这个测试家庭？", "Join this test family?"],
@@ -206,6 +238,14 @@ const messages = {
   pendingInvitation: ["待接受", "Waiting for acceptance"],
   acceptedInvitation: ["已接受", "Accepted"],
   declinedInvitation: ["已拒绝", "Declined"],
+  declinedCreatedFamily: [
+    "已自动拒绝 · 对方创建了自己的家庭群组",
+    "Automatically declined · recipient created their own family group",
+  ],
+  declinedJoinedFamily: [
+    "已自动拒绝 · 对方加入了其他家庭群组",
+    "Automatically declined · recipient joined another family group",
+  ],
   revokedInvitation: ["已撤销", "Revoked"],
   expiredInvitation: ["已过期", "Expired"],
   expiresAt: ["到期：{time}", "Expires {time}"],
@@ -626,6 +666,7 @@ const errorMessages: Record<string, FamilyMessageKey> = {
   forbidden: "errorForbidden",
   membership_revoked: "errorRevoked",
   already_in_family: "errorAlreadyFamily",
+  invitation_decline_consent_required: "errorDeclineConsent",
   invitation_unavailable: "errorInvitationUnavailable",
   invitation_already_created: "errorInvitationCreated",
   record_changed: "errorRecordChanged",
@@ -676,7 +717,11 @@ const errorMessages: Record<string, FamilyMessageKey> = {
 };
 
 export function familyErrorMessage(locale: AppLocale, code: string): string {
-  if (["full_sharing_unavailable", "family_schema_unsupported"].includes(code))
+  if (code === "family_schema_unsupported")
+    return locale === "zh-CN"
+      ? "此家庭的数据格式暂不受当前应用支持。请联系家庭管理员处理；你可以在“我的账户”中退出登录。本机个人资料不会因此删除。"
+      : "This family’s data format is not supported by this app. Contact the family admin for help; you can sign out from My account. Your personal data on this device will not be deleted by this error.";
+  if (code === "full_sharing_unavailable")
     return locale === "zh-CN"
       ? "服务或家庭尚未支持完整记录。请更新服务后重试。"
       : "The service or family does not support complete records yet. Update the service and retry.";
@@ -700,7 +745,7 @@ const fullMessages: Partial<Record<FamilyMessageKey, [string, string]>> = {
     "Enter 1–19 valid, different family email addresses.",
   ],
   title: ["家庭共享", "Family sharing"],
-  account: ["家庭账户", "Family account"],
+  account: ["我的账户", "My account"],
   deleteAccountDescription: [
     "服务接受删除申请后会立即停用账户访问，并处理关联资料及身份账户的永久删除。账户删除会清理你创建或最后编辑的家庭记录（包括最初由别人创建的记录）；普通退出则保留家庭贡献。身份删除只有在服务确认后才算完成。已迁移的原本机资料不会恢复。",
     "Once accepted, account access stops and associated data and identity enter permanent deletion processing. Account deletion removes family records you created or last edited, including records originally created by someone else; ordinary departure retains contributions. Identity deletion is complete only when the service confirms it. Previously migrated local data is not restored.",
@@ -781,8 +826,8 @@ const fullMessages: Partial<Record<FamilyMessageKey, [string, string]>> = {
     "Setup could not finish. Check the family action status and refresh; do not create another family while the result is unconfirmed.",
   ],
   joinConsent: [
-    "我了解加入后会下载此家庭完整记录并清理本机旧资料；我创建的共享记录也会在离开后留在家庭。",
-    "I understand that joining downloads this family’s complete records and clears old local data. My shared contributions remain with the family after I leave.",
+    "我了解加入后会下载此家庭完整记录并清理本机旧资料；我创建的共享记录也会在离开后留在家庭。同意加入成功时自动拒绝收到的其他待处理邀请。",
+    "I understand that joining downloads this family’s complete records and clears old local data. My shared contributions remain with the family after I leave. I agree to decline my other pending invitations when joining succeeds.",
   ],
   acceptInviteTitle: ["加入这个家庭？", "Join this family?"],
   joinWarning: [

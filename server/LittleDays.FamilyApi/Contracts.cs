@@ -1,11 +1,12 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace LittleDays.FamilyApi;
 
 public sealed record FamilyUser(Guid Id, string DisplayName, string Email);
 public sealed record FamilySummary(Guid Id, string BabyName, string Role, Guid MembershipId, string? BabyBirthDate, string ProfileVersion);
 public sealed record FamilyMember(Guid Id, string DisplayName, string? Email, string Role, Guid MembershipId, string Status, DateTimeOffset? EndedAt);
-public sealed record FamilyInvitation(Guid Id, string Email, DateTimeOffset ExpiresAt, string Status);
+public sealed record FamilyInvitation(Guid Id, string Email, DateTimeOffset ExpiresAt, string Status, string? DeclineReason = null);
 public sealed record PendingFamilyInvitation(Guid Id, Guid FamilyId, string OwnerDisplayName, DateTimeOffset ExpiresAt);
 public sealed record OwnershipTransfer(Guid Id, Guid FromUserId, Guid ToUserId, string Status, DateTimeOffset CreatedAt);
 public sealed record AccountDeletion(Guid DeletionId, string Status, DateTimeOffset RequestedAt);
@@ -26,7 +27,7 @@ public sealed record SharedCareRecord(JsonElement Record, string Version, Guid R
 public sealed record FullFamilySnapshot(int SchemaVersion, FullFamilyProfile Profile,
     SharedEntry[] Entries, SharedCareRecord[] CareRecords, FamilySummary Family, Guid HistoryId, string Revision,
     FamilyMember[] Members, FamilyInvitation[] Invitations, SharedFeed[] Feeds, OwnershipTransfer? OwnershipTransfer);
-public sealed record CreateFullFamilyRequest(Guid OperationId, string ConsentRevision, JsonElement Seed);
+public sealed record CreateFullFamilyRequest(Guid OperationId, string ConsentRevision, JsonElement Seed, bool DeclinePendingInvitations = false);
 public sealed record CreateFullFamilyResult(Guid OperationId, Guid FamilyId, Guid MembershipId, Guid HistoryId, string SeedDigest, FullFamilySnapshot Snapshot);
 public sealed record FullRecordOperation(Guid OperationId, string RecordId, Guid MembershipId, Guid HistoryId,
     string Kind, string Collection, string? BaseVersion, JsonElement? Entry, JsonElement? CareRecord);
@@ -35,7 +36,9 @@ public sealed record FullProfileRequest(Guid OperationId, Guid? MembershipId, Gu
 public sealed record CreateFamilyRequest(Guid OperationId, string BabyName);
 public interface IGrantContext { Guid? MembershipId { get; } Guid? HistoryId { get; } }
 public sealed record CreateInvitationRequest(Guid OperationId, string Email, Guid? MembershipId = null, Guid? HistoryId = null) : IGrantContext;
-public sealed record OperationRequest(Guid OperationId, Guid? MembershipId = null, Guid? HistoryId = null, Guid? TargetMembershipId = null) : IGrantContext;
+public sealed record OperationRequest(Guid OperationId, Guid? MembershipId = null, Guid? HistoryId = null, Guid? TargetMembershipId = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool DeclineOtherInvitations = false,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] int? RequiredSchemaVersion = null) : IGrantContext;
 public sealed record ProfileRequest(Guid OperationId, string BaseVersion, string BabyName, string? BabyBirthDate, Guid? MembershipId = null, Guid? HistoryId = null) : IGrantContext;
 public sealed record NominateOwnerRequest(Guid OperationId, Guid UserId, Guid? MembershipId = null, Guid? HistoryId = null) : IGrantContext;
 public sealed record InvitationResult(FamilyInvitation Invitation);

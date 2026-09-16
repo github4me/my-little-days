@@ -25,6 +25,11 @@ function SampleScreen({
       ownerSetup={
         <OwnerSetupCard
           mode="demo"
+          pendingInvitationCount={
+            pilot.inbox.filter(
+              (invite) => Date.parse(invite.expiresAt) > Date.now(),
+            ).length
+          }
           profile={pilot.demoSource.profile}
           summary={summarizeOwnerSeed(pilot.demoSource)}
           onPrepare={async (emails) =>

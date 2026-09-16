@@ -36,10 +36,19 @@ public sealed class LifecycleSqlTests(SqlFixture sql) : IClassFixture<SqlFixture
         var second = await s.Call(x => x.CreateFamily(s.Other, new(Guid.NewGuid(), "Other family"), default));
         var invitationA = await s.Invite(first.Id);
         var invitationB = await s.Call(x => x.CreateInvitation(s.Other, second.Id, s.Invitation(second, s.Caregiver.Email), default));
-        var results = await Task.WhenAll(Capture(() => s.Accept(invitationA)), Capture(() => s.Accept(invitationB)));
+        var results = await Task.WhenAll(
+            Capture(() => s.Call(x => x.AcceptInvitation(s.Caregiver, invitationA.Invitation.Id, new(Guid.NewGuid(), DeclineOtherInvitations: true), default))),
+            Capture(() => s.Call(x => x.AcceptInvitation(s.Caregiver, invitationB.Invitation.Id, new(Guid.NewGuid(), DeclineOtherInvitations: true), default))));
         Assert.Single(results, x => x is null);
-        Assert.Single(results, x => x == "already_in_family");
+        Assert.Single(results, x => x == "invitation_unavailable");
         Assert.Single((await s.Call(x => x.Me(s.Caregiver, default))).Families);
+        var snapshots = new[]
+        {
+            await s.Call(x => x.Snapshot(s.Owner, first.Id, default)),
+            await s.Call(x => x.Snapshot(s.Other, second.Id, default))
+        };
+        Assert.Single(snapshots.SelectMany(x => x.Invitations), x => x.Status == "accepted");
+        Assert.Single(snapshots.SelectMany(x => x.Invitations), x => x.Status == "declined" && x.DeclineReason == "joined_family");
     }
 
     [SqlFact]

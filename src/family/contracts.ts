@@ -28,6 +28,7 @@ export type FamilyActivation = {
 export type CreateFullFamily = {
   operationId: string;
   consentRevision: "family-sharing-v1";
+  declinePendingInvitations?: boolean;
   seed: OwnerSeedDraft;
 };
 export type RecordOperation = Omit<FeedOperation, "feed"> & {
@@ -57,6 +58,7 @@ export type FamilyInvitation = {
   email: string;
   expiresAt: string;
   status: "pending" | "accepted" | "revoked" | "expired" | "declined";
+  declineReason?: "created_family" | "joined_family" | null;
 };
 export type PendingFamilyInvitation = {
   id: string;

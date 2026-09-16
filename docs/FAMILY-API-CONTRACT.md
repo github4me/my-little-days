@@ -20,6 +20,7 @@ Every endpoint uses the same JWT validation and account admission. Capability di
 {
   "operationId": "<new GUID>",
   "consentRevision": "family-sharing-v1",
+  "declinePendingInvitations": true,
   "seed": {
     "schemaVersion": 1,
     "source": {
@@ -48,6 +49,28 @@ One SQL transaction commits family/profile, owner membership, every imported rec
 
 Persist the request operation ID/content and verify its returned digest, operation ID and destination family/grant/history before clearing local migration data. Retry identical content after an uncertain response; a removed/replaced grant or changed history cannot be revived. Different content with the same operation ID fails. An account already in a family cannot create another. Invitation acceptance accepts no seed and never uploads the invitee's local history.
 
+After explicit review/consent, `declinePendingInvitations: true` also declines all live incoming invitations in the creation transaction. Omitted/false consent with pending invitations returns `409 invitation_decline_consent_required` without creation or decline. The legacy `/v1/families` endpoint similarly refuses new creation with live incoming invitations; old successful receipts remain replayable. Expired, revoked and closed-family invitations are not auto-declined. A successful replay never declines invitations received after the original operation.
+
+### Join a family and decline other invitations
+
+`POST /v1/invitations/{invitationId}/accept` uses the shared lifecycle endpoint:
+
+```json
+{
+  "operationId": "<new GUID>",
+  "declineOtherInvitations": true,
+  "requiredSchemaVersion": 2
+}
+```
+
+The full app shows the local-data replacement warning plus automatic-decline consent before sending. Only a successful server transaction accepts the chosen invitation, creates the membership and declines the account's other live incoming invitations. It validates the recipient, selected invitation, capacity, existing membership and requested target-family schema before mutation. Schema mismatch returns `409 family_schema_unsupported`; missing decline consent when other invitations exist returns `409 invitation_decline_consent_required`. Rejection/rollback does not change membership or invitations.
+
+Keep this exact request and operation ID for retries. Consent/schema options are bound to the receipt; omitted legacy options retain their original receipt fingerprints. Changing the options is not a retry. Expired/revoked invitations, closed families and other recipients are untouched. Successful replays do not decline new invitations.
+
+Invitation history exposes terminal status `declined` and optional `declineReason: "created_family" | "joined_family" | null`. Only the source family's admin receives this history; no destination family identifier is disclosed. While an account belongs to a family, `/v1/me` does not expose actionable incoming invitations.
+
+Mobile activation still waits for the authorized full snapshot before clearing private data. If the server verifies that a **committed** creation/join grant has been revoked or replaced, the client retires the obsolete activation journal and clears its family cache without deleting untouched personal data or activating a replacement grant through that journal. Network/unknown-result failures remain retryable with the same operation. Previously committed joins into unsupported legacy families can be signed out of safely; new full-app joins require schema 2 before membership is committed.
+
 ### Full snapshot
 
 ```text
@@ -59,7 +82,7 @@ Persist the request operation ID/content and verify its returned digest, operati
   family: {id, babyName, role, membershipId, babyBirthDate, profileVersion},
   historyId, revision,
   members: [{id, displayName, email, role, membershipId, status, endedAt}],
-  invitations: [{id, email, expiresAt, status}],
+  invitations: [{id, email, expiresAt, status, declineReason}],
   ownershipTransfer: null | {id, fromUserId, toUserId, status, createdAt},
   feeds: []
 }

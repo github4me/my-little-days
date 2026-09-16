@@ -660,6 +660,30 @@ Do not start another release or change the current run just because this documen
 4. Verify deleted identities and revoked memberships cannot regain access.
 5. Document SQL-backup/diagnostic retention separately from live application deletion. Do not claim all backup copies vanish immediately.
 
+### Family creation, joining and received invitations (16 September 2026)
+
+This change needs API deployment **before** the updated mobile app. It needs no new Azure resources, settings, permissions or database migrations.
+
+1. Commit/review the API and mobile changes together. Run the existing **Deploy family API and database** workflow on that revision and verify success.
+2. Publish the updated iPhone preview using the normal preview release process. Do not publish the new mobile confirmation against an older API: the older API ignores the new consent field.
+   - For this JavaScript-only change, the existing preview build `eb360c84-c263-49be-ac63-217ad61dda19` has compatible runtime `0.2.0`; no native rebuild is required. Confirm the preview channel and section 12.1 public variables, including `EXPO_PUBLIC_FAMILY_UI_DEMO=0`, before publishing.
+   - From the reviewed release commit, run `eas update --platform ios --channel preview --environment preview --clear-cache --message "Improve family creation and joining" --non-interactive`. Do not use `ui-preview`, the production channel, or a bundle exported without the real preview environment.
+   - Record the returned update-group URL and commit. On each phone, open the installed preview online to download the update, then fully close and reopen it. Check **My account**, the collapsed **Create a family group**, and the new confirmation warning. The native footer remains `0.2.0 / Update 18` for this OTA; it is not an OTA identifier. Do not uninstall a data-bearing app.
+3. On a disposable account without membership, receive two invitations. Open **Create a family group** (collapsed by default), enter another test email, and review. Verify the pending count, automatic-decline warning and required consent.
+4. Cancel. Both invitations must remain available. Reopen, acknowledge and create. The new family and outgoing invitations must be created together; received pending invitations become declined. Refresh the inviting admins' invitation history to see the automatic-decline reason.
+5. Verify an existing member sees the one-family reminder and no creation form. An admin sees guidance to transfer administration and leave, or close the group. A member sees guidance to leave first and the warning that family-record access is lost.
+6. Verify new received invitations are not actionable while an account has active membership. Existing API membership checks still reject creating or joining a second family.
+7. Older clients without automatic-decline consent cannot create a family while live invitations are pending; no invitations are changed. Update the app and review again. Previously successful creation receipts remain replayable without repeating the decline operation.
+8. On another disposable account, receive invitations from two families. Tap **Accept invitation** for one, verify the automatic-decline and local-data replacement warnings, then cancel. Both invitations must remain available. Reopen and acknowledge: only the chosen family is joined; the other invitation shows **Automatically declined · recipient joined another family group** to its inviting admin.
+9. Reconnect/restart after a lost acceptance response. The same operation must resume; it must not re-decline invitations created after the successful join. If the admin removes the user before snapshot download finishes, refreshing must end the obsolete activation and allow sign-out, without deleting untouched personal data.
+10. A schema-1 legacy family's invitation must be rejected by the updated full-history client before membership is created; invites and personal data remain unchanged. If an earlier app already committed such a join, refresh with the updated app and use **My account → Sign out**. Ask the legacy family admin to remove that membership before joining a supported family; signing out alone does not end server membership.
+
+Implementation notes: the server commits creating/joining and automatic declines in one transaction. The API presents automatic declines as `declined` with `declineReason: created_family` or `joined_family` for backward compatibility. Expired invitations and invitations belonging to closed families are not automatically declined. The updated client sends `declineOtherInvitations: true` and `requiredSchemaVersion: 2` when accepting; deploy API first because an older service ignores these fields. See [the API contract](FAMILY-API-CONTRACT.md). This section describes release/acceptance steps, not a claim that the change has been deployed.
+
+Rollback caution: once automatic declines exist, an older API would expose internal invitation states instead of the public `declined` mapping. Retain the compatible API when rolling back the mobile update; review server rollback compatibility before replacing it. Never reset family data or the migration journal as a rollback shortcut.
+
+Second-phone login is unchanged by this release: signing into an already joined account does not itself delete that phone's independent offline data. A future per-device replacement/consent policy must be agreed before changing this behavior; do not assume it has been implemented.
+
 ## 16. Remaining operator checklist
 
 - [ ] Record actual customer default `.onmicrosoft.com` domain.

@@ -125,6 +125,7 @@ function wrapperWorld() {
     pilot: {
       user: { id: "owner", email: owner },
       snapshot: null,
+      inbox: [],
       transitionPending: false,
       accountDeletion: null,
       busy: false,

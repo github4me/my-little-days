@@ -15,7 +15,10 @@ public sealed partial class FamilyService
         if (request.ConsentRevision != "family-sharing-v1") Invalid();
         var seed = FullDomainValidation.Seed(request.Seed);
         if (seed.InviteeEmails.Contains(user.Email, StringComparer.Ordinal)) Invalid();
-        var hash = Fingerprint("create-family-v2", request);
+        // Keep existing durable receipts replayable for older clients that omit the new consent.
+        var hash = request.DeclinePendingInvitations
+            ? Fingerprint("create-family-v2", request)
+            : Fingerprint("create-family-v2", new { request.OperationId, request.ConsentRevision, request.Seed });
         var old = await Receipt(user, request.OperationId, hash, ct);
         if (old is not null)
         {
@@ -29,6 +32,19 @@ public sealed partial class FamilyService
         }
         if (await db.Memberships.AnyAsync(x => x.UserId == user.ObjectId && x.Active, ct))
             throw new ApiException(409, "already_in_family");
+        var received = await LiveReceivedInvitations(user, Now).ToArrayAsync(ct);
+        // A stale/older app must never silently reject invitations without the new warning.
+        if (received.Length > 0 && !request.DeclinePendingInvitations)
+            throw new ApiException(409, "invitation_decline_consent_required");
+        foreach (var invitation in received)
+        {
+            // Internal terminal state fits the existing status column; public API still returns
+            // "declined" plus a reason, so older clients display a safe terminal status.
+            invitation.Status = "own_family";
+            invitation.RecipientUserId = user.ObjectId;
+        }
+        foreach (var familyId in received.Select(x => x.FamilyId).Distinct())
+            (await Family(familyId, ct)).Revision++;
         var family = new FamilyRow
         {
             Id = Guid.NewGuid(), SchemaVersion = 2, BabyName = seed.Profile.Name,
