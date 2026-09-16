@@ -6,7 +6,7 @@ namespace LittleDays.FamilyApi;
 public sealed record FamilyUser(Guid Id, string DisplayName, string Email);
 public sealed record FamilySummary(Guid Id, string BabyName, string Role, Guid MembershipId, string? BabyBirthDate, string ProfileVersion);
 public sealed record FamilyMember(Guid Id, string DisplayName, string? Email, string Role, Guid MembershipId, string Status, DateTimeOffset? EndedAt);
-public sealed record FamilyInvitation(Guid Id, string Email, DateTimeOffset ExpiresAt, string Status, string? DeclineReason = null);
+public sealed record FamilyInvitation(Guid Id, string Email, DateTimeOffset ExpiresAt, string Status, string? DeclineReason = null, Guid? AcceptedMembershipId = null);
 public sealed record PendingFamilyInvitation(Guid Id, Guid FamilyId, string OwnerDisplayName, DateTimeOffset ExpiresAt);
 public sealed record OwnershipTransfer(Guid Id, Guid FromUserId, Guid ToUserId, string Status, DateTimeOffset CreatedAt);
 public sealed record AccountDeletion(Guid DeletionId, string Status, DateTimeOffset RequestedAt);

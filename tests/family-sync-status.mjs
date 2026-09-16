@@ -276,6 +276,22 @@ test("resolved then recurring network failure appears again without claiming ins
   assert.ok(world.close());
 });
 
+test("preserved changes are under the bilingual section title named by the notice", () => {
+  for (const locale of ["en", "zh-CN"]) {
+    const world = fixture({ recordConflicts: [conflict()] }, locale);
+    world.render("FamilySyncDetails");
+    const title =
+      locale === "en"
+        ? "Sharing issues and preserved changes"
+        : "共享问题与保留的修改";
+    const heading = world
+      .nodes()
+      .find((node) => node.props?.accessibilityRole === "header");
+    assert.equal(heading?.props.children, title);
+    assert.match(world.text(), /Preserved note/);
+  }
+});
+
 test("dismissed conflict remains reachable in details; only confirmed discard calls the controller", async () => {
   const world = fixture({ recordConflicts: [conflict()] });
   world.render();

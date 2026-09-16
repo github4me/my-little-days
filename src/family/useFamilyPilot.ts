@@ -132,6 +132,36 @@ export function useFamilyPilot() {
     [notice, setNoticeValue] = useState<string | null>(null);
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const noticeToken = useRef(0);
+  const feedbackError =
+    error === "sign_in_cancelled" ||
+    (authStatus === "authenticated" &&
+      (error === "sign_in_required" || error === "unauthorized"))
+      ? null
+      : error;
+  const feedbackContext = JSON.stringify([
+    identity?.user.id,
+    state.snapshot?.family.id,
+    state.snapshot?.family.membershipId,
+    state.snapshot?.historyId,
+    authStatus,
+    feedbackError
+      ? ["error", feedbackError]
+      : notice && notice !== "saved_locally"
+        ? ["notice", notice, noticeToken.current]
+        : null,
+  ]);
+  const [feedbackPresentation, setFeedbackPresentation] = useState({
+    context: feedbackContext,
+    dismissedKey: null as string | null,
+  });
+  // The controller outlives individual tabs. Reset presentation when an issue
+  // changes or resolves, even while its screen is unmounted; keep all data intact.
+  const currentFeedback =
+    feedbackPresentation.context === feedbackContext
+      ? feedbackPresentation
+      : { context: feedbackContext, dismissedKey: null };
+  if (currentFeedback !== feedbackPresentation)
+    setFeedbackPresentation(currentFeedback);
   const current = useRef(state),
     durable = useRef(state),
     who = useRef(identity),
@@ -1494,6 +1524,13 @@ export function useFamilyPilot() {
     syncing,
     error,
     notice,
+    dismissedFeedback: currentFeedback.dismissedKey,
+    dismissFeedback: (key: string | null) =>
+      setFeedbackPresentation((previous) =>
+        previous.context === feedbackContext
+          ? { ...previous, dismissedKey: key }
+          : previous,
+      ),
     hasPrivateWork:
       !!state.draft ||
       state.queue.some((q) => q.status !== "accepted") ||

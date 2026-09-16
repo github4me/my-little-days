@@ -256,6 +256,14 @@ const messages = {
   you: ["你", "You"],
   members: ["家庭成员", "Family members"],
   membersCount: ["家庭成员（{count}）", "Family members ({count})"],
+  memberHistoryCount: [
+    "退出与移除历史（{count}）",
+    "Departure and removal history ({count})",
+  ],
+  memberHistoryDescription: [
+    "仅管理员可见，不计入当前成员人数。可通过「邀请照护者」再次邀请；对方接受后才会重新加入，历史记录仍会保留。",
+    "Only admins can see this history. These past memberships do not count towards the current member total. Use Invite a caregiver to invite them again; they must accept to rejoin, and the history is retained.",
+  ],
   sharingDescription: [
     "成员可查看家庭记录，并修改或删除自己添加的记录。管理员可修改或删除任何记录。成员离开或被移除时，已共享的记录不会自动删除。",
     "Members can view family records and edit or delete their own. Admins can edit or delete any record. Leaving or removal does not automatically delete shared contributions.",
@@ -281,6 +289,8 @@ const messages = {
   noInvitations: ["还没有发出邀请。", "No invitations sent yet."],
   pendingInvitation: ["待接受", "Waiting for acceptance"],
   acceptedInvitation: ["已接受", "Accepted"],
+  acceptedRemovedInvitation: ["已接受 · 后已移除", "Accepted · later removed"],
+  acceptedLeftInvitation: ["已接受 · 后已退出", "Accepted · later left"],
   declinedInvitation: ["已拒绝", "Declined"],
   declinedCreatedFamily: [
     "已自动拒绝 · 对方创建了自己的家庭群组",
@@ -478,6 +488,10 @@ const messages = {
   preservedSection: [
     "需要检查的私人修改（{count}）",
     "Private changes to review ({count})",
+  ],
+  sharingIssuesTitle: [
+    "共享问题与保留的修改",
+    "Sharing issues and preserved changes",
   ],
   preservedDescription: [
     "这些修改没有共享，也不会自动重发。请查看最新记录，再从该记录重新编辑。这里不能把保留内容另存为新记录或带入其他家庭；可丢弃已检查的修改。",
@@ -834,6 +848,10 @@ const fullMessages: Partial<Record<FamilyMessageKey, [string, string]>> = {
   pilotNotice: [
     "首次创建将共享你确认的完整宝宝记录；加入家庭将下载管理员的记录。之后在主界面记录和照护。",
     "Creating a family shares the complete baby history you review. Joining downloads the admin’s family records. Continue recording in the main app.",
+  ],
+  noticeNotShared: [
+    "有修改未能共享，已保留在本机。请到「家庭共享」页面下方的「{section}」查看并处理。",
+    "A change could not be shared and is preserved on this device. Review it in “{section}” further down the Family sharing page.",
   ],
   signInDescription: [
     "登录后可邀请家人，或接受家庭邀请。",

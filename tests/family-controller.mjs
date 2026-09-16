@@ -1382,6 +1382,65 @@ test("successful no-family refresh clears an obsolete sign-in error", async () =
   }
 });
 
+test("feedback dismissal survives controller renders but not a later sign-out event or stale close", async () => {
+  const world = makeWorld({ offline: false });
+  const controller = await boot(world);
+  try {
+    await controller.result().signOut();
+    const first = controller.result();
+    assert.equal(first.notice, "signed_out");
+    first.dismissFeedback("sign-out-banner");
+    assert.equal(controller.result().dismissedFeedback, "sign-out-banner");
+    assert.equal(controller.result().notice, "signed_out");
+    assert.equal(controller.result().authStatus, "signed_out");
+
+    await controller.result().signIn();
+    assert.equal(controller.result().dismissedFeedback, null);
+    await controller.result().signOut();
+    assert.equal(controller.result().notice, "signed_out");
+    assert.equal(controller.result().dismissedFeedback, null);
+    first.dismissFeedback("sign-out-banner");
+    assert.equal(controller.result().dismissedFeedback, null);
+    controller.result().dismissFeedback("new-sign-out-banner");
+    first.dismissFeedback("sign-out-banner");
+    assert.equal(controller.result().dismissedFeedback, "new-sign-out-banner");
+  } finally {
+    controller.unmount();
+  }
+});
+
+test("dismissed errors survive unchanged polling without clearing work and reappear after recovery", async () => {
+  const world = makeWorld({ offline: true, queued: true });
+  const controller = await boot(world);
+  try {
+    const before = controller.result();
+    assert.equal(before.error, "network_unavailable");
+    const disk = world.disk.get(world.account);
+    before.dismissFeedback("network-banner");
+    assert.equal(controller.result().dismissedFeedback, "network-banner");
+    assert.equal(controller.result().error, "network_unavailable");
+    assert.equal(controller.result().authStatus, before.authStatus);
+    assert.equal(
+      controller.result().transitionPending,
+      before.transitionPending,
+    );
+    assert.equal(world.disk.get(world.account), disk);
+    await controller.result().refresh();
+    assert.equal(controller.result().dismissedFeedback, "network-banner");
+
+    world.offline = false;
+    await controller.result().refresh();
+    assert.equal(controller.result().error, null);
+    assert.equal(controller.result().dismissedFeedback, null);
+    world.offline = true;
+    await controller.result().refresh();
+    assert.equal(controller.result().error, "network_unavailable");
+    assert.equal(controller.result().dismissedFeedback, null);
+  } finally {
+    controller.unmount();
+  }
+});
+
 test("first cancelled login stays signed out and uses a temporary notice", async () => {
   const world = ownerWorld();
   world.session = false;

@@ -596,7 +596,8 @@ public sealed partial class FamilyService(PilotDatabase db, PilotConfiguration c
     }
     private static FamilyInvitation Invitation(InvitationRow row) => new(row.Id, row.Email, row.ExpiresAt,
         row.Status is "own_family" or "joined_alt" ? "declined" : row.Status,
-        row.Status switch { "own_family" => "created_family", "joined_alt" => "joined_family", _ => null });
+        row.Status switch { "own_family" => "created_family", "joined_alt" => "joined_family", _ => null },
+        row.AcceptedMembershipId);
     private static string Revision(FamilyRow family) => family.Revision.ToString(CultureInfo.InvariantCulture);
     private static string Fingerprint<T>(string action, T value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(action + ":" + JsonSerializer.Serialize(value, Json))));
     private static void ValidateId(Guid id) { if (id == Guid.Empty) Invalid(); }

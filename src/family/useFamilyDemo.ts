@@ -91,6 +91,8 @@ export function useFamilyDemo(scenario: FamilyDemoScenario): ReturnType<
     syncing: false,
     error,
     notice: state.notice,
+    dismissedFeedback: null,
+    dismissFeedback: () => {},
     hasPrivateWork: !!state.draft,
     signIn: () => run({ type: "sign-in" }),
     signOut: () => run({ type: "sign-out" }),

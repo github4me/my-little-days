@@ -496,6 +496,9 @@ export default function FamilyScreenView({
   const owner = snapshot?.family.role === "owner";
   const activeMembers =
     snapshot?.members.filter((member) => member.status === "active") ?? [];
+  const formerMembers = owner
+    ? (snapshot?.members.filter((member) => member.status !== "active") ?? [])
+    : [];
   const successors = activeMembers.filter(
     (member) => member.id !== pilot.user?.id,
   );
@@ -583,7 +586,14 @@ export default function FamilyScreenView({
       : null;
   const notice =
     pilot.notice && (demo || pilot.notice !== "saved_locally")
-      ? familyNoticeMessage(locale, pilot.notice)
+      ? !demo && pilot.notice === "change_not_shared"
+        ? m("noticeNotShared", {
+            section:
+              pilot.conflicts.length && !pilot.recordConflicts?.length
+                ? m("preservedSection", { count: pilot.conflicts.length })
+                : m("sharingIssuesTitle"),
+          })
+        : familyNoticeMessage(locale, pilot.notice)
       : null;
   const feedback = error ?? notice;
   const feedbackKey = feedback
@@ -727,15 +737,20 @@ export default function FamilyScreenView({
               />
             ) : null}
           </View>
-          <View style={[styles.notice, { backgroundColor: c.soft }]}>
-            <T raw style={{ fontSize: 13, lineHeight: 20 }}>
-              {m(demo ? "demoNotice" : "pilotNotice")}
-            </T>
-          </View>
+          {demo || (!snapshot && !pilot.sharedMode) ? (
+            <View style={[styles.notice, { backgroundColor: c.soft }]}>
+              <T raw style={{ fontSize: 13, lineHeight: 20 }}>
+                {m(demo ? "demoNotice" : "pilotNotice")}
+              </T>
+            </View>
+          ) : null}
         </>
       ) : null}
 
-      {feedback && (demo || dismissedFeedback !== feedbackKey) ? (
+      {feedback &&
+      (demo ||
+        (localError ? dismissedFeedback : pilot.dismissedFeedback) !==
+          feedbackKey) ? (
         <View
           style={[
             styles.notice,
@@ -759,7 +774,11 @@ export default function FamilyScreenView({
                 accessibilityLabel={
                   locale === "zh-CN" ? "关闭提示" : "Dismiss message"
                 }
-                onPress={() => setDismissedFeedback(feedbackKey)}
+                onPress={() =>
+                  localError
+                    ? setDismissedFeedback(feedbackKey)
+                    : pilot.dismissFeedback(feedbackKey)
+                }
                 style={{
                   minWidth: 44,
                   minHeight: 44,
@@ -1157,14 +1176,11 @@ export default function FamilyScreenView({
                 </Card>
               ) : null}
 
-              <Card style={styles.card}>
-                <T raw accessibilityRole="header" style={styles.sectionTitle}>
-                  {m("ownerSetup")}
-                </T>
+              <Disclosure title={m("ownerSetup")}>
                 <T raw style={styles.muted(c.muted)}>
                   {m(owner ? "createBlockedOwner" : "createBlockedMember")}
                 </T>
-              </Card>
+              </Disclosure>
 
               {transfer?.toUserId === pilot.user.id ? (
                 <Card style={{ ...styles.card, borderColor: c.primary }}>
@@ -1320,12 +1336,12 @@ export default function FamilyScreenView({
           !pilot.accountDeletion ? (
             <>
               <Disclosure
-                title={m("membersCount", { count: snapshot.members.length })}
+                title={m("membersCount", { count: activeMembers.length })}
               >
                 <T raw style={styles.muted(c.muted)}>
                   {m("sharingDescription")}
                 </T>
-                {snapshot.members.map((member) => (
+                {activeMembers.map((member) => (
                   <View
                     key={member.membershipId}
                     style={[styles.listItem, { borderColor: c.line }]}
@@ -1337,19 +1353,10 @@ export default function FamilyScreenView({
                           {member.id === pilot.user?.id ? ` (${m("you")})` : ""}
                         </T>
                         <T raw style={styles.muted(c.muted)}>
-                          {m(member.role)} ·{" "}
-                          {m(
-                            member.status === "left"
-                              ? "leftMember"
-                              : member.status === "removed"
-                                ? "removedMember"
-                                : "activeMember",
-                          )}
+                          {m(member.role)} · {m("activeMember")}
                         </T>
                       </View>
-                      {owner &&
-                      member.role !== "owner" &&
-                      member.status === "active" ? (
+                      {owner && member.role !== "owner" ? (
                         <Button
                           label={m("remove")}
                           secondary
@@ -1373,13 +1380,6 @@ export default function FamilyScreenView({
                         {member.email}
                       </T>
                     ) : null}
-                    {member.endedAt ? (
-                      <T raw style={styles.muted(c.muted)}>
-                        {m("endedAt", {
-                          time: displayDate(member.endedAt, locale),
-                        })}
-                      </T>
-                    ) : null}
                   </View>
                 ))}
                 {!owner ? (
@@ -1398,6 +1398,48 @@ export default function FamilyScreenView({
                   />
                 ) : null}
               </Disclosure>
+
+              {owner && formerMembers.length ? (
+                <Disclosure
+                  title={m("memberHistoryCount", {
+                    count: formerMembers.length,
+                  })}
+                >
+                  <T raw style={styles.muted(c.muted)}>
+                    {m("memberHistoryDescription")}
+                  </T>
+                  {formerMembers.map((member) => (
+                    <View
+                      key={member.membershipId}
+                      style={[styles.listItem, { borderColor: c.line }]}
+                    >
+                      <T raw style={{ fontWeight: "600" }}>
+                        {member.displayName}
+                      </T>
+                      <T raw style={styles.muted(c.muted)}>
+                        {m(member.role)} ·{" "}
+                        {m(
+                          member.status === "left"
+                            ? "leftMember"
+                            : "removedMember",
+                        )}
+                      </T>
+                      {member.email ? (
+                        <T raw style={styles.muted(c.muted)}>
+                          {member.email}
+                        </T>
+                      ) : null}
+                      {member.endedAt ? (
+                        <T raw style={styles.muted(c.muted)}>
+                          {m("endedAt", {
+                            time: displayDate(member.endedAt, locale),
+                          })}
+                        </T>
+                      ) : null}
+                    </View>
+                  ))}
+                </Disclosure>
+              ) : null}
 
               {demo ? (
                 <Disclosure title={m("profile")}>
@@ -1525,12 +1567,27 @@ export default function FamilyScreenView({
                         invitation.status === "pending" && !pending
                           ? "expired"
                           : invitation.status;
+                      // Link to this invitation's grant, never to the email:
+                      // the same person can leave and rejoin with a new grant.
+                      const acceptedMember =
+                        status === "accepted" && invitation.acceptedMembershipId
+                          ? snapshot.members.find(
+                              (member) =>
+                                member.membershipId ===
+                                invitation.acceptedMembershipId,
+                            )
+                          : undefined;
                       const statusLabel: Record<
                         typeof status,
                         FamilyMessageKey
                       > = {
                         pending: "pendingInvitation",
-                        accepted: "acceptedInvitation",
+                        accepted:
+                          acceptedMember?.status === "removed"
+                            ? "acceptedRemovedInvitation"
+                            : acceptedMember?.status === "left"
+                              ? "acceptedLeftInvitation"
+                              : "acceptedInvitation",
                         declined: "declinedInvitation",
                         revoked: "revokedInvitation",
                         expired: "expiredInvitation",
@@ -1553,9 +1610,20 @@ export default function FamilyScreenView({
                             )}
                           </T>
                           <T raw style={styles.muted(c.muted)}>
-                            {m("expiresAt", {
-                              time: displayDate(invitation.expiresAt, locale),
-                            })}
+                            {acceptedMember?.endedAt &&
+                            acceptedMember.status !== "active"
+                              ? m("endedAt", {
+                                  time: displayDate(
+                                    acceptedMember.endedAt,
+                                    locale,
+                                  ),
+                                })
+                              : m("expiresAt", {
+                                  time: displayDate(
+                                    invitation.expiresAt,
+                                    locale,
+                                  ),
+                                })}
                           </T>
                           {pending ? (
                             <Button

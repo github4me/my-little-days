@@ -7,12 +7,18 @@ import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
 // Run the real screen against a deterministic React Native/controller boundary.
-// Disclosures are expanded to inspect their contents. These checks cover access
+// Disclosures are expanded by default to inspect their contents. These checks cover access
 // controls and confirmation wiring, not React scheduling, layout or a real device.
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
-function fixture(overrides = {}, locale = "en", demo = false, section = "all") {
+function fixture(
+  overrides = {},
+  locale = "en",
+  demo = false,
+  section = "all",
+  expandDisclosures = true,
+) {
   let active = "",
     slot = 0,
     nodes = [];
@@ -65,7 +71,7 @@ function fixture(overrides = {}, locale = "en", demo = false, section = "all") {
       if (!values.has(key))
         values.set(
           key,
-          active.endsWith("Disclosure")
+          expandDisclosures && active.endsWith("Disclosure")
             ? true
             : typeof value === "function"
               ? value()
@@ -122,6 +128,10 @@ function fixture(overrides = {}, locale = "en", demo = false, section = "all") {
     syncing: false,
     error: null,
     notice: null,
+    dismissedFeedback: null,
+    dismissFeedback(key) {
+      controller.dismissedFeedback = key;
+    },
     transitionPending: false,
     activationPending: false,
     accountDeletion: null,
@@ -235,6 +245,12 @@ function fixture(overrides = {}, locale = "en", demo = false, section = "all") {
   return {
     calls,
     controller,
+    unmount() {
+      values.clear();
+      refs.clear();
+      effects.clear();
+      nodes = [];
+    },
     render() {
       nodes = [];
       visit(
@@ -375,6 +391,120 @@ const snapshot = (role = "caregiver") => ({
   feeds: [],
   historyId: "history",
   revision: "1",
+});
+
+const snapshotWithMemberHistory = (role) => {
+  const family = snapshot(role);
+  family.members.push(
+    {
+      id: "removed-user",
+      membershipId: "removed-grant",
+      displayName: "Removed caregiver",
+      email: "removed@example.invalid",
+      role: "caregiver",
+      status: "removed",
+      endedAt: "2026-09-16T10:30:00Z",
+    },
+    {
+      id: "former-user",
+      membershipId: "former-grant",
+      displayName: "Former caregiver",
+      email: "former@example.invalid",
+      role: "caregiver",
+      status: "left",
+      endedAt: "2026-09-15T10:30:00Z",
+    },
+  );
+  return family;
+};
+
+test("removal reduces current member count and moves the member to collapsed admin-only history", () => {
+  for (const locale of ["en", "zh-CN"]) {
+    const family = snapshotWithMemberHistory("owner");
+    const departing = {
+      id: "departing-user",
+      membershipId: "departing-grant",
+      displayName: "Departing caregiver",
+      email: "departing@example.invalid",
+      role: "caregiver",
+      status: "active",
+      endedAt: null,
+    };
+    family.members.push(departing);
+    const view = fixture({ snapshot: family }, locale, false, "family", false);
+    const findToggle = (en, zh) =>
+      view
+        .nodes()
+        .find(
+          (node) =>
+            node.props?.accessibilityLabel === (locale === "en" ? en : zh),
+        );
+    view.render();
+    assert.ok(findToggle("Show Family members (2)", "展开家庭成员（2）"));
+    departing.status = "removed";
+    departing.endedAt = "2026-09-16T11:00:00Z";
+    view.render();
+    findToggle("Show Family members (1)", "展开家庭成员（1）").props.onPress();
+    view.render();
+    assert.doesNotMatch(
+      view.text(),
+      /Departing caregiver|Removed caregiver|Former caregiver/,
+    );
+    const history = findToggle(
+      "Show Departure and removal history (3)",
+      "展开退出与移除历史（3）",
+    );
+    assert.equal(history?.props.accessibilityState.expanded, false);
+    history.props.onPress();
+    view.render();
+    assert.match(view.text(), /Departing caregiver/);
+    assert.match(view.text(), /removed@example.invalid/);
+    assert.match(view.text(), /former@example.invalid/);
+    assert.match(view.text(), locale === "en" ? /Access ended/ : /结束访问/);
+    assert.match(
+      view.text(),
+      locale === "en" ? /invite them again/i : /再次邀请/,
+    );
+    assert.equal(view.buttons(locale === "en" ? "Remove" : "移除").length, 0);
+    assert.equal(view.calls.length, 0);
+    family.members.push({
+      ...departing,
+      membershipId: "rejoined-grant",
+      status: "active",
+      endedAt: null,
+    });
+    view.render();
+    assert.ok(findToggle("Hide Family members (2)", "收起家庭成员（2）"));
+    assert.ok(
+      findToggle(
+        "Hide Departure and removal history (3)",
+        "收起退出与移除历史（3）",
+      ),
+    );
+    assert.equal(view.buttons(locale === "en" ? "Remove" : "移除").length, 1);
+  }
+});
+
+test("ordinary members never see former-member history even if cached snapshot contains it", () => {
+  for (const locale of ["en", "zh-CN"]) {
+    const view = fixture(
+      { snapshot: snapshotWithMemberHistory("caregiver") },
+      locale,
+    );
+    view.render();
+    assert.match(
+      view.text(),
+      locale === "en" ? /Family members \(1\)/ : /家庭成员（1）/,
+    );
+    assert.doesNotMatch(
+      view.text(),
+      /Removed caregiver|Former caregiver|removed@example.invalid|former@example.invalid/,
+    );
+    assert.doesNotMatch(
+      view.text(),
+      /Departure and removal history|退出与移除历史/,
+    );
+  }
 });
 
 test("embedded account includes account controls and omits family management and page chrome", () => {
@@ -545,7 +675,7 @@ test("real account and family views hide routine local-save notices while demo r
   assert.match(demo.text(), /Saved on this device/i);
 });
 
-test("dismissing real feedback hides only presentation and new or resolved issues reappear", () => {
+test("dismissing real feedback hides only presentation and controller updates can show new issues", () => {
   const screen = fixture(
     { error: "network_unavailable", transitionPending: true },
     "en",
@@ -566,28 +696,58 @@ test("dismissing real feedback hides only presentation and new or resolved issue
   assert.equal(alertCount(), 1);
   dismiss();
   assert.equal(alertCount(), 0);
+  screen.unmount();
+  screen.render();
+  assert.equal(alertCount(), 0);
   assert.equal(screen.controller.error, "network_unavailable");
   assert.equal(screen.controller.authStatus, "authenticated");
   assert.equal(screen.controller.transitionPending, true);
   assert.equal(screen.calls.length, 0);
 
   screen.controller.error = "local_save_failed";
+  screen.controller.dismissedFeedback = null;
   screen.render();
   assert.equal(alertCount(), 1);
   dismiss();
   screen.controller.error = null;
+  screen.controller.dismissedFeedback = null;
   screen.render();
   screen.controller.error = "local_save_failed";
   screen.render();
   assert.equal(alertCount(), 1);
   dismiss();
   screen.controller.user = { ...screen.controller.user, id: "another-user" };
+  screen.controller.dismissedFeedback = null;
   screen.render();
   assert.equal(alertCount(), 1);
   dismiss();
   screen.controller.snapshot = snapshot();
+  screen.controller.dismissedFeedback = null;
   screen.render();
   assert.equal(alertCount(), 1);
+});
+
+test("dismissed sign-out notice stays hidden after leaving and remounting the account page", () => {
+  const screen = fixture(
+    { user: null, notice: "signed_out" },
+    "zh-CN",
+    false,
+    "account",
+  );
+  screen.render();
+  assert.match(screen.text(), /已退出/);
+  screen
+    .nodes()
+    .find((node) => node.props?.accessibilityLabel === "关闭提示")
+    .props.onPress();
+  screen.render();
+  assert.doesNotMatch(screen.text(), /已退出/);
+  screen.unmount();
+  screen.render();
+  assert.doesNotMatch(screen.text(), /已退出/);
+  assert.equal(screen.controller.notice, "signed_out");
+  assert.equal(screen.controller.authStatus, "signed_out");
+  assert.equal(screen.calls.length, 0);
 });
 
 test("real notices can be dismissed without clearing the controller and demo feedback stays unchanged", () => {
@@ -795,6 +955,134 @@ test("an open delete confirmation follows session expiry and cannot submit", () 
   assert.equal(view.calls.length, 0);
 });
 
+test("onboarding is shown only before joining, including while an existing family is being verified", () => {
+  for (const locale of ["en", "zh-CN"]) {
+    const introduction =
+      locale === "en" ? /Creating a family shares/ : /首次创建将共享/;
+    const preview = locale === "en" ? /UI preview only/ : /仅供界面预览/;
+    for (const role of ["owner", "caregiver"]) {
+      const view = fixture({}, locale, false, "family");
+      view.render();
+      assert.match(view.text(), introduction);
+      view.controller.snapshot = snapshot(role);
+      view.render();
+      assert.doesNotMatch(view.text(), introduction);
+      view.controller.sharedMode = true;
+      view.render();
+      assert.doesNotMatch(view.text(), introduction);
+      view.controller.snapshot = null;
+      view.controller.authStatus = "unverified";
+      view.render();
+      assert.doesNotMatch(view.text(), introduction);
+      view.controller.sharedMode = false;
+      view.controller.authStatus = "authenticated";
+      view.render();
+      assert.match(view.text(), introduction);
+      assert.equal(view.calls.length, 0);
+
+      const demo = fixture(
+        { snapshot: snapshot(role), sharedMode: true },
+        locale,
+        true,
+        "family",
+      );
+      demo.render();
+      assert.match(demo.text(), preview);
+    }
+  }
+});
+
+test("unshared-change notices identify the actual section below on the family page", () => {
+  for (const locale of ["en", "zh-CN"]) {
+    for (const section of ["account", "family"]) {
+      const view = fixture(
+        { snapshot: snapshot(), notice: "change_not_shared" },
+        locale,
+        false,
+        section,
+      );
+      view.render();
+      assert.match(
+        view.text(),
+        locale === "en"
+          ? /Sharing issues and preserved changes.*further down the Family sharing page/
+          : /家庭共享.*页面下方的「共享问题与保留的修改」/,
+      );
+      assert.doesNotMatch(
+        view.text(),
+        /Private changes to review|需要检查的私人修改/,
+      );
+      assert.equal(view.controller.notice, "change_not_shared");
+      assert.equal(view.calls.length, 0);
+    }
+  }
+});
+
+test("legacy-only preserved feed notices still name their own review section", () => {
+  for (const locale of ["en", "zh-CN"]) {
+    const view = fixture(
+      {
+        snapshot: snapshot(),
+        notice: "change_not_shared",
+        recordConflicts: [],
+        conflicts: [{ operation: { operationId: "legacy-delete" } }],
+      },
+      locale,
+      false,
+      "family",
+    );
+    view.render();
+    assert.match(
+      view.text(),
+      locale === "en"
+        ? /Private changes to review \(1\).*further down the Family sharing page/
+        : /页面下方的「需要检查的私人修改（1）」/,
+    );
+    assert.equal(view.controller.conflicts.length, 1);
+    assert.equal(view.calls.length, 0);
+  }
+});
+
+test("joined-family creation guidance starts collapsed and can be expanded and closed", () => {
+  for (const locale of ["en", "zh-CN"]) {
+    for (const role of ["owner", "caregiver"]) {
+      const view = fixture(
+        { snapshot: snapshot(role) },
+        locale,
+        false,
+        "family",
+        false,
+      );
+      const title = locale === "en" ? "Create a family group" : "创建家庭群组";
+      const message =
+        locale === "en"
+          ? /already belong to a family group/
+          : /已加入一个家庭群组/;
+      const toggle = (expanded) =>
+        view
+          .nodes()
+          .find(
+            (node) =>
+              node.props?.accessibilityLabel ===
+              (locale === "en"
+                ? `${expanded ? "Hide" : "Show"} ${title}`
+                : `${expanded ? "收起" : "展开"}${title}`),
+          );
+      view.render();
+      assert.doesNotMatch(view.text(), message);
+      assert.equal(toggle(false)?.props.accessibilityState.expanded, false);
+      toggle(false).props.onPress();
+      view.render();
+      assert.match(view.text(), message);
+      assert.equal(toggle(true)?.props.accessibilityState.expanded, true);
+      toggle(true).props.onPress();
+      view.render();
+      assert.doesNotMatch(view.text(), message);
+      assert.equal(view.calls.length, 0);
+    }
+  }
+});
+
 test("family members see why they cannot create another group", () => {
   for (const locale of ["en", "zh-CN"]) {
     for (const role of ["owner", "caregiver"]) {
@@ -902,6 +1190,53 @@ test("invitation acceptance requires explicit warning acknowledgement in both la
       1,
     );
     assert.equal(screen.calls[0].args[0], "invite");
+  }
+});
+
+test("accepted invitations show the outcome of their own membership without relabeling a reinvitation", () => {
+  for (const locale of ["en", "zh-CN"]) {
+    const data = snapshotWithMemberHistory("owner");
+    data.members.push({
+      ...data.members[1],
+      membershipId: "rejoined-grant",
+      status: "active",
+      endedAt: null,
+    });
+    const accepted = (id, acceptedMembershipId) => ({
+      id,
+      email: "removed@example.invalid",
+      expiresAt: "2027-01-01T00:00:00Z",
+      status: "accepted",
+      acceptedMembershipId,
+    });
+    data.invitations = [
+      accepted("old-accepted", "removed-grant"),
+      accepted("current-accepted", "rejoined-grant"),
+      accepted("left-accepted", "former-grant"),
+      { ...accepted("new-pending", null), status: "pending" },
+      accepted("legacy-accepted", undefined),
+    ];
+    const view = fixture({ snapshot: data }, locale);
+    view.render();
+    const lines = view.text().split("\n");
+    for (const [message, count] of [
+      [locale === "en" ? "Accepted · later removed" : "已接受 · 后已移除", 1],
+      [locale === "en" ? "Accepted · later left" : "已接受 · 后已退出", 1],
+      [locale === "en" ? "Accepted" : "已接受", 2],
+      [locale === "en" ? "Waiting for acceptance" : "待接受", 1],
+    ])
+      assert.equal(
+        lines.filter((line) => line === message).length,
+        count,
+        message,
+      );
+    assert.equal(view.buttons(locale === "en" ? "Revoke" : "撤销").length, 1);
+    assert.equal(
+      lines.filter((line) =>
+        line.startsWith(locale === "en" ? "Expires " : "到期："),
+      ).length,
+      3,
+    );
   }
 });
 

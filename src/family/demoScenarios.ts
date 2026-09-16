@@ -194,6 +194,13 @@ function demoSnapshot(owner: boolean, now: number): FamilySnapshot {
             expiresAt: iso(now + 28 * 86400000),
             status: "declined",
           },
+          {
+            id: "demo-member-accepted",
+            email: "sample.member@example.com",
+            expiresAt: iso(now + 14 * 86400000),
+            status: "accepted",
+            acceptedMembershipId: "demo-member-grant",
+          },
         ]
       : [],
     feeds: [

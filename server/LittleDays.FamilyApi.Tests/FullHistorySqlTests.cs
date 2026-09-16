@@ -210,6 +210,98 @@ public sealed class FullHistorySqlTests(SqlFixture sql) : IClassFixture<SqlFixtu
     }
 
     [SqlFact]
+    public async Task RemovedMembersCanRejoinRepeatedlyWhileHistoryRemainsOwnerOnly()
+    {
+        var s = new Scenario(sql);
+        var created = await s.Call(x => x.CreateFullFamily(s.Owner, Request([s.Caregiver.Email, s.Other.Email]), default));
+        var family = created.Snapshot.Family;
+        var firstInvitation = created.Snapshot.Invitations.Single(x => x.Email == s.Caregiver.Email);
+        var grant = await s.Call(x => x.AcceptInvitation(s.Caregiver, firstInvitation.Id,
+            new(Guid.NewGuid(), RequiredSchemaVersion: 2), default));
+        var acceptedInvitations = new Dictionary<Guid, Guid> { [firstInvitation.Id] = grant.MembershipId };
+        var otherInvitation = created.Snapshot.Invitations.Single(x => x.Email == s.Other.Email);
+        await s.Call(x => x.AcceptInvitation(s.Other, otherInvitation.Id,
+            new(Guid.NewGuid(), RequiredSchemaVersion: 2), default));
+        var entry = FullDomainTests.Json("""{"id":"reinvited-member-record","type":"sleep","start":"2026-09-01T10:00:00Z","end":"2026-09-01T11:00:00Z","note":"Retained shared contribution"}""");
+        await s.Call(x => x.ApplyFullRecord(s.Caregiver, family.Id, Create(s, grant, entry), default));
+        var removedGrants = new List<Guid>();
+
+        for (var cycle = 0; cycle < 2; cycle++)
+        {
+            var removedGrant = grant.MembershipId;
+            await s.Call(x => x.RemoveMember(s.Owner, family.Id, s.Caregiver.ObjectId,
+                s.Context(family, target: removedGrant), default));
+            removedGrants.Add(removedGrant);
+            await Code("membership_revoked", () => s.Call(x => x.FullSnapshot(s.Caregiver, family.Id, default)));
+
+            var ownerAfterRemoval = await s.Call(x => x.FullSnapshot(s.Owner, family.Id, default));
+            Assert.Equal(2, ownerAfterRemoval.Members.Count(x => x.Status == "active"));
+            foreach (var membershipId in removedGrants)
+            {
+                var history = Assert.Single(ownerAfterRemoval.Members, x => x.MembershipId == membershipId);
+                Assert.Equal(s.Caregiver.ObjectId, history.Id);
+                Assert.Equal(s.Caregiver.Email, history.Email);
+                Assert.Equal("removed", history.Status);
+                Assert.NotNull(history.EndedAt);
+            }
+            var viewer = await s.Call(x => x.FullSnapshot(s.Other, family.Id, default));
+            Assert.Equal(2, viewer.Members.Length);
+            Assert.DoesNotContain(viewer.Members, x => x.Id == s.Caregiver.ObjectId);
+            Assert.All(viewer.Members, x => { Assert.Equal("active", x.Status); Assert.Null(x.Email); Assert.Null(x.EndedAt); });
+            Assert.Empty(viewer.Invitations);
+            Assert.Equal(s.Caregiver.ObjectId, Assert.Single(viewer.Entries,
+                x => x.Entry.GetProperty("id").GetString() == "reinvited-member-record").RecordedBy);
+
+            var invitationRequest = s.Invitation(family, s.Caregiver.Email);
+            var invitation = await s.Call(x => x.CreateInvitation(s.Owner, family.Id, invitationRequest, default));
+            Assert.NotEqual(firstInvitation.Id, invitation.Invitation.Id);
+            Assert.Equal("pending", invitation.Invitation.Status);
+            Assert.Null(invitation.Invitation.AcceptedMembershipId);
+            var ownerWithPending = await s.Call(x => x.Snapshot(s.Owner, family.Id, default));
+            Assert.Null(Assert.Single(ownerWithPending.Invitations, x => x.Id == invitation.Invitation.Id).AcceptedMembershipId);
+            foreach (var (invitationId, membershipId) in acceptedInvitations)
+            {
+                var accepted = Assert.Single(ownerWithPending.Invitations, x => x.Id == invitationId);
+                Assert.Equal("accepted", accepted.Status);
+                Assert.Equal(membershipId, accepted.AcceptedMembershipId);
+                Assert.Contains(ownerWithPending.Members, x => x.MembershipId == membershipId && x.Status == "removed");
+            }
+            Assert.Contains((await s.Call(x => x.Me(s.Caregiver, default))).PendingInvitations,
+                x => x.Id == invitation.Invitation.Id);
+            grant = await s.Call(x => x.AcceptInvitation(s.Caregiver, invitation.Invitation.Id,
+                new(Guid.NewGuid(), RequiredSchemaVersion: 2), default));
+            acceptedInvitations.Add(invitation.Invitation.Id, grant.MembershipId);
+            Assert.DoesNotContain(grant.MembershipId, removedGrants);
+            var invitationRetry = await s.Call(x => x.CreateInvitation(s.Owner, family.Id, invitationRequest, default));
+            Assert.Equal("accepted", invitationRetry.Invitation.Status);
+            Assert.Equal(grant.MembershipId, invitationRetry.Invitation.AcceptedMembershipId);
+            await Code("member_changed", () => s.Call(x => x.RemoveMember(s.Owner, family.Id, s.Caregiver.ObjectId,
+                s.Context(family, target: removedGrant), default)));
+
+            var ownerAfterRejoin = await s.Call(x => x.FullSnapshot(s.Owner, family.Id, default));
+            Assert.Equal(3, ownerAfterRejoin.Members.Count(x => x.Status == "active"));
+            Assert.Equal(removedGrants.Count, ownerAfterRejoin.Members.Count(x => x.Status == "removed"));
+            foreach (var (invitationId, membershipId) in acceptedInvitations)
+            {
+                var accepted = Assert.Single(ownerAfterRejoin.Invitations, x => x.Id == invitationId);
+                Assert.Equal("accepted", accepted.Status);
+                Assert.Equal(membershipId, accepted.AcceptedMembershipId);
+            }
+            var rejoined = await s.Call(x => x.FullSnapshot(s.Caregiver, family.Id, default));
+            Assert.Equal(grant.MembershipId, rejoined.Family.MembershipId);
+            Assert.Equal(3, rejoined.Members.Length);
+            Assert.All(rejoined.Members, x => { Assert.Equal("active", x.Status); Assert.Null(x.Email); Assert.Null(x.EndedAt); });
+            Assert.DoesNotContain(rejoined.Members, x => removedGrants.Contains(x.MembershipId));
+            Assert.Empty(rejoined.Invitations);
+        }
+        await using var verification = sql.Open();
+        var generations = await verification.Memberships.Where(x => x.FamilyId == family.Id && x.UserId == s.Caregiver.ObjectId).ToArrayAsync();
+        Assert.Equal(3, generations.Length);
+        Assert.Single(generations, x => x.Active && x.Id == grant.MembershipId);
+        Assert.Equal(2, generations.Count(x => !x.Active && x.Status == "removed"));
+    }
+
+    [SqlFact]
     public async Task PermissionsRowversionsTombstonesAndIndependentRunningTimersAreEnforced()
     {
         var s = new Scenario(sql);

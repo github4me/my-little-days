@@ -202,10 +202,43 @@ async function englishFlows(page) {
   await expect(page.getByText("135 mL", { exact: true })).toBeVisible();
   await button(page, "Show My account").click();
   await expect(button(page, "Request account deletion")).toBeDisabled();
-  await button(page, "Show Family members (4)").click();
+  await button(page, "Show Family members (2)").click();
   await button(page, "Remove").click();
   await confirm(page, "Remove");
   await expect(button(page, "Remove")).toHaveCount(0);
+  await expect(button(page, "Hide Family members (1)")).toBeVisible();
+  await expect(
+    button(page, "Show Departure and removal history (3)"),
+  ).toHaveAttribute("aria-expanded", "false");
+  await expect(
+    page.getByText("sample.member@example.com", { exact: true }),
+  ).toHaveCount(0);
+  await button(page, "Show Departure and removal history (3)").click();
+  await expect(
+    page.getByText("sample.member@example.com", { exact: true }),
+  ).toBeVisible();
+  await button(page, "Hide Departure and removal history (3)").click();
+  await button(page, "Show Invite a caregiver").click();
+  await expect(
+    page.getByText("Accepted · later removed", { exact: true }),
+  ).toBeVisible();
+  await page
+    .getByLabel("Recipient email", { exact: true })
+    .fill("sample.member@example.com");
+  await button(page, "Add invitation").click();
+  await expect(
+    page.getByText("Invitation saved; no notification sent", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Accepted · later removed", { exact: true }),
+  ).toHaveCount(1);
+  await expect(
+    page.getByText("Waiting for acceptance", { exact: true }),
+  ).toHaveCount(2);
+  await expect(button(page, "Hide Family members (1)")).toBeVisible();
+  await expect(
+    button(page, "Show Departure and removal history (3)"),
+  ).toBeVisible();
   await expect(page.getByText("135 mL", { exact: true })).toBeVisible();
   await button(page, "Reset samples").click();
   await expect(button(page, "Edit")).toHaveCount(2);
@@ -213,7 +246,13 @@ async function englishFlows(page) {
 
   await button(page, "Member").click();
   await expect(button(page, "Edit")).toHaveCount(1);
-  await button(page, "Show Family members (4)").click();
+  await button(page, "Show Family members (2)").click();
+  await expect(
+    page.getByRole("button", { name: /Departure and removal history/ }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByText("Sample Removed Member", { exact: true }),
+  ).toHaveCount(0);
   await expect(button(page, "Remove")).toHaveCount(0);
   await button(page, "Leave test family").click();
   await confirm(page, "Leave test family");
@@ -322,14 +361,24 @@ async function receivedInvitationCreationFlow(page, zh) {
   await expect(button(page, accept)).toHaveCount(0);
   await expect(
     button(page, label("Show Create a family group", "展开创建家庭群组")),
-  ).toHaveCount(0);
-  await expect(
-    page.getByText(
-      zh
-        ? /你已加入一个家庭群组并担任管理员/
-        : /You already belong to a family group as its admin/,
-    ),
-  ).toBeVisible();
+  ).toHaveAttribute("aria-expanded", "false");
+  const creationGuidance = page.getByText(
+    zh
+      ? /你已加入一个家庭群组并担任管理员/
+      : /You already belong to a family group as its admin/,
+  );
+  await expect(creationGuidance).toHaveCount(0);
+  await button(
+    page,
+    label("Show Create a family group", "展开创建家庭群组"),
+  ).click();
+  await expect(creationGuidance).toBeVisible();
+  await expect(button(page, create)).toHaveCount(0);
+  await button(
+    page,
+    label("Hide Create a family group", "收起创建家庭群组"),
+  ).click();
+  await expect(creationGuidance).toHaveCount(0);
 }
 
 async function firstInvitationFlow(page, zh, width) {

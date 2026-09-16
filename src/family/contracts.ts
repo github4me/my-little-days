@@ -65,6 +65,7 @@ export type FamilyInvitation = {
   expiresAt: string;
   status: "pending" | "accepted" | "revoked" | "expired" | "declined";
   declineReason?: "created_family" | "joined_family" | null;
+  acceptedMembershipId?: string | null;
 };
 export type PendingFamilyInvitation = {
   id: string;

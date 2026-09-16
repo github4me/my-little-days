@@ -207,9 +207,7 @@ export function FamilySyncDetails({ pilot }: { pilot: Pilot }) {
     <View testID="family-sync-details" style={styles.stack}>
       <Card style={styles.card}>
         <T raw accessibilityRole="header" style={styles.heading}>
-          {locale === "zh-CN"
-            ? "共享问题与保留的修改"
-            : "Sharing issues and preserved changes"}
+          {fullFamilyMessage(locale, "sharingIssuesTitle")}
         </T>
         <View accessibilityLiveRegion="polite" style={styles.stack}>
           <IssueMessages issues={issues} />
