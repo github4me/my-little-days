@@ -1,6 +1,6 @@
 # Family photo, reminders and play sharing
 
-Implemented locally for the next release. This document is not evidence of a GitHub, Azure, Expo or TestFlight deployment; record those results separately after an authorized release.
+Released to the existing Azure API/database and iOS Expo preview on 16 September 2026 from commit `7cf0dab71ad3ed3a8668d26c573d893e5ec0d73b`. See the release evidence in the [manual runbook](AZURE-MANUAL-SETUP-RUNBOOK.md#shared-extras-release-evidence-16-september-2026). Native two-phone acceptance remains outstanding; this was not a TestFlight or App Store submission.
 
 ## Agreed behavior
 

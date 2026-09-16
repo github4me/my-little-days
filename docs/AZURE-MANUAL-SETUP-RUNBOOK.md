@@ -712,7 +712,7 @@ The invitation-capacity change itself requires the updated API and mobile client
 
 ### Family photos, reminders and play: release and phone acceptance
 
-The shared-extras implementation is prepared locally; do not treat this section as confirmation that it has been committed, deployed or installed. It covers the current baby avatar, reminder rules/settings, all stored play check-ins and play selections. It does not upload the device photo library. See [the data-flow reference](FAMILY-EXTRAS.md).
+The shared-extras implementation covers the current baby avatar, reminder rules/settings, all stored play check-ins and play selections. It does not upload the device photo library. The authorized release is recorded below; successful publication does not confirm installation or native two-phone acceptance. See [the data-flow reference](FAMILY-EXTRAS.md).
 
 #### A. Azure and GitHub release
 
@@ -748,6 +748,15 @@ No Bicep update, storage account, Key Vault, Entra registration or new environme
 9. Join a different disposable family and verify no avatar, check-in, selection, reminder rule or pending edit from the previous family appears there. New-family notifications require their own explicit opt-in. Record device/OS, release identifiers and any failure; do not include private baby records or auth tokens in shared logs.
 
 These checks do not change the existing policy for signing an already joined account into a second phone that has independent offline data. Explicit create/join activation is the destructive replacement flow; do not assume a newly implemented automatic second-phone migration.
+
+#### Shared-extras release evidence: 16 September 2026
+
+- Application commit `7cf0dab71ad3ed3a8668d26c573d893e5ec0d73b` was pushed to `feature/family-invitations`. Only reviewed source, tests and documentation were committed; local `work/` and `dist-ios-verification/` were excluded.
+- [API/database release 35066678308](https://github.com/github4me/my-little-days/actions/runs/35066678308) completed successfully for that exact commit. Cloud application/browser checks, API/SQL integration, DbUp migration and API deployment/liveness passed. Migration logs identify `0003_FamilySharedExtras.sql`, confirm migration success at `2026-09-16T07:07:17Z`, and confirm the temporary SQL firewall rule was removed.
+- Independent post-deployment requests returned HTTP 200 with `{"status":"ok"}` from `/health/live`, and HTTP 401/`unauthorized` from both unauthenticated `/v1/me` and `/v2/capabilities`. These prove responsiveness and an authentication boundary, not authenticated phone flows.
+- The same application commit was published to EAS **preview**, **iOS**, runtime **0.2.0**, using the **preview** environment and `EXPO_PUBLIC_FAMILY_UI_DEMO=0`. Update group: [`d540cfe1-70c4-476d-bc85-5e248131cd29`](https://expo.dev/accounts/expo4chao/projects/little-days/updates/d540cfe1-70c4-476d-bc85-5e248131cd29). Update ID: `01a0a90d-0891-75d5-a0f1-903f4bafad45`. Published at `2026-09-16T07:09:58.801Z`. EAS readback confirmed the source commit, iOS platform, preview branch and runtime. The exported bundle contains all four expected public API/Entra connection values.
+- No native rebuild, Bicep deployment, TestFlight submission or App Store submission was performed. Existing compatible [preview build 18](https://expo.dev/accounts/expo4chao/projects/little-days/builds/eb360c84-c263-49be-ac63-217ad61dda19) remains the install reference. On each phone, open the app online to download the update, then fully close and reopen it. Do not uninstall a data-bearing app. The static footer remains `0.2.0 / Update 18`; use the update group and new behavior rather than this footer alone to identify the OTA.
+- Still required: complete section C on disposable two-phone data, especially photo decoding, SQLite activation/recovery and actual notification delivery. Do not claim device acceptance from successful publication.
 
 ## 16. Remaining operator checklist
 
