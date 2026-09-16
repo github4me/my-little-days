@@ -151,5 +151,6 @@ jobs:
         env:
           PUBLIC_URL: ${{ vars.FAMILY_API_PUBLIC_URL }}
         run: |
-          curl --fail --silent --show-error --retry 10 --retry-delay 5 --retry-all-errors \
+          # Shared B1 cold starts can take several minutes after zip deployment finishes.
+          curl --fail --silent --show-error --retry 60 --retry-delay 5 --retry-max-time 300 --retry-all-errors \
             --connect-timeout 10 --max-time 20 "${PUBLIC_URL%/}/health/live"
