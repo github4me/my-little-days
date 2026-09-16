@@ -2044,7 +2044,7 @@ assert.equal(
 );
 await page.getByText("家庭服务尚未配置", { exact: true }).waitFor();
 assert.equal(
-  await page.getByRole("button", { name: "登录家庭账户", exact: true }).count(),
+  await page.getByRole("button", { name: "登录", exact: true }).count(),
   0,
 );
 await page.setViewportSize({ width: 320, height: 740 });
@@ -2066,7 +2066,7 @@ await page
   .getByText("Family service is not configured", { exact: true })
   .waitFor();
 assert.equal(
-  await page.getByRole("button", { name: "Sign in", exact: true }).count(),
+  await page.getByRole("button", { name: "Login", exact: true }).count(),
   0,
 );
 assert.equal(

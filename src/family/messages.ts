@@ -807,10 +807,62 @@ export function familyErrorMessage(locale: AppLocale, code: string): string {
     return locale === "zh-CN"
       ? "请联网刷新家庭权限后继续。"
       : "Connect and refresh family access to continue.";
-  return familyMessage(locale, errorMessages[code] ?? "errorGeneric");
+  return fullFamilyMessage(locale, errorMessages[code] ?? "errorGeneric");
 }
 
 const fullMessages: Partial<Record<FamilyMessageKey, [string, string]>> = {
+  noticeSignedOut: [
+    "已退出登录，此设备上的家庭数据和登录信息已清除。已共享记录仍保留在家庭中。",
+    "Signed out. Family data and sign-in details have been cleared from this device. Shared records remain with the family.",
+  ],
+  noticeReviewAsNew: [
+    "原记录已不存在。请检查保留的内容；再次保存会创建一条新记录。",
+    "The original record no longer exists. Review the preserved content; saving again will create a new record.",
+  ],
+  errorNotAdmitted: [
+    "此账户暂时无法使用家庭共享服务。请联系支持人员检查账户访问权限。",
+    "This account cannot currently use family sharing. Contact support to check account access.",
+  ],
+  errorRevoked: [
+    "你已无法访问此家庭。家庭内容将停止显示并从此设备清除，包括草稿和未发送修改。已共享的记录留在家庭中。",
+    "You no longer have access to this family. Family content is hidden and cleared from this device, including drafts and unsent changes. Shared records stay with the family.",
+  ],
+  errorAlreadyFamily: [
+    "此账户已加入一个家庭。每个账户只能加入一个家庭。",
+    "This account already belongs to a family. Each account can belong to one family.",
+  ],
+  errorSignInFailed: [
+    "暂时无法完成登录。请重试；如果问题持续，请联系支持人员。",
+    "Sign-in could not be completed. Try again; if the problem continues, contact support.",
+  ],
+  errorSessionChanged: [
+    "当前账户已改变。请在“我的账户”中确认登录账户后继续。",
+    "The active account has changed. Check the signed-in account in My account before continuing.",
+  ],
+  errorLocalData: [
+    "无法读取此设备上的家庭数据。请保留应用和现有数据，并联系支持人员检查。",
+    "Family data on this device could not be read. Keep the app and its data, and contact support to investigate.",
+  ],
+  errorSignOutFirst: [
+    "更换账户前请先退出。退出会清除此设备上的家庭缓存、私人草稿和待发送修改。已共享记录仍留在家庭中。",
+    "Sign out before changing accounts. Signing out clears this device’s family cache, private drafts and unsent changes. Shared records remain with the family.",
+  ],
+  errorSignOutFailed: [
+    "已停止此页面的家庭连接，但未能完成此设备上的退出清理。请保持页面打开并重试退出，完成清理后再登录。已共享记录仍留在家庭中。",
+    "Family activity on this page has stopped, but cleanup on this device did not finish. Keep this page open and retry sign out before signing in again. Shared records remain with the family.",
+  ],
+  errorFamilyUnavailable: [
+    "当前没有可访问的家庭。请刷新，或接受一条有效邀请。",
+    "No family is currently available. Refresh or accept a valid invitation.",
+  ],
+  errorQueueFull: [
+    "此设备上待处理的家庭修改已达上限。请连接服务发送修改，或检查并丢弃不再需要的保留内容。",
+    "This device has reached the limit for unresolved family changes. Connect to send saved changes, or review and discard preserved changes you no longer need.",
+  ],
+  deletionReceiptUnavailable: [
+    "此设备没有可用的删除查询凭证。请联系支持人员确认处理状态。",
+    "This device has no usable deletion-status receipt. Contact support to confirm the request’s status.",
+  ],
   ownerEmails: ["家人邮箱（最多 5 个）", "Family emails (up to 5)"],
   ownerEmailError: [
     "请填写 1–5 个有效且不同的家人邮箱。",
@@ -822,7 +874,7 @@ const fullMessages: Partial<Record<FamilyMessageKey, [string, string]>> = {
     "服务接受删除申请后会立即停用账户访问，并处理关联资料及身份账户的永久删除。账户删除会清理你创建或最后编辑的家庭记录（包括最初由别人创建的记录）；普通退出则保留家庭贡献。身份删除只有在服务确认后才算完成。已迁移的原本机资料不会恢复。",
     "Once accepted, account access stops and associated data and identity enter permanent deletion processing. Account deletion removes family records you created or last edited, including records originally created by someone else; ordinary departure retains contributions. Identity deletion is complete only when the service confirms it. Previously migrated local data is not restored.",
   ],
-  signIn: ["登录家庭账户", "Sign in"],
+  signIn: ["登录", "Login"],
   leave: ["离开家庭", "Leave family"],
   leaveTitle: ["离开这个家庭？", "Leave this family?"],
   leaveDescription: [
@@ -942,7 +994,12 @@ const noticeMessages: Record<string, FamilyMessageKey> = {
 export function familyNoticeMessage(
   locale: AppLocale,
   code: string,
+  demo = false,
 ): string | null {
   const key = noticeMessages[code];
-  return key ? familyMessage(locale, key) : null;
+  if (!key) return null;
+  if (demo) return familyMessage(locale, key);
+  return fullFamilyMessage(locale, key, {
+    section: fullFamilyMessage(locale, "sharingIssuesTitle"),
+  });
 }

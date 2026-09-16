@@ -543,7 +543,7 @@ test("account stays identifiable when signed out or family services are unavaila
       assert.equal(screen.buttons(locale === "en" ? "Back" : "返回").length, 0);
       if (overrides.configured !== false && !overrides.webUnsupported) {
         assert.equal(
-          screen.buttons(locale === "en" ? "Sign in" : "登录家庭账户").length,
+          screen.buttons(locale === "en" ? "Login" : "登录").length,
           1,
         );
       }
@@ -659,7 +659,7 @@ test("account and family modes retain deletion receipts after sign out", () => {
     );
     screen.render();
     assert.equal(screen.buttons("Check deletion status").length, 1);
-    assert.equal(screen.buttons("Sign in").length, 0);
+    assert.equal(screen.buttons("Login").length, 0);
     assert.match(screen.text(), /not yet confirmed deleted/);
   }
 });
@@ -727,6 +727,72 @@ test("dismissing real feedback hides only presentation and controller updates ca
   assert.equal(alertCount(), 1);
 });
 
+test("live account sign-out describes local cleanup and retained shared data in both languages", () => {
+  for (const locale of ["zh-CN", "en"]) {
+    const screen = fixture(
+      { user: null, notice: "signed_out" },
+      locale,
+      false,
+      "account",
+    );
+    screen.render();
+    assert.doesNotMatch(screen.text(), /试点|测试|pilot|test account/i);
+    assert.match(
+      screen.text(),
+      locale === "zh-CN"
+        ? /此设备上的家庭数据和登录信息已清除/
+        : /Family data and sign-in details have been cleared from this device/,
+    );
+    assert.match(
+      screen.text(),
+      locale === "zh-CN"
+        ? /已共享记录仍保留在家庭中/
+        : /Shared records remain with the family/,
+    );
+    assert.equal(screen.calls.length, 0);
+  }
+});
+
+test("live account errors never describe production families as a fictional pilot", () => {
+  for (const locale of ["zh-CN", "en"]) {
+    for (const error of [
+      "network_unavailable",
+      "pilot_not_admitted",
+      "membership_revoked",
+      "already_in_family",
+      "history_changed",
+      "sign_in_failed",
+      "session_changed",
+      "local_data_invalid",
+      "sign_out_first",
+      "sign_out_failed",
+      "family_unavailable",
+      "queue_full",
+      "deletion_receipt_unavailable",
+    ]) {
+      const screen = fixture({ error }, locale, false, "account");
+      screen.render();
+      assert(
+        screen
+          .nodes()
+          .some((node) => node.props?.accessibilityRole === "alert"),
+        `${locale}: ${error} must be visible`,
+      );
+      assert.doesNotMatch(
+        screen.text(),
+        /试点|测试家庭|测试记录|pilot|test family|test feed|fictional/i,
+        `${locale}: ${error}`,
+      );
+      if (error === "sign_out_failed")
+        assert.doesNotMatch(
+          screen.text(),
+          /原有离线记录不受影响|existing offline records are unaffected/i,
+        );
+      assert.equal(screen.calls.length, 0);
+    }
+  }
+});
+
 test("dismissed sign-out notice stays hidden after leaving and remounting the account page", () => {
   const screen = fixture(
     { user: null, notice: "signed_out" },
@@ -781,6 +847,11 @@ test("real notices can be dismissed without clearing the controller and demo fee
       .nodes()
       .some((node) => node.props?.accessibilityLabel === "Dismiss message"),
   );
+  demo.controller.error = null;
+  demo.controller.notice = "change_not_shared";
+  demo.render();
+  assert.match(demo.text(), /It is kept under Private changes to review/);
+  assert.doesNotMatch(demo.text(), /Sharing issues and preserved changes/);
 });
 
 test("invitation form counts members and pending places while allowing pending-email replacement", async () => {

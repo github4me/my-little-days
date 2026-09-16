@@ -593,7 +593,7 @@ export default function FamilyScreenView({
                 ? m("preservedSection", { count: pilot.conflicts.length })
                 : m("sharingIssuesTitle"),
           })
-        : familyNoticeMessage(locale, pilot.notice)
+        : familyNoticeMessage(locale, pilot.notice, demo)
       : null;
   const feedback = error ?? notice;
   const feedbackKey = feedback
