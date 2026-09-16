@@ -18,6 +18,7 @@ function fixture(
   demo = false,
   section = "all",
   expandDisclosures = true,
+  screenProps = {},
 ) {
   let active = "",
     slot = 0,
@@ -140,6 +141,9 @@ function fixture(
     feeds: [],
     pending: [],
     conflicts: [],
+    recordPending: [],
+    recordConflicts: [],
+    sharedMode: false,
     hasPrivateWork: false,
     ...Object.fromEntries(
       [
@@ -204,6 +208,7 @@ function fixture(
         if (name === "./messages") return messages;
         if (name === "./invitationCapacity")
           return load("src/family/invitationCapacity.ts");
+        if (name === "./syncIssues") return load("src/family/syncIssues.ts");
         if (name === "./extras") return load("src/family/extras.ts");
         if (name === "../reminderSettings")
           return load("src/reminderSettings.ts");
@@ -259,6 +264,7 @@ function fixture(
           pilot: controller,
           demo,
           section,
+          ...screenProps,
         }),
       );
       return nodes;
@@ -1010,13 +1016,210 @@ test("unverified cached identity is not presented as signed in or allowed to del
     error: "network_unavailable",
   });
   view.render();
-  assert.match(view.text(), /Not verified/);
+  assert.match(view.text(), /Connection unavailable/);
   assert.doesNotMatch(view.text(), /Signed in/);
   assert.equal(
     view.buttons("Request account deletion")[0].props.disabled,
     true,
   );
   assert.equal(view.buttons("Refresh")[0].props.disabled, false);
+});
+
+test("cached startup describes connecting without claiming authentication or expired access in either language", () => {
+  for (const locale of ["en", "zh-CN"]) {
+    const view = fixture({ authStatus: "checking", syncing: true }, locale);
+    view.render();
+    assert.match(view.text(), locale === "en" ? /Connecting…/ : /正在连接…/);
+    assert.match(
+      view.text(),
+      locale === "en" ? /confirm your sign-in/ : /确认登录状态/,
+    );
+    assert.match(
+      view.text(),
+      locale === "en" ? /saved on this device/ : /本机保存的账户资料/,
+    );
+    assert.doesNotMatch(
+      view.text(),
+      locale === "en" ? /Signed in|Session expired/ : /已登录|登录已过期/,
+    );
+    assert.equal(
+      view.buttons(
+        locale === "en" ? "Request account deletion" : "申请删除账户",
+      )[0].props.disabled,
+      true,
+    );
+    assert.equal(
+      view.buttons(locale === "en" ? "Refreshing…" : "正在刷新…")[0].props
+        .disabled,
+      true,
+    );
+  }
+  const noCache = fixture({ user: null, authStatus: "checking" });
+  noCache.render();
+  assert.match(noCache.text(), /Checking sign-in…/);
+  assert.doesNotMatch(noCache.text(), /saved on this device/);
+});
+
+test("connection failures describe connectivity while other verification failures and expiry keep their own statuses", () => {
+  for (const locale of ["en", "zh-CN"]) {
+    for (const error of [
+      "network_unavailable",
+      "network_error",
+      "offline",
+      "service_unavailable",
+    ]) {
+      const view = fixture({ authStatus: "unverified", error }, locale);
+      view.render();
+      assert.match(
+        view.text(),
+        locale === "en" ? /Connection unavailable/ : /暂时无法连接/,
+      );
+      assert.match(
+        view.text(),
+        locale === "en"
+          ? /sign-in could not be checked/
+          : /暂时无法确认登录状态/,
+      );
+      assert.doesNotMatch(
+        view.text(),
+        locale === "en" ? /Signed in|Session expired/ : /已登录|登录已过期/,
+      );
+      assert.equal(
+        view.buttons(
+          locale === "en" ? "Request account deletion" : "申请删除账户",
+        )[0].props.disabled,
+        true,
+      );
+      assert.equal(
+        view.buttons(locale === "en" ? "Refresh" : "刷新")[0].props.disabled,
+        false,
+      );
+    }
+    const invalid = fixture(
+      { authStatus: "unverified", error: "invalid_response" },
+      locale,
+    );
+    invalid.render();
+    assert.match(
+      invalid.text(),
+      locale === "en" ? /Not verified/ : /登录状态待验证/,
+    );
+    assert.doesNotMatch(
+      invalid.text(),
+      locale === "en" ? /Connection unavailable/ : /暂时无法连接/,
+    );
+    const expired = fixture(
+      { authStatus: "reauth_required", error: "network_unavailable" },
+      locale,
+    );
+    expired.render();
+    assert.match(
+      expired.text(),
+      locale === "en" ? /Session expired/ : /登录已过期/,
+    );
+    assert.equal(
+      expired.buttons(locale === "en" ? "Sign in again" : "重新登录").length,
+      1,
+    );
+  }
+});
+
+test("global feedback ownership deduplicates matching errors and notices without clearing or resurrecting them", () => {
+  for (const locale of ["en", "zh-CN"]) {
+    for (const section of ["account", "family"]) {
+      const view = fixture(
+        { error: "network_unavailable" },
+        locale,
+        false,
+        section,
+        true,
+        { feedbackHandledByGlobalBanner: true },
+      );
+      view.render();
+      assert.doesNotMatch(
+        view.text(),
+        /cannot be reached|暂时无法连接家庭共享服务/,
+      );
+      assert.equal(
+        view.nodes().filter((node) => node.props?.accessibilityRole === "alert")
+          .length,
+        0,
+      );
+      view.unmount();
+      view.render();
+      assert.equal(
+        view.nodes().filter((node) => node.props?.accessibilityRole === "alert")
+          .length,
+        0,
+      );
+      assert.equal(view.controller.error, "network_unavailable");
+      view.controller.error = null;
+      view.controller.notice = "membership_revoked";
+      view.render();
+      assert.doesNotMatch(view.text(), /access has ended|访问已结束/);
+      assert.equal(
+        view
+          .nodes()
+          .some((node) =>
+            ["Dismiss message", "关闭提示"].includes(
+              node.props?.accessibilityLabel,
+            ),
+          ),
+        false,
+      );
+      assert.equal(view.controller.notice, "membership_revoked");
+      view.controller.notice = "sign_in_cancelled";
+      view.render();
+      assert.match(
+        view.text(),
+        locale === "en"
+          ? /This sign-in attempt was cancelled/
+          : /已取消本次登录/,
+      );
+      assert.equal(view.calls.length, 0);
+    }
+  }
+  const standalone = fixture({ error: "network_unavailable" });
+  standalone.render();
+  assert.match(standalone.text(), /cannot be reached/);
+  const demo = fixture(
+    { error: "network_unavailable" },
+    "en",
+    true,
+    "all",
+    true,
+    { feedbackHandledByGlobalBanner: true },
+  );
+  demo.render();
+  assert.match(demo.text(), /cannot be reached/);
+});
+
+test("modal action errors stay visible when controller feedback is globally handled", async () => {
+  const view = fixture(
+    {
+      error: "network_unavailable",
+      deleteAccount: async () => {
+        throw new Error("local_save_failed");
+      },
+    },
+    "en",
+    false,
+    "account",
+    true,
+    { feedbackHandledByGlobalBanner: true },
+  );
+  view.render();
+  view.buttons("Request account deletion")[0].props.onPress();
+  view.render();
+  view
+    .nodes()
+    .find((node) => node.props?.accessibilityRole === "checkbox")
+    .props.onPress();
+  view.render();
+  view.buttons("Request account deletion").at(-1).props.onPress();
+  await tick();
+  view.render();
+  assert.match(view.modalText(), /could not be saved on this device/i);
 });
 
 test("verified account ignores obsolete login errors while preserving unrelated failures", () => {

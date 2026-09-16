@@ -1188,6 +1188,14 @@ export function useFamilyPilot() {
         }
         if (cached.accountDeletion || (!grantMatches && !stored.transition))
           await persist(revokeCache, e, false, true);
+        // A restored, same-account cache gets the same bounded connection grace
+        // as foreground resume. Known access/storage problems never get hidden.
+        reconnectRetry.current =
+          grantMatches &&
+          originMatches &&
+          !guard?.reauthRequired &&
+          !stored.transition &&
+          !cached.accountDeletion;
       }
       // Only local restoration gates startup. The existing sync lock continues
       // identity checks, downloads and queued uploads after the app can render.

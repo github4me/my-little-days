@@ -34,6 +34,16 @@ const messages = {
   account: ["我的账户", "My account"],
   accountSignedOut: ["未登录", "Signed out"],
   accountChecking: ["正在验证登录状态…", "Checking sign-in…"],
+  accountConnecting: ["正在连接…", "Connecting…"],
+  accountConnectionUnavailable: ["暂时无法连接", "Connection unavailable"],
+  accountConnectingDetails: [
+    "正在连接服务并确认登录状态，暂显示本机保存的账户资料。",
+    "Connecting to confirm your sign-in. Showing account details saved on this device for now.",
+  ],
+  accountConnectionDetails: [
+    "暂时无法确认登录状态，显示本机保存的账户资料。连接恢复后会自动重试。",
+    "Your sign-in could not be checked. Showing account details saved on this device; we’ll retry when connected.",
+  ],
   accountSignedIn: ["已登录", "Signed in"],
   accountExpired: ["登录已过期", "Session expired"],
   accountUnverified: ["登录状态待验证", "Not verified"],

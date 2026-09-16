@@ -45,6 +45,9 @@ function nativeWorld() {
     exchanges: [],
     refreshes: [],
     discoveries: 0,
+    now: Date.now(),
+    timers: [],
+    beforeDiscovery: async () => {},
     beforeSet: async () => {},
     beforeGet: async () => {},
     afterGet: async () => {},
@@ -88,6 +91,7 @@ function nativeWorld() {
       TokenError: class extends Error {},
       fetchDiscoveryAsync: async () => {
         world.discoveries++;
+        await world.beforeDiscovery();
         return {};
       },
       makeRedirectUri: () => "mylittledays://auth",
@@ -117,6 +121,25 @@ function nativeWorld() {
       target: ts.ScriptTarget.ES2022,
     },
   }).outputText;
+  world.runtime = {
+    Date: class extends Date {
+      static now() {
+        return world.now;
+      }
+    },
+    setTimeout: (callback, delay) => {
+      world.timers.push({
+        callback,
+        delay,
+        deadline: world.now + delay,
+        active: true,
+      });
+      return world.timers.length;
+    },
+    clearTimeout: (id) => {
+      if (world.timers[id - 1]) world.timers[id - 1].active = false;
+    },
+  };
   world.reload = () => {
     const module = { exports: {} };
     vm.runInNewContext(
@@ -124,7 +147,7 @@ function nativeWorld() {
       {
         module,
         exports: module.exports,
-        Date,
+        ...world.runtime,
         Promise,
         Error,
         require: (name) => {
@@ -250,6 +273,151 @@ test("reauthentication invalidates an outstanding refresh response", async () =>
   assert.equal((await world.auth.loadIdentity()).user.id, "user-a");
   await assert.rejects(world.auth.getAccessToken(), /sign_in_required/);
   assert.equal(JSON.parse(world.secure.get(tokenKey)).accessToken, "account-a");
+});
+
+test("stalled silent discovery releases its shared lock and late discovery cannot start a refresh", async () => {
+  const world = nativeWorld();
+  await world.login();
+  world.expire();
+  const discovery = deferred();
+  world.beforeDiscovery = () => discovery.promise;
+  const first = world.auth.getAccessToken();
+  const second = world.auth.getAccessToken();
+  const rejected = Promise.all([
+    assert.rejects(first, /network_unavailable/),
+    assert.rejects(second, /network_unavailable/),
+  ]);
+  await until(() => world.discoveries === 2);
+  assert.equal(world.timers[0].delay, 15000);
+  world.timers[0].callback();
+  await rejected;
+  assert.equal(await world.auth.hasSession(), true);
+  assert.equal(world.timers[0].active, false);
+  world.beforeDiscovery = async () => {};
+  const retry = world.auth.getAccessToken();
+  await until(() => world.refreshes.length === 1);
+  world.refreshes[0].resolve(world.token("recovered"));
+  assert.equal(await retry, "recovered");
+  discovery.resolve();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(world.refreshes.length, 1);
+  assert.equal(JSON.parse(world.secure.get(tokenKey)).accessToken, "recovered");
+});
+
+test("silent discovery and refresh share one network budget and late refresh cannot overwrite a retry", async () => {
+  const world = nativeWorld();
+  await world.login();
+  world.expire();
+  world.beforeDiscovery = async () => {
+    world.now += 7000;
+  };
+  const first = world.auth.getAccessToken();
+  const rejected = assert.rejects(first, /network_unavailable/);
+  await until(() => world.refreshes.length === 1);
+  assert.equal(world.timers[0].delay, 15000);
+  assert.equal(world.timers[0].active, false);
+  assert.equal(world.timers[1].delay, 8000);
+  world.timers[1].callback();
+  await rejected;
+  assert.equal(await world.auth.hasSession(), true);
+  assert.equal(JSON.parse(world.secure.get(tokenKey)).accessToken, "account-a");
+  world.beforeDiscovery = async () => {};
+  const retry = world.auth.getAccessToken();
+  await until(() => world.refreshes.length === 2);
+  world.refreshes[1].resolve(world.token("recovered"));
+  assert.equal(await retry, "recovered");
+  world.refreshes[0].resolve(world.token("obsolete"));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(JSON.parse(world.secure.get(tokenKey)).accessToken, "recovered");
+});
+
+test("API token deadline lets the native refresh lock settle before an immediate connection retry", async () => {
+  const world = nativeWorld();
+  await world.login();
+  world.expire();
+  let apiRequests = 0;
+  const module = { exports: {} };
+  const filename = path.join(root, "src/family/api.ts");
+  const code = ts.transpileModule(fs.readFileSync(filename, "utf8"), {
+    compilerOptions: {
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2022,
+    },
+  }).outputText;
+  vm.runInNewContext(
+    code,
+    {
+      ...world.runtime,
+      module,
+      exports: module.exports,
+      AbortController,
+      Error,
+      Promise,
+      console: { info: () => {} },
+      require: (name) => {
+        if (name === "./auth") return world.auth;
+        if (name === "./config") return { familyConfig: world.config };
+        assert.fail(`Unexpected API dependency ${name}`);
+      },
+      fetch: async () => {
+        apiRequests++;
+        return { ok: true, status: 200, json: async () => ({ ok: true }) };
+      },
+    },
+    { filename },
+  );
+  const request = module.exports.familyRequest;
+  const pending = request("/v1/me").catch((error) => {
+    assert.equal(error.code, "network_unavailable");
+    return request("/v1/me");
+  });
+  await until(() => world.refreshes.length === 1);
+  const firstDeadline = world.timers
+    .filter((timer) => timer.active)
+    .sort((a, b) => a.deadline - b.deadline)[0];
+  assert.equal(
+    firstDeadline.delay,
+    15000,
+    "native refresh must settle before the outer safety deadline",
+  );
+  world.now = firstDeadline.deadline;
+  firstDeadline.callback();
+  await until(() => world.refreshes.length === 2);
+  assert.equal(apiRequests, 0);
+  assert.equal(
+    world.discoveries,
+    3,
+    "retry starts new discovery instead of reusing the expiring lock",
+  );
+  world.refreshes[1].resolve(world.token("recovered"));
+  assert.deepEqual(plain(await pending), { ok: true });
+  world.refreshes[0].resolve(world.token("obsolete"));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(apiRequests, 1);
+  assert.equal(JSON.parse(world.secure.get(tokenKey)).accessToken, "recovered");
+});
+
+test("a timed-out silent refresh cannot restore credentials after logout or a replacement login", async () => {
+  for (const replace of [false, true]) {
+    const world = nativeWorld();
+    await world.login();
+    world.expire();
+    const first = world.auth.getAccessToken();
+    const rejected = assert.rejects(first, /network_unavailable/);
+    await until(() => world.refreshes.length === 1);
+    world.timers[1].callback();
+    await rejected;
+    await world.auth.signOut();
+    if (replace) await world.login("replacement-account");
+    world.refreshes[0].resolve(world.token("obsolete"));
+    await new Promise((resolve) => setImmediate(resolve));
+    if (replace) {
+      assert.equal(await world.auth.getAccessToken(), "replacement-account");
+    } else {
+      assert.equal(await world.auth.hasSession(), false);
+      await assert.rejects(world.auth.getAccessToken(), /sign_in_required/);
+    }
+  }
 });
 
 test("reauthentication during a token write retains identity but never returns its token", async () => {

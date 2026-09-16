@@ -163,3 +163,67 @@ Device follow-up (no Azure/GitHub configuration change is needed):
 5. Log out during the retry. Confirm neither its eventual response nor reminder
    delivery restores the signed-out family. Native suspension, real token refresh
    and two-device behavior still need this physical-device check.
+
+## Follow-up: cold-start identity check — 17 September 2026 (build 21)
+
+Build 20's quiet retry covered foreground resume, not a fresh process. On cold
+start, the first temporary `/v1/me` failure still surfaced immediately. Token
+refresh also shared the request's 15-second deadline, and an indefinitely stalled
+native auth SDK request could retain the shared refresh promise. These are
+confirmed implementation gaps; they do not establish which network/server phase
+failed on the reported phone without runtime diagnostics.
+
+- After guarded local restoration, a matching cached account gets one serial,
+  quiet connection retry on cold start too. Rendering still does not await the
+  API. Known expiry, cache-origin mismatch, account deletion, transitions and
+  local storage errors do not receive this grace period. Queued changes still
+  require fresh identity, membership and snapshot checks before upload.
+- Token acquisition has a 20-second outer safety cap; native silent network
+  refresh has a shorter 15-second deadline so its shared lock clears before a
+  fresh retry. HTTP starts a separate budget:
+  30 seconds for `/v1/me`, 15 seconds for ordinary operations, and the existing
+  120 seconds for large transfers. Response-body reading is bounded as well.
+  A continued outage eventually shows the normal warning/backoff; no write is
+  automatically repeated by the request layer.
+- Confirmed HTTP 401 is handled immediately, without waiting for its error body.
+  Known 4xx status is retained if body reading fails or times out, so an access
+  denial cannot become a quietly retried connection error. Durable record queues
+  may retry the same operation ID after renewed identity/snapshot checks; direct
+  actions such as sending an invitation are not automatically replayed.
+- Native silent discovery/refresh shares a bounded 15-second deadline. Expo's
+  SDK cannot physically abort that network request, but its late result cannot
+  continue the timed-out flow or store replacement credentials. Logout and
+  account-generation checks remain in place.
+- Cached startup says “正在连接…” / “Connecting…”. A temporary failure says
+  “暂时无法连接” / “Connection unavailable”, rather than implying confirmed
+  expiry. The global warning is not repeated inside the account/family panel;
+  local validation and confirmation-dialog errors remain visible. Actual expired
+  sessions keep the existing access restrictions and expiry message.
+
+No Azure settings, API code, SQL migration or GitHub environment change is needed.
+This is a native preview update (OTA remains disabled). Install build 21 over the
+existing app; do not uninstall it to test reconnection.
+
+### Phone verification and optional diagnostics
+
+1. Confirm the installed app is version 0.2.1, build 21. Fully close and reopen
+   after leaving the account signed in for several hours. Guarded cached data
+   should render before the connection check finishes. A transient first failure
+   should recover without requiring a second manual refresh.
+2. Repeat in flight mode. After both bounded attempts fail, expect one connection
+   warning, not two or a false “session expired”. Restore the network and verify
+   automatic recovery; check that locally queued records upload only once.
+3. Repeat logout during reconnection and removal from the other phone. The old
+   response must not restore access. A genuine expired token still requires login.
+4. If failure recurs, record the time/timezone and whether this was a full launch
+   or foreground resume. When a native JavaScript console is available, filter
+   for `[family-request]`: `phase: token` separates token acquisition from
+   `phase: api`; `operation: identity` identifies the identity check. `durationMs`
+   and `outcome` distinguish timeout/cancellation/authentication/failure. Release
+   console visibility depends on the device tooling; these events are not
+   uploaded telemetry or a user-facing log export.
+5. Diagnostics intentionally exclude URLs, account/family identifiers, emails,
+   tokens, request/response bodies and raw exceptions. Do not send access tokens,
+   refresh tokens or private baby records when reporting a failure. A slow API
+   phase still needs separately authorized Azure logs to distinguish Graph, SQL
+   and hosting delay; mobile timing alone does not prove the backend cause.

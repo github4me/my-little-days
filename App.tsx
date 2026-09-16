@@ -1413,6 +1413,7 @@ function BabyApp({
                 <FamilyScreen
                   source={offlineState ?? initialState}
                   pilot={family}
+                  feedbackHandledByGlobalBanner
                   onBack={() => {
                     setSettingsPage("main");
                     mainScroll.current?.scrollTo({ y: 0, animated: false });
@@ -1442,7 +1443,11 @@ function BabyApp({
                   profileVersion={family.fullSnapshot?.family.profileVersion}
                   familyUiPreview={familyDemoEnabled}
                   accountPanel={
-                    <FamilyScreenView pilot={family} section="account" />
+                    <FamilyScreenView
+                      pilot={family}
+                      section="account"
+                      feedbackHandledByGlobalBanner
+                    />
                   }
                   familySharingVisible={!!family.user || family.sharedMode}
                   initialProfileExpanded={openProfile}

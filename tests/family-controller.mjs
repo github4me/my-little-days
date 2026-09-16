@@ -1233,6 +1233,246 @@ test("quiet resume does not silence an explicit invitation action failure", asyn
   }
 });
 
+test("quiet cold startup retries its first connection failure while keeping only validated cached data visible", async () => {
+  const world = makeWorld({ offline: false, queued: true });
+  const initial = deferred();
+  const retry = deferred();
+  const states = [];
+  let attempts = 0;
+  let active = 0;
+  let maxActive = 0;
+  world.beforeIdentify = async () => {
+    const attempt = ++attempts;
+    maxActive = Math.max(maxActive, ++active);
+    try {
+      await (attempt === 1 ? initial.promise : retry.promise);
+    } finally {
+      active--;
+    }
+  };
+  world.onStateChange = (value) => states.push(value);
+  const controller = world.mount();
+  try {
+    await until(() => attempts === 1, "first cold identity check");
+    initial.reject(new Error("network_unavailable"));
+    await until(() => attempts === 2, "quiet cold identity retry");
+    assert.equal(controller.result().booting, false);
+    assert.equal(controller.result().authStatus, "checking");
+    assert.equal(controller.result().error, null);
+    assert.equal(controller.result().ready, true);
+    assert.equal(controller.result().sharedState.profile.name, "Baby");
+    assert.equal(world.feedsSent.length, 0);
+    await controller.result().saveRecord("entry", {
+      id: "cold-start-diaper",
+      type: "diaper",
+      start: new Date().toISOString(),
+      diaperKind: "wet",
+      note: "Saved during quiet cold verification",
+    });
+    assert.equal(world.read().records.length, 1);
+    assert.equal(world.recordsSent.length, 0);
+    const firstRefresh = controller.result().refresh();
+    const secondRefresh = controller.result().refresh();
+    retry.resolve();
+    await Promise.all([firstRefresh, secondRefresh]);
+    await until(() => !controller.result().syncing, "cold retry settlement");
+    assert.equal(attempts, 2);
+    assert.equal(maxActive, 1);
+    assert.equal(world.feedsSent.length, 1);
+    assert.equal(world.recordsSent.length, 1);
+    assert.equal(world.recordsSent[0].durablySaved, true);
+    assert.equal(world.read().records.length, 0);
+    assert.equal(world.read().queue.length, 0);
+    assert.equal(controller.result().authStatus, "authenticated");
+    assert.equal(controller.result().error, null);
+    assert.equal(states.includes("network_unavailable"), false);
+    assert.equal(states.includes("unverified"), false);
+  } finally {
+    world.onStateChange = null;
+    initial.resolve();
+    retry.resolve();
+    controller.unmount();
+  }
+});
+
+test("quiet cold startup also retries a cached account that has not joined a family", async () => {
+  const world = makeWorld({ offline: false });
+  world.identity.families = [];
+  world.cachedIdentity.families = [];
+  world.data.state.snapshot = null;
+  world.data.state.draft = null;
+  world.disk.set(world.account, JSON.stringify(world.data.state));
+  const retry = deferred();
+  let attempts = 0;
+  world.beforeIdentify = async () => {
+    if (++attempts === 1) throw new Error("network_unavailable");
+    await retry.promise;
+  };
+  const controller = world.mount();
+  try {
+    await until(() => attempts === 2, "cached no-family identity retry");
+    assert.equal(controller.result().booting, false);
+    assert.equal(controller.result().authStatus, "checking");
+    assert.equal(controller.result().error, null);
+    assert.equal(controller.result().user.id, "user-a");
+    assert.equal(controller.result().sharedState, null);
+    retry.resolve();
+    await until(() => !controller.result().syncing, "verified no-family retry");
+    assert.equal(attempts, 2);
+    assert.equal(controller.result().authStatus, "authenticated");
+    assert.equal(controller.result().sharedMode, false);
+    assert.equal(controller.result().error, null);
+  } finally {
+    retry.resolve();
+    controller.unmount();
+  }
+});
+
+test("quiet cold startup surfaces a persistent connection failure after exactly one retry", async () => {
+  const world = makeWorld({ offline: false, queued: true });
+  const retry = deferred();
+  let attempts = 0;
+  world.beforeIdentify = async () => {
+    if (++attempts === 1) throw new Error("network_unavailable");
+    await retry.promise;
+  };
+  const controller = world.mount();
+  try {
+    await until(() => attempts === 2, "bounded cold retry");
+    assert.equal(controller.result().authStatus, "checking");
+    assert.equal(controller.result().error, null);
+    retry.reject(new Error("network_unavailable"));
+    await until(() => !controller.result().syncing, "persistent cold outage");
+    for (let index = 0; index < 5; index++) await tick();
+    assert.equal(attempts, 2);
+    assert.equal(controller.result().authStatus, "unverified");
+    assert.equal(controller.result().error, "network_unavailable");
+    assert.equal(controller.result().sharedState.profile.name, "Baby");
+    assert.equal(world.read().queue.length, 1);
+    assert.equal(world.feedsSent.length, 0);
+    assert.equal(world.authSignOutCalls, 0);
+  } finally {
+    retry.resolve();
+    controller.unmount();
+  }
+});
+
+for (const failure of [
+  { code: "unauthorized", status: 401, expected: "sign_in_required" },
+  { code: "network_unavailable", status: 401, expected: "sign_in_required" },
+  { code: "membership_revoked", status: 403, expected: "membership_revoked" },
+])
+  test(`quiet cold startup never retries or hides ${failure.code} (${failure.status})`, async () => {
+    const world = makeWorld({ offline: false, queued: true });
+    world.identityError = failure;
+    const controller = await boot(world);
+    try {
+      assert.equal(
+        world.http.filter((request) => request.url === "/v1/me").length,
+        1,
+      );
+      assert.equal(controller.result().error, failure.expected);
+      assert.equal(controller.result().ready, false);
+      assert.equal(controller.result().sharedState, null);
+      assert.equal(world.feedsSent.length, 0);
+      if (failure.expected === "sign_in_required") {
+        assert.equal(controller.result().authStatus, "reauth_required");
+        assert.equal(world.cacheGuard.reauthRequired, true);
+      } else {
+        assert.equal(controller.result().snapshot, null);
+        assert.equal(world.cachedIdentity.families.length, 0);
+      }
+    } finally {
+      controller.unmount();
+    }
+  });
+
+test("quiet cold startup cannot restore data after logout interrupts its retry", async () => {
+  const world = makeWorld({ offline: false, queued: true });
+  let attempts = 0;
+  let retrySignal;
+  let release;
+  world.beforeIdentify = (signal) => {
+    if (++attempts === 1) throw new Error("network_unavailable");
+    retrySignal = signal;
+    return new Promise((resolve, reject) => {
+      release = resolve;
+      signal.addEventListener(
+        "abort",
+        () => reject(new Error("network_unavailable")),
+        {
+          once: true,
+        },
+      );
+    });
+  };
+  const controller = world.mount();
+  try {
+    await until(() => retrySignal, "cancellable cold retry");
+    await controller.result().signOut();
+    assert.equal(retrySignal.aborted, true);
+    release();
+    await controller.result().refresh();
+    for (let index = 0; index < 5; index++) await tick();
+    assert.equal(attempts, 2);
+    assert.equal(controller.result().authStatus, "signed_out");
+    assert.equal(controller.result().user, null);
+    assert.equal(controller.result().sharedState, null);
+    assert.equal(controller.result().error, null);
+    assert.equal(world.read(), null);
+    assert.equal(world.cachedIdentity, null);
+    assert.equal(world.feedsSent.length, 0);
+  } finally {
+    release?.();
+    controller.unmount();
+  }
+});
+
+test("cold startup local storage errors are reported without a connectivity retry", async () => {
+  const world = makeWorld({ offline: false });
+  world.beforeRead = async () => {
+    throw new Error("local_data_invalid");
+  };
+  const controller = world.mount();
+  try {
+    await until(
+      () => !controller.result().booting,
+      "failed local cache restore",
+    );
+    assert.equal(world.http.length, 0);
+    assert.equal(controller.result().error, "local_data_invalid");
+    assert.equal(controller.result().authStatus, "unverified");
+    assert.equal(controller.result().ready, false);
+    assert.equal(controller.result().sharedState, null);
+  } finally {
+    controller.unmount();
+  }
+});
+
+test("cold startup without a cached identity retains recovery after a connection failure", async () => {
+  const world = makeWorld({ offline: false });
+  world.cachedIdentity = null;
+  world.identityError = { code: "network_unavailable", status: 0 };
+  const controller = world.mount();
+  try {
+    await until(
+      () => world.http.length > 0 && !controller.result().syncing,
+      "uncached identity failure",
+    );
+    assert.equal(
+      world.http.filter((request) => request.url === "/v1/me").length,
+      1,
+    );
+    assert.equal(controller.result().sharedMode, true);
+    assert.equal(controller.result().sharedState, null);
+    assert.equal(controller.result().user, null);
+    assert.equal(controller.result().authStatus, "unverified");
+    assert.equal(controller.result().error, "network_unavailable");
+  } finally {
+    controller.unmount();
+  }
+});
+
 test("cached bootstrap stays checking until identity is verified, and offline stays unverified", async () => {
   const world = makeWorld({ offline: false, queued: true });
   const identityGate = deferred();
@@ -1486,6 +1726,10 @@ test("a different background identity immediately hides the restored account and
     );
     assert.equal(world.cachedIdentity.user.id, "user-a");
     assert.equal(world.cacheGuard.reauthRequired, true);
+    assert.equal(
+      world.http.filter((request) => request.url === "/v1/me").length,
+      1,
+    );
   } finally {
     gate.resolve();
     controller.unmount();

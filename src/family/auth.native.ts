@@ -331,9 +331,33 @@ export async function saveIdentity(identity: PilotIdentity): Promise<void> {
     }
   });
 }
+// Expo's discovery/refresh helpers do not accept an AbortSignal. Bound each
+// await against the same deadline so a hung SDK request cannot retain the
+// shared refresh lock forever. Late results cannot advance to refresh/store.
+async function tokenNetworkStep<T>(
+  work: () => Promise<T>,
+  deadline: number,
+): Promise<T> {
+  const remaining = deadline - Date.now();
+  if (remaining <= 0) throw new Error("network_unavailable");
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const timedOut = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error("network_unavailable")),
+        remaining,
+      );
+    });
+    return await Promise.race([work(), timedOut]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function getAccessToken(): Promise<string> {
   if (refresh) return refresh;
   const current = generation;
+  const deadline = Date.now() + 15000;
   const work = async () => {
     const c = config(),
       token = await load();
@@ -346,17 +370,24 @@ export async function getAccessToken(): Promise<string> {
     if (reauthenticationUser) throw new Error("sign_in_required");
     if (token.expiresAt > Date.now() + 60_000) return token.accessToken;
     if (!token.refreshToken) throw new Error("sign_in_required");
-    const discovery = await AuthSession.fetchDiscoveryAsync(c.authority);
+    const discovery = await tokenNetworkStep(
+      () => AuthSession.fetchDiscoveryAsync(c.authority),
+      deadline,
+    );
     if (reauthenticationUser || current !== generation || signedOut)
       throw new Error("sign_in_required");
     try {
-      const updated = await AuthSession.refreshAsync(
-        {
-          clientId: c.clientId,
-          refreshToken: token.refreshToken,
-          scopes: ["openid", "profile", "offline_access", c.scope],
-        },
-        discovery,
+      const updated = await tokenNetworkStep(
+        () =>
+          AuthSession.refreshAsync(
+            {
+              clientId: c.clientId,
+              refreshToken: token.refreshToken,
+              scopes: ["openid", "profile", "offline_access", c.scope],
+            },
+            discovery,
+          ),
+        deadline,
       );
       await store(updated, current, token.refreshToken);
       if (reauthenticationUser || current !== generation || signedOut)

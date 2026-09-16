@@ -28,6 +28,7 @@ import type { OwnerSeedSummary } from "./ownerSeed";
 import { OwnerSeedCountsView } from "./OwnerSetupCard";
 import { familyInvitationCapacity } from "./invitationCapacity";
 import { FamilySyncDetails } from "./FamilySyncStatus";
+import { familySyncIssues } from "./syncIssues";
 
 type Translate = (
   key: FamilyMessageKey,
@@ -460,6 +461,7 @@ export default function FamilyScreenView({
   pilot,
   demo = false,
   section = "all",
+  feedbackHandledByGlobalBanner = false,
   ownerSetup,
   initialDataSummary,
 }: {
@@ -467,6 +469,7 @@ export default function FamilyScreenView({
   pilot: ReturnType<typeof useFamilyPilot>;
   demo?: boolean;
   section?: "all" | "account" | "family";
+  feedbackHandledByGlobalBanner?: boolean;
   ownerSetup?: React.ReactNode;
   initialDataSummary?: OwnerSeedSummary;
 }) {
@@ -505,13 +508,27 @@ export default function FamilyScreenView({
     !authenticated ||
     pilot.transitionPending ||
     (pilot.sharedMode && !pilot.ready);
-  const accountStatusKey: FamilyMessageKey = {
-    signed_out: "accountSignedOut",
-    checking: "accountChecking",
-    authenticated: "accountSignedIn",
-    reauth_required: "accountExpired",
-    unverified: "accountUnverified",
-  }[pilot.authStatus] as FamilyMessageKey;
+  const connectionUnavailable =
+    pilot.authStatus === "unverified" &&
+    [
+      "network_unavailable",
+      "network_error",
+      "offline",
+      "service_unavailable",
+    ].includes(pilot.error ?? "");
+  const connectingCachedAccount =
+    !!pilot.user && pilot.authStatus === "checking";
+  const accountStatusKey: FamilyMessageKey = connectingCachedAccount
+    ? "accountConnecting"
+    : connectionUnavailable
+      ? "accountConnectionUnavailable"
+      : ({
+          signed_out: "accountSignedOut",
+          checking: "accountChecking",
+          authenticated: "accountSignedIn",
+          reauth_required: "accountExpired",
+          unverified: "accountUnverified",
+        }[pilot.authStatus] as FamilyMessageKey);
   const snapshot = pilot.snapshot;
   const inviteCapacity = snapshot
     ? familyInvitationCapacity(snapshot.members, snapshot.invitations)
@@ -628,13 +645,23 @@ export default function FamilyScreenView({
     pilot.error === "sign_in_cancelled" ||
     (authenticated &&
       (pilot.error === "sign_in_required" || pilot.error === "unauthorized"));
+  // The surrounding app owns the global banner and its dismissal state. Only
+  // deduplicate feedback it represents, never local validation or modal errors.
+  const globalIssues =
+    feedbackHandledByGlobalBanner && !demo ? familySyncIssues(pilot) : [];
+  const globallyHandled = (kind: "error" | "notice", code: string | null) =>
+    globalIssues.some((issue) => issue.kind === kind && issue.code === code);
   const error = localError
     ? m(localError)
-    : pilot.error && !obsoleteAuthError
+    : pilot.error &&
+        !obsoleteAuthError &&
+        !globallyHandled("error", pilot.error)
       ? familyErrorMessage(locale, pilot.error)
       : null;
   const notice =
-    pilot.notice && (demo || pilot.notice !== "saved_locally")
+    pilot.notice &&
+    (demo || pilot.notice !== "saved_locally") &&
+    !globallyHandled("notice", pilot.notice)
       ? !demo && pilot.notice === "change_not_shared"
         ? m("noticeNotShared", {
             section:
@@ -1004,7 +1031,13 @@ export default function FamilyScreenView({
               </T>
               {!authenticated ? (
                 <T raw style={styles.muted(c.muted)}>
-                  {m("accountCachedDetails")}
+                  {m(
+                    connectingCachedAccount
+                      ? "accountConnectingDetails"
+                      : connectionUnavailable
+                        ? "accountConnectionDetails"
+                        : "accountCachedDetails",
+                  )}
                 </T>
               ) : null}
               {needsSignIn ? (

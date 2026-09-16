@@ -8,15 +8,18 @@ export default function FamilyScreen({
   onBack,
   source,
   pilot,
+  feedbackHandledByGlobalBanner = false,
 }: {
   onBack: () => void;
   source: State;
   pilot: ReturnType<typeof useFamilyPilot>;
+  feedbackHandledByGlobalBanner?: boolean;
 }) {
   return (
     <FamilyScreenView
       onBack={onBack}
       pilot={pilot}
+      feedbackHandledByGlobalBanner={feedbackHandledByGlobalBanner}
       section="family"
       ownerSetup={<OwnerSetup pilot={pilot} source={source} />}
     />
