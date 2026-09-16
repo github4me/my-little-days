@@ -13,7 +13,7 @@ public sealed class PublicIdentitySettings
     public string Mode { get; set; } = "Directory";
     public string LocalAccountIssuer { get; set; } = "";
     // Deployment contract: the mobile application's linked user flow must use email OTP only.
-    // Graph's emailAddress identity describes a login name, not a per-session OTP claim.
+    // Graph login identities describe the account, not a per-session OTP claim.
     public bool EmailOtpOnly { get; set; }
     public bool UseAccountDeletionCredentials { get; set; }
     public Guid GraphClientId { get; set; }
@@ -103,16 +103,17 @@ public sealed class GraphPublicIdentityAdmission(HttpClient http, PilotConfigura
         {
             var token = await Token(ct);
             using var user = await Get($"users/{objectId:D}?$select=id,accountEnabled,creationType,displayName,identities", token, ct);
-            var identity = ParseLocalAccount(user.RootElement, objectId, config.Admission.LocalAccountIssuer);
-            // Graph ignores the issuer in emailAddress filters. Revalidate the returned object,
-            // require one exact match, and fail closed on pagination/ambiguous directory state.
-            var filter = $"identities/any(i:i/issuerAssignedId eq '{identity.Email.Replace("'", "''")}' and i/issuer eq '{config.Admission.LocalAccountIssuer}')";
+            var identity = ParseLocalAccount(user.RootElement, objectId, config.Admission.LocalAccountIssuer, out var identityIssuer);
+            // OTP identities use the special "mail" issuer, not the tenant domain. Graph
+            // ignores issuer for emailAddress filters; both formats need exact revalidation.
+            var filter = $"identities/any(i:i/issuerAssignedId eq '{identity.Email.Replace("'", "''")}' and i/issuer eq '{identityIssuer}')";
             using var matches = await Get($"users?$select=id,accountEnabled,creationType,displayName,identities&$top=2&$filter={Uri.EscapeDataString(filter)}", token, ct);
             if (matches.RootElement.TryGetProperty("@odata.nextLink", out _) ||
                 !matches.RootElement.TryGetProperty("value", out var users) || users.ValueKind != JsonValueKind.Array || users.GetArrayLength() != 1)
                 throw new ApiException(403, "identity_not_supported");
-            var verified = ParseLocalAccount(users[0], objectId, config.Admission.LocalAccountIssuer);
-            if (verified.Email != identity.Email) throw new ApiException(403, "identity_not_supported");
+            var verified = ParseLocalAccount(users[0], objectId, config.Admission.LocalAccountIssuer, out var verifiedIssuer);
+            if (verified.Email != identity.Email || verifiedIssuer != identityIssuer)
+                throw new ApiException(403, "identity_not_supported");
             return identity;
         }
         catch (ApiException) { throw; }
@@ -125,27 +126,42 @@ public sealed class GraphPublicIdentityAdmission(HttpClient http, PilotConfigura
     }
 
     public static PilotIdentity ParseLocalAccount(JsonElement user, Guid objectId, string issuer)
+        => ParseLocalAccount(user, objectId, issuer, out _);
+
+    private static PilotIdentity ParseLocalAccount(JsonElement user, Guid objectId, string issuer, out string identityIssuer)
     {
         if (user.ValueKind != JsonValueKind.Object ||
             !Guid.TryParse(String(user, "id"), out var id) || id != objectId || id == Guid.Empty ||
             !user.TryGetProperty("accountEnabled", out var enabled) || enabled.ValueKind != JsonValueKind.True ||
-            String(user, "creationType") != "LocalAccount" ||
+            !user.TryGetProperty("creationType", out var creationType) ||
             !user.TryGetProperty("identities", out var identities) || identities.ValueKind != JsonValueKind.Array)
             throw new ApiException(403, "identity_not_supported");
+        var localEmail = creationType.ValueKind == JsonValueKind.String && creationType.GetString() == "LocalAccount";
+        // External ID email-code sign-ups are represented as creationType=null and
+        // federated/mail. This is NOT permission to admit arbitrary federated accounts.
+        var emailOtp = creationType.ValueKind == JsonValueKind.Null;
+        if (!localEmail && !emailOtp) throw new ApiException(403, "identity_not_supported");
+        identityIssuer = emailOtp ? "mail" : issuer;
         string? email = null;
+        var tenantUpnCount = 0;
         foreach (var identity in identities.EnumerateArray())
         {
             if (identity.ValueKind != JsonValueKind.Object) throw new ApiException(403, "identity_not_supported");
             var signInType = String(identity, "signInType");
-            // Directory-generated UPNs are not mailbox proof; other login methods are unsupported.
-            if (signInType == "userPrincipalName") continue;
-            if (signInType != "emailAddress" || email is not null ||
-                !string.Equals(String(identity, "issuer"), issuer, StringComparison.OrdinalIgnoreCase))
+            // UPN is only a tenant anchor, never mailbox proof or an email fallback.
+            if (signInType == "userPrincipalName")
+            {
+                if (!string.Equals(String(identity, "issuer"), issuer, StringComparison.OrdinalIgnoreCase) || ++tenantUpnCount > 1)
+                    throw new ApiException(403, "identity_not_supported");
+                continue;
+            }
+            if (signInType != (emailOtp ? "federated" : "emailAddress") || email is not null ||
+                !string.Equals(String(identity, "issuer"), identityIssuer, StringComparison.OrdinalIgnoreCase))
                 throw new ApiException(403, "identity_not_supported");
             email = PilotConfiguration.NormalizeEmail(String(identity, "issuerAssignedId"));
             if (!PilotConfiguration.IsEmail(email)) throw new ApiException(403, "identity_not_supported");
         }
-        if (email is null) throw new ApiException(403, "identity_not_supported");
+        if (email is null || (emailOtp && tenantUpnCount != 1)) throw new ApiException(403, "identity_not_supported");
         return new() { ObjectId = objectId, Email = email, DisplayName = DisplayName(String(user, "displayName")) };
     }
 

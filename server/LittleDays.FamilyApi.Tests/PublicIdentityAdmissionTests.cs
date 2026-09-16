@@ -38,6 +38,68 @@ public sealed class PublicIdentityAdmissionTests
     }
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ResolvesEmailOtpIdentityAndUsesMailIssuerForLookup(bool reverseIdentities)
+    {
+        var account = OtpAccount();
+        account["mail"] = "untrusted@example.test";
+        if (reverseIdentities)
+        {
+            var identities = account["identities"]!.AsArray();
+            account["identities"] = new JsonArray(identities[1]!.DeepClone(), identities[0]!.DeepClone());
+        }
+        using var handler = Handler(account);
+        using var http = new HttpClient(handler);
+        var identity = await new GraphPublicIdentityAdmission(http, Config()).AdmitAsync(Principal(), default);
+        Assert.Equal(userId, identity.ObjectId);
+        Assert.Equal("parent@example.test", identity.Email);
+        Assert.Equal(3, handler.Requests.Count);
+        var filterUrl = Uri.UnescapeDataString(handler.Requests[2]);
+        Assert.Contains("issuer eq 'mail'", filterUrl);
+        Assert.Contains("issuerAssignedId eq 'parent@example.test'", filterUrl);
+        Assert.DoesNotContain("untrusted", filterUrl);
+    }
+
+    [Theory]
+    [InlineData("guest")]
+    [InlineData("missing_creation_type")]
+    [InlineData("invalid_creation_type")]
+    [InlineData("social")]
+    [InlineData("wrong_upn_issuer")]
+    [InlineData("missing_upn")]
+    [InlineData("duplicate_upn")]
+    [InlineData("duplicate_mail")]
+    [InlineData("mixed_email_methods")]
+    [InlineData("disabled")]
+    [InlineData("malformed_email")]
+    public async Task EmailOtpSupportDoesNotAdmitUnsupportedOrAmbiguousAccounts(string scenario)
+    {
+        var account = OtpAccount();
+        var identities = account["identities"]!.AsArray();
+        switch (scenario)
+        {
+            case "guest": account["creationType"] = "Invitation"; break;
+            case "missing_creation_type": account.Remove("creationType"); break;
+            case "invalid_creation_type": account["creationType"] = 42; break;
+            case "social": identities[0]!["issuer"] = "google.com"; break;
+            case "wrong_upn_issuer": identities[1]!["issuer"] = "other.onmicrosoft.com"; break;
+            case "missing_upn": identities.RemoveAt(1); break;
+            case "duplicate_upn": identities.Add(identities[1]!.DeepClone()); break;
+            case "duplicate_mail": identities.Add(identities[0]!.DeepClone()); break;
+            case "mixed_email_methods": identities.Add(Account()["identities"]![0]!.DeepClone()); break;
+            case "disabled": account["accountEnabled"] = false; break;
+            case "malformed_email": identities[0]!["issuerAssignedId"] = "not-a-mailbox"; break;
+        }
+        using var handler = Handler(account);
+        using var http = new HttpClient(handler);
+        var error = await Assert.ThrowsAsync<ApiException>(() => new GraphPublicIdentityAdmission(http, Config()).AdmitAsync(Principal(), default));
+        Assert.Equal(403, error.Status);
+        Assert.Equal("identity_not_supported", error.Code);
+        Assert.Equal(2, handler.Requests.Count);
+    }
+
+    [Theory]
     [InlineData("disabled")]
     [InlineData("different_id")]
     [InlineData("administrator")]
@@ -94,6 +156,36 @@ public sealed class PublicIdentityAdmissionTests
         using var http = new HttpClient(handler);
         Assert.Equal("identity_not_supported", (await Assert.ThrowsAsync<ApiException>(() =>
             new GraphPublicIdentityAdmission(http, Config()).AdmitAsync(Principal(), default))).Code);
+        Assert.Equal(3, handler.Requests.Count);
+    }
+
+    [Theory]
+    [InlineData("different_id")]
+    [InlineData("different_email")]
+    [InlineData("different_method")]
+    [InlineData("disabled")]
+    [InlineData("missing")]
+    [InlineData("duplicate")]
+    [InlineData("pagination")]
+    public async Task EmailOtpLookupMustReturnOneUnchangedEnabledIdentity(string scenario)
+    {
+        var account = OtpAccount();
+        var matched = (JsonObject)account.DeepClone();
+        switch (scenario)
+        {
+            case "different_id": matched["id"] = Guid.NewGuid().ToString(); break;
+            case "different_email": matched["identities"]![0]!["issuerAssignedId"] = "other@example.test"; break;
+            case "different_method": matched = Account(); break;
+            case "disabled": matched["accountEnabled"] = false; break;
+        }
+        var matches = new JsonObject { ["value"] = new JsonArray(matched) };
+        if (scenario == "missing") matches["value"] = new JsonArray();
+        if (scenario == "duplicate") matches["value"]!.AsArray().Add(account.DeepClone());
+        if (scenario == "pagination") matches["@odata.nextLink"] = "https://attacker.example.test";
+        using var handler = new ScriptedHandler(Token(), Json(account), Json(matches));
+        using var http = new HttpClient(handler);
+        var error = await Assert.ThrowsAsync<ApiException>(() => new GraphPublicIdentityAdmission(http, Config()).AdmitAsync(Principal(), default));
+        Assert.Equal("identity_not_supported", error.Code);
         Assert.Equal(3, handler.Requests.Count);
     }
 
@@ -209,6 +301,14 @@ public sealed class PublicIdentityAdmissionTests
             ["signInType"] = "emailAddress", ["issuer"] = Issuer, ["issuerAssignedId"] = " Parent@Example.Test "
         }, new JsonObject { ["signInType"] = "userPrincipalName", ["issuer"] = Issuer, ["issuerAssignedId"] = "not-an-email-proof" })
     };
+    private JsonObject OtpAccount()
+    {
+        var account = Account();
+        account["creationType"] = null;
+        account["identities"]![0]!["signInType"] = "federated";
+        account["identities"]![0]!["issuer"] = "mail";
+        return account;
+    }
     private static ScriptedHandler Handler(JsonObject account) => new(Token(), Json(account),
         Json(new JsonObject { ["value"] = new JsonArray(account.DeepClone()) }));
     private static HttpResponseMessage Token() => new(HttpStatusCode.OK)
