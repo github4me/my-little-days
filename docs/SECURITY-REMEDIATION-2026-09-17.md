@@ -10,7 +10,7 @@ real families or restore a production database as a smoke test.
 | Finding | Candidate change | Remaining acceptance |
 | --- | --- | --- |
 | SEC-01 | Isolated authenticated-account and anonymous rate budgets; authenticated users no longer share the anonymous allowance. | Deploy API; observe authenticated failures/429s separately from liveness. Limits remain per instance, not a DDoS perimeter. |
-| SEC-02 | Aggregate payload/count budgets, bounded snapshot serialization, authorized conditional reads before materialization, per-family locking for ordinary operations, and bounded completed-purge tracking. | Apply DbUp 0004 before API deployment; isolated boundary/concurrency checks and operational load monitoring. No pagination contract change. |
+| SEC-02 | Aggregate payload/count budgets, bounded snapshot serialization, authorized conditional reads before materialization, per-family locking for ordinary operations, and bounded completed-purge tracking. | Apply DbUp 0004 before API deployment; review existing history sizes and monitor operational load. Isolated boundary/concurrency tests passed. No pagination contract change. |
 | SEC-03 | Explicit `Recovery:Blocked` maintenance gate blocks all API data routes and pauses deletion processing; readiness reports blocked while liveness remains available. | **Not closed:** independent complete recovery evidence/replay and an isolated restore drill are still required. The gate does not automatically detect an old database or reconstruct missing decisions. No production restore is authorized. |
 | SEC-04 | Durable notification-cleanup journal, independent cancellation/dismissal attempts, startup retry and fail-closed delivery. | Native notification acceptance on a disposable device, including restart and injected OS/storage failure. |
 | SEC-05 | New iOS native module excludes persistent `Documents/SQLite` from OS backup on launch and verifies protection before family DB access. Covers existing databases and future WAL/SHM files without migration or purgeable storage. | New native binary required; inspect signed-device attributes and perform disposable backup/restore. Earlier backups cannot be recalled. |
@@ -165,3 +165,31 @@ No subscription upgrade is assumed. After approving that route:
 Apple's [backup-exclusion guidance](https://developer.apple.com/documentation/foundation/optimizing-your-app-s-data-for-icloud-backup)
 supports the directory attribute; source/VM tests are not a substitute for the
 signed-device checks above.
+
+## Release evidence — 17 September 2026 (Sydney)
+
+- Code committed/pushed with the GitHub plugin on `feature/family-invitations`:
+  [`9c2fef26266bb332e8f8d7741f25e3f4a46ea34d`](https://github.com/github4me/my-little-days/commit/9c2fef26266bb332e8f8d7741f25e3f4a46ea34d).
+  The remote tree matched the tested local index. Earlier sleep/recording-response
+  changes are included; unrelated local `work/` and verification output folders
+  were not committed or uploaded to EAS.
+- Local verification: 384 mobile unit/controller/UI/native-adapter tests;
+  183 API + 11 DbUp tests against generated disposable local SQL databases,
+  all passed with no SQL skips; browser regression and Web/iOS Hermes exports
+  passed. Eighteen action/workflow policy tests passed. npm and .NET dependency
+  reports found no known vulnerable packages in the checked dependency set.
+- [EAS iOS preview build](https://expo.dev/accounts/expo4chao/projects/little-days/builds/4b6dc6c8-4c8a-438d-bce5-8d1b00cca534)
+  **FINISHED** at `2026-09-16T18:05:22.831Z` (17 September in Sydney).
+  Build ID `4b6dc6c8-4c8a-438d-bce5-8d1b00cca534`, source commit above,
+  version **0.2.1**, build **19**, internal distribution, preview environment,
+  existing two registered iPhones. Native logs include successful packaging of
+  `FamilyStorageSecurity`; the image-manipulator native dependency is included.
+- Expo Doctor reported non-blocking existing splash-schema and available SDK
+  patch-version warnings. They did not fail the native build and were not
+  suppressed; they remain a separate maintenance follow-up.
+- No OTA was published, no TestFlight submission was made, and no production
+  API/SQL migration or Azure settings change was performed. This is a successful
+  signed build, **not** physical-device backup/notification/orientation acceptance
+  or proof that SEC-03 is closed. Follow the manual prerequisites above before
+  releasing the backend, and keep restored service traffic closed without
+  independent reconciliation evidence.
