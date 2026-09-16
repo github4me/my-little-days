@@ -93,6 +93,17 @@ const retryable = (error: unknown) =>
 const authenticationRequired = (cause: unknown) =>
   ["sign_in_required", "unauthorized"].includes(errorCode(cause)) ||
   (cause instanceof PilotApiError && cause.status === 401);
+const connectionFailure = (cause: unknown) =>
+  [
+    "network_unavailable",
+    "network_error",
+    "offline",
+    "service_unavailable",
+  ].includes(errorCode(cause)) &&
+  (!(cause instanceof PilotApiError) ||
+    cause.status === 0 ||
+    cause.status === 408 ||
+    cause.status >= 500);
 
 export type FamilyAuthStatus =
   | "signed_out"
@@ -183,6 +194,11 @@ export function useFamilyPilot() {
   const writes = useRef<Promise<void>>(Promise.resolve());
   const requests = useRef(new AbortController());
   const foreground = useRef(AppState.currentState === "active");
+  const backgroundGeneration = useRef(0);
+  const reconnectRetry = useRef(false);
+  const backgroundRetryPending = useRef(false);
+  const syncConnectionError = useRef<string | null>(null);
+  const identityUnavailable = useRef(false);
   const failures = useRef(0),
     nextRefresh = useRef(0);
   const isCurrent = (e: number) => mounted.current && e === epoch.current;
@@ -300,7 +316,11 @@ export function useFamilyPilot() {
       throw new Error(isCurrent(e) ? "local_save_failed" : "session_changed");
     }
   }
-  async function identify(e: number, expectedAccountId?: string) {
+  async function identify(
+    e: number,
+    expectedAccountId?: string,
+    deferConnectionError: () => boolean = () => false,
+  ) {
     let result: PilotIdentity;
     try {
       result = await familyRequest<PilotIdentity>(
@@ -312,7 +332,9 @@ export function useFamilyPilot() {
       check(e);
       if (authenticationRequired(cause)) pauseAuthentication();
       else if (!authPaused.current) {
-        setAuthStatus("unverified");
+        identityUnavailable.current = true;
+        if (!connectionFailure(cause) || !deferConnectionError())
+          setAuthStatus("unverified");
         void stopNotificationDelivery().catch(() => {});
       }
       throw cause;
@@ -339,6 +361,7 @@ export function useFamilyPilot() {
       throw new Error("account_mismatch");
     }
     authPaused.current = false;
+    identityUnavailable.current = false;
     setAuthStatus("authenticated");
     if (!who.current || !cacheRestored.current) {
       const stored = await loadPilot(accountKey(result.user.id));
@@ -779,13 +802,30 @@ export function useFamilyPilot() {
     )
       return;
     const e = epoch.current;
+    const background = backgroundGeneration.current;
+    const reconnecting = reconnectRetry.current;
+    reconnectRetry.current = false;
+    // A suspended request can time out just as iOS restores the app. Give
+    // automatic reconnection one fresh attempt before showing a network error;
+    // explicit actions and all authorization/data errors keep their normal path.
+    const deferConnectionError = () =>
+      !commands.current &&
+      !lifecycleActive.current &&
+      !authenticating.current &&
+      !authPaused.current &&
+      !signedOut.current &&
+      !requests.current.signal.aborted &&
+      (!foreground.current ||
+        background !== backgroundGeneration.current ||
+        reconnecting);
     setSyncing(true);
     try {
-      const me = await identify(e);
+      const me = await identify(e, undefined, deferConnectionError);
       if (current.current.transition) {
         await resumeTransition(e);
         failures.current = 0;
         nextRefresh.current = Date.now() + 30000;
+        syncConnectionError.current = null;
         setError(null);
         return;
       }
@@ -804,6 +844,7 @@ export function useFamilyPilot() {
         }
         failures.current = 0;
         nextRefresh.current = Date.now() + 30000;
+        syncConnectionError.current = null;
         markReady(true);
         // Identity-only refresh cannot resolve a failed local write. Successful
         // authentication still clears obsolete login and connectivity errors.
@@ -922,9 +963,14 @@ export function useFamilyPilot() {
       nextRefresh.current =
         Date.now() +
         (recordsForSend(durable.current, current.current).length ? 0 : 30000);
+      syncConnectionError.current = null;
       setError(null);
     } catch (cause) {
       if (!isCurrent(e)) return;
+      if (connectionFailure(cause) && deferConnectionError()) {
+        nextRefresh.current = 0;
+        return "reconnect";
+      }
       const code = authenticationRequired(cause)
         ? "sign_in_required"
         : errorCode(cause);
@@ -962,6 +1008,8 @@ export function useFamilyPilot() {
       failures.current = Math.min(5, failures.current + 1);
       nextRefresh.current =
         Date.now() + Math.min(300000, 15000 * 2 ** failures.current);
+      syncConnectionError.current =
+        connectionFailure(cause) && !commands.current ? code : null;
       setError(code);
     } finally {
       if (isCurrent(e)) setSyncing(false);
@@ -969,7 +1017,20 @@ export function useFamilyPilot() {
   }
   function sync() {
     if (syncLock.current) return syncLock.current;
-    const promise = runSync();
+    const e = epoch.current;
+    const promise = (async () => {
+      let outcome = await runSync();
+      while (outcome === "reconnect" && isCurrent(e) && foreground.current) {
+        // Reuse this lock: never overlap requests or send queued work before
+        // the new membership/snapshot check. A fresh failure uses normal backoff.
+        reconnectRetry.current = false;
+        outcome = await runSync();
+      }
+      if (isCurrent(e)) {
+        backgroundRetryPending.current = outcome === "reconnect";
+        reconnectRetry.current = false;
+      }
+    })();
     syncLock.current = promise;
     void promise.finally(() => {
       if (syncLock.current === promise) syncLock.current = null;
@@ -1000,6 +1061,9 @@ export function useFamilyPilot() {
   ): Promise<T> {
     if (commands.current) throw new Error("action_busy");
     commands.current = true;
+    reconnectRetry.current = false;
+    backgroundRetryPending.current = false;
+    syncConnectionError.current = null;
     setBusy(true);
     if (!preserveError)
       setError(authPaused.current ? "sign_in_required" : null);
@@ -1149,8 +1213,26 @@ export function useFamilyPilot() {
     mounted.current = true;
     void start();
     const subscription = AppState.addEventListener("change", (value) => {
+      const wasForeground = foreground.current;
       foreground.current = value === "active";
-      if (foreground.current && who.current) void sync();
+      if (wasForeground && !foreground.current) backgroundGeneration.current++;
+      if (!wasForeground && foreground.current && who.current) {
+        // If the interrupted attempt already failed in the background, this
+        // foreground check IS its fresh retry, not a new two-attempt budget.
+        reconnectRetry.current = !backgroundRetryPending.current;
+        backgroundRetryPending.current = false;
+        const previousError = syncConnectionError.current;
+        if (previousError && !authPaused.current && !commands.current) {
+          syncConnectionError.current = null;
+          setError((previous) =>
+            previous === previousError ? null : previous,
+          );
+          setAuthStatus((previous) =>
+            previous === "unverified" ? "checking" : previous,
+          );
+        }
+        void sync();
+      }
     });
     const timer = setInterval(() => {
       if (
@@ -1212,6 +1294,7 @@ export function useFamilyPilot() {
   const notificationOrigin =
     ready &&
     authStatus === "authenticated" &&
+    !identityUnavailable.current &&
     !state.transition &&
     isFullSnapshot(state.snapshot) &&
     state.snapshot.extrasSchemaVersion === 1 &&
@@ -1232,6 +1315,7 @@ export function useFamilyPilot() {
       if (notificationOrigin) {
         if (
           notificationContext.current !== notificationOrigin ||
+          identityUnavailable.current ||
           authPaused.current ||
           signedOut.current ||
           !verified.current
@@ -1295,6 +1379,7 @@ export function useFamilyPilot() {
       const stillCurrent = () =>
         isCurrent(e) &&
         verified.current &&
+        !identityUnavailable.current &&
         !authPaused.current &&
         !signedOut.current &&
         !lifecycleActive.current &&

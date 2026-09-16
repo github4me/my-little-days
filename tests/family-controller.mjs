@@ -185,6 +185,11 @@ function makeWorld({ offline = true, queued = false } = {}) {
     }
   };
   const contexts = new Map();
+  const appStateListeners = new Set();
+  world.changeAppState = (value) => {
+    overrides["react-native"].AppState.currentState = value;
+    for (const listener of appStateListeners) listener(value);
+  };
   let activeReact;
   let operationSequence = 0;
   const ownerSetupDisk = world.ownerSetupDisk;
@@ -269,7 +274,11 @@ function makeWorld({ offline = true, queued = false } = {}) {
       Platform: { OS: "ios" },
       AppState: {
         currentState: "active",
-        addEventListener: () => ({ remove() {} }),
+        addEventListener: (event, listener) => {
+          assert.equal(event, "change");
+          appStateListeners.add(listener);
+          return { remove: () => appStateListeners.delete(listener) };
+        },
       },
     },
     "expo-crypto": {
@@ -379,7 +388,7 @@ function makeWorld({ offline = true, queued = false } = {}) {
         world.http.push({ url, operation });
         if (world.offline) throw new PilotApiError("network_unavailable");
         if (url === "/v1/me") {
-          await world.beforeIdentify();
+          await world.beforeIdentify(signal);
           if (world.identityError)
             throw new PilotApiError(
               world.identityError.code,
@@ -666,6 +675,7 @@ function makeWorld({ offline = true, queued = false } = {}) {
           (next) => {
             slots[index] =
               typeof next === "function" ? next(slots[index]) : next;
+            world.onStateChange?.(slots[index]);
           },
         ];
       },
@@ -702,9 +712,12 @@ function makeWorld({ offline = true, queued = false } = {}) {
       return value;
     }
     result();
-    const cleanups = effects.map((effect) => effect());
+    const cleanups = effects.splice(0).map((effect) => effect());
     return {
       result,
+      flushEffects: () => {
+        cleanups.push(...effects.splice(0).map((effect) => effect()));
+      },
       unmount: () => cleanups.forEach((cleanup) => cleanup?.()),
     };
   };
@@ -852,6 +865,373 @@ for (const failDiscard of [false, true]) {
     }
   });
 }
+
+test("quiet resume retries an interrupted identity check without flashing offline or repeating queued writes", async () => {
+  const world = makeWorld({ offline: false });
+  const controller = await boot(world);
+  const interrupted = deferred();
+  const fresh = deferred();
+  const states = [];
+  let attempts = 0;
+  let activeRequests = 0;
+  let maxActiveRequests = 0;
+  world.http.length = 0;
+  world.beforeIdentify = async () => {
+    const attempt = ++attempts;
+    maxActiveRequests = Math.max(maxActiveRequests, ++activeRequests);
+    try {
+      await (attempt === 1 ? interrupted.promise : fresh.promise);
+    } finally {
+      activeRequests--;
+    }
+  };
+  world.onStateChange = (value) => states.push(value);
+  try {
+    const refresh = controller.result().refresh();
+    await until(() => attempts === 1, "identity check before backgrounding");
+    world.changeAppState("background");
+    world.changeAppState("active");
+    interrupted.reject(new Error("network_unavailable"));
+    await until(() => attempts === 2, "fresh foreground identity retry");
+    assert.equal(controller.result().ready, true);
+    assert.equal(controller.result().sharedState.profile.name, "Baby");
+    assert.equal(controller.result().error, null);
+    assert.notEqual(controller.result().authStatus, "unverified");
+    await controller.result().saveRecord("entry", {
+      id: "quiet-resume-diaper",
+      type: "diaper",
+      start: new Date().toISOString(),
+      diaperKind: "wet",
+      note: "Saved while reconnecting",
+    });
+    assert.equal(world.read().records.length, 1);
+    assert.equal(world.recordsSent.length, 0);
+    fresh.resolve();
+    await refresh;
+    await until(
+      () => !controller.result().syncing && world.recordsSent.length === 1,
+      "verified retry and durable queued write",
+    );
+    assert.equal(maxActiveRequests, 1, "identity checks must not overlap");
+    assert.equal(attempts, 2, "only one fresh foreground retry is needed");
+    assert.equal(world.recordsSent[0].durablySaved, true);
+    assert.equal(world.read().records.length, 0);
+    assert.equal(states.includes("network_unavailable"), false);
+    assert.equal(states.includes("unverified"), false);
+    assert.equal(controller.result().sharedState.profile.name, "Baby");
+    assert.equal(controller.result().authStatus, "authenticated");
+  } finally {
+    world.onStateChange = null;
+    interrupted.resolve();
+    fresh.resolve();
+    controller.unmount();
+  }
+});
+
+test("quiet resume reports a continuing outage after its one fresh identity retry fails", async () => {
+  const world = makeWorld({ offline: false });
+  const controller = await boot(world);
+  const interrupted = deferred();
+  const fresh = deferred();
+  let attempts = 0;
+  world.beforeIdentify = () =>
+    ++attempts === 1 ? interrupted.promise : fresh.promise;
+  try {
+    const refresh = controller.result().refresh();
+    await until(() => attempts === 1, "identity request before suspension");
+    world.changeAppState("background");
+    world.changeAppState("active");
+    interrupted.reject(new Error("network_unavailable"));
+    await until(() => attempts === 2, "one immediate foreground retry");
+    assert.equal(controller.result().error, null);
+    assert.notEqual(controller.result().authStatus, "unverified");
+    fresh.reject(new Error("network_unavailable"));
+    await refresh;
+    await until(() => !controller.result().syncing, "confirmed outage");
+    for (let i = 0; i < 5; i++) await tick();
+    assert.equal(attempts, 2, "persistent outage must not create a retry loop");
+    assert.equal(controller.result().error, "network_unavailable");
+    assert.equal(controller.result().authStatus, "unverified");
+    assert.equal(controller.result().ready, true);
+    assert.equal(controller.result().sharedState.profile.name, "Baby");
+    assert.equal(world.authSignOutCalls, 0);
+  } finally {
+    interrupted.resolve();
+    fresh.resolve();
+    controller.unmount();
+  }
+});
+
+test("quiet resume retries its first new connectivity failure without an old in-flight request", async () => {
+  const world = makeWorld({ offline: false });
+  const controller = await boot(world);
+  const fresh = deferred();
+  const states = [];
+  let attempts = 0;
+  world.onStateChange = (value) => states.push(value);
+  world.beforeIdentify = async () => {
+    if (++attempts === 1) throw new Error("network_unavailable");
+    await fresh.promise;
+  };
+  try {
+    assert.equal(controller.result().syncing, false);
+    world.changeAppState("background");
+    world.changeAppState("active");
+    await until(() => attempts === 2, "fresh resume retry without old request");
+    assert.equal(controller.result().error, null);
+    assert.equal(controller.result().ready, true);
+    assert.equal(controller.result().sharedState.profile.name, "Baby");
+    fresh.resolve();
+    await until(() => !controller.result().syncing, "successful resume");
+    assert.equal(attempts, 2);
+    assert.equal(states.includes("network_unavailable"), false);
+    assert.equal(states.includes("unverified"), false);
+    assert.equal(controller.result().authStatus, "authenticated");
+  } finally {
+    world.onStateChange = null;
+    fresh.resolve();
+    controller.unmount();
+  }
+});
+
+test("quiet resume defers a background failure only until one fresh foreground attempt fails", async () => {
+  const world = makeWorld({ offline: false });
+  const controller = await boot(world);
+  const interrupted = deferred();
+  const fresh = deferred();
+  let attempts = 0;
+  world.beforeIdentify = () =>
+    ++attempts === 1 ? interrupted.promise : fresh.promise;
+  try {
+    const refresh = controller.result().refresh();
+    await until(() => attempts === 1, "request before entering background");
+    world.changeAppState("background");
+    interrupted.reject(new Error("network_unavailable"));
+    await refresh;
+    assert.equal(attempts, 1, "do not retry while backgrounded");
+    assert.equal(controller.result().syncing, false);
+    assert.equal(controller.result().error, null);
+    assert.notEqual(controller.result().authStatus, "unverified");
+    assert.equal(controller.result().ready, true);
+    world.changeAppState("active");
+    await until(() => attempts === 2, "one foreground check after old failure");
+    assert.equal(controller.result().error, null);
+    fresh.reject(new Error("network_unavailable"));
+    await until(
+      () => !controller.result().syncing,
+      "confirmed foreground outage",
+    );
+    assert.equal(
+      attempts,
+      2,
+      "the background failure already used the grace attempt",
+    );
+    assert.equal(controller.result().error, "network_unavailable");
+    assert.equal(controller.result().authStatus, "unverified");
+    assert.equal(controller.result().sharedState.profile.name, "Baby");
+  } finally {
+    interrupted.resolve();
+    fresh.resolve();
+    controller.unmount();
+  }
+});
+
+test("quiet resume keeps reminder delivery suspended across local saves and renders until identity succeeds", async () => {
+  const world = makeWorld({ offline: false });
+  const controller = await boot(world);
+  const interrupted = deferred();
+  const fresh = deferred();
+  let attempts = 0;
+  world.beforeIdentify = () =>
+    ++attempts === 1 ? interrupted.promise : fresh.promise;
+  try {
+    controller.flushEffects();
+    await tick();
+    const enable = controller.result().setNotificationsEnabled;
+    await enable(true);
+    const before = world.notificationCalls.length;
+    const refresh = controller.result().refresh();
+    await until(() => attempts === 1, "identity check before suspend");
+    world.changeAppState("background");
+    world.changeAppState("active");
+    interrupted.reject(new Error("network_unavailable"));
+    await until(() => attempts === 2, "quiet foreground retry");
+    assert.ok(
+      world.notificationCalls
+        .slice(before)
+        .some((call) => call.kind === "suspend"),
+      "connectivity uncertainty suspends notifications even while the UI stays quiet",
+    );
+    await assert.rejects(enable(true), /refresh_required|session_changed/);
+    await controller.result().saveRecord("entry", {
+      id: "quiet-resume-reminder-guard",
+      type: "diaper",
+      start: new Date().toISOString(),
+      diaperKind: "wet",
+      note: "Saved offline while identity is pending",
+    });
+    controller.result();
+    controller.flushEffects();
+    await tick();
+    assert.equal(controller.result().ready, true);
+    assert.equal(controller.result().authStatus, "authenticated");
+    assert.equal(world.recordsSent.length, 0);
+    assert.equal(world.read().records.length, 1);
+    assert.equal(
+      world.notificationCalls
+        .slice(before)
+        .some((call) => ["permission", "sync"].includes(call.kind)),
+      false,
+      "neither a stale enable callback nor queued-record effects may restart reminders",
+    );
+    fresh.resolve();
+    await refresh;
+    await until(() => !controller.result().syncing, "fresh verified identity");
+    controller.result();
+    controller.flushEffects();
+    await tick();
+    await controller.result().setNotificationsEnabled(true);
+    assert.ok(
+      world.notificationCalls
+        .slice(before)
+        .some((call) => call.kind === "sync"),
+      "delivery can resume only after fresh identity succeeds",
+    );
+  } finally {
+    interrupted.resolve();
+    fresh.resolve();
+    controller.unmount();
+  }
+});
+
+test("quiet resume cannot retry or restore cached history after logout during its fresh check", async () => {
+  const world = makeWorld({ offline: false });
+  const controller = await boot(world);
+  const interrupted = deferred();
+  let attempts = 0;
+  let retrySignal;
+  let releaseRetry;
+  world.beforeIdentify = (signal) => {
+    if (++attempts === 1) return interrupted.promise;
+    retrySignal = signal;
+    return new Promise((resolve, reject) => {
+      releaseRetry = resolve;
+      signal.addEventListener(
+        "abort",
+        () => reject(new Error("network_unavailable")),
+        {
+          once: true,
+        },
+      );
+    });
+  };
+  try {
+    const refresh = controller.result().refresh();
+    await until(() => attempts === 1, "identity request before background");
+    world.changeAppState("background");
+    world.changeAppState("active");
+    interrupted.reject(new Error("network_unavailable"));
+    await until(() => retrySignal, "fresh cancellable identity request");
+    await controller.result().signOut();
+    await refresh;
+    assert.equal(retrySignal.aborted, true);
+    releaseRetry();
+    world.changeAppState("background");
+    world.changeAppState("active");
+    await controller.result().refresh();
+    for (let i = 0; i < 5; i++) await tick();
+    assert.equal(attempts, 2);
+    assert.equal(controller.result().authStatus, "signed_out");
+    assert.equal(controller.result().ready, false);
+    assert.equal(controller.result().sharedState, null);
+    assert.equal(controller.result().error, null);
+    assert.equal(world.read(), null);
+    assert.equal(world.cachedIdentity, null);
+    assert.equal(world.authSignOutCalls, 1);
+    assert.equal(world.recordsSent.length, 0);
+  } finally {
+    interrupted.resolve();
+    releaseRetry?.();
+    controller.unmount();
+  }
+});
+
+for (const failure of [
+  { code: "unauthorized", status: 401, expected: "sign_in_required" },
+  { code: "network_unavailable", status: 401, expected: "sign_in_required" },
+  { code: "sign_in_required", status: 0, expected: "sign_in_required" },
+  { code: "membership_revoked", status: 403, expected: "membership_revoked" },
+])
+  test(`quiet resume never suppresses ${failure.code} or exposes its cached family`, async () => {
+    const world = makeWorld({ offline: false });
+    const controller = await boot(world);
+    const gate = deferred();
+    let attempts = 0;
+    world.beforeIdentify = () => {
+      attempts++;
+      return gate.promise;
+    };
+    try {
+      const refresh = controller.result().refresh();
+      await until(() => attempts === 1, "pending identity verification");
+      world.changeAppState("background");
+      world.changeAppState("active");
+      world.identityError = failure;
+      gate.resolve();
+      await refresh;
+      for (let i = 0; i < 5; i++) await tick();
+      assert.equal(
+        attempts,
+        1,
+        "security rejection is not a connectivity retry",
+      );
+      assert.equal(controller.result().error, failure.expected);
+      assert.equal(controller.result().ready, false);
+      assert.equal(controller.result().sharedState, null);
+      assert.equal(world.recordsSent.length, 0);
+      if (failure.expected === "sign_in_required") {
+        assert.equal(controller.result().authStatus, "reauth_required");
+        assert.equal(world.cacheGuard.reauthRequired, true);
+      } else {
+        assert.equal(controller.result().snapshot, null);
+        assert.equal(world.cachedIdentity.families.length, 0);
+      }
+    } finally {
+      gate.resolve();
+      controller.unmount();
+    }
+  });
+
+test("quiet resume does not silence an explicit invitation action failure", async () => {
+  const world = makeWorld({ offline: false });
+  const controller = await boot(world);
+  const gate = deferred();
+  let attempted = false;
+  world.beforeMutation = async () => {
+    attempted = true;
+    await gate.promise;
+  };
+  try {
+    const action = controller
+      .result()
+      .createInvitation("guest@example.invalid");
+    const result = assert.rejects(action, /network_unavailable/);
+    await until(() => attempted, "explicit invitation request");
+    world.changeAppState("background");
+    world.changeAppState("active");
+    gate.reject(new Error("network_unavailable"));
+    await result;
+    assert.equal(controller.result().error, "network_unavailable");
+    assert.equal(controller.result().transitionPending, true);
+    assert.ok(
+      world.read().transition,
+      "uncertain action intent remains durable",
+    );
+  } finally {
+    gate.resolve();
+    controller.unmount();
+  }
+});
 
 test("cached bootstrap stays checking until identity is verified, and offline stays unverified", async () => {
   const world = makeWorld({ offline: false, queued: true });

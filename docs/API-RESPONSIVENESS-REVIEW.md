@@ -49,7 +49,7 @@ The following avoidable waits were corrected:
 
 | Operation | UI/network behavior retained or changed |
 | --- | --- |
-| Startup, returning to foreground | Validated same-account cached history renders while background identity/snapshot checks run. Known expired, revoked, incompatible or unresolved activation state remains blocked. No new change needed. |
+| Startup, returning to foreground | Validated same-account cached history renders while background identity/snapshot checks run. Returning to the app now quietly retries a transient interrupted sync before showing a connection warning; see the follow-up below. Known expired, revoked, incompatible or unresolved activation state remains blocked. |
 | Feeding and sleep start/stop | Local projection first; durable timer follow-ups support stopping before the start is acknowledged. Feeding retains explicit amount confirmation. |
 | Feeding, nappy, sleep, growth, milestone and care saves/deletes | Existing optimistic outbox is already independent of API response. Preserve local durability, permission checks and conflict handling. |
 | Avatar, shared reminders, early-learning settings/check-ins | Already locally projected and queued. Keep pending same-record edit locks; allowing unrestricted re-edits would require additional versioned follow-up logic, not just moving an `await`. |
@@ -98,3 +98,54 @@ Before release, use fictional records on two iPhones:
 Native SQLite, iOS authentication, real network behavior and dual-device results
 still require this device validation. No live API writes, deployment, commit,
 push or Expo/TestFlight release were performed as part of this review.
+
+## Follow-up: quiet foreground reconnection — 17 September 2026
+
+The real controller harness reproduced an interrupted `/v1/me` request that
+outlived backgrounding. Returning to the app joined that old request; its network
+failure immediately changed the account to unverified, displayed a connection
+warning and scheduled a 30-second first retry. This is a confirmed code path,
+not proof of the precise network failure on the reported iPhone.
+
+- Keep the guarded same-account cache visible while checking in the background.
+  A transient interrupted check or first foreground reconnect gets one fresh,
+  serial retry before the usual warning/backoff. Do not loop while backgrounded.
+- Clear only an automatic sync connection warning when reconnection starts;
+  explicit action errors, data conflicts and storage failures are not treated as
+  connectivity noise. Cold-start cache validation is unchanged.
+- Preserve the sync lock, durable operation IDs, and fresh grant/snapshot checks
+  before sending queued records. No extra unversioned write or new invitation is
+  created to retry a refresh.
+- HTTP 401, known sign-in expiry, revoked access, account mismatch and invalid
+  responses retain their existing immediate protection. A network check in
+  progress is not a newly verified session. If identity checking fails transiently,
+  notification delivery stays suspended until identity verification succeeds,
+  even though the cached account presentation remains stable during the retry.
+
+Verification: `npm run verify` passed (395 tests including 119 controller tests;
+11 new resume regressions, plus TypeScript). The focused tests cover interrupted
+and newly started reconnects, background-only failures, continued outage, cached
+history and exactly-once queued submission, notification suspension across
+renders, logout during retry, real 401/expiry/removal, and explicit invitation
+errors. Independent source review found no remaining blocker in this change.
+Web export and the complete browser regression also passed. The requested native
+review release is prepared as iOS 0.2.1 / build 20 on the preview profile, with
+unsigned OTA still disabled. Build completion and installation need separate
+confirmation; no API, database or Azure deployment is part of this follow-up.
+
+Device follow-up (no Azure/GitHub configuration change is needed):
+
+1. Install a build containing this follow-up over the existing app. This is a
+   local source change until published; an older preview does not contain it.
+2. Start a refresh, background/lock the phone, and return after both a short wait
+   and several hours. With connectivity available, cached records should stay
+   visible without an immediate offline flash. Verify a newly saved record is
+   eventually shared once, not duplicated.
+3. Repeat with the network unavailable. After the fresh reconnect attempt fails,
+   the connection warning must appear and locally saved changes must remain.
+4. Restore connectivity and return again. Verify successful recovery clears the
+   automatic warning. An expired login or a member removed from another phone
+   must still require login or remove family access as appropriate.
+5. Log out during the retry. Confirm neither its eventual response nor reminder
+   delivery restores the signed-out family. Native suspension, real token refresh
+   and two-device behavior still need this physical-device check.
