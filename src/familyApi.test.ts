@@ -10,6 +10,7 @@ function clientBoundary() {
   const callbacks: Array<() => void> = [];
   let request: { url: string; signal: AbortSignal } | undefined;
   let delayed = false;
+  let tokenRequest = async () => "synthetic-test-only";
   const module = {
     exports: {} as {
       familyRequest<T>(
@@ -34,8 +35,7 @@ function clientBoundary() {
     require(id: string) {
       if (id === "./config")
         return { familyConfig: { apiUrl: "https://family.example.invalid" } };
-      if (id === "./auth")
-        return { getAccessToken: async () => "synthetic-test-only" };
+      if (id === "./auth") return { getAccessToken: () => tokenRequest() };
       throw new Error(`Unexpected dependency: ${id}`);
     },
     AbortController,
@@ -64,6 +64,9 @@ function clientBoundary() {
     cancelled,
     callbacks,
     request: () => request,
+    token: (request: () => Promise<string>) => {
+      tokenRequest = request;
+    },
     delay: () => {
       delayed = true;
     },
@@ -119,4 +122,80 @@ test("long snapshot requests still abort and release their timeout", async () =>
   await assert.rejects(pending, /network_unavailable/);
   assert.equal(client.request()?.signal.aborted, true);
   assert.deepEqual(client.cancelled, [1]);
+});
+
+test("stalled token refresh is bounded and a late token never sends a timed-out request", async () => {
+  const client = clientBoundary();
+  let release!: (value: string) => void;
+  client.token(
+    () =>
+      new Promise<string>((resolve) => {
+        release = resolve;
+      }),
+  );
+  const pending = client.api.familyRequest("/v1/me");
+  void pending.catch(() => {});
+  await new Promise((resolve) => setImmediate(resolve));
+  try {
+    assert.equal(
+      typeof client.callbacks[0],
+      "function",
+      "token acquisition must be inside the request deadline",
+    );
+    client.callbacks[0]();
+    await assert.rejects(pending, /network_unavailable/);
+    release("late-token");
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(client.request(), undefined);
+    assert.deepEqual(client.cancelled, [1]);
+  } finally {
+    release("cleanup-token");
+    await pending.catch(() => {});
+  }
+});
+
+test("session abort settles while token refresh is pending and never sends after late completion", async () => {
+  const client = clientBoundary();
+  let release!: (value: string) => void;
+  client.token(
+    () =>
+      new Promise<string>((resolve) => {
+        release = resolve;
+      }),
+  );
+  const session = new AbortController();
+  const pending = client.api.familyRequest("/v1/me", undefined, session.signal);
+  let failed = false;
+  void pending.catch(() => {
+    failed = true;
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  session.abort();
+  await new Promise((resolve) => setImmediate(resolve));
+  try {
+    assert.equal(
+      failed,
+      true,
+      "cancelling the session must not wait for token refresh",
+    );
+    await assert.rejects(pending, /network_unavailable/);
+    release("late-token");
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(client.request(), undefined);
+    assert.deepEqual(client.cancelled, [1]);
+  } finally {
+    release("cleanup-token");
+    await pending.catch(() => {});
+  }
+});
+
+test("token expiry and session replacement retain their authentication errors", async () => {
+  for (const code of ["sign_in_required", "session_changed"]) {
+    const client = clientBoundary();
+    client.token(async () => {
+      throw new Error(code);
+    });
+    await assert.rejects(client.api.familyRequest("/v1/me"), new RegExp(code));
+    assert.equal(client.request(), undefined);
+  }
 });

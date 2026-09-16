@@ -101,6 +101,9 @@ export function useFamilyPilot() {
   const configured = !!familyConfig,
     webUnsupported = Platform.OS === "web";
   const [identity, setIdentity] = useState<PilotIdentity | null>(null);
+  const [sessionUnresolved, setSessionUnresolved] = useState(
+    configured && !webUnsupported,
+  );
   const [authStatus, setAuthStatus] = useState<FamilyAuthStatus>(
     configured && !webUnsupported ? "checking" : "signed_out",
   );
@@ -141,6 +144,7 @@ export function useFamilyPilot() {
   const signedOut = useRef(false);
   const logoutAccount = useRef<string | null>(null);
   const cleanupPending = useRef(false);
+  const cacheRestored = useRef(false);
   const authPaused = useRef(false);
   const writes = useRef<Promise<void>>(Promise.resolve());
   const requests = useRef(new AbortController());
@@ -186,9 +190,14 @@ export function useFamilyPilot() {
   }
   function pauseAuthentication() {
     if (signedOut.current) return;
+    const alreadyPaused = authPaused.current;
     authPaused.current = true;
     setAuthStatus("reauth_required");
     markReady(false);
+    if (!alreadyPaused && who.current)
+      void auth
+        .markReauthenticationRequired(who.current.user.id)
+        .catch(() => {});
   }
   function requireAuthentication() {
     if (authPaused.current || signedOut.current)
@@ -286,21 +295,37 @@ export function useFamilyPilot() {
       await auth.signOut();
       check(e);
       signedOut.current = true;
+      setSessionUnresolved(false);
       authPaused.current = false;
       setAuthStatus("signed_out");
       throw new Error("account_mismatch");
     }
-    if (who.current && who.current.user.id !== result.user.id)
-      throw new Error("session_changed");
+    if (who.current && who.current.user.id !== result.user.id) {
+      pauseAuthentication();
+      throw new Error("account_mismatch");
+    }
     authPaused.current = false;
     setAuthStatus("authenticated");
-    if (!who.current) {
+    if (!who.current || !cacheRestored.current) {
       const stored = await loadPilot(accountKey(result.user.id));
       check(e);
       showState(stored, true);
+      cacheRestored.current = true;
     }
     showIdentity(result);
+    setSessionUnresolved(false);
     const cached = current.current.snapshot;
+    if (
+      result.accountDeletion ||
+      (cached?.family.role === "owner" &&
+        result.families.some(
+          (grant) =>
+            grant.id === cached.family.id &&
+            grant.membershipId === cached.family.membershipId &&
+            grant.role !== "owner",
+        ))
+    )
+      markReady(false);
     const revoked =
       cached &&
       !current.current.transition &&
@@ -353,14 +378,41 @@ export function useFamilyPilot() {
         (expected.historyId && result.historyId !== expected.historyId))
     )
       throw new Error("membership_changed");
+    const checked = validateFullSnapshot(result);
     const previous = current.current.snapshot;
+    if (previous?.family.role === "owner" && checked.family.role !== "owner")
+      markReady(false);
     if (previous && !matchesOrigin(originForSnapshot(previous), result)) {
+      markReady(false);
       await stopNotificationDelivery(true);
       check(e);
     }
     // Once the server has disproved the old grant/history, a local disk error
     // must not make that old family or obsolete admin permissions return.
-    await persist((s) => applyFullSnapshot(s, result), e, false);
+    if (
+      who.current?.families.some(
+        (grant) =>
+          grant.id === checked.family.id &&
+          grant.membershipId === checked.family.membershipId &&
+          grant.role !== checked.family.role,
+      )
+    ) {
+      const checkedIdentity = {
+        ...who.current,
+        families: who.current.families.map((grant) =>
+          grant.id === checked.family.id &&
+          grant.membershipId === checked.family.membershipId
+            ? { ...grant, role: checked.family.role }
+            : grant,
+        ),
+      };
+      showIdentity(checkedIdentity);
+      await auth.saveIdentity(checkedIdentity);
+      check(e);
+    }
+    await auth.saveCacheOrigin(originForSnapshot(checked));
+    check(e);
+    await persist((s) => applyFullSnapshot(s, checked), e, false);
     markReady(true);
     if (
       previous &&
@@ -923,6 +975,7 @@ export function useFamilyPilot() {
   const start = useCallback(async () => {
     if (!configured || webUnsupported) return;
     const e = epoch.current;
+    let cached: PilotIdentity | null = null;
     try {
       const deletion = await loadDeletionReceipt();
       check(e);
@@ -938,15 +991,23 @@ export function useFamilyPilot() {
         await stopNotificationDelivery(true);
         check(e);
         signedOut.current = true;
+        setSessionUnresolved(false);
         setAuthStatus("signed_out");
         return;
       }
-      const cached = await auth.loadIdentity();
+      // A stored session with an unknown identity must keep personal writes
+      // blocked while the recovery screen verifies which workspace it owns.
+      setSessionUnresolved(true);
+      cached = await auth.loadIdentity();
       check(e);
       if (cached) {
+        const guard = await auth.loadCacheGuard(cached.user.id);
+        check(e);
         const stored = await loadPilot(accountKey(cached.user.id));
         check(e);
+        cacheRestored.current = true;
         showIdentity(cached);
+        setSessionUnresolved(false);
         const source = stored.snapshot?.family;
         const cachedGrant = source
           ? cached.families.find(
@@ -954,10 +1015,33 @@ export function useFamilyPilot() {
                 f.id === source.id && f.membershipId === source.membershipId,
             )
           : undefined;
-        const grantMatches = !source || !!cachedGrant;
+        const cachedMember =
+          cachedGrant && Array.isArray(stored.snapshot?.members)
+            ? stored.snapshot.members.find(
+                (member) =>
+                  member.id === cached!.user.id &&
+                  member.membershipId === cachedGrant.membershipId &&
+                  member.status === "active",
+              )
+            : undefined;
+        const grantMatches = !source || (!!cachedGrant && !!cachedMember);
+        const originMatches =
+          !guard?.origin ||
+          (grantMatches && matchesOrigin(guard.origin, stored.snapshot));
         const cachedState =
-          cachedGrant && stored.snapshot
-            ? applySnapshot(stored, { ...stored.snapshot, family: cachedGrant })
+          grantMatches && cachedGrant && stored.snapshot
+            ? applySnapshot(stored, {
+                ...stored.snapshot,
+                family: {
+                  ...cachedGrant,
+                  role:
+                    cachedGrant.role === "owner" &&
+                    source?.role === "owner" &&
+                    cachedMember?.role === "owner"
+                      ? "owner"
+                      : "caregiver",
+                },
+              })
             : stored;
         showState(
           grantMatches || stored.transition ? cachedState : revokeCache(stored),
@@ -965,6 +1049,9 @@ export function useFamilyPilot() {
         );
         if (
           grantMatches &&
+          cachedGrant &&
+          originMatches &&
+          !guard?.reauthRequired &&
           isFullSnapshot(cachedState.snapshot) &&
           !stored.transition &&
           !cached.accountDeletion
@@ -972,12 +1059,25 @@ export function useFamilyPilot() {
           validateFullSnapshot(cachedState.snapshot);
           markReady(true);
         }
+        if (guard?.reauthRequired) {
+          authPaused.current = true;
+          setAuthStatus("reauth_required");
+          markReady(false);
+          setError("sign_in_required");
+        }
         if (cached.accountDeletion || (!grantMatches && !stored.transition))
           await persist(revokeCache, e, false, true);
       }
+      // Only local restoration gates startup. The existing sync lock continues
+      // identity checks, downloads and queued uploads after the app can render.
+      setBooting(false);
       await sync();
     } catch (cause) {
       if (isCurrent(e)) {
+        if (cached && !who.current) {
+          showIdentity(cached);
+        }
+        markReady(false);
         if (authenticationRequired(cause)) pauseAuthentication();
         else if (!authPaused.current) setAuthStatus("unverified");
         setError(
@@ -1163,7 +1263,10 @@ export function useFamilyPilot() {
     authStatus,
     ready,
     sharedMode:
-      !!state.snapshot || !!identity?.families.length || !!state.transition,
+      sessionUnresolved ||
+      !!state.snapshot ||
+      !!identity?.families.length ||
+      !!state.transition,
     sharedState: ready && !state.transition ? projectedFullState(state) : null,
     sharedExtras:
       ready && !state.transition ? projectedExtraRecords(state) : [],
@@ -1413,6 +1516,8 @@ export function useFamilyPilot() {
             if (!authPaused.current) setAuthStatus("checking");
             // Preserve previous work on disk, but don't show it under a new identity.
             showIdentity(null);
+            cacheRestored.current = false;
+            setSessionUnresolved(true);
             markReady(false);
             showState(emptyPilotState(), true);
             await identify(e, previous?.user.id);
@@ -1453,12 +1558,14 @@ export function useFamilyPilot() {
           epoch.current++;
           const e = epoch.current;
           signedOut.current = true;
+          setSessionUnresolved(false);
           authPaused.current = false;
           setAuthStatus("signed_out");
           requests.current.abort();
           requests.current = new AbortController();
           syncLock.current = null;
           showIdentity(null);
+          cacheRestored.current = false;
           markReady(false);
           showState(emptyPilotState(), true);
           setSyncing(false);

@@ -1,5 +1,11 @@
 // Shared API is implemented natively. Never put OAuth tokens in browser storage.
 import type { PilotIdentity } from "./identity";
+import type { SharingOrigin } from "./pilotState";
+export type FamilyCacheGuard = {
+  userId: string;
+  reauthRequired: boolean;
+  origin: SharingOrigin | null;
+};
 export async function signIn(_emailHint?: string): Promise<void> {
   throw new Error("native_required");
 }
@@ -14,5 +20,18 @@ export async function loadIdentity(): Promise<PilotIdentity | null> {
   return null;
 }
 export async function saveIdentity(_identity: PilotIdentity): Promise<void> {
+  throw new Error("native_required");
+}
+export async function loadCacheGuard(
+  _userId: string,
+): Promise<FamilyCacheGuard | null> {
+  return null;
+}
+export async function markReauthenticationRequired(
+  _userId: string,
+): Promise<void> {
+  throw new Error("native_required");
+}
+export async function saveCacheOrigin(_origin: SharingOrigin): Promise<void> {
   throw new Error("native_required");
 }

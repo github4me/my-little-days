@@ -2,6 +2,9 @@ import * as AuthSession from "expo-auth-session";
 import * as SecureStore from "expo-secure-store";
 import { familyConfig } from "./config";
 import type { PilotIdentity } from "./identity";
+import type { SharingOrigin } from "./pilotState";
+import type { FamilyCacheGuard } from "./auth";
+export type { FamilyCacheGuard } from "./auth";
 
 type StoredTokens = {
   binding: string;
@@ -12,6 +15,7 @@ type StoredTokens = {
 const key = "my-little-days.family-pilot.tokens";
 const identityKey = "my-little-days.family-pilot.identity";
 const logoutKey = "my-little-days.family-pilot.signed-out";
+const guardKey = "my-little-days.family-pilot.cache-guard";
 const binding = JSON.stringify(familyConfig);
 const options = {
   keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
@@ -19,6 +23,7 @@ const options = {
 let refresh: Promise<string> | null = null;
 let generation = 0;
 let signedOut = false;
+let reauthenticationUser: string | null = null;
 // Order native mutations across refresh, login and logout. An obsolete write
 // must finish before the replacement session is stored, never erase it later.
 let mutations: Promise<void> = Promise.resolve();
@@ -34,6 +39,136 @@ const config = () => {
   if (!familyConfig) throw new Error("not_configured");
   return familyConfig;
 };
+const nonempty = (value: unknown): value is string =>
+  typeof value === "string" && value.trim().length > 0;
+function validOrigin(value: unknown): value is SharingOrigin {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const origin = value as Partial<SharingOrigin>;
+  return [
+    origin.userId,
+    origin.familyId,
+    origin.membershipId,
+    origin.historyId,
+  ].every(nonempty);
+}
+// Parsing is side-effect free: a delayed read from an old session must never
+// restore its barrier after an explicit replacement login has cleared it.
+async function readCacheGuard(
+  userId?: string,
+): Promise<FamilyCacheGuard | null> {
+  const raw = await SecureStore.getItemAsync(guardKey, options);
+  if (raw === null) return null;
+  let value;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    throw new Error("local_data_invalid");
+  }
+  if (
+    !value ||
+    value.schema !== 1 ||
+    value.binding !== binding ||
+    !nonempty(value.userId) ||
+    (userId !== undefined && value.userId !== userId) ||
+    typeof value.reauthRequired !== "boolean" ||
+    (value.origin !== null &&
+      (!validOrigin(value.origin) || value.origin.userId !== value.userId))
+  ) {
+    throw new Error("local_data_invalid");
+  }
+  return {
+    userId: value.userId,
+    reauthRequired: value.reauthRequired,
+    origin: value.origin,
+  };
+}
+async function writeCacheGuard(guard: FamilyCacheGuard): Promise<void> {
+  await SecureStore.setItemAsync(
+    guardKey,
+    JSON.stringify({ schema: 1, binding, ...guard }),
+    options,
+  );
+}
+// Used inside the mutation queue only. If one storage operation fails, another
+// may still durably deny stale cache on restart. Never erase recovery identity.
+async function invalidateStoredSession(): Promise<void> {
+  try {
+    await SecureStore.setItemAsync(logoutKey, binding, options);
+    signedOut = true;
+  } catch {
+    try {
+      await SecureStore.deleteItemAsync(key, options);
+    } catch {
+      /* Memory barrier still denies this process if all native writes fail. */
+    }
+  }
+}
+export async function loadCacheGuard(
+  userId: string,
+): Promise<FamilyCacheGuard | null> {
+  if (!nonempty(userId)) throw new Error("local_data_invalid");
+  const current = generation;
+  return mutate(async () => {
+    if (current !== generation || signedOut) throw new Error("session_changed");
+    const guard = await readCacheGuard(userId);
+    if (current !== generation || signedOut) throw new Error("session_changed");
+    if (guard?.reauthRequired) reauthenticationUser = guard.userId;
+    return guard;
+  });
+}
+export async function markReauthenticationRequired(
+  userId: string,
+): Promise<void> {
+  if (!nonempty(userId)) throw new Error("local_data_invalid");
+  // Invalidate network responses before waiting for native storage. Identity is
+  // retained so the account remains recognizable while explicit login is needed.
+  reauthenticationUser = userId;
+  generation++;
+  refresh = null;
+  await mutate(async () => {
+    let origin: SharingOrigin | null = null;
+    try {
+      origin = (await readCacheGuard(userId))?.origin ?? null;
+    } catch {
+      /* A new deny marker repairs malformed guard data. */
+    }
+    try {
+      await writeCacheGuard({ userId, reauthRequired: true, origin });
+    } catch (error) {
+      // Best-effort fallback: a failed guard write must not silently restore the
+      // cached session next launch if another local invalidation can succeed.
+      await invalidateStoredSession();
+      throw error;
+    }
+  });
+}
+export async function saveCacheOrigin(origin: SharingOrigin): Promise<void> {
+  if (!validOrigin(origin)) throw new Error("local_data_invalid");
+  const current = generation;
+  await mutate(async () => {
+    if (current !== generation || signedOut) throw new Error("session_changed");
+    const existing = await readCacheGuard(origin.userId);
+    if (reauthenticationUser || existing?.reauthRequired)
+      throw new Error("sign_in_required");
+    if (current !== generation) throw new Error("session_changed");
+    try {
+      await writeCacheGuard({
+        userId: origin.userId,
+        reauthRequired: false,
+        origin,
+      });
+    } catch (error) {
+      // The previously stored history is no longer safe evidence of the newly
+      // observed origin. Deny cached startup rather than reviving it on restart.
+      reauthenticationUser = origin.userId;
+      if (current === generation) generation++;
+      refresh = null;
+      await invalidateStoredSession();
+      throw error;
+    }
+    if (current !== generation) throw new Error("session_changed");
+  });
+}
 async function load(): Promise<StoredTokens | null> {
   await mutations;
   if (signedOut) return null;
@@ -79,13 +214,19 @@ async function store(
     );
     if (generation !== expectedGeneration) {
       // Still inside the mutation queue: no newer session can be written yet.
-      await SecureStore.deleteItemAsync(key, options);
+      // A known-expiry barrier keeps the local session recognizable, but never
+      // permits this refreshed token to be returned or used without new login.
+      if (replaceIdentity || signedOut || !reauthenticationUser)
+        await SecureStore.deleteItemAsync(key, options);
       throw new Error("session_changed");
     }
     if (replaceIdentity) {
       // Only a successful, explicit new login can remove the durable logout barrier.
       await SecureStore.deleteItemAsync(logoutKey, options);
       if (generation !== expectedGeneration) throw new Error("session_changed");
+      await SecureStore.deleteItemAsync(guardKey, options);
+      if (generation !== expectedGeneration) throw new Error("session_changed");
+      reauthenticationUser = null;
       signedOut = false;
     }
   });
@@ -168,13 +309,24 @@ export async function saveIdentity(identity: PilotIdentity): Promise<void> {
   const current = generation;
   await mutate(async () => {
     if (current !== generation || signedOut) throw new Error("session_changed");
-    await SecureStore.setItemAsync(
-      identityKey,
-      JSON.stringify({ binding, identity }),
-      options,
-    );
+    try {
+      await SecureStore.setItemAsync(
+        identityKey,
+        JSON.stringify({ binding, identity }),
+        options,
+      );
+    } catch (error) {
+      // A fresh identity may revoke membership or narrow permissions. If it
+      // cannot be stored, the older cached grants must not revive on restart.
+      reauthenticationUser = identity.user.id;
+      if (current === generation) generation++;
+      refresh = null;
+      await invalidateStoredSession();
+      throw error;
+    }
     if (current !== generation) {
-      await SecureStore.deleteItemAsync(identityKey, options);
+      if (signedOut || reauthenticationUser !== identity.user.id)
+        await SecureStore.deleteItemAsync(identityKey, options);
       throw new Error("session_changed");
     }
   });
@@ -186,9 +338,17 @@ export async function getAccessToken(): Promise<string> {
     const c = config(),
       token = await load();
     if (!token || current !== generation) throw new Error("sign_in_required");
+    await mutations;
+    const guard = await readCacheGuard();
+    if (current !== generation || signedOut)
+      throw new Error("sign_in_required");
+    if (guard?.reauthRequired) reauthenticationUser = guard.userId;
+    if (reauthenticationUser) throw new Error("sign_in_required");
     if (token.expiresAt > Date.now() + 60_000) return token.accessToken;
     if (!token.refreshToken) throw new Error("sign_in_required");
     const discovery = await AuthSession.fetchDiscoveryAsync(c.authority);
+    if (reauthenticationUser || current !== generation || signedOut)
+      throw new Error("sign_in_required");
     try {
       const updated = await AuthSession.refreshAsync(
         {
@@ -199,10 +359,14 @@ export async function getAccessToken(): Promise<string> {
         discovery,
       );
       await store(updated, current, token.refreshToken);
+      if (reauthenticationUser || current !== generation || signedOut)
+        throw new Error("sign_in_required");
       return updated.accessToken;
     } catch (error) {
-      if (error instanceof AuthSession.TokenError)
+      if (reauthenticationUser || error instanceof AuthSession.TokenError)
         throw new Error("sign_in_required");
+      if (current !== generation || signedOut)
+        throw new Error("session_changed");
       throw new Error("network_unavailable");
     }
   };

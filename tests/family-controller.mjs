@@ -129,6 +129,7 @@ function makeWorld({ offline = true, queued = false } = {}) {
     ownerSetupDisk: new Map(),
     identity: structuredClone(data.identity),
     cachedIdentity: structuredClone(data.identity),
+    cacheGuard: null,
     server: structuredClone(data.state.snapshot),
     session: true,
     offline,
@@ -141,10 +142,13 @@ function makeWorld({ offline = true, queued = false } = {}) {
     deleteCalls: 0,
     readCalls: 0,
     beforeCommit: async () => {},
+    beforeRead: async () => {},
     beforeDelete: async () => {},
     beforeAuthSignOut: async () => {},
     beforeAuthSignIn: async () => {},
+    beforeSessionRead: async () => {},
     beforeIdentify: async () => {},
+    beforeSnapshot: async () => {},
     beforeMutation: async () => {},
     mutationReceipts: new Map(),
     deletionReceipt: null,
@@ -155,6 +159,7 @@ function makeWorld({ offline = true, queued = false } = {}) {
     beforeNotificationEnable: async () => {},
     beforeNotificationClear: async () => {},
     beforeIdentitySave: async () => {},
+    beforeCacheOriginSave: async () => {},
     personalExtras: [],
     beforeReminderDrain: async () => {},
     beforePersonalClear: async () => {},
@@ -194,6 +199,7 @@ function makeWorld({ offline = true, queued = false } = {}) {
     execAsync: async () => {},
     getFirstAsync: async (query, key) => {
       world.readCalls++;
+      await world.beforeRead();
       const payload = (
         query.includes("owner_setup_drafts") ? ownerSetupDisk : world.disk
       ).get(key);
@@ -314,8 +320,29 @@ function makeWorld({ offline = true, queued = false } = {}) {
       },
     },
     auth: {
-      hasSession: async () => world.session,
+      hasSession: async () => {
+        await world.beforeSessionRead();
+        return world.session;
+      },
       loadIdentity: async () => structuredClone(world.cachedIdentity),
+      loadCacheGuard: async () => structuredClone(world.cacheGuard),
+      markReauthenticationRequired: async (userId) => {
+        world.cacheGuard = {
+          userId,
+          reauthRequired: true,
+          origin: world.cacheGuard?.origin ?? null,
+        };
+      },
+      saveCacheOrigin: async (origin) => {
+        await world.beforeCacheOriginSave(origin);
+        if (world.cacheGuard?.reauthRequired)
+          throw new Error("sign_in_required");
+        world.cacheGuard = {
+          userId: origin.userId,
+          reauthRequired: false,
+          origin: structuredClone(origin),
+        };
+      },
       saveIdentity: async (identity) => {
         await world.beforeIdentitySave();
         world.cachedIdentity = structuredClone(identity);
@@ -325,12 +352,14 @@ function makeWorld({ offline = true, queued = false } = {}) {
         await world.beforeAuthSignIn();
         world.session = true;
         world.cachedIdentity = null;
+        world.cacheGuard = null;
       },
       signOut: async () => {
         world.authSignOutCalls++;
         await world.beforeAuthSignOut();
         world.session = false;
         world.cachedIdentity = null;
+        world.cacheGuard = null;
       },
     },
     deletionReceipt: {
@@ -426,6 +455,7 @@ function makeWorld({ offline = true, queued = false } = {}) {
           return receipt;
         }
         if (url.endsWith("/snapshot")) {
+          await world.beforeSnapshot();
           if (world.snapshotOffline)
             throw new PilotApiError("network_unavailable");
           if (world.snapshotUnsupported)
@@ -707,7 +737,7 @@ test("cached bootstrap stays checking until identity is verified, and offline st
     assert.equal(controller.result().ready, true);
     world.identityError = { code: "network_unavailable", status: 0 };
     identityGate.resolve();
-    await until(() => !controller.result().booting, "offline identity check");
+    await until(() => !controller.result().syncing, "offline identity check");
     assert.equal(controller.result().authStatus, "unverified");
     assert.equal(world.read().queue.length, 1);
     assert.notEqual(world.read().draft, null);
@@ -720,6 +750,547 @@ test("cached bootstrap stays checking until identity is verified, and offline st
   } finally {
     identityGate.resolve();
     controller.unmount();
+  }
+});
+
+test("startup exposes validated cached history and extras while identity refresh is still pending", async () => {
+  const world = makeWorld({ offline: false });
+  const gate = deferred();
+  const entry = {
+    id: "cached-growth",
+    type: "growth",
+    start: "2026-09-01T01:00:00Z",
+    weight: 3.725,
+    note: "Cached history",
+  };
+  world.data.state.snapshot.entries = [
+    { entry, version: "1", recordedBy: "user-a", lastEditedBy: "user-a" },
+  ];
+  world.data.state.snapshot.extraRecords = [
+    {
+      record: { id: "avatar", kind: "avatar", dataUrl: null },
+      version: "1",
+      recordedBy: "user-a",
+      lastEditedBy: "user-a",
+    },
+  ];
+  world.disk.set(world.account, JSON.stringify(world.data.state));
+  world.server = structuredClone(world.data.state.snapshot);
+  world.server.profile.name = "Refreshed baby";
+  world.beforeIdentify = () => gate.promise;
+  const controller = world.mount();
+  try {
+    await until(() => world.http.length > 0, "background identity request");
+    const local = controller.result();
+    assert.equal(local.booting, false);
+    assert.equal(local.authStatus, "checking");
+    assert.equal(local.ready, true);
+    assert.equal(local.sharedState.profile.name, "Baby");
+    assert.equal(local.sharedState.entries[0].note, "Cached history");
+    assert.equal(local.fullSnapshot.historyId, "history-a");
+    assert.equal(local.sharedExtras[0].record.kind, "avatar");
+    await local.saveRecord("entry", {
+      ...entry,
+      id: "new-growth",
+      note: "Saved during refresh",
+    });
+    assert.equal(world.read().records.length, 1);
+    assert.equal(world.recordsSent.length, 0);
+    assert.equal(controller.result().sharedState.entries.length, 2);
+    gate.resolve();
+    await until(
+      () => !controller.result().syncing && world.recordsSent.length === 1,
+      "background snapshot and queued save",
+    );
+    assert.equal(controller.result().authStatus, "authenticated");
+    assert.equal(
+      controller.result().sharedState.profile.name,
+      "Refreshed baby",
+    );
+  } finally {
+    gate.resolve();
+    controller.unmount();
+  }
+});
+
+for (const cache of [
+  "missing-snapshot",
+  "missing-row",
+  "corrupt-row",
+  "invalid-profile",
+])
+  test(`startup releases local loading without exposing ${cache} family data`, async () => {
+    const world = makeWorld({ offline: false });
+    const gate = deferred();
+    world.beforeIdentify = () => gate.promise;
+    if (cache === "missing-row") world.disk.delete(world.account);
+    else if (cache === "corrupt-row") world.disk.set(world.account, "not-json");
+    else {
+      if (cache === "missing-snapshot") world.data.state.snapshot = null;
+      else world.data.state.snapshot.profile.sex = "invalid";
+      world.disk.set(world.account, JSON.stringify(world.data.state));
+    }
+    const controller = world.mount();
+    try {
+      await until(
+        () => !controller.result().booting,
+        "local bootstrap complete",
+      );
+      assert.equal(controller.result().ready, false);
+      assert.equal(controller.result().sharedState, null);
+      assert.equal(
+        controller.result().sharedMode,
+        true,
+        "Known family must stay in recovery instead of falling back to personal data",
+      );
+      assert.equal(world.recordsSent.length, 0);
+    } finally {
+      controller.unmount();
+      gate.resolve();
+    }
+  });
+
+test("startup with a session but no cached identity remains in recovery until background identity resolves", async () => {
+  const world = makeWorld({ offline: false });
+  world.cachedIdentity = null;
+  world.identity.families = [];
+  const gate = deferred();
+  world.beforeIdentify = () => gate.promise;
+  const controller = world.mount();
+  try {
+    await until(() => world.http.length > 0, "uncached identity request");
+    assert.equal(controller.result().booting, false);
+    assert.equal(controller.result().sharedMode, true);
+    assert.equal(controller.result().sharedState, null);
+    assert.equal(controller.result().user, null);
+    gate.resolve();
+    await until(
+      () => !controller.result().syncing,
+      "verified no-family account",
+    );
+    assert.equal(controller.result().authStatus, "authenticated");
+    assert.equal(controller.result().sharedMode, false);
+  } finally {
+    gate.resolve();
+    controller.unmount();
+  }
+});
+
+for (const mismatch of ["user", "membership", "inactive"])
+  test(`cached family does not expose an active grant with a ${mismatch} member mismatch`, async () => {
+    const world = makeWorld({ offline: false });
+    const member = world.data.state.snapshot.members[0];
+    if (mismatch === "user") member.id = "user-b";
+    if (mismatch === "membership") member.membershipId = "other-grant";
+    if (mismatch === "inactive") member.status = "removed";
+    world.disk.set(world.account, JSON.stringify(world.data.state));
+    const gate = deferred();
+    world.beforeIdentify = () => gate.promise;
+    const controller = world.mount();
+    try {
+      await until(() => !controller.result().booting, "member validation");
+      assert.equal(controller.result().ready, false);
+      assert.equal(controller.result().sharedState, null);
+      assert.equal(controller.result().fullSnapshot, null);
+      assert.equal(world.feedsSent.length, 0);
+    } finally {
+      controller.unmount();
+      gate.resolve();
+    }
+  });
+
+for (const blocked of [
+  "transition",
+  "deletion",
+  "revoked",
+  "expired",
+  "old-origin",
+])
+  test(`startup keeps ${blocked} cached family hidden without waiting for the API`, async () => {
+    const world = makeWorld({ offline: false });
+    if (blocked === "transition")
+      world.data.state.transition = {
+        operationId: "pending-join",
+        path: "/v2/invitations/invite-b/accept",
+        body: {},
+        kind: "join",
+        userId: "user-a",
+        phase: "pending",
+      };
+    if (blocked === "deletion")
+      world.cachedIdentity.accountDeletion = {
+        deletionId: "deletion",
+        status: "pending",
+        requestedAt: "2026-09-01T01:00:00Z",
+      };
+    if (blocked === "revoked") world.cachedIdentity.families = [];
+    if (blocked === "expired" || blocked === "old-origin")
+      world.cacheGuard = {
+        userId: "user-a",
+        reauthRequired: blocked === "expired",
+        origin: { ...world.data.state.draft.origin, historyId: "new-history" },
+      };
+    world.disk.set(world.account, JSON.stringify(world.data.state));
+    const gate = deferred();
+    world.beforeIdentify = () => gate.promise;
+    const controller = world.mount();
+    try {
+      await until(() => !controller.result().booting, "guarded bootstrap");
+      assert.equal(controller.result().sharedState, null);
+      assert.equal(controller.result().fullSnapshot, null);
+      assert.equal(controller.result().ready, false);
+      assert.equal(world.feedsSent.length, 0);
+      if (blocked === "expired")
+        assert.equal(controller.result().authStatus, "reauth_required");
+      if (blocked === "transition")
+        await assert.rejects(
+          controller.result().signOut(),
+          /transition_pending/,
+        );
+    } finally {
+      controller.unmount();
+      gate.resolve();
+    }
+  });
+
+test("a different background identity immediately hides the restored account and never sends its pending work", async () => {
+  const world = makeWorld({ offline: false, queued: true });
+  world.identity.user.id = "user-b";
+  const gate = deferred();
+  world.beforeIdentify = () => gate.promise;
+  const controller = world.mount();
+  try {
+    await until(() => world.http.length > 0, "pending account verification");
+    assert.equal(controller.result().sharedState.profile.name, "Baby");
+    gate.resolve();
+    await until(
+      () => !controller.result().syncing,
+      "mismatched identity rejection",
+    );
+    assert.equal(controller.result().authStatus, "reauth_required");
+    assert.equal(controller.result().ready, false);
+    assert.equal(controller.result().sharedState, null);
+    assert.equal(controller.result().fullSnapshot, null);
+    assert.equal(world.feedsSent.length, 0);
+    assert.equal(world.recordsSent.length, 0);
+    assert.equal(
+      world.read().queue[0].operation.operationId,
+      "saved-operation-a",
+    );
+    assert.equal(world.cachedIdentity.user.id, "user-a");
+    assert.equal(world.cacheGuard.reauthRequired, true);
+  } finally {
+    gate.resolve();
+    controller.unmount();
+  }
+});
+
+test("an unmounted startup refresh cannot replace its cached data or send queued work", async () => {
+  const world = makeWorld({ offline: false, queued: true });
+  const gate = deferred();
+  world.beforeIdentify = () => gate.promise;
+  const controller = world.mount();
+  await until(() => world.http.length > 0, "startup request before unmount");
+  const before = world.disk.get(world.account);
+  controller.unmount();
+  gate.resolve();
+  for (let index = 0; index < 10; index++) await tick();
+  assert.equal(world.disk.get(world.account), before);
+  assert.equal(world.feedsSent.length, 0);
+  assert.equal(world.recordsSent.length, 0);
+});
+
+test("native session-read failure leaves a responsive recovery screen instead of personal data", async () => {
+  const world = makeWorld({ offline: false });
+  world.beforeSessionRead = async () => {
+    throw new Error("local_data_invalid");
+  };
+  const controller = world.mount();
+  try {
+    await until(
+      () => !controller.result().booting,
+      "failed secure session read",
+    );
+    assert.equal(controller.result().sharedMode, true);
+    assert.equal(controller.result().sharedState, null);
+    assert.equal(controller.result().user, null);
+    assert.equal(world.http.length, 0);
+    await controller.result().signOut();
+    assert.equal(controller.result().sharedMode, false);
+    assert.equal(controller.result().authStatus, "signed_out");
+  } finally {
+    controller.unmount();
+  }
+});
+
+test("sign out during startup refresh remains signed out after the pending response settles", async () => {
+  const world = makeWorld({ offline: false });
+  const gate = deferred();
+  world.beforeIdentify = () => gate.promise;
+  const controller = world.mount();
+  try {
+    await until(() => world.http.length > 0, "startup request before sign out");
+    assert.equal(controller.result().booting, false);
+    const signingOut = controller.result().signOut();
+    gate.resolve();
+    await signingOut;
+    assert.equal(controller.result().authStatus, "signed_out");
+    assert.equal(controller.result().user, null);
+    assert.equal(controller.result().sharedState, null);
+    assert.equal(controller.result().sharedMode, false);
+    assert.equal(world.read(), null);
+    const requests = world.http.length;
+    await controller.result().refresh();
+    for (let index = 0; index < 5; index++) await tick();
+    assert.equal(world.http.length, requests);
+    assert.equal(controller.result().sharedState, null);
+  } finally {
+    gate.resolve();
+    controller.unmount();
+  }
+});
+
+test("known family without a cache can leave local loading while the first snapshot is pending", async () => {
+  const world = makeWorld({ offline: false });
+  world.disk.delete(world.account);
+  const gate = deferred();
+  world.beforeSnapshot = () => gate.promise;
+  const controller = world.mount();
+  try {
+    await until(
+      () => world.http.some((request) => request.url.endsWith("/snapshot")),
+      "first snapshot request",
+    );
+    assert.equal(controller.result().booting, false);
+    assert.equal(controller.result().sharedMode, true);
+    assert.equal(controller.result().ready, false);
+    assert.equal(controller.result().sharedState, null);
+    gate.resolve();
+    await until(() => !controller.result().syncing, "first snapshot completes");
+    assert.equal(controller.result().sharedState.profile.name, "Baby");
+  } finally {
+    gate.resolve();
+    controller.unmount();
+  }
+});
+
+test("cached account owner status cannot elevate a caregiver snapshot before verification", async () => {
+  const world = makeWorld({ offline: false });
+  world.data.state.snapshot.family.role = "caregiver";
+  world.data.state.snapshot.members[0].role = "caregiver";
+  world.disk.set(world.account, JSON.stringify(world.data.state));
+  const gate = deferred();
+  world.beforeIdentify = () => gate.promise;
+  const controller = world.mount();
+  try {
+    await until(() => !controller.result().booting, "conservative cache roles");
+    assert.equal(controller.result().ready, true);
+    assert.equal(controller.result().fullSnapshot.family.role, "caregiver");
+    assert.equal(controller.result().canEditRecord("extra", "avatar"), false);
+  } finally {
+    controller.unmount();
+    gate.resolve();
+  }
+});
+
+test("a fresh identity downgrade hides cached admin permissions while the replacement snapshot is pending", async () => {
+  const world = makeWorld({ offline: false, queued: true });
+  world.identity.families[0].role = "caregiver";
+  world.server.family.role = "caregiver";
+  world.server.members[0].role = "caregiver";
+  const gate = deferred();
+  world.beforeSnapshot = () => gate.promise;
+  const controller = world.mount();
+  try {
+    await until(
+      () => world.http.some((request) => request.url.endsWith("/snapshot")),
+      "snapshot after identity downgrade",
+    );
+    assert.equal(controller.result().booting, false);
+    assert.equal(controller.result().authStatus, "authenticated");
+    assert.equal(controller.result().ready, false);
+    assert.equal(controller.result().fullSnapshot, null);
+    assert.equal(controller.result().canEditRecord("extra", "avatar"), false);
+    assert.equal(world.feedsSent.length, 0);
+    assert.equal(world.read().queue.length, 1);
+    gate.resolve();
+    await until(
+      () => !controller.result().syncing,
+      "replacement caregiver snapshot",
+    );
+    assert.equal(controller.result().ready, true);
+    assert.equal(controller.result().fullSnapshot.family.role, "caregiver");
+  } finally {
+    gate.resolve();
+    controller.unmount();
+  }
+});
+
+test("a newly confirmed account deletion hides cache before identity persistence can stall", async () => {
+  const world = makeWorld({ offline: false });
+  world.identity.accountDeletion = {
+    deletionId: "deletion",
+    status: "pending",
+    requestedAt: "2026-09-01T01:00:00Z",
+  };
+  const gate = deferred();
+  let savingIdentity = false;
+  world.beforeIdentitySave = () => {
+    savingIdentity = true;
+    return gate.promise;
+  };
+  const controller = world.mount();
+  try {
+    await until(() => savingIdentity, "deleting identity write");
+    assert.equal(controller.result().booting, false);
+    assert.equal(controller.result().ready, false);
+    assert.equal(controller.result().sharedState, null);
+    assert.equal(controller.result().fullSnapshot, null);
+    assert.equal(world.read().snapshot.family.id, "family-a");
+    gate.resolve();
+    await until(() => !controller.result().syncing, "deletion cache cleanup");
+    assert.equal(controller.result().sharedState, null);
+    assert.equal(world.read().snapshot, null);
+  } finally {
+    gate.resolve();
+    controller.unmount();
+  }
+});
+
+test("a local read failure preserves unknown activation recovery and reloads its journal on refresh", async () => {
+  const world = joinWorld();
+  const intent = {
+    operationId: "pending-join",
+    path: "/v2/invitations/invite-b/accept",
+    body: {
+      declineOtherInvitations: true,
+      requiredSchemaVersion: 2,
+      requiredExtrasSchemaVersion: 1,
+    },
+    kind: "join",
+    userId: "user-a",
+    phase: "pending",
+  };
+  world.data.state.transition = intent;
+  world.disk.set(world.account, JSON.stringify(world.data.state));
+  world.beforeRead = async () => {
+    throw new Error("local_data_invalid");
+  };
+  const controller = world.mount();
+  const gate = deferred();
+  try {
+    await until(() => !controller.result().booting, "failed local read");
+    assert.equal(controller.result().sharedMode, true);
+    assert.equal(controller.result().ready, false);
+    world.beforeRead = async () => {};
+    world.beforeMutation = () => gate.promise;
+    const refresh = controller.result().refresh();
+    await until(
+      () => controller.result().activationPending,
+      "reloaded activation journal",
+    );
+    assert.equal(controller.result().sharedMode, true);
+    assert.equal(controller.result().sharedState, null);
+    assert.equal(world.personalClears, 0);
+    controller.unmount();
+    gate.resolve();
+    await refresh;
+  } finally {
+    controller.unmount();
+    gate.resolve();
+  }
+});
+
+test("a verified role downgrade hides old admin permissions before cache guard persistence can fail", async () => {
+  const world = makeWorld({ offline: false });
+  const controller = await boot(world);
+  world.server.family.role = "caregiver";
+  world.server.members[0].role = "caregiver";
+  world.beforeCacheOriginSave = async () => {
+    throw new Error("local_save_failed");
+  };
+  try {
+    await controller.result().refresh();
+    assert.equal(controller.result().ready, false);
+    assert.equal(controller.result().sharedState, null);
+    assert.equal(controller.result().canEditRecord("extra", "avatar"), false);
+  } finally {
+    controller.unmount();
+  }
+});
+
+test("a snapshot role downgrade survives failed SQLite persistence and restart of an older admin cache", async () => {
+  const world = makeWorld({ offline: false });
+  const first = await boot(world);
+  world.server.family.role = "caregiver";
+  world.server.members[0].role = "caregiver";
+  world.beforeCommit = async () => {
+    throw new Error("disk_full");
+  };
+  await first.result().refresh();
+  assert.equal(world.cachedIdentity.families[0].role, "caregiver");
+  assert.equal(world.read().snapshot.family.role, "owner");
+  first.unmount();
+  const gate = deferred();
+  world.beforeIdentify = () => gate.promise;
+  const reopened = world.mount();
+  try {
+    await until(
+      () => !reopened.result().booting,
+      "narrowed cached role restart",
+    );
+    assert.equal(reopened.result().ready, true);
+    assert.equal(reopened.result().fullSnapshot.family.role, "caregiver");
+    assert.equal(reopened.result().canEditRecord("extra", "avatar"), false);
+  } finally {
+    reopened.unmount();
+    gate.resolve();
+  }
+});
+
+test("known expired authentication stays hidden on restart without a network response", async () => {
+  const world = makeWorld({ offline: false });
+  const first = await boot(world);
+  world.identityError = { code: "sign_in_required", status: 401 };
+  await first.result().refresh();
+  assert.equal(world.cacheGuard.reauthRequired, true);
+  first.unmount();
+  world.identityError = null;
+  const gate = deferred();
+  world.beforeIdentify = () => gate.promise;
+  const reopened = world.mount();
+  try {
+    await until(() => !reopened.result().booting, "expired local restart");
+    assert.equal(reopened.result().authStatus, "reauth_required");
+    assert.equal(reopened.result().sharedState, null);
+    assert.equal(reopened.result().ready, false);
+  } finally {
+    reopened.unmount();
+    gate.resolve();
+  }
+});
+
+test("a newer verified history guard keeps an older SQLite cache hidden after failed persistence and restart", async () => {
+  const world = makeWorld({ offline: false });
+  const first = await boot(world);
+  world.server.historyId = "new-history";
+  world.beforeCommit = async () => {
+    throw new Error("disk_full");
+  };
+  await first.result().refresh();
+  assert.equal(world.read().snapshot.historyId, "history-a");
+  assert.equal(world.cacheGuard.origin.historyId, "new-history");
+  first.unmount();
+  const gate = deferred();
+  world.beforeIdentify = () => gate.promise;
+  const reopened = world.mount();
+  try {
+    await until(() => !reopened.result().booting, "history guard restart");
+    assert.equal(reopened.result().ready, false);
+    assert.equal(reopened.result().sharedState, null);
+  } finally {
+    reopened.unmount();
+    gate.resolve();
   }
 });
 

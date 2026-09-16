@@ -18,7 +18,6 @@ export async function familyRequest<T>(
   if (!familyConfig) throw new PilotApiError("not_configured");
   if (!/^\/v[12]\//.test(path) || path.includes("://"))
     throw new PilotApiError("invalid_request");
-  const token = await getAccessToken();
   const timeout = new AbortController();
   const abort = () => timeout.abort();
   signal?.addEventListener("abort", abort, { once: true });
@@ -37,7 +36,17 @@ export async function familyRequest<T>(
       operation?.collection === "extra" &&
       operation.extraRecord?.kind === "avatar");
   const timer = setTimeout(abort, largeTransfer ? 120000 : 15000);
+  let abortTokenWait = () => {};
   try {
+    if (timeout.signal.aborted) throw new PilotApiError("network_unavailable");
+    // Discovery/token refresh is network work too. A stalled refresh must not
+    // retain the sync lock indefinitely or send a request after this session ends.
+    const tokenAborted = new Promise<never>((_, reject) => {
+      abortTokenWait = () => reject(new PilotApiError("network_unavailable"));
+      timeout.signal.addEventListener("abort", abortTokenWait, { once: true });
+    });
+    const token = await Promise.race([getAccessToken(), tokenAborted]);
+    if (timeout.signal.aborted) throw new PilotApiError("network_unavailable");
     const response = await fetch(`${familyConfig.apiUrl}${path}`, {
       method: body === undefined ? "GET" : "POST",
       headers: {
@@ -66,9 +75,13 @@ export async function familyRequest<T>(
     return (await response.json()) as T;
   } catch (error) {
     if (error instanceof PilotApiError) throw error;
+    const code = (error as Error | null)?.message;
+    if (code === "sign_in_required" || code === "session_changed")
+      throw new PilotApiError(code);
     throw new PilotApiError("network_unavailable");
   } finally {
     clearTimeout(timer);
+    timeout.signal.removeEventListener("abort", abortTokenWait);
     signal?.removeEventListener("abort", abort);
   }
 }
