@@ -124,6 +124,7 @@ public sealed class FullDomainTests
         var capabilities = await client.GetFromJsonAsync<FullFamilyCapabilities>("/v2/capabilities");
         Assert.Equal(2, capabilities!.SchemaVersion);
         Assert.Equal(FullDomainValidation.RecordKinds, capabilities.RecordKinds);
-        Assert.Equal(10485760, capabilities.MaxSeedBytes);
+        Assert.Equal(33554432, capabilities.MaxSeedBytes);
+        Assert.Equal(1, capabilities.ExtrasSchemaVersion);
     }
 }

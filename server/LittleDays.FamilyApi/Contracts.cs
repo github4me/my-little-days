@@ -20,17 +20,20 @@ public sealed record FamilySnapshot(FamilySummary Family, Guid HistoryId, string
 public sealed record FeedOperation(Guid OperationId, Guid RecordId, Guid MembershipId, Guid HistoryId,
     string Kind, string? BaseVersion, SharedFeedInput? Feed);
 public sealed record FeedReceipt(Guid OperationId, Guid HistoryId, string Revision);
-public sealed record FullFamilyCapabilities(int SchemaVersion, string[] RecordKinds, int MaxSeedBytes);
+public sealed record FullFamilyCapabilities(int SchemaVersion, string[] RecordKinds, int MaxSeedBytes, int ExtrasSchemaVersion = 1);
 public sealed record FullFamilyProfile(string Name, string BirthDate, string Sex);
 public sealed record SharedEntry(JsonElement Entry, string Version, Guid RecordedBy, Guid LastEditedBy);
 public sealed record SharedCareRecord(JsonElement Record, string Version, Guid RecordedBy, Guid LastEditedBy);
+public sealed record SharedExtraRecord(JsonElement Record, string Version, Guid RecordedBy, Guid LastEditedBy);
 public sealed record FullFamilySnapshot(int SchemaVersion, FullFamilyProfile Profile,
     SharedEntry[] Entries, SharedCareRecord[] CareRecords, FamilySummary Family, Guid HistoryId, string Revision,
-    FamilyMember[] Members, FamilyInvitation[] Invitations, SharedFeed[] Feeds, OwnershipTransfer? OwnershipTransfer);
+    FamilyMember[] Members, FamilyInvitation[] Invitations, SharedFeed[] Feeds, OwnershipTransfer? OwnershipTransfer,
+    int ExtrasSchemaVersion = 1, SharedExtraRecord[]? ExtraRecords = null);
 public sealed record CreateFullFamilyRequest(Guid OperationId, string ConsentRevision, JsonElement Seed, bool DeclinePendingInvitations = false);
 public sealed record CreateFullFamilyResult(Guid OperationId, Guid FamilyId, Guid MembershipId, Guid HistoryId, string SeedDigest, FullFamilySnapshot Snapshot);
 public sealed record FullRecordOperation(Guid OperationId, string RecordId, Guid MembershipId, Guid HistoryId,
-    string Kind, string Collection, string? BaseVersion, JsonElement? Entry, JsonElement? CareRecord);
+    string Kind, string Collection, string? BaseVersion, JsonElement? Entry, JsonElement? CareRecord,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] JsonElement? ExtraRecord = null);
 public sealed record FullProfileRequest(Guid OperationId, Guid? MembershipId, Guid? HistoryId,
     string BaseVersion, JsonElement Profile) : IGrantContext;
 public sealed record CreateFamilyRequest(Guid OperationId, string BabyName);
@@ -38,7 +41,8 @@ public interface IGrantContext { Guid? MembershipId { get; } Guid? HistoryId { g
 public sealed record CreateInvitationRequest(Guid OperationId, string Email, Guid? MembershipId = null, Guid? HistoryId = null) : IGrantContext;
 public sealed record OperationRequest(Guid OperationId, Guid? MembershipId = null, Guid? HistoryId = null, Guid? TargetMembershipId = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool DeclineOtherInvitations = false,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] int? RequiredSchemaVersion = null) : IGrantContext;
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] int? RequiredSchemaVersion = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? RequiredExtrasSchemaVersion = null) : IGrantContext;
 public sealed record ProfileRequest(Guid OperationId, string BaseVersion, string BabyName, string? BabyBirthDate, Guid? MembershipId = null, Guid? HistoryId = null) : IGrantContext;
 public sealed record NominateOwnerRequest(Guid OperationId, Guid UserId, Guid? MembershipId = null, Guid? HistoryId = null) : IGrantContext;
 public sealed record InvitationResult(FamilyInvitation Invitation);

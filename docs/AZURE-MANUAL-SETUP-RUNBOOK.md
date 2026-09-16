@@ -688,6 +688,67 @@ After API success, the same commit was published to EAS **preview**, iOS runtime
 
 Second-phone login is unchanged by this release: signing into an already joined account does not itself delete that phone's independent offline data. A future per-device replacement/consent policy must be agreed before changing this behavior; do not assume it has been implemented.
 
+### Account session-status correction: device acceptance
+
+This client-side correction requires no new Azure settings, API or database changes. It is not deployed merely by adding these instructions; publish the reviewed mobile change separately using the preview OTA procedure above.
+
+1. On a signed-out test account, start sign-in and cancel it. **My account** must stay **Signed out**; cancellation is a short informational notice, not a permanent error or a successful login. Do not delete real data to prepare this test.
+2. If an existing session expires, the account must show **Session expired**, label the displayed name/email as cached details, and offer **Sign in again**. Cached profile information is not evidence of current authentication.
+3. Cancel that reauthentication. The account must remain expired; the application must not enable family creation, invitation acceptance or account deletion. Explicit sign-out remains available, subject to the existing unresolved activation safeguards.
+4. Complete reauthentication with the same account. After the server verifies it, **My account** must show **Signed in** and obsolete login errors must disappear, including for an account that has not joined a family yet.
+5. Open the app offline with cached account details. It must not claim that those details have just been verified or silently sign the user out. Reconnect and refresh to verify the status; keep existing data and pending work intact.
+6. Open **Request account deletion** without submitting. No previous login-cancellation error should appear in its confirmation. If authentication expires while the confirmation is open, submission must become unavailable and the explanation must request reauthentication. Cancel the dialog; only test a real deletion on an explicitly disposable account.
+7. Verify unrelated unresolved errors (for example, a local-save or sign-out-cleanup failure) and unknown family-operation results are not dismissed by the cancellation-notice timer. Do not confuse a dismissed notice with a cancelled server operation.
+
+### Five invited-person places and activation review
+
+The invitation-capacity change itself requires the updated API and mobile client, but no SQL migration or new Azure settings. The shared photo/reminder/play additions below do require the new migration. Deploy the database/API before the mobile update. An old `Pilot:MaxMembers=20` value is automatically capped at six active people (one administrator plus five invitees); existing excess members or invitation history are not deleted.
+
+1. Create a disposable family with five different invitee emails. Review must show the baby profile, category counts, total records and all five normalized addresses. Six different emails must be rejected without creating a family. Repeating the same address must not consume another place.
+2. Close review before confirming and verify nothing is uploaded or created. Reopen it; consent must be unchecked again. Change the original records while reviewing and verify a stale review cannot be submitted.
+3. In an existing family, active non-admin members and distinct unexpired pending invitations share the five places. At capacity, adding a new email must be blocked; renewing an existing pending invitation does not consume another place. Decline, revoke, expiry or departure releases that place. Concurrent requests must not exceed capacity.
+4. Verify the create/join copy advises that the member holding the most complete baby history should create the family. Joining does not merge the recipient's personal records. Only after verified family records are downloaded and saved does activation clear and replace original local data; no recoverable personal backup is retained.
+5. On both languages at narrow phone widths, check that the review's final action, cancellation and failure explanation remain usable without scrolling past all disclosure text.
+
+### Family photos, reminders and play: release and phone acceptance
+
+The shared-extras implementation is prepared locally; do not treat this section as confirmation that it has been committed, deployed or installed. It covers the current baby avatar, reminder rules/settings, all stored play check-ins and play selections. It does not upload the device photo library. See [the data-flow reference](FAMILY-EXTRAS.md).
+
+#### A. Azure and GitHub release
+
+1. Review the intended release commit and `server/LittleDays.DatabaseMigrator/Scripts/0003_FamilySharedExtras.sql`. This expands the existing `FamilyRecords` collection/JSON checks for extras and the bounded avatar. It does not recreate tables, replace records or require a new Azure resource. Leave scripts `0001` and `0002` unchanged.
+2. Ensure the reviewed commit has been pushed to the trusted release branch before starting a release. In GitHub, open **Actions → Deploy family API and database → Run workflow** and select **feature/family-invitations**, or the deliberately configured trusted branch. Do not use an old failed run if its branch revision has since changed.
+3. Confirm **SQL identities and runtime role are bootstrapped; I reviewed this release's SQL changes** only after reviewing the migration and verifying the existing bootstrap. Keep **Adopt a reviewed existing database with legacy EF history** unchecked for the already DbUp-managed database. No new bootstrap identities or grants are needed for this migration.
+4. Start the workflow. Review/approve the `family-database` environment when requested. Check that the migrator applies `0003_FamilySharedExtras.sql`, or reports it already applied. Do not manually execute the SQL file or edit `dbo.DatabaseMigrations` to force a rerun.
+5. After migration succeeds, review/approve API deployment through the existing `family-pilot` environment. The workflow orders the database before API packaging/deployment. Do not publish the mobile extras update before both have succeeded.
+6. Verify API liveness using the existing `/health/live` check. Liveness alone does not verify SQL, login or extras support. During authenticated app testing, the capability contract must include `extrasSchemaVersion: 1`; new create/join activation refuses an older server before clearing personal data. Do not paste access tokens into documentation or screenshots.
+7. If SQL succeeds but API deployment fails, retain the successful migration and fix/retry the compatible API release. DbUp skips already applied scripts. Do not revert or delete shared records to recover the deployment.
+8. Publish the reviewed mobile commit to the existing Expo **preview** environment/channel using the previous release procedure, with `EXPO_PUBLIC_FAMILY_UI_DEMO=0`. Record the GitHub run, source commit, Expo update group/runtime and build/install reference. This is not a TestFlight submission unless one is separately requested.
+
+No Bicep update, storage account, Key Vault, Entra registration or new environment variable is required for these extras. Existing API managed identity and database access remain in use. The original history limit is 10 MiB; the complete seed is bounded at 32 MiB and the avatar at 12 MiB decoded. Large avatars increase snapshot traffic, so monitor the existing App Service and SQL usage after release.
+
+#### B. Before creating a family
+
+1. Use disposable test histories and accounts on the two phones; joining intentionally clears/replaces the joiner's original local records. Do not run destructive acceptance against a real baby history without the person's informed approval.
+2. On the creator phone, set a recognizable baby avatar. Save play selections and check-ins on more than one date, and create daily/after-feed reminder rules plus a one-time reminder with a known due time. The member with the most complete history should be the creator.
+3. Open **More → Manage family sharing → Create a family group**. Review the baby profile, ordinary record counts, photo preview, reminder/check-in/settings counts and invitee emails. Cancel first and confirm nothing was uploaded or erased. Reopen and explicitly confirm the review/consent to create.
+4. If the review shows an older-reminder warning, stop and return to personal **More → Reminders**. Old iOS one-time notifications can lack the original absolute deadline; the app will not guess or restart them. Explicitly cancel/recreate the affected reminders with the intended deadline, then prepare a fresh family review. Unknown legacy rule settings require the same review/recreation. Do not clear all app data or bypass the warning.
+5. If an avatar or extra cannot be read, correct/reselect it in the personal app and retry review. Source changes between review and first upload must request a new review, not silently upload an unseen replacement. Cancelled or failed preparation must leave original personal data intact.
+
+#### C. Two-phone acceptance after deployment
+
+1. Creator: confirm successful creation retains the reviewed avatar, ordinary history, all check-in dates, selections and reminder rules in the family. Restart the app and check again. No recoverable personal backup should be manufactured during activation.
+2. Invitee: sign in, accept the invitation and read the warning that existing local information will be cleared/replaced. After confirmed activation, see the creator's family data; the invitee's unrelated photo/history/play/reminders must not have been uploaded to the family. Cancel a separate disposable acceptance attempt before confirmation and verify its local data remains unchanged.
+3. On **Care → Play activities / Play settings**, verify the creator's selections and today's family check-ins appear on both phones. A member can add a check-in and undo their own; they cannot undo another member's check-in or change shared activity selections. The administrator can manage all. Refresh the other phone and test a stale edit/conflict without losing the winning record.
+4. Update the family avatar as administrator, then refresh the member phone. Confirm the member cannot change it. Remove it and add another supported photo to check that clearing the avatar does not permanently block later updates. Native photo selection/decoding must be checked on the phones, not just in the browser.
+5. On **More → Reminders**, confirm the family rules are visible but neither phone enables notifications merely by joining/downloading. Choose **Enable on this phone** on only one phone; handle the OS permission prompt. Verify the other phone stays opted out. Disabling on one phone must not delete family rules or change the other phone's choice.
+6. Verify one-time rules use the original absolute due time and expired ones do not restart. Daily rules use each phone's local time. After-feed rules follow the latest family feed and do not produce duplicate notifications after repeated refreshes. Test silent/non-silent behavior on the actual iPhone; do not infer delivery from a saved record.
+7. Add/edit/remove a reminder as its member-author and refresh the other phone. Another member cannot edit/delete it; the administrator can. Confirm the delete dialog can be cancelled without a write. Unsaved reminder edits must remain drafts.
+8. With disposable accounts, leave/remove a member or sign out while family reminders are enabled. After the action is verified, family records and notifications must be cleared from that device and must not reappear in personal storage. Retry after interrupted connectivity. A remotely removed offline phone cannot learn its removal until reconnecting; check cleanup when it reconnects rather than promising instantaneous offline erasure.
+9. Join a different disposable family and verify no avatar, check-in, selection, reminder rule or pending edit from the previous family appears there. New-family notifications require their own explicit opt-in. Record device/OS, release identifiers and any failure; do not include private baby records or auth tokens in shared logs.
+
+These checks do not change the existing policy for signing an already joined account into a second phone that has independent offline data. Explicit create/join activation is the destructive replacement flow; do not assume a newly implemented automatic second-phone migration.
+
 ## 16. Remaining operator checklist
 
 - [ ] Record actual customer default `.onmicrosoft.com` domain.

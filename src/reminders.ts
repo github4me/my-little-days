@@ -14,6 +14,13 @@ import {
 } from "./storage";
 import { formatDate, t } from "./i18n";
 import { personalStorageIsBlocked, reminderWrite } from "./personalWrites";
+import type { FamilyExtraRecord } from "./family/extras";
+import {
+  absoluteReminderTime,
+  captureScheduledReminderRecords,
+  isFamilyReminderData,
+} from "./family/familyReminderPlan";
+import { shouldShowFamilyNotification } from "./family/familyReminders";
 
 export type Reminder = {
   id: string;
@@ -24,13 +31,18 @@ export type Reminder = {
 const autoFeedMode = "after-feed";
 
 Notifications.setNotificationHandler({
-  handleNotification: async (notification) => ({
-    shouldShowBanner: !personalStorageIsBlocked(),
-    shouldShowList: !personalStorageIsBlocked(),
-    shouldPlaySound:
-      !personalStorageIsBlocked() && !!notification.request.content.sound,
-    shouldSetBadge: false,
-  }),
+  handleNotification: async (notification) => {
+    const data = notification.request.content.data;
+    const allowed = isFamilyReminderData(data)
+      ? shouldShowFamilyNotification(data)
+      : !personalStorageIsBlocked();
+    return {
+      shouldShowBanner: allowed,
+      shouldShowList: allowed,
+      shouldPlaySound: allowed && !!notification.request.content.sound,
+      shouldSetBadge: false,
+    };
+  },
 });
 
 function validMinutes(minutes: number) {
@@ -101,15 +113,25 @@ async function scheduleAutoFeedReminder(
 }
 
 export async function listReminders(): Promise<Reminder[]> {
-  return (await Notifications.getAllScheduledNotificationsAsync()).map((n) => {
-    const title = n.content.title ?? t("照护提醒");
-    return {
-      id: n.identifier,
-      title,
-      detail: String(n.content.data?.detail ?? ""),
-      settings: settingsFromReminderData(title, n.content.data),
-    };
-  });
+  return (await Notifications.getAllScheduledNotificationsAsync())
+    .filter((n) => !isFamilyReminderData(n.content.data))
+    .map((n) => {
+      const title = n.content.title ?? t("照护提醒");
+      return {
+        id: n.identifier,
+        title,
+        detail: String(n.content.data?.detail ?? ""),
+        settings: settingsFromReminderData(title, n.content.data),
+      };
+    });
+}
+
+export async function captureReminderRecords(): Promise<FamilyExtraRecord[]> {
+  const [scheduled, automatic] = await Promise.all([
+    Notifications.getAllScheduledNotificationsAsync(),
+    loadAutoFeedReminder(),
+  ]);
+  return captureScheduledReminderRecords(scheduled, automatic);
 }
 
 export async function cancelReminder(id: string) {
@@ -131,6 +153,10 @@ export async function updateReminderSilent(id: string, silent: boolean) {
     if (!reminder || !reminder.trigger || typeof reminder.trigger !== "object")
       return;
     const channelId = await prepareChannel(silent);
+    const onceAt = absoluteReminderTime(
+      reminder.content.data,
+      reminder.trigger,
+    );
     await Notifications.cancelScheduledNotificationAsync(id);
     await Notifications.scheduleNotificationAsync({
       content: {
@@ -139,10 +165,16 @@ export async function updateReminderSilent(id: string, silent: boolean) {
         sound: silent ? false : "default",
         data: { ...(reminder.content.data ?? {}), silent },
       },
-      trigger: {
-        ...reminder.trigger,
-        channelId,
-      } as Notifications.NotificationTriggerInput,
+      trigger: onceAt
+        ? {
+            type: Notifications.SchedulableTriggerInputTypes.DATE,
+            date: new Date(onceAt),
+            channelId,
+          }
+        : ({
+            ...reminder.trigger,
+            channelId,
+          } as Notifications.NotificationTriggerInput),
     });
   });
 }
@@ -159,6 +191,7 @@ export async function addReminder(
     await requirePermission();
     let trigger: Notifications.NotificationTriggerInput;
     let detail: string;
+    let onceAt: string | undefined;
     if (dailyTime) {
       if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(dailyTime))
         throw new Error(t("时间格式应为 HH:mm"));
@@ -173,6 +206,7 @@ export async function addReminder(
     } else {
       validMinutes(minutes);
       const date = new Date(Date.now() + minutes * 60000);
+      onceAt = date.toISOString();
       trigger = {
         type: Notifications.SchedulableTriggerInputTypes.DATE,
         date,
@@ -199,6 +233,7 @@ export async function addReminder(
           minutes,
           dailyTime: dailyTime ?? "",
           silent,
+          ...(onceAt ? { onceAt } : {}),
         },
       },
       trigger,

@@ -159,7 +159,9 @@ export async function loadPlaySelection(): Promise<PlaySelection> {
     "SELECT value FROM app_data WHERE key = ?",
     "play-selection",
   );
-  return parsePlaySelection(row?.value ?? null);
+  return row
+    ? parsePlaySelection(row.value)
+    : { included: await loadPlayFavorites(), excluded: [] };
 }
 export async function savePlaySelection(value: PlaySelection): Promise<void> {
   await writePersonalValue(
@@ -184,6 +186,24 @@ export async function loadPlayCheckins(day: string): Promise<string[]> {
     playCheckinKey(day),
   );
   return parsePlayFavorites(row?.value ?? null);
+}
+export async function loadAllPlayCheckins(): Promise<
+  { day: string; ids: string[] }[]
+> {
+  const rows = await (
+    await db()
+  ).getAllAsync<{ key: string; value: string }>(
+    "SELECT key, value FROM app_data WHERE key LIKE ? ORDER BY key",
+    "play-checkins-%",
+  );
+  return rows.map((row) => {
+    const day = row.key.slice("play-checkins-".length);
+    playCheckinKey(day);
+    const ids: unknown = JSON.parse(row.value);
+    if (!Array.isArray(ids) || ids.some((id) => typeof id !== "string"))
+      throw new Error("Invalid play check-ins");
+    return { day, ids: [...new Set(ids as string[])].sort() };
+  });
 }
 export async function savePlayCheckins(
   day: string,

@@ -140,7 +140,7 @@ test("owner seed rejects malformed, missing, self or excess recipients with safe
     () =>
       prepareOwnerSeed(
         initialState,
-        Array.from({ length: 20 }, (_, i) => `family${i}@example.test`).join(
+        Array.from({ length: 6 }, (_, i) => `family${i}@example.test`).join(
           ",",
         ),
         ownEmail,
@@ -150,10 +150,34 @@ test("owner seed rejects malformed, missing, self or excess recipients with safe
   assert.equal(
     prepareOwnerSeed(
       initialState,
-      Array.from({ length: 19 }, (_, i) => `family${i}@example.test`).join(","),
+      Array.from({ length: 5 }, (_, i) => `family${i}@example.test`).join(","),
       ownEmail,
     ).inviteeEmails.length,
-    19,
+    5,
+  );
+});
+
+test("five distinct recipients remain valid when entered more than once", () => {
+  const emails = Array.from({ length: 5 }, (_, i) => `family${i}@example.test`);
+  const draft = prepareOwnerSeed(
+    initialState,
+    [...emails, emails[0].toUpperCase(), emails[4]].join(";"),
+    ownEmail,
+  );
+  assert.deepEqual(draft.inviteeEmails, emails);
+});
+
+test("legacy committed seed serialization preserves recipients for identical receipt retries", () => {
+  const draft = prepareOwnerSeed(initialState, recipient, ownEmail);
+  draft.inviteeEmails = Array.from(
+    { length: 19 },
+    (_, i) => `family${i}@example.test`,
+  );
+  assert.deepEqual(JSON.parse(serializeOwnerSeed(draft)), draft);
+  assert.throws(
+    () =>
+      prepareOwnerSeed(draft.source, draft.inviteeEmails.join(","), ownEmail),
+    { message: "owner_recipient_limit" },
   );
 });
 

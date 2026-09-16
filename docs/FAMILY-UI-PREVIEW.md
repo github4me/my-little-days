@@ -6,7 +6,7 @@ This is a **UI-only demo**, not a connected family service. It reuses the real f
 
 Install the dedicated `ui-preview` build, then open **More → Family invitation pilot → Preview screens — no login**. In Chinese: **我的 → 家庭邀请试点 → 界面预览（无需登录）**.
 
-The default **First invitation** scenario reviews a fictional baby's complete sample history. Enter up to three emails, tap **Review setup**, read the sharing explanation and confirm to simulate family creation. No invitation is sent. Admin transfer includes data control, with unchanged record authorship.
+The default **First invitation** scenario reviews a fictional baby's complete sample history. Enter up to five different emails, tap **Review setup**, check the profile, record totals and recipients, then read the sharing explanation and confirm to simulate family creation. The member with the most complete baby history should create the family. No invitation is sent. Admin transfer includes data control, with unchanged record authorship.
 
 Swipe the nine scenario buttons to review first invitation, signed-out, incoming invitations, admin, member, admin transfer, sole-admin family closure, removed-member and account-deletion screens. Expand sections, try forms and confirmation dialogs, and use **Reset samples** to start again. Every destructive confirmation is explicitly marked as simulated. Changing scenarios, leaving the demo or closing the app discards the sample session. Light/dark appearance and Chinese/English use the normal app preferences.
 

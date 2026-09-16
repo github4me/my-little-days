@@ -32,16 +32,43 @@ public sealed class MigrationTests
     }
 
     [SqlFact]
+    public async Task SharedExtrasUpgradePreservesRowsAndAllowsOnlyAvatarToExceedOldJsonBound()
+    {
+        await using var db = await TestDatabase.Create();
+        db.Runner(scripts: MigrationRunner.Scripts().Take(2).ToArray()).Apply();
+        await db.Execute("""
+            INSERT dbo.Families(Id,BabyName,Revision,CreatedAt) VALUES ('11111111-1111-1111-1111-111111111111',N'Existing baby',1,SYSUTCDATETIME());
+            INSERT dbo.FamilyRecords(FamilyId,Collection,IdHash,Id,RecordJson,RecordedBy,LastEditedBy,Deleted)
+            VALUES ('11111111-1111-1111-1111-111111111111','care','abc','retained','{"kind":"bath"}',
+                '22222222-2222-2222-2222-222222222222','22222222-2222-2222-2222-222222222222',0);
+            """);
+        var version = await db.Count("SELECT CHECKSUM(Version) FROM dbo.FamilyRecords WHERE Id='retained'");
+        db.Runner().Apply();
+        Assert.Equal(version, await db.Count("SELECT CHECKSUM(Version) FROM dbo.FamilyRecords WHERE Id='retained'"));
+        await db.Execute("""
+            INSERT dbo.FamilyRecords(FamilyId,Collection,IdHash,Id,RecordJson,RecordedBy,LastEditedBy,Deleted)
+            VALUES ('11111111-1111-1111-1111-111111111111','extra','avatar-hash','avatar',
+                N'{"kind":"avatar","dataUrl":"'+REPLICATE(CONVERT(nvarchar(max),'a'),70000)+'"}',
+                '22222222-2222-2222-2222-222222222222','22222222-2222-2222-2222-222222222222',0);
+            """);
+        await Assert.ThrowsAsync<SqlException>(() => db.Execute("UPDATE dbo.FamilyRecords SET Id='not-avatar' WHERE Id='avatar'"));
+        await Assert.ThrowsAsync<SqlException>(() => db.Execute("UPDATE dbo.FamilyRecords SET Collection='care' WHERE Id='avatar'"));
+        await Assert.ThrowsAsync<SqlException>(() => db.Execute("UPDATE dbo.FamilyRecords SET RecordJson=REPLACE(RecordJson,'avatar','other') WHERE Id='avatar'"));
+        await Assert.ThrowsAsync<SqlException>(() => db.Execute("UPDATE dbo.FamilyRecords SET RecordJson=REPLACE(RecordJson,'kind','missingKind') WHERE Id='avatar'"));
+        Assert.Equal(2, await db.Count("SELECT COUNT(*) FROM sys.check_constraints WHERE parent_object_id=OBJECT_ID('dbo.FamilyRecords') AND is_disabled=0 AND is_not_trusted=0"));
+    }
+
+    [SqlFact]
     public async Task FreshCheckDoesNotWriteAndApplyIsRepeatable()
     {
         await using var db = await TestDatabase.Create();
-        Assert.Equal(2, db.Runner().Pending().Count);
+        Assert.Equal(3, db.Runner().Pending().Count);
         Assert.Equal(0, await db.Count("SELECT COUNT(*) FROM sys.tables WHERE is_ms_shipped=0"));
         db.Runner().Apply();
-        Assert.Equal(2, await db.Count("SELECT COUNT(*) FROM dbo.DatabaseMigrations"));
+        Assert.Equal(3, await db.Count("SELECT COUNT(*) FROM dbo.DatabaseMigrations"));
         Assert.Empty(db.Runner().Pending());
         db.Runner().Apply();
-        Assert.Equal(2, await db.Count("SELECT COUNT(*) FROM dbo.DatabaseMigrations"));
+        Assert.Equal(3, await db.Count("SELECT COUNT(*) FROM dbo.DatabaseMigrations"));
         Assert.Equal(3, await db.Count("SELECT COUNT(*) FROM dbo.__EFMigrationsHistory"));
     }
 
@@ -54,21 +81,21 @@ public sealed class MigrationTests
         Assert.ThrowsAny<Exception>(() => db.Runner(scripts: [new(scripts[0].Name, scripts[0].Contents + "\n-- changed"), scripts[1]]).Pending());
         Assert.ThrowsAny<Exception>(() => db.Runner(scripts: [scripts[1]]).Pending());
         Assert.ThrowsAny<Exception>(() => db.Runner(scripts: [new("0000_Earlier.sql", "SELECT 1"), .. scripts]).Pending());
-        db.Runner(scripts: [.. scripts, new("0003_AddExample.sql", "CREATE TABLE dbo.Example(Id int NOT NULL);")]).Apply();
-        Assert.Equal(3, await db.Count("SELECT COUNT(*) FROM dbo.DatabaseMigrations"));
+        db.Runner(scripts: [.. scripts, new("0004_AddExample.sql", "CREATE TABLE dbo.Example(Id int NOT NULL);")]).Apply();
+        Assert.Equal(4, await db.Count("SELECT COUNT(*) FROM dbo.DatabaseMigrations"));
     }
 
     [SqlFact]
     public async Task FailureRollsBackSchemaDataAndJournalAndCanRetry()
     {
         await using var db = await TestDatabase.Create();
-        var fail = new SqlScript("0003_Failure.sql", "CREATE TABLE dbo.Example(Id int); INSERT dbo.Example VALUES (1); THROW 51000, 'Synthetic failure', 1;");
+        var fail = new SqlScript("0004_Failure.sql", "CREATE TABLE dbo.Example(Id int); INSERT dbo.Example VALUES (1); THROW 51000, 'Synthetic failure', 1;");
         Assert.ThrowsAny<Exception>(() => db.Runner(scripts: [.. MigrationRunner.Scripts(), fail]).Apply());
         Assert.Equal(0, await db.Count("SELECT COUNT(*) FROM sys.tables WHERE is_ms_shipped=0"));
         db.Runner().Apply();
         Assert.ThrowsAny<Exception>(() => db.Runner(scripts: [.. MigrationRunner.Scripts(), fail]).Apply());
         Assert.Equal(0, await db.Count("SELECT COUNT(*) FROM sys.tables WHERE name='Example'"));
-        Assert.Equal(2, await db.Count("SELECT COUNT(*) FROM dbo.DatabaseMigrations"));
+        Assert.Equal(3, await db.Count("SELECT COUNT(*) FROM dbo.DatabaseMigrations"));
     }
 
     [SqlFact]
@@ -101,7 +128,7 @@ public sealed class MigrationTests
             Assert.Equal(1, await db.Count("SELECT COUNT(*) FROM dbo.Families WHERE BabyName=N'Synthetic baby'"));
             Assert.Equal(1, await db.Count("SELECT COUNT(*) FROM dbo.Feeds WHERE Amount=36.80 AND Note=N'Synthetic feed'"));
             Assert.Equal(version, await db.Count("SELECT CHECKSUM(Version) FROM dbo.Feeds"));
-            Assert.Equal(2, await db.Count("SELECT COUNT(*) FROM dbo.DatabaseMigrations"));
+            Assert.Equal(3, await db.Count("SELECT COUNT(*) FROM dbo.DatabaseMigrations"));
             Assert.Empty(db.Runner().Pending());
         }
     }
@@ -162,7 +189,7 @@ public sealed class MigrationTests
             return connection;
         }
         new MigrationRunner(Limited, db.Name).Apply();
-        Assert.Equal(2, await db.Count("SELECT COUNT(*) FROM dbo.DatabaseMigrations"));
+        Assert.Equal(3, await db.Count("SELECT COUNT(*) FROM dbo.DatabaseMigrations"));
     }
 }
 

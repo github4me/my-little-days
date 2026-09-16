@@ -1,5 +1,7 @@
 import type { State, Entry, CareRecord } from "../domain";
 import type { OwnerSeedDraft } from "./ownerSeed";
+import type { FamilyExtraRecord } from "./extras";
+export type { FamilyExtraRecord } from "./extras";
 
 export type SharedRecord<T> = {
   version: string;
@@ -11,11 +13,14 @@ export type FullFamilySnapshot = FamilySnapshot & {
   profile: State["profile"];
   entries: SharedRecord<{ entry: Entry }>[];
   careRecords: SharedRecord<{ record: CareRecord }>[];
+  extrasSchemaVersion?: 1;
+  extraRecords?: SharedRecord<{ record: FamilyExtraRecord }>[];
 };
 export type FamilyCapabilities = {
   schemaVersion: 2;
   recordKinds: string[];
   maxSeedBytes: number;
+  extrasSchemaVersion?: 1;
 };
 export type FamilyActivation = {
   operationId: string;
@@ -32,9 +37,10 @@ export type CreateFullFamily = {
   seed: OwnerSeedDraft;
 };
 export type RecordOperation = Omit<FeedOperation, "feed"> & {
-  collection: "entry" | "care";
+  collection: "entry" | "care" | "extra";
   entry?: Entry;
   careRecord?: CareRecord;
+  extraRecord?: FamilyExtraRecord;
 };
 export type FamilyRole = "owner" | "caregiver";
 export type FamilyUser = { id: string; displayName: string; email: string };

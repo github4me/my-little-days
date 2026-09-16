@@ -163,6 +163,7 @@ async function confirm(page, name, consent = false, zh = false) {
 
 async function englishFlows(page) {
   await button(page, "Invitations").click();
+  await expect(page.getByText("Signed in", { exact: true })).toBeVisible();
   await expect(button(page, "Accept invitation")).toHaveCount(2);
   await button(page, "Accept invitation").first().click();
   await expect(
@@ -293,7 +294,7 @@ async function receivedInvitationCreationFlow(page, zh) {
     label("Show Create a family group", "展开创建家庭群组"),
   ).click();
   await page
-    .getByLabel(label("Family emails (up to 3)", "家人邮箱（最多 3 个）"), {
+    .getByLabel(label("Family emails (up to 5)", "家人邮箱（最多 5 个）"), {
       exact: true,
     })
     .fill("new.family@example.com");
@@ -337,7 +338,7 @@ async function firstInvitationFlow(page, zh, width) {
     "Review the family’s starting data",
     "确认家庭初始资料",
   );
-  const emailsLabel = label("Family emails (up to 3)", "家人邮箱（最多 3 个）");
+  const emailsLabel = label("Family emails (up to 5)", "家人邮箱（最多 5 个）");
   const reviewLabel = label("Review setup", "查看并确认");
   const createLabel = label("Create family and invite", "创建家庭并邀请");
   const startingTitle = label("Family starting records", "家庭初始记录");
@@ -379,8 +380,8 @@ async function firstInvitationFlow(page, zh, width) {
   await button(page, reviewLabel).click();
   await expect(page.getByRole("alert")).toContainText(
     label(
-      "Enter 1–3 valid, different family email addresses.",
-      "请填写 1–3 个有效且不同的家人邮箱。",
+      "Enter 1–5 valid, different family email addresses.",
+      "请填写 1–5 个有效且不同的家人邮箱。",
     ),
   );
   await expect(
@@ -389,13 +390,36 @@ async function firstInvitationFlow(page, zh, width) {
   await page
     .getByLabel(emailsLabel, { exact: true })
     .fill(
-      " FAMILY.ONE@example.com, family.two@example.com\nfamily.one@example.com ",
+      Array.from({ length: 6 }, (_, i) => `family${i}@example.com`).join("\n"),
+    );
+  await button(page, reviewLabel).click();
+  await expect(page.getByRole("alert")).toContainText(
+    label(
+      "Enter 1–5 valid, different family email addresses.",
+      "请填写 1–5 个有效且不同的家人邮箱。",
+    ),
+  );
+  await expect(
+    page.getByRole("heading", { name: reviewTitle, exact: true }),
+  ).toHaveCount(0);
+  await page
+    .getByLabel(emailsLabel, { exact: true })
+    .fill(
+      " FAMILY.ONE@example.com, family.two@example.com\nfamily.one@example.com\nfamily.three@example.com\nfamily.four@example.com\nfamily.five@example.com ",
     );
   await button(page, reviewLabel).click();
   await expect(
     page.getByRole("heading", { name: reviewTitle, exact: true }),
   ).toBeVisible();
   await expect(button(page, createLabel)).toBeDisabled();
+  await expect(button(page, createLabel)).toBeInViewport();
+  await expect(button(page, label("Cancel", "取消"))).toBeInViewport();
+  await expect(
+    page.getByText(label("Total records: 7", "记录总数：7"), { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(label("Invitees: 5/5", "受邀人数：5/5"), { exact: true }),
+  ).toBeVisible();
   await expect(
     page
       .getByText(
@@ -462,6 +486,8 @@ async function firstInvitationFlow(page, zh, width) {
   await expect(button(page, createLabel)).toBeDisabled();
   await page.getByRole("checkbox").last().click();
   await expect(button(page, createLabel)).toBeEnabled();
+  await expect(button(page, createLabel)).toBeInViewport();
+  await expect(button(page, label("Cancel", "取消"))).toBeInViewport();
   await button(page, createLabel).click();
   await expect(
     page.getByRole("heading", { name: startingTitle, exact: true }),
@@ -483,7 +509,7 @@ async function firstInvitationFlow(page, zh, width) {
     page,
     label("Show Invite a caregiver", "展开邀请照护者"),
   ).click();
-  await expect(button(page, label("Revoke", "撤销"))).toHaveCount(2);
+  await expect(button(page, label("Revoke", "撤销"))).toHaveCount(5);
   await expect(
     page.getByText("family.one@example.com", { exact: true }),
   ).toBeVisible();

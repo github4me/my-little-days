@@ -33,7 +33,10 @@ export async function saveRecordView(value: RecordView): Promise<void> {
   localStorage.setItem(KEY + "-record-view", parseRecordView(value));
 }
 export async function loadPlaySelection(): Promise<PlaySelection> {
-  return parsePlaySelection(localStorage.getItem(KEY + "-play-selection"));
+  const raw = localStorage.getItem(KEY + "-play-selection");
+  return raw === null
+    ? { included: await loadPlayFavorites(), excluded: [] }
+    : parsePlaySelection(raw);
 }
 export async function savePlaySelection(value: PlaySelection): Promise<void> {
   await writePersonalValue(
@@ -45,6 +48,24 @@ export async function loadPlayCheckins(day: string): Promise<string[]> {
   return parsePlayFavorites(
     localStorage.getItem(KEY + "-" + playCheckinKey(day)),
   );
+}
+export async function loadAllPlayCheckins(): Promise<
+  { day: string; ids: string[] }[]
+> {
+  const prefix = KEY + "-play-checkins-";
+  const keys = Array.from({ length: localStorage.length }, (_, index) =>
+    localStorage.key(index),
+  )
+    .filter((key): key is string => key !== null && key.startsWith(prefix))
+    .sort();
+  return keys.map((key) => {
+    const day = key.slice(prefix.length);
+    playCheckinKey(day);
+    const ids: unknown = JSON.parse(localStorage.getItem(key)!);
+    if (!Array.isArray(ids) || ids.some((id) => typeof id !== "string"))
+      throw new Error("Invalid play check-ins");
+    return { day, ids: [...new Set(ids as string[])].sort() };
+  });
 }
 export async function savePlayCheckins(
   day: string,

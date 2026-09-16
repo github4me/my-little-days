@@ -45,6 +45,10 @@ import PrivacySupport from "./src/PrivacySupport";
 import FamilyScreen from "./src/family/FamilyScreen";
 import { useFamilyPilot } from "./src/family/useFamilyPilot";
 import { familyErrorMessage } from "./src/family/messages";
+import SharedReminders from "./src/family/SharedReminders";
+import type { FamilyExtraRecord } from "./src/family/extras";
+import { readSelectedAvatarDataUrl } from "./src/avatar";
+import { randomUUID } from "expo-crypto";
 import FamilyDemoScreen from "./src/family/FamilyDemoScreen";
 import { familyDemoEnabled } from "./src/family/demoConfig";
 import FeedStopButton from "./src/FeedStopButton";
@@ -181,13 +185,51 @@ function BabyApp({
   sharingRef.current = family.sharedMode || family.booting;
   setPersonalStorageBlocked(family.booting || family.sharedMode);
   const state = family.sharedMode ? family.sharedState : offlineState;
-  const avatarUri = family.sharedMode ? null : privateAvatarUri;
+  const sharedAvatar = family.sharedExtras.find(
+    (r) => r.record.kind === "avatar",
+  )?.record;
+  const avatarUri = family.sharedMode
+    ? sharedAvatar?.kind === "avatar"
+      ? sharedAvatar.dataUrl
+      : null
+    : privateAvatarUri;
   stateRef.current = state;
   const familyContext = family.fullSnapshot
     ? `${family.user?.id}|${family.fullSnapshot.family.id}|${family.fullSnapshot.family.membershipId}|${family.fullSnapshot.historyId}`
     : family.sharedMode
       ? "family-unavailable"
       : "private";
+  const activeFamilyContext = useRef(familyContext);
+  activeFamilyContext.current = familyContext;
+  const extrasAvailable = family.fullSnapshot?.extrasSchemaVersion === 1;
+  const extraVersionFor = (id: string) =>
+    family.fullSnapshot?.extraRecords?.find((r) => r.record.id === id)?.version;
+  const sharedSelection = family.sharedExtras.find(
+    (r) => r.record.kind === "play-selection",
+  )?.record;
+  const checkinsFor = (id: string) =>
+    family.sharedExtras.filter(
+      (r) =>
+        r.record.kind === "play-checkin" &&
+        r.record.day === localDay(new Date(now)) &&
+        r.record.activityId === id,
+    );
+  const canToggleCheckin = (id: string) =>
+    !!extrasAvailable &&
+    checkinsFor(id).every((r) => family.canEditRecord("extra", r.record.id));
+  async function saveExtra(record: FamilyExtraRecord, baseVersion?: string) {
+    if (activeFamilyContext.current !== familyContext)
+      throw new Error("membership_changed");
+    if (!extrasAvailable) throw new Error("extras_sharing_unavailable");
+    if (!family.canEditRecord("extra", record.id))
+      throw new Error("record_forbidden");
+    await family.saveRecord("extra", record, baseVersion);
+  }
+  async function deleteExtra(id: string, version: string) {
+    if (activeFamilyContext.current !== familyContext)
+      throw new Error("membership_changed");
+    await family.deleteRecord("extra", id, version);
+  }
   const editVersion = useRef<{
     id: string;
     version?: string;
@@ -366,7 +408,14 @@ function BabyApp({
     setMessage(family.sharedMode ? "已保存，等待家庭同步" : "已保存到本机");
   }
   async function updateAvatar(uri: string | null) {
-    if (family.sharedMode) throw new Error("shared_photo_unavailable");
+    if (family.sharedMode) {
+      const dataUrl = uri ? await readSelectedAvatarDataUrl(uri) : null;
+      await saveExtra(
+        { id: "avatar", kind: "avatar", dataUrl },
+        extraVersionFor("avatar"),
+      );
+      return;
+    }
     await saveAvatarUri(uri);
     setAvatarUri(uri);
   }
@@ -1194,6 +1243,55 @@ function BabyApp({
               <PlayLearning
                 key={familyContext}
                 sharedMode={family.sharedMode}
+                sharedPlay={
+                  extrasAvailable
+                    ? {
+                        selection:
+                          sharedSelection?.kind === "play-selection"
+                            ? sharedSelection.selection
+                            : { included: [], excluded: [] },
+                        checkins: [
+                          ...new Set(
+                            family.sharedExtras.flatMap((r) =>
+                              r.record.kind === "play-checkin" &&
+                              r.record.day === localDay(new Date(now))
+                                ? [r.record.activityId]
+                                : [],
+                            ),
+                          ),
+                        ],
+                        canChangeSelection: family.canEditRecord(
+                          "extra",
+                          "play-selection",
+                        ),
+                        canToggleCheckin,
+                        onChangeSelection: (selection) =>
+                          saveExtra(
+                            {
+                              id: "play-selection",
+                              kind: "play-selection",
+                              selection,
+                            },
+                            extraVersionFor("play-selection"),
+                          ),
+                        onToggleCheckin: async (id) => {
+                          if (!canToggleCheckin(id))
+                            throw new Error("record_forbidden");
+                          const existing = checkinsFor(id);
+                          if (existing.length) {
+                            for (const r of existing)
+                              await deleteExtra(r.record.id, r.version);
+                          } else
+                            await saveExtra({
+                              id: randomUUID(),
+                              kind: "play-checkin",
+                              day: localDay(new Date(now)),
+                              activityId: id,
+                            });
+                        },
+                      }
+                    : undefined
+                }
                 careVersions={Object.fromEntries(
                   family.fullSnapshot?.careRecords.map((r) => [
                     r.record.id,
@@ -1262,6 +1360,22 @@ function BabyApp({
                   key={familyContext}
                   sharedMode={family.sharedMode}
                   sharedOwner={family.fullSnapshot?.family.role === "owner"}
+                  sharedAvatarEditable={
+                    !!extrasAvailable && family.canEditRecord("extra", "avatar")
+                  }
+                  sharedReminders={
+                    extrasAvailable ? (
+                      <SharedReminders
+                        records={family.sharedExtras}
+                        enabled={family.notificationsEnabled}
+                        notificationError={family.notificationError}
+                        canEdit={(id) => family.canEditRecord("extra", id)}
+                        onSave={saveExtra}
+                        onDelete={deleteExtra}
+                        onEnable={family.setNotificationsEnabled}
+                      />
+                    ) : undefined
+                  }
                   profileVersion={family.fullSnapshot?.family.profileVersion}
                   familyUiPreview={familyDemoEnabled}
                   initialProfileExpanded={openProfile}

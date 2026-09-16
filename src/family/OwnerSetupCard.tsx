@@ -1,6 +1,7 @@
 import React, { useContext, useEffect, useRef, useState } from "react";
 import {
   KeyboardAvoidingView,
+  Image,
   Modal,
   Platform,
   Pressable,
@@ -19,6 +20,8 @@ import {
   type FamilyMessageKey,
 } from "./messages";
 import type { OwnerSeedDraft, OwnerSeedSummary } from "./ownerSeed";
+import { MAX_INVITED_FAMILY_MEMBERS } from "./invitationCapacity";
+import { extraRecordCounts } from "./extras";
 
 const countLabels = [
   ["feed", "ownerCountFeed"],
@@ -116,23 +119,31 @@ export default function OwnerSetupCard({
       const code = cause instanceof Error ? cause.message : "";
       if (mounted.current)
         setError(
-          code === "owner_active_timer"
-            ? "ownerTimerError"
+          code.startsWith("legacy_reminder_")
+            ? "ownerLegacyReminderError"
             : [
-                  "owner_source_changed",
-                  "owner_data_changed",
-                  "owner_setup_changed",
+                  "avatar_read_failed",
+                  "invalid_extra_record",
+                  "owner_extra_read_failed",
                 ].includes(code)
-              ? "ownerChangedError"
-              : [
-                    "owner_invalid_email",
-                    "owner_self_invite",
-                    "owner_recipient_limit",
-                  ].includes(code)
-                ? "ownerEmailError"
-                : code === "invitation_decline_consent_required"
-                  ? "errorDeclineConsent"
-                  : "ownerGenericError",
+              ? "ownerExtraReadError"
+              : code === "owner_active_timer"
+                ? "ownerTimerError"
+                : [
+                      "owner_source_changed",
+                      "owner_data_changed",
+                      "owner_setup_changed",
+                    ].includes(code)
+                  ? "ownerChangedError"
+                  : [
+                        "owner_invalid_email",
+                        "owner_self_invite",
+                        "owner_recipient_limit",
+                      ].includes(code)
+                    ? "ownerEmailError"
+                    : code === "invitation_decline_consent_required"
+                      ? "errorDeclineConsent"
+                      : "ownerGenericError",
         );
     } finally {
       lock.current = false;
@@ -198,6 +209,7 @@ export default function OwnerSetupCard({
       {expanded ? (
         <View style={{ gap: 12 }}>
           {body(m("ownerSetupDescription"))}
+          {body(m("ownerCreatorRecommendation"))}
           {createsFamily ? body(m("ownerDeclineWarning")) : null}
           <View style={[styles.notice, { backgroundColor: c.soft }]}>
             {body(
@@ -233,7 +245,7 @@ export default function OwnerSetupCard({
               keyboardType="email-address"
               autoCapitalize="none"
               autoCorrect={false}
-              maxLength={mode === "full" ? 4900 : 800}
+              maxLength={MAX_INVITED_FAMILY_MEMBERS * 260}
               value={emails}
               onChangeText={setEmails}
               editable={!busy}
@@ -274,7 +286,7 @@ export default function OwnerSetupCard({
             onPress={() =>
               void act(async () => {
                 const prepared = await onPrepare(emails);
-                if (mode === "demo" && prepared.inviteeEmails.length > 3)
+                if (prepared.inviteeEmails.length > MAX_INVITED_FAMILY_MEMBERS)
                   throw new Error("owner_recipient_limit");
                 if (mounted.current) {
                   setReview(prepared);
@@ -313,6 +325,7 @@ export default function OwnerSetupCard({
               style={[styles.modal, { backgroundColor: c.card }]}
             >
               <ScrollView
+                style={{ flexShrink: 1 }}
                 contentContainerStyle={{ gap: 14 }}
                 keyboardShouldPersistTaps="handled"
               >
@@ -333,12 +346,94 @@ export default function OwnerSetupCard({
                       )}
                     </View>
                     {profileView(review.source.profile)}
+                    <T raw style={{ fontWeight: "600" }}>
+                      {familyMessage(locale, "ownerTotalRecords", {
+                        count: review.counts.total,
+                      })}
+                    </T>
                     <OwnerSeedCountsView
                       summary={{ counts: review.counts, runningCount: 0 }}
                     />
+                    {review.extrasSchemaVersion === 1 ? (
+                      <View style={{ gap: 8 }}>
+                        <T raw style={{ fontWeight: "600" }}>
+                          {locale === "zh-CN"
+                            ? "同时共享的资料"
+                            : "Also shared with your family"}
+                        </T>
+                        {review.extraRecords?.map((record) =>
+                          record.kind === "avatar" && record.dataUrl ? (
+                            <Image
+                              key={record.id}
+                              accessibilityLabel={
+                                locale === "zh-CN"
+                                  ? "待共享的宝宝头像"
+                                  : "Baby photo to share"
+                              }
+                              source={{ uri: record.dataUrl }}
+                              style={{
+                                width: 72,
+                                height: 72,
+                                borderRadius: 36,
+                              }}
+                            />
+                          ) : null,
+                        )}
+                        {(() => {
+                          const counts = extraRecordCounts(
+                            review.extraRecords ?? [],
+                          );
+                          const selection = review.extraRecords?.find(
+                            (r) => r.kind === "play-selection",
+                          );
+                          return (
+                            <>
+                              {body(
+                                locale === "zh-CN"
+                                  ? `宝宝头像 ${counts.avatar} 张 · 提醒 ${counts.reminders} 条 · 早教打卡 ${counts.playCheckins} 条`
+                                  : `${counts.avatar} baby photo · ${counts.reminders} reminders · ${counts.playCheckins} play check-ins`,
+                              )}
+                              {selection?.kind === "play-selection"
+                                ? body(
+                                    locale === "zh-CN"
+                                      ? `早教设置：默认按月龄推荐，手动选入 ${selection.selection.included.length} 项、排除 ${selection.selection.excluded.length} 项。`
+                                      : `Play settings: age-based defaults, ${selection.selection.included.length} manually included and ${selection.selection.excluded.length} excluded.`,
+                                  )
+                                : null}
+                              {counts.reminderSettings
+                                ? body(
+                                    locale === "zh-CN"
+                                      ? "包含上次保存的提醒表单设置。"
+                                      : "Includes the last saved reminder form settings.",
+                                  )
+                                : null}
+                            </>
+                          );
+                        })()}
+                        {review.extraRecords?.map((record) =>
+                          record.kind === "reminder" ? (
+                            <T
+                              raw
+                              key={record.id}
+                              style={{ fontSize: 13, color: c.muted }}
+                            >
+                              {record.settings.title} ·{" "}
+                              {record.onceAt
+                                ? new Date(record.onceAt).toLocaleString()
+                                : record.settings.mode === "daily"
+                                  ? record.settings.dailyTime
+                                  : `${record.settings.minutes} min`}
+                            </T>
+                          ) : null,
+                        )}
+                      </View>
+                    ) : null}
                     <View style={{ gap: 4 }}>
                       <T raw style={{ fontWeight: "600" }}>
-                        {m("ownerEmails")}
+                        {familyMessage(locale, "ownerInviteeCount", {
+                          count: review.inviteeEmails.length,
+                          limit: MAX_INVITED_FAMILY_MEMBERS,
+                        })}
                       </T>
                       {review.inviteeEmails.map((email) => (
                         <T raw key={email} style={styles.body}>
@@ -347,6 +442,7 @@ export default function OwnerSetupCard({
                       ))}
                     </View>
                     {body(m("ownerReviewSharing"))}
+                    {body(m("ownerCreatorRecommendation"))}
                     {body(m("ownerExclusions"))}
                     {createsFamily ? (
                       <View
@@ -393,8 +489,10 @@ export default function OwnerSetupCard({
                     </Pressable>
                   </>
                 ) : null}
+              </ScrollView>
+              <View style={[styles.modalFooter, { borderColor: c.line }]}>
                 {error ? (
-                  <T raw accessibilityRole="alert">
+                  <T raw accessibilityRole="alert" style={styles.body}>
                     {m(error)}
                   </T>
                 ) : null}
@@ -431,7 +529,7 @@ export default function OwnerSetupCard({
                   style={styles.button}
                   onPress={close}
                 />
-              </ScrollView>
+              </View>
             </View>
           </KeyboardAvoidingView>
         </SafeAreaView>
@@ -499,5 +597,7 @@ const styles = StyleSheet.create({
     alignSelf: "center",
     borderRadius: 20,
     padding: 18,
+    gap: 14,
   },
+  modalFooter: { gap: 10, borderTopWidth: 1, paddingTop: 12, flexShrink: 0 },
 });

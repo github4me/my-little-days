@@ -22,6 +22,60 @@ test("owner setup draft canonical round trip preserves detached reviewed data", 
   assert.equal(parseStoredOwnerSetup(null, owner), null);
 });
 
+test("persisted owner review restores every extra without altering legacy payloads", () => {
+  const reviewed = prepareOwnerSeed(initialState, recipient, owner, [
+    {
+      id: "avatar",
+      kind: "avatar",
+      dataUrl: "data:image/png;base64,iVBORw0KGgo=",
+    },
+    {
+      id: "play-selection",
+      kind: "play-selection",
+      selection: { included: ["gentle-touch"], excluded: [] },
+    },
+    {
+      id: "checkin-1",
+      kind: "play-checkin",
+      day: "2026-09-16",
+      activityId: "gentle-touch",
+    },
+    { id: "reminder-settings", kind: "reminder-settings", settings: null },
+  ]);
+  const raw = serializeOwnerSetupDraft(reviewed);
+  const restored = parseStoredOwnerSetup(raw, owner);
+  assert.equal(restored?.extrasSchemaVersion, 1);
+  assert.deepEqual(restored?.extraRecords, reviewed.extraRecords);
+  assert.notEqual(restored?.extraRecords, reviewed.extraRecords);
+  assert.equal(serializeOwnerSetupDraft(restored!), raw);
+  const legacy = serializeOwnerSetupDraft(draft());
+  assert.equal(
+    serializeOwnerSetupDraft(parseStoredOwnerSetup(legacy, owner)!),
+    legacy,
+  );
+  assert.equal("extraRecords" in parseStoredOwnerSetup(legacy, owner)!, false);
+});
+
+test("owner review rejects partial or invalid shared extras rather than silently dropping them", () => {
+  const valid = draft();
+  for (const fields of [
+    { extrasSchemaVersion: 1 },
+    { extraRecords: [] },
+    { extrasSchemaVersion: 2, extraRecords: [] },
+    {
+      extrasSchemaVersion: 1,
+      extraRecords: [
+        { id: "avatar", kind: "avatar", dataUrl: "file:///private.jpg" },
+      ],
+    },
+  ])
+    assert.throws(
+      () =>
+        parseStoredOwnerSetup(JSON.stringify({ ...valid, ...fields }), owner),
+      /owner_invalid_data/,
+    );
+});
+
 test("owner setup draft rejects corruption rather than silently returning empty", () => {
   const valid = draft();
   for (const raw of [

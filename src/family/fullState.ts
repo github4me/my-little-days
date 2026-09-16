@@ -10,7 +10,14 @@ import type {
   FeedReceipt,
   FullFamilySnapshot,
   RecordOperation,
+  SharedRecord,
 } from "./contracts";
+import {
+  isSingletonExtraId,
+  validateExtraRecord,
+  validateExtraRecords,
+  type FamilyExtraRecord,
+} from "./extras";
 import {
   applySnapshot,
   matchesOrigin,
@@ -39,6 +46,12 @@ export function requireFullCapabilities(value: FamilyCapabilities) {
     value.maxSeedBytes < 10485760
   )
     throw new Error("full_sharing_unavailable");
+  return value;
+}
+export function requireExtraCapabilities(value: FamilyCapabilities) {
+  requireFullCapabilities(value);
+  if (value.extrasSchemaVersion !== 1 || value.maxSeedBytes < 32 * 1024 * 1024)
+    throw new Error("extras_sharing_unavailable");
   return value;
 }
 export function isFullSnapshot(
@@ -82,22 +95,51 @@ export function validateFullSnapshot(
     ...metadata(item),
     record: validateCareRecord(item.record),
   }));
+  const hasExtras =
+    value.extrasSchemaVersion !== undefined || value.extraRecords !== undefined;
+  if (
+    hasExtras &&
+    (value.extrasSchemaVersion !== 1 || !Array.isArray(value.extraRecords))
+  )
+    throw new Error("extras_sharing_unavailable");
+  const extraRecords = hasExtras
+    ? value.extraRecords!.map((item) => ({
+        ...metadata(item),
+        record: validateExtraRecord(item.record),
+      }))
+    : undefined;
+  if (extraRecords)
+    validateExtraRecords(extraRecords.map((item) => item.record));
   if (
     new Set(entries.map((r) => r.entry.id)).size !== entries.length ||
     new Set(careRecords.map((r) => r.record.id)).size !== careRecords.length
   )
     throw new Error("invalid_response");
-  return { ...value, profile, entries, careRecords };
+  return {
+    ...value,
+    profile,
+    entries,
+    careRecords,
+    ...(extraRecords ? { extraRecords } : {}),
+  };
 }
 export function canEditRecord(
   snapshot: FullFamilySnapshot,
-  collection: "entry" | "care",
+  collection: "entry" | "care" | "extra",
   id: string,
 ) {
+  if (
+    collection === "extra" &&
+    (snapshot.extrasSchemaVersion !== 1 ||
+      (isSingletonExtraId(id) && snapshot.family.role !== "owner"))
+  )
+    return false;
   const record =
     collection === "entry"
       ? snapshot.entries.find((r) => r.entry.id === id)
-      : snapshot.careRecords.find((r) => r.record.id === id);
+      : collection === "care"
+        ? snapshot.careRecords.find((r) => r.record.id === id)
+        : snapshot.extraRecords?.find((r) => r.record.id === id);
   return (
     !record ||
     snapshot.family.role === "owner" ||
@@ -119,12 +161,13 @@ export function enqueueRecord(
   const record =
     operation.collection === "entry"
       ? snapshot.entries.find((r) => r.entry.id === operation.recordId)
-      : snapshot.careRecords.find((r) => r.record.id === operation.recordId);
+      : operation.collection === "care"
+        ? snapshot.careRecords.find((r) => r.record.id === operation.recordId)
+        : snapshot.extraRecords?.find(
+            (r) => r.record.id === operation.recordId,
+          );
   if (operation.kind !== "create" && !record) throw new Error("record_changed");
-  if (
-    record &&
-    !canEditRecord(snapshot, operation.collection, operation.recordId)
-  )
+  if (!canEditRecord(snapshot, operation.collection, operation.recordId))
     throw new Error("record_forbidden");
   if (
     (state.records ?? []).some(
@@ -138,6 +181,29 @@ export function enqueueRecord(
   if ((state.records ?? []).length >= 200) throw new Error("queue_full");
   if (operation.entry) validateEntry(operation.entry);
   if (operation.careRecord) validateCareRecord(operation.careRecord);
+  if (operation.collection === "extra") {
+    const existingExtra = snapshot.extraRecords?.find(
+      (item) => item.record.id === operation.recordId,
+    );
+    if (
+      existingExtra &&
+      operation.extraRecord &&
+      existingExtra.record.kind !== operation.extraRecord.kind
+    )
+      throw new Error("invalid_extra_record");
+    if (
+      operation.entry ||
+      operation.careRecord ||
+      (operation.kind === "delete" &&
+        (operation.extraRecord || isSingletonExtraId(operation.recordId)))
+    )
+      throw new Error("invalid_extra_record");
+    if (
+      operation.kind !== "delete" &&
+      validateExtraRecord(operation.extraRecord).id !== operation.recordId
+    )
+      throw new Error("invalid_extra_record");
+  } else if (operation.extraRecord) throw new Error("invalid_extra_record");
   return {
     ...state,
     records: [
@@ -232,7 +298,7 @@ export function projectedFullState(state: PilotState): State | null {
     if (op.collection === "entry") {
       if (op.kind === "delete") entries.delete(op.recordId);
       else if (op.entry) entries.set(op.recordId, op.entry);
-    } else {
+    } else if (op.collection === "care") {
       if (op.kind === "delete") care.delete(op.recordId);
       else if (op.careRecord) care.set(op.recordId, op.careRecord);
     }
@@ -243,4 +309,39 @@ export function projectedFullState(state: PilotState): State | null {
     entries: [...entries.values()],
     careRecords: [...care.values()],
   };
+}
+
+export function projectedExtraRecords(
+  state: PilotState,
+): SharedRecord<{ record: FamilyExtraRecord }>[] {
+  if (
+    state.transition ||
+    !isFullSnapshot(state.snapshot) ||
+    state.snapshot.extrasSchemaVersion !== 1
+  )
+    return [];
+  const snapshot = state.snapshot;
+  const records = new Map(
+    (snapshot.extraRecords ?? []).map((item) => [item.record.id, item]),
+  );
+  for (const queued of state.records ?? []) {
+    if (
+      queued.status === "failed" ||
+      !matchesOrigin(queued.origin, snapshot) ||
+      queued.operation.collection !== "extra"
+    )
+      continue;
+    const operation = queued.operation;
+    if (operation.kind === "delete") records.delete(operation.recordId);
+    else if (operation.extraRecord) {
+      const previous = records.get(operation.recordId);
+      records.set(operation.recordId, {
+        version: previous?.version ?? `pending:${operation.operationId}`,
+        recordedBy: previous?.recordedBy ?? queued.origin.userId,
+        lastEditedBy: queued.origin.userId,
+        record: operation.extraRecord,
+      });
+    }
+  }
+  return [...records.values()];
 }

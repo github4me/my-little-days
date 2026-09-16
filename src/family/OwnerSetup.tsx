@@ -7,6 +7,7 @@ import {
   summarizeOwnerSeed,
 } from "./ownerSeed";
 import type { useFamilyPilot } from "./useFamilyPilot";
+import { loadPersonalExtras } from "./personalExtras";
 
 export default function OwnerSetup(context: {
   pilot: ReturnType<typeof useFamilyPilot>;
@@ -17,6 +18,7 @@ export default function OwnerSetup(context: {
   const user = context.pilot.user;
   if (
     !user ||
+    context.pilot.authStatus !== "authenticated" ||
     context.pilot.sharedMode ||
     context.pilot.snapshot ||
     context.pilot.transitionPending
@@ -26,6 +28,7 @@ export default function OwnerSetup(context: {
     const latest = current.current;
     if (
       latest.pilot.user?.id !== user.id ||
+      latest.pilot.authStatus !== "authenticated" ||
       latest.pilot.sharedMode ||
       latest.pilot.snapshot ||
       latest.pilot.transitionPending ||
@@ -46,14 +49,19 @@ export default function OwnerSetup(context: {
       }
       profile={context.source.profile}
       summary={summarizeOwnerSeed(context.source)}
-      onPrepare={async (emails) =>
-        prepareOwnerSeed(sourceNow(), emails, user.email)
-      }
+      onPrepare={async (emails) => {
+        sourceNow();
+        const extras = await loadPersonalExtras();
+        return prepareOwnerSeed(sourceNow(), emails, user.email, extras);
+      }}
       onSave={async (draft) => {
+        sourceNow();
+        const extras = await loadPersonalExtras();
         const latest = prepareOwnerSeed(
           sourceNow(),
           draft.inviteeEmails.join("\n"),
           user.email,
+          extras,
         );
         if (serializeOwnerSeed(latest) !== serializeOwnerSeed(draft))
           throw new Error("owner_source_changed");

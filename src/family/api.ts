@@ -23,7 +23,20 @@ export async function familyRequest<T>(
   const abort = () => timeout.abort();
   signal?.addEventListener("abort", abort, { once: true });
   if (signal?.aborted) timeout.abort();
-  const timer = setTimeout(abort, path === "/v2/families" ? 120000 : 15000);
+  // A supported 12 MiB photo is roughly 16 MiB on the wire. Its creation,
+  // updates and subsequent family downloads need the same bounded transfer
+  // window; keep account and small-record failures responsive.
+  const operation =
+    body && typeof body === "object"
+      ? (body as { collection?: unknown; extraRecord?: { kind?: unknown } })
+      : null;
+  const largeTransfer =
+    path === "/v2/families" ||
+    (body === undefined && /^\/v2\/families\/[^/?#]+\/snapshot$/.test(path)) ||
+    (/^\/v2\/families\/[^/?#]+\/record-operations$/.test(path) &&
+      operation?.collection === "extra" &&
+      operation.extraRecord?.kind === "avatar");
+  const timer = setTimeout(abort, largeTransfer ? 120000 : 15000);
   try {
     const response = await fetch(`${familyConfig.apiUrl}${path}`, {
       method: body === undefined ? "GET" : "POST",

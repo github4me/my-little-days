@@ -16,6 +16,28 @@ const messages = {
     "This is a separate test space. Use a fictional baby and bottle feeds only. Your existing baby records are never uploaded or shared.",
   ],
   account: ["我的账户", "My account"],
+  accountSignedOut: ["未登录", "Signed out"],
+  accountChecking: ["正在验证登录状态…", "Checking sign-in…"],
+  accountSignedIn: ["已登录", "Signed in"],
+  accountExpired: ["登录已过期", "Session expired"],
+  accountUnverified: ["登录状态待验证", "Not verified"],
+  accountCachedDetails: [
+    "以下为此设备缓存的账户资料，不代表当前登录仍然有效。",
+    "These are cached account details from this device, not confirmation of a valid current session.",
+  ],
+  accountExpiredAction: [
+    "登录已过期，请重新登录后再进行账户或家庭管理操作。",
+    "Session expired. Sign in again before managing your account or family.",
+  ],
+  accountVerifyAction: [
+    "请先联网验证登录状态，再继续此操作。",
+    "Connect and verify your sign-in before continuing this action.",
+  ],
+  signInAgain: ["重新登录", "Sign in again"],
+  noticeSignInCancelled: [
+    "已取消本次登录。",
+    "This sign-in attempt was cancelled.",
+  ],
   signIn: ["登录试点账户", "Sign in to the pilot"],
   signInDescription: [
     "使用已获准参与试点的邮箱登录，创建家庭或接受邀请。",
@@ -98,6 +120,10 @@ const messages = {
     "首次邀请将以你的宝宝资料和已保存记录建立一个家庭，由你担任管理员。后续邀请加入同一家庭，不会重复导入。",
     "Your first invitation starts one family from your baby profile and saved records, with you as admin. Later invitations join that same family without importing the records again.",
   ],
+  ownerCreatorRecommendation: [
+    "建议由宝宝资料最完整的成员创建家庭并担任首位管理员：创建者的资料会成为家庭初始资料，其他成员加入时不会合并原有资料。",
+    "The member with the most complete baby history should create the family and be its first admin. Their data becomes the family’s starting history; other members’ existing data is not merged when they join.",
+  ],
   ownerSetupLocalNotice: [
     "尚未连接完整家庭服务。本次只把设置草稿保存在此设备：不会创建线上家庭、发送邀请、上传或替换宝宝记录。Azure 全量记录接口接入后，仍需重新查看并确认发送。",
     "Full family service is not connected yet. This only saves a setup draft on this device: no online family is created, no invitation is sent, and no baby records are uploaded or replaced. After the Azure full-history service is connected, you must review and confirm sending again.",
@@ -119,7 +145,17 @@ const messages = {
   ownerCountGrowth: ["成长", "Growth"],
   ownerCountMilestone: ["里程碑", "Milestones"],
   ownerCountCare: ["日常照护", "Daily care"],
-  ownerEmails: ["家人邮箱（最多 3 个）", "Family emails (up to 3)"],
+  ownerEmails: ["家人邮箱（最多 5 个）", "Family emails (up to 5)"],
+  ownerTotalRecords: ["记录总数：{count}", "Total records: {count}"],
+  ownerInviteeCount: ["受邀人数：{count}/{limit}", "Invitees: {count}/{limit}"],
+  invitationSlots: [
+    "邀请名额：{used}/{limit} · 还可邀请 {remaining} 人",
+    "Invitation places: {used}/{limit} · {remaining} available",
+  ],
+  invitationCapacityHint: [
+    "管理员之外最多 5 人；已加入成员和有效待接受邀请均占名额。取消、拒绝或过期后可重新邀请。",
+    "Up to 5 people besides the admin. Current members and valid pending invitations both use a place. Cancelled, declined or expired invitations free their places.",
+  ],
   ownerEmailsHint: [
     "每行一个，或用逗号分隔。对方无需已注册，也不会收到通知；以后登录并验证邮箱后可接受或拒绝。",
     "One per line, or separated by commas. They need not be registered. No notification is sent; after signing in and verifying their email, they can accept or decline.",
@@ -159,6 +195,14 @@ const messages = {
     "设置未保存。请检查邮箱和记录后重试；原始宝宝资料不受影响。",
     "Setup was not saved. Check the emails and records, then retry. Your original baby data is unaffected.",
   ],
+  ownerLegacyReminderError: [
+    "旧版提醒缺少可迁移的准确时间或规则。请返回“我的 → 照护提醒”，删除并重新设置旧提醒，再查看创建资料；原记录没有清理。",
+    "An older reminder has no reliable time or rule to migrate. In More → Care reminders, delete and recreate it, then review again. Your existing records have not been cleared.",
+  ],
+  ownerExtraReadError: [
+    "照片或其他共享资料无法完整读取，请检查头像与本机资料后重新查看。不会跳过这些资料或清理原记录。",
+    "The photo or other shared data could not be read completely. Check the photo and local data, then review again. Nothing will be skipped or cleared.",
+  ],
   ownerTimerError: [
     "请先结束并保存正在计时的喂养或睡眠，再重新查看家庭设置。",
     "Finish and save the running feeding or sleep timer, then review the family setup again.",
@@ -168,8 +212,8 @@ const messages = {
     "The baby profile or records changed. Close this confirmation and review the latest data before saving.",
   ],
   ownerEmailError: [
-    "请填写 1–3 个有效且不同的家人邮箱。",
-    "Enter 1–3 valid, different family email addresses.",
+    "请填写 1–5 个有效且不同的家人邮箱。",
+    "Enter 1–5 valid, different family email addresses.",
   ],
   joinSection: ["接受家庭邀请", "Accept a family invitation"],
   inviteLink: ["邀请链接", "Invitation link"],
@@ -510,8 +554,8 @@ const messages = {
     "An admin nomination is already pending. Cancel it before nominating another member.",
   ],
   errorInvitationLimit: [
-    "此家庭已有 100 条待接受邀请。请先撤销不再需要的邀请，再添加新邀请。",
-    "This family already has 100 pending invitations. Revoke invitations you no longer need before adding another.",
+    "管理员之外最多可邀请 5 人，已加入成员和有效待接受邀请均占名额。请先查看最新成员和邀请，撤销不再需要的邀请后重试。",
+    "A family has up to 5 people besides the admin, including current members and valid pending invitations. Review the latest members and invitations, then revoke any unneeded invitation before retrying.",
   ],
   errorMemberChanged: [
     "这位成员的访问权限已改变，未执行旧的移除操作。请刷新，检查最新成员状态后再决定。",
@@ -717,6 +761,20 @@ const errorMessages: Record<string, FamilyMessageKey> = {
 };
 
 export function familyErrorMessage(locale: AppLocale, code: string): string {
+  if (code === "extras_sharing_unavailable")
+    return locale === "zh-CN"
+      ? "服务尚未支持照片、提醒和早教共享，请先更新数据库与 API，再刷新重试。原本机资料不会因此清理。"
+      : "Photo, reminder and play sharing require the database and API update. Refresh after updating. Existing personal data will not be cleared by this error.";
+  if (code.startsWith("legacy_reminder_"))
+    return familyMessage(locale, "ownerLegacyReminderError");
+  if (
+    [
+      "avatar_read_failed",
+      "invalid_extra_record",
+      "owner_extra_read_failed",
+    ].includes(code)
+  )
+    return familyMessage(locale, "ownerExtraReadError");
   if (code === "family_schema_unsupported")
     return locale === "zh-CN"
       ? "此家庭的数据格式暂不受当前应用支持。请联系家庭管理员处理；你可以在“我的账户”中退出登录。本机个人资料不会因此删除。"
@@ -739,10 +797,10 @@ export function familyErrorMessage(locale: AppLocale, code: string): string {
 }
 
 const fullMessages: Partial<Record<FamilyMessageKey, [string, string]>> = {
-  ownerEmails: ["家人邮箱（最多 19 个）", "Family emails (up to 19)"],
+  ownerEmails: ["家人邮箱（最多 5 个）", "Family emails (up to 5)"],
   ownerEmailError: [
-    "请填写 1–19 个有效且不同的家人邮箱。",
-    "Enter 1–19 valid, different family email addresses.",
+    "请填写 1–5 个有效且不同的家人邮箱。",
+    "Enter 1–5 valid, different family email addresses.",
   ],
   title: ["家庭共享", "Family sharing"],
   account: ["我的账户", "My account"],
@@ -810,16 +868,16 @@ const fullMessages: Partial<Record<FamilyMessageKey, [string, string]>> = {
   family: ["家庭", "Family"],
   babyName: ["宝宝名字", "Baby name"],
   ownerSetupLocalNotice: [
-    "确认后将上传下面全部资料、创建家庭并保存邀请。照片、提醒和打卡不会上传；激活成功后会清理本机旧资料和恢复副本。",
-    "Confirmation uploads all data below, creates the family and saves invitations. Photos, reminders and check-ins are excluded. Successful activation clears the old local data and recovery copies.",
+    "确认后将上传下面全部资料，包括宝宝头像、提醒规则、早教打卡和早教设置，并创建家庭及保存邀请。激活成功后清理本机旧资料和恢复副本；通知需由每个成员在自己的手机单独启用。",
+    "Confirmation uploads the data below, including the baby photo, reminder rules, play check-ins and play settings, creates the family and saves invitations. Successful activation clears old personal data and recovery copies. Each member enables notifications separately on their phone.",
   ],
   ownerConsent: [
     "我已查看全部初始资料和邀请邮箱，同意上传并与家人共享；激活后清理本机旧资料，受邀人的个人记录不会合并。",
     "I reviewed the starting data and invitation emails and agree to upload and share them. Activation clears the old local data. Invitees’ personal records are not merged.",
   ],
   ownerExclusions: [
-    "照片、设备偏好、提醒和早教打卡不包含在上传中。请先结束正在计时的喂养或睡眠。",
-    "Photos, device preferences, reminders and play check-ins are excluded from upload. Finish running feeding or sleep timers first.",
+    "宝宝头像、提醒规则、早教打卡及早教设置会上传；语言、主题、视图偏好和手机通知权限不共享。请先结束正在计时的喂养或睡眠。",
+    "The baby photo, reminder rules, play check-ins and play settings are uploaded. Language, theme, view preferences and device notification permission are not shared. Finish running feeding or sleep timers first.",
   ],
   ownerGenericError: [
     "暂时无法完成设置。请查看家庭操作状态并刷新；未确认结果时不要重新创建。",
@@ -831,8 +889,8 @@ const fullMessages: Partial<Record<FamilyMessageKey, [string, string]>> = {
   ],
   acceptInviteTitle: ["加入这个家庭？", "Join this family?"],
   joinWarning: [
-    "加入将下载管理员的完整记录，并删除此设备的原离线资料、恢复副本、照片、提醒和打卡；你的个人记录不会上传或合并。\n\n管理员可随时移除成员，无需提前通知，服务端访问立即停止；管理员也可编辑或删除任何记录。离开或被移除后，你将失去全部家庭记录的访问权，包括自己创建的记录；已共享内容仍留在家庭。本设备检测到撤销时会清除家庭缓存和草稿。",
-    "Joining downloads the admin’s complete history and clears this device’s original offline data, recovery copies, photos, reminders and check-ins. Your personal records are never uploaded or merged.\n\nThe admin can remove members at any time without advance notice. Server access ends immediately. Admins can edit or delete any record. Leaving or removal ends access to all family records, including your contributions, which remain with the family. This device clears family data and drafts when revocation is detected.",
+    "加入时会下载此家庭的完整记录；确认家庭资料已成功保存到此设备后，才会清空并替换原离线资料、恢复副本、照片、提醒、早教打卡和早教设置，不保留可恢复的个人副本。你的原有资料不会上传或合并。仅查看或取消本次确认不会清理资料。\n\n建议由宝宝资料最完整的成员创建家庭并担任首位管理员。\n\n管理员可随时移除成员，无需提前通知，服务端访问立即停止；管理员也可编辑或删除任何记录。离开或被移除后，你将失去全部家庭记录的访问权，包括自己创建的记录；已共享内容仍留在家庭。本设备检测到撤销时会清除家庭缓存和草稿。",
+    "Joining downloads this family’s complete history. Only after the family data is successfully saved on this device will it clear and replace your original offline data, recovery copies, photos, reminders, play check-ins and play settings, without keeping a recoverable personal copy. Your existing data is never uploaded or merged. Reviewing or cancelling this confirmation does not clear anything.\n\nThe member with the most complete baby history should create the family and be its first admin.\n\nThe admin can remove members at any time without advance notice. Server access ends immediately. Admins can edit or delete any record. Leaving or removal ends access to all family records, including your contributions, which remain with the family. This device clears family data and drafts when revocation is detected.",
   ],
   localCache: ["已验证家庭权限与记录。", "Family access and records verified."],
 };
@@ -853,6 +911,7 @@ export function fullFamilyMessage(
 }
 
 const noticeMessages: Record<string, FamilyMessageKey> = {
+  sign_in_cancelled: "noticeSignInCancelled",
   sharing_context_changed: "noticeContextChanged",
   membership_revoked: "errorRevoked",
   change_not_shared: "noticeNotShared",

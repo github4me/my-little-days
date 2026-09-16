@@ -120,10 +120,18 @@ public sealed partial class FamilyService(PilotDatabase db, PilotConfiguration c
             return new InvitationResult(Invitation(prior));
         }
         await CheckCapacity(familyId, ct);
-        // Never reveal whether an arbitrary email is registered or belongs to another family.
-        if (await db.Memberships.CountAsync(x => x.FamilyId == familyId && x.Active, ct) >= config.Pilot.MaxMembers) Invalid();
         var now = Now;
-        if (await db.Invitations.CountAsync(x => x.FamilyId == familyId && x.Email != email && x.Status == "pending" && x.ExpiresAt > now, ct) >= 100)
+        // Count only this family's known members and live reservations. Never look up
+        // an arbitrary email's registration or membership in a different family.
+        var activeEmails = await db.Memberships.Where(x => x.FamilyId == familyId && x.Active).Select(x => x.Email).ToArrayAsync(ct);
+        if (activeEmails.Contains(email, StringComparer.Ordinal))
+            throw new ApiException(409, "invitation_already_created");
+        var pendingEmails = await db.Invitations.Where(x => x.FamilyId == familyId && x.Status == "pending" && x.ExpiresAt > now)
+            .Select(x => x.Email).Distinct().ToArrayAsync(ct);
+        // Replacing an existing live invitation adds no capacity, even if a legacy
+        // family already exceeds today's limit. Terminal/expired invitations do not reserve a slot.
+        if (!pendingEmails.Contains(email, StringComparer.Ordinal) &&
+            activeEmails.Length + pendingEmails.Except(activeEmails, StringComparer.Ordinal).Count() >= config.Pilot.EffectiveMaxMembers)
             throw new ApiException(409, "invitation_limit");
         foreach (var prior in await db.Invitations.Where(x => x.FamilyId == familyId && x.Email == email && x.Status == "pending").ToArrayAsync(ct))
             prior.Status = "revoked";
@@ -323,7 +331,9 @@ public sealed partial class FamilyService(PilotDatabase db, PilotConfiguration c
         await RequireAccount(user, ct);
         ValidateId(request.OperationId);
         // Preserve old durable receipts when clients omit both new options.
-        var hash = request.DeclineOtherInvitations || request.RequiredSchemaVersion is not null
+        var hash = request.RequiredExtrasSchemaVersion is not null
+            ? Fingerprint("accept-invitation", new { request.OperationId, invitationId, request.DeclineOtherInvitations, request.RequiredSchemaVersion, request.RequiredExtrasSchemaVersion })
+            : request.DeclineOtherInvitations || request.RequiredSchemaVersion is not null
             ? Fingerprint("accept-invitation", new { request.OperationId, invitationId, request.DeclineOtherInvitations, request.RequiredSchemaVersion })
             : Fingerprint("accept-invitation", new { request.OperationId, invitationId });
         var old = await Receipt(user, request.OperationId, hash, ct);
@@ -342,9 +352,13 @@ public sealed partial class FamilyService(PilotDatabase db, PilotConfiguration c
         var family = await Family(invitation.FamilyId, ct);
         // A full-history client cannot use a legacy family. Reject before creating a
         // membership or declining another invitation so it can choose a valid family.
-        if (request.RequiredSchemaVersion is not null && request.RequiredSchemaVersion != family.SchemaVersion)
+        if (request.RequiredSchemaVersion is not null && request.RequiredSchemaVersion != family.SchemaVersion ||
+            request.RequiredExtrasSchemaVersion is not null && (request.RequiredExtrasSchemaVersion != 1 || family.SchemaVersion != 2))
             throw new ApiException(409, "family_schema_unsupported");
-        if (await db.Memberships.CountAsync(x => x.FamilyId == invitation.FamilyId && x.Active, ct) >= config.Pilot.MaxMembers) Invalid();
+        // Acceptance consumes its existing reservation, so excess legacy pending
+        // invitations need not be deleted. Active membership may never grow past the cap.
+        if (await db.Memberships.CountAsync(x => x.FamilyId == invitation.FamilyId && x.Active, ct) >= config.Pilot.EffectiveMaxMembers)
+            throw new ApiException(409, "invitation_limit");
         await CheckCapacity(invitation.FamilyId, ct);
         var others = await LiveReceivedInvitations(user, Now).Where(x => x.Id != invitationId).ToArrayAsync(ct);
         if (others.Length > 0 && !request.DeclineOtherInvitations)

@@ -27,7 +27,10 @@ public sealed class PilotIdentity
 public sealed class PilotSettings
 {
     public PilotIdentity[] Identities { get; set; } = [];
-    public int MaxMembers { get; set; } = 20;
+    public int MaxMembers { get; set; } = 6;
+    // Keep the legacy setting readable, but never let an old value (such as 20)
+    // expand the product limit: one administrator plus five invited members.
+    public int EffectiveMaxMembers => Math.Min(MaxMembers, 6);
     public int MaxFeeds { get; set; } = 1000;
     public int MaxOperationsPerFamily { get; set; } = 100000;
     public int MaxNoteLength { get; set; } = 500;

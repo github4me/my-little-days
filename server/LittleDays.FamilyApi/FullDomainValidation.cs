@@ -9,18 +9,31 @@ namespace LittleDays.FamilyApi;
 // active timers; only the initial owner's seed requires every timer to be stopped.
 public static partial class FullDomainValidation
 {
-    public const int MaxSeedBytes = 10 * 1024 * 1024;
+    public const int MaxSeedBytes = 32 * 1024 * 1024;
+    public const int MaxSourceBytes = 10 * 1024 * 1024;
     public const int MaxRecordsPerCollection = 100000;
     public static readonly string[] RecordKinds = ["feed", "diaper", "sleep", "growth", "milestone", "care"];
 
-    public sealed record SeedData(FullFamilyProfile Profile, JsonElement[] Entries, JsonElement[] CareRecords, string[] InviteeEmails);
+    public sealed record SeedData(FullFamilyProfile Profile, JsonElement[] Entries, JsonElement[] CareRecords, string[] InviteeEmails, JsonElement[] ExtraRecords);
 
     public static SeedData Seed(JsonElement seed)
     {
         if (seed.ValueKind != JsonValueKind.Object || Encoding.UTF8.GetByteCount(seed.GetRawText()) > MaxSeedBytes) Invalid();
-        Fields(seed, "schemaVersion", "source", "inviteeEmails", "counts");
+        Fields(seed, "schemaVersion", "source", "inviteeEmails", "counts", "extrasSchemaVersion", "extraRecords");
         Integer(Property(seed, "schemaVersion"), 1, 1);
         var source = Property(seed, "source");
+        if (Encoding.UTF8.GetByteCount(source.GetRawText()) > MaxSourceBytes) Invalid();
+        var hasExtras = seed.TryGetProperty("extrasSchemaVersion", out var extrasVersion);
+        if (hasExtras != seed.TryGetProperty("extraRecords", out var extraArray)) Invalid();
+        if (hasExtras) Integer(extrasVersion, 1, 1);
+        else if (Encoding.UTF8.GetByteCount(seed.GetRawText()) > MaxSourceBytes) Invalid();
+        var extras = hasExtras ? Array(extraArray, MaxRecordsPerCollection) : [];
+        var extraIds = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var extra in extras)
+        {
+            ExtraRecord(extra);
+            if (!extraIds.Add(Property(extra, "id").GetString()!)) Invalid();
+        }
         Fields(source, "schemaVersion", "profile", "entries", "careRecords");
         Integer(Property(source, "schemaVersion"), 1, 1);
         var profile = Profile(Property(source, "profile"));
@@ -49,7 +62,7 @@ public static partial class FullDomainValidation
             Integer(Property(counts, kind), entries.Count(x => Property(x, "type").GetString() == kind), entries.Count(x => Property(x, "type").GetString() == kind));
         Integer(Property(counts, "care"), careRecords.Length, careRecords.Length);
         Integer(Property(counts, "total"), entries.Length + careRecords.Length, entries.Length + careRecords.Length);
-        return new(profile, entries, careRecords, emails);
+        return new(profile, entries, careRecords, emails, extras);
     }
 
     public static FullFamilyProfile Profile(JsonElement profile)
@@ -123,17 +136,21 @@ public static partial class FullDomainValidation
     {
         if (operation.OperationId == Guid.Empty || operation.MembershipId == Guid.Empty || operation.HistoryId == Guid.Empty ||
             string.IsNullOrWhiteSpace(operation.RecordId) || operation.RecordId.Length > 128 ||
-            operation.Kind is not ("create" or "update" or "delete") || operation.Collection is not ("entry" or "care")) Invalid();
+            operation.Kind is not ("create" or "update" or "delete") || operation.Collection is not ("entry" or "care" or "extra")) Invalid();
         if (operation.Kind == "create" ? operation.BaseVersion is not null : !RowVersion(operation.BaseVersion)) Invalid();
         if (operation.Kind == "delete")
         {
-            if (operation.Entry is not null || operation.CareRecord is not null) Invalid();
+            if (operation.Entry is not null || operation.CareRecord is not null || operation.ExtraRecord is not null ||
+                operation.Collection == "extra" && IsExtraSingleton(operation.RecordId)) Invalid();
             return null;
         }
-        var value = operation.Collection == "entry" ? operation.Entry : operation.CareRecord;
-        if (value is null || operation.Collection == "entry" && operation.CareRecord is not null ||
-            operation.Collection == "care" && operation.Entry is not null) Invalid();
-        if (operation.Collection == "entry") Entry(value!.Value); else CareRecord(value!.Value);
+        var value = operation.Collection switch { "entry" => operation.Entry, "care" => operation.CareRecord, _ => operation.ExtraRecord };
+        if (value is null || operation.Collection != "entry" && operation.Entry is not null ||
+            operation.Collection != "care" && operation.CareRecord is not null ||
+            operation.Collection != "extra" && operation.ExtraRecord is not null) Invalid();
+        if (operation.Collection == "entry") Entry(value!.Value);
+        else if (operation.Collection == "care") CareRecord(value!.Value);
+        else ExtraRecord(value!.Value);
         if (Property(value!.Value, "id").GetString() != operation.RecordId) Invalid();
         return value;
     }

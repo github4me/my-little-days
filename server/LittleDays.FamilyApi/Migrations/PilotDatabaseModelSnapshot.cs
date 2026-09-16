@@ -103,9 +103,9 @@ namespace LittleDays.FamilyApi.Migrations
 
                     b.ToTable("FamilyRecords", t =>
                         {
-                            t.HasCheckConstraint("CK_FamilyRecords_Collection", "[Collection] IN ('entry', 'care')");
+                            t.HasCheckConstraint("CK_FamilyRecords_Collection", "[Collection] IN ('entry', 'care', 'extra')");
 
-                            t.HasCheckConstraint("CK_FamilyRecords_Json", "ISJSON([RecordJson]) = 1 AND DATALENGTH([RecordJson]) <= 131072");
+                            t.HasCheckConstraint("CK_FamilyRecords_Json", "ISJSON([RecordJson]) = 1 AND (DATALENGTH([RecordJson]) <= 131072 OR ([Collection] = 'extra' AND [Id] = 'avatar' AND COALESCE(JSON_VALUE([RecordJson], '$.kind'), '') = 'avatar' AND DATALENGTH([RecordJson]) <= 35651584))");
                         });
                 });
 

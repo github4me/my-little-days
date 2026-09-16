@@ -1829,6 +1829,7 @@ assert.ok(
       box.height >= 44 &&
       Math.abs(box.y - fullDayBox.y) < 2,
   ),
+  JSON.stringify({ fullFilterBoxes, fullDayBox }),
 );
 assert.ok(fullFilterBoxes[3].x + fullFilterBoxes[3].width <= 372);
 await page.getByRole("button", { name: "Filter: Sleep", exact: true }).click();

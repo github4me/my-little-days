@@ -113,8 +113,11 @@ app.Use(async (context, next) =>
     context.Response.Headers.XContentTypeOptions = "nosniff";
     try
     {
-        var limit = context.Request.Method == "POST" && context.Request.Path == "/v2/families"
-            ? FullDomainValidation.MaxSeedBytes + 64 * 1024 : context.Request.Path.StartsWithSegments("/v2") ? 128 * 1024 : 16 * 1024;
+        var fullUpload = context.Request.Method == "POST" &&
+            (context.Request.Path == "/v2/families" || context.Request.Path.StartsWithSegments("/v2/families") &&
+                context.Request.Path.Value!.EndsWith("/record-operations", StringComparison.Ordinal));
+        var limit = fullUpload ? FullDomainValidation.MaxSeedBytes + 64 * 1024
+            : context.Request.Path.StartsWithSegments("/v2") ? 128 * 1024 : 16 * 1024;
         var bodyLimit = context.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>();
         if (bodyLimit is { IsReadOnly: false }) bodyLimit.MaxRequestBodySize = limit;
         if (context.Request.ContentLength > limit) throw new ApiException(422, "invalid_input");
@@ -194,7 +197,7 @@ fullApi.MapPost("/families", (HttpContext context, CreateFullFamilyRequest reque
 fullApi.MapGet("/families/{familyId:guid}/snapshot", async (Guid familyId, HttpContext context, FamilyService service, CancellationToken ct) =>
 {
     var snapshot = await service.FullSnapshot(PublicIdentityAdmission.Get(context), familyId, ct);
-    var etag = $"\"v2:{snapshot.HistoryId:D}:{snapshot.Revision}:{snapshot.Family.MembershipId:D}\"";
+    var etag = $"\"v2-extras1:{snapshot.HistoryId:D}:{snapshot.Revision}:{snapshot.Family.MembershipId:D}\"";
     context.Response.Headers.ETag = etag;
     return context.Request.Headers.IfNoneMatch.ToString() == etag ? Results.StatusCode(304) : Results.Json(snapshot);
 });

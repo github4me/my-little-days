@@ -21,7 +21,14 @@ export function parseStoredOwnerSetup(
       !value ||
       Object.keys(value).some(
         (key) =>
-          !["schemaVersion", "source", "inviteeEmails", "counts"].includes(key),
+          ![
+            "schemaVersion",
+            "source",
+            "inviteeEmails",
+            "counts",
+            "extrasSchemaVersion",
+            "extraRecords",
+          ].includes(key),
       )
     )
       throw new Error();
@@ -32,6 +39,7 @@ export function parseStoredOwnerSetup(
       canonical.source,
       canonical.inviteeEmails.join("\n"),
       ownEmail,
+      canonical.extraRecords,
     );
     if (
       !value.counts ||

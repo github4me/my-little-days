@@ -1,5 +1,9 @@
 # Repository Guidelines
 
+## Collaboration preferences
+
+When information or a material decision is needed from the user, use the available `grilling` ("grill me") skill for concise, dependency-aware questions. First resolve discoverable facts from the repository and tools; do not ask about choices already agreed in the conversation.
+
 ## Project Structure & Module Organization
 
 This is an offline baby-growth tracker built with Expo, React Native, and TypeScript. `App.tsx` owns top-level navigation and screen composition. Application modules live in `src/`: domain models and statistics in `domain.ts`, persistence in `storage.ts` (with browser counterparts such as `storage.web.ts`), and feature UI in components such as `EntryEditor.tsx` and `Settings.tsx`. Keep static images and bundled WHO reference data in `assets/`; keep supporting documentation in `docs/`. Unit tests sit beside their subjects as `src/*.test.ts`; end-to-end browser coverage is in `tests/browser.mjs`.

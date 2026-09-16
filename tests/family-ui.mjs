@@ -83,6 +83,7 @@ function fixture(overrides = {}, locale = "en", demo = false) {
     ...Object.fromEntries(
       [
         "ActivityIndicator",
+        "Image",
         "KeyboardAvoidingView",
         "Modal",
         "Pressable",
@@ -97,6 +98,7 @@ function fixture(overrides = {}, locale = "en", demo = false) {
   const controller = {
     configured: true,
     webUnsupported: false,
+    authStatus: overrides.user === null ? "signed_out" : "authenticated",
     user: {
       id: "user",
       displayName: "Test member",
@@ -125,6 +127,7 @@ function fixture(overrides = {}, locale = "en", demo = false) {
         "acceptInvitation",
         "declineInvitation",
         "createFamily",
+        "createInvitation",
         "deleteAccount",
         "checkDeletionStatus",
         "closeFamily",
@@ -160,6 +163,7 @@ function fixture(overrides = {}, locale = "en", demo = false) {
     vm.runInNewContext(code, {
       module: result,
       exports: result.exports,
+      Error,
       Date,
       Intl,
       Number,
@@ -176,6 +180,11 @@ function fixture(overrides = {}, locale = "en", demo = false) {
         if (name === "../i18n") return { useI18n: () => ({ locale }) };
         if (name === "../ui") return ui;
         if (name === "./messages") return messages;
+        if (name === "./invitationCapacity")
+          return load("src/family/invitationCapacity.ts");
+        if (name === "./extras") return load("src/family/extras.ts");
+        if (name === "../reminderSettings")
+          return load("src/reminderSettings.ts");
         if (name === "./OwnerSetupCard")
           return load("src/family/OwnerSetupCard.tsx");
         if (name === "./FamilyScreenView")
@@ -230,6 +239,16 @@ function fixture(overrides = {}, locale = "en", demo = false) {
         .map((node) => node.text)
         .join("\n");
     },
+    modalText() {
+      const index = nodes.findIndex((node) => node.type === "Modal");
+      return index < 0
+        ? ""
+        : nodes
+            .slice(index)
+            .filter((node) => node.text)
+            .map((node) => node.text)
+            .join("\n");
+    },
     nodes: () => nodes,
   };
 }
@@ -268,6 +287,178 @@ const snapshot = (role = "caregiver") => ({
   feeds: [],
   historyId: "history",
   revision: "1",
+});
+
+test("invitation form counts members and pending places while allowing pending-email replacement", async () => {
+  const family = snapshot("owner");
+  family.members.push(
+    ...[1, 2].map((i) => ({
+      id: `member-${i}`,
+      membershipId: `grant-${i}`,
+      displayName: `Member ${i}`,
+      email: `member${i}@example.test`,
+      role: "caregiver",
+      status: "active",
+      endedAt: null,
+    })),
+  );
+  family.invitations = [1, 2, 3].map((i) => ({
+    id: `invite-${i}`,
+    email: `guest${i}@example.test`,
+    status: "pending",
+    expiresAt: new Date(Date.now() + 60000).toISOString(),
+  }));
+  const view = fixture({ snapshot: family });
+  view.render();
+  const typeEmail = (email) => {
+    view
+      .nodes()
+      .find(
+        (node) =>
+          node.type === "TextInput" &&
+          node.props.accessibilityLabel === "Recipient email",
+      )
+      .props.onChangeText(email);
+    view.render();
+  };
+  typeEmail("another@example.test");
+  assert.equal(view.buttons("Add invitation")[0].props.disabled, true);
+  await view.buttons("Add invitation")[0].props.onPress();
+  await tick();
+  assert.equal(
+    view.calls.filter((call) => call.name === "createInvitation").length,
+    0,
+  );
+  assert.match(view.text(), /5\/5/);
+  typeEmail("GUEST1@example.test");
+  assert.equal(view.buttons("Add invitation")[0].props.disabled, false);
+  family.invitations[0].expiresAt = new Date(Date.now() - 1000).toISOString();
+  typeEmail("another@example.test");
+  assert.equal(view.buttons("Add invitation")[0].props.disabled, false);
+  assert.match(view.text(), /4\/5/);
+});
+
+test("expired cached accounts remain expired after cancellation and cannot perform account actions", () => {
+  for (const locale of ["en", "zh-CN"]) {
+    const view = fixture(
+      { authStatus: "reauth_required", error: "sign_in_cancelled" },
+      locale,
+    );
+    view.render();
+    assert.match(
+      view.text(),
+      locale === "en" ? /Session expired/ : /登录已过期/,
+    );
+    assert.match(
+      view.text(),
+      locale === "en" ? /cached account details/ : /缓存的账户资料/,
+    );
+    assert.equal(
+      view.buttons(locale === "en" ? "Sign in again" : "重新登录").length,
+      1,
+    );
+    assert.equal(
+      view.buttons(
+        locale === "en" ? "Request account deletion" : "申请删除账户",
+      )[0].props.disabled,
+      true,
+    );
+    assert.equal(view.buttons(locale === "en" ? "Refresh" : "刷新").length, 0);
+    assert.doesNotMatch(
+      view.text(),
+      locale === "en" ? /Sign-in was cancelled/ : /登录已取消/,
+    );
+  }
+});
+
+test("unverified cached identity is not presented as signed in or allowed to delete", () => {
+  const view = fixture({
+    authStatus: "unverified",
+    error: "network_unavailable",
+  });
+  view.render();
+  assert.match(view.text(), /Not verified/);
+  assert.doesNotMatch(view.text(), /Signed in/);
+  assert.equal(
+    view.buttons("Request account deletion")[0].props.disabled,
+    true,
+  );
+  assert.equal(view.buttons("Refresh")[0].props.disabled, false);
+});
+
+test("verified account ignores obsolete login errors while preserving unrelated failures", () => {
+  for (const error of [
+    "sign_in_cancelled",
+    "sign_in_required",
+    "unauthorized",
+  ]) {
+    const view = fixture({ authStatus: "authenticated", error });
+    view.render();
+    assert.match(view.text(), /Signed in/);
+    assert.doesNotMatch(
+      view.text(),
+      /Sign-in was cancelled|Sign in again|Session expired/,
+    );
+    assert.equal(
+      view.buttons("Request account deletion")[0].props.disabled,
+      false,
+    );
+  }
+  const failed = fixture({ error: "local_save_failed" });
+  failed.render();
+  assert(
+    failed.nodes().some((node) => node.props?.accessibilityRole === "alert"),
+  );
+});
+
+test("delete confirmation isolates old errors and shows only its own failed attempt", async () => {
+  const view = fixture({
+    error: "request_failed",
+    deleteAccount: async () => {
+      throw new Error("local_save_failed");
+    },
+  });
+  view.render();
+  const oldAlert = view
+    .nodes()
+    .find((node) => node.props?.accessibilityRole === "alert").props.children;
+  view.buttons("Request account deletion")[0].props.onPress();
+  view.render();
+  assert(!view.modalText().includes(oldAlert));
+  view
+    .nodes()
+    .find((node) => node.props?.accessibilityRole === "checkbox")
+    .props.onPress();
+  view.render();
+  view.buttons("Request account deletion").at(-1).props.onPress();
+  await tick();
+  view.render();
+  assert.match(view.modalText(), /could not be saved on this device/i);
+  view.buttons("Cancel")[0].props.onPress();
+  view.render();
+  view.buttons("Request account deletion")[0].props.onPress();
+  view.render();
+  assert.doesNotMatch(view.modalText(), /could not be saved on this device/i);
+});
+
+test("an open delete confirmation follows session expiry and cannot submit", () => {
+  const view = fixture();
+  view.render();
+  view.buttons("Request account deletion")[0].props.onPress();
+  view.render();
+  view
+    .nodes()
+    .find((node) => node.props?.accessibilityRole === "checkbox")
+    .props.onPress();
+  view.controller.authStatus = "reauth_required";
+  view.controller.error = "sign_in_cancelled";
+  view.render();
+  assert.match(view.modalText(), /Session expired/);
+  assert.doesNotMatch(view.modalText(), /Sign-in was cancelled/);
+  const submit = view.buttons("Request account deletion").at(-1);
+  assert.equal(submit.props.disabled, true);
+  submit.props.onPress();
+  assert.equal(view.calls.length, 0);
 });
 
 test("family members see why they cannot create another group", () => {

@@ -32,6 +32,10 @@ public sealed partial class FamilyService
         }
         if (await db.Memberships.AnyAsync(x => x.UserId == user.ObjectId && x.Active, ct))
             throw new ApiException(409, "already_in_family");
+        // Enforce the current policy only for a new commit. Older committed seeds
+        // remain replayable through their durable receipt without re-uploading data.
+        if (seed.InviteeEmails.Length >= config.Pilot.EffectiveMaxMembers)
+            throw new ApiException(409, "invitation_limit");
         var received = await LiveReceivedInvitations(user, Now).ToArrayAsync(ct);
         // A stale/older app must never silently reject invitations without the new warning.
         if (received.Length > 0 && !request.DeclinePendingInvitations)
@@ -56,6 +60,7 @@ public sealed partial class FamilyService
         db.Memberships.Add(grant);
         foreach (var entry in seed.Entries) db.FamilyRecords.Add(NewRecord(family.Id, "entry", entry, user.ObjectId));
         foreach (var care in seed.CareRecords) db.FamilyRecords.Add(NewRecord(family.Id, "care", care, user.ObjectId));
+        foreach (var extra in seed.ExtraRecords) db.FamilyRecords.Add(NewRecord(family.Id, "extra", extra, user.ObjectId));
         foreach (var email in seed.InviteeEmails)
             db.Invitations.Add(new InvitationRow { Id = Guid.NewGuid(), FamilyId = family.Id, Email = email, CreatedAt = Now, ExpiresAt = Now.AddDays(30) });
         var seedDigest = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(request.Seed.GetRawText()))).ToLowerInvariant();
@@ -85,6 +90,8 @@ public sealed partial class FamilyService
         var hash = Fingerprint("record-v2", new { familyId, operation });
         var old = await Receipt(user, operation.OperationId, hash, ct);
         if (old is not null) return ReadResult<FeedReceipt>(old);
+        if (operation.Collection == "extra" && FullDomainValidation.IsExtraSingleton(operation.RecordId) && grant.Role != "owner")
+            throw new ApiException(403, "record_forbidden");
         await CheckCapacity(familyId, ct);
         var idHash = RecordIdHash(operation.RecordId);
         var row = await db.FamilyRecords.SingleOrDefaultAsync(x => x.FamilyId == familyId && x.Collection == operation.Collection && x.IdHash == idHash, ct);
@@ -100,9 +107,11 @@ public sealed partial class FamilyService
             if (row is null || row.Deleted || Convert.ToBase64String(row.Version) != operation.BaseVersion)
                 throw new ApiException(412, "record_changed");
             if (grant.Role != "owner" && row.RecordedBy != user.ObjectId) throw new ApiException(403, "record_forbidden");
+            if (operation.Collection == "extra" && value is not null &&
+                ReadRecord(row).GetProperty("kind").GetString() != value.Value.GetProperty("kind").GetString()) Invalid();
             row.LastEditedBy = user.ObjectId;
             if (operation.Kind == "delete") row.Deleted = true;
-            else row.RecordJson = JsonSerializer.Serialize(value!.Value, Json);
+            else row.RecordJson = RecordJson(operation.Collection, value!.Value);
             // A logically unchanged accepted update still consumes the base rowversion.
             db.Entry(row).Property(x => x.LastEditedBy).IsModified = true;
         }
@@ -157,15 +166,21 @@ public sealed partial class FamilyService
             records.Where(x => x.Collection == "care").OrderBy(x => x.Id, StringComparer.Ordinal)
                 .Select(x => new SharedCareRecord(ReadRecord(x), Convert.ToBase64String(x.Version), x.RecordedBy, x.LastEditedBy)).ToArray(),
             Summary(family, grant), config.Family.HistoryId, Revision(family), members.Select(x => Member(x, grant.Role == "owner")).ToArray(),
-            invitations.Select(Invitation).ToArray(), [], transfer is null ? null : Transfer(transfer));
+            invitations.Select(Invitation).ToArray(), [], transfer is null ? null : Transfer(transfer), 1,
+            records.Where(x => x.Collection == "extra").OrderBy(x => x.Id, StringComparer.Ordinal)
+                .Select(x => new SharedExtraRecord(ReadRecord(x), Convert.ToBase64String(x.Version), x.RecordedBy, x.LastEditedBy)).ToArray());
     }
 
     private static FamilyRecordRow NewRecord(Guid familyId, string collection, JsonElement value, Guid author)
     {
         var id = value.GetProperty("id").GetString()!;
         return new() { FamilyId = familyId, Collection = collection, Id = id, IdHash = RecordIdHash(id),
-            RecordJson = JsonSerializer.Serialize(value, Json), RecordedBy = author, LastEditedBy = author };
+            RecordJson = RecordJson(collection, value), RecordedBy = author, LastEditedBy = author };
     }
+    // The reviewed extras body already contains validated JSON. Keep its byte
+    // representation so base64 escaping cannot inflate an avatar past its SQL cap.
+    private static string RecordJson(string collection, JsonElement value) =>
+        collection == "extra" ? value.GetRawText() : JsonSerializer.Serialize(value, Json);
     private static string RecordIdHash(string id) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(id)));
     private static JsonElement ReadRecord(FamilyRecordRow row)
     {

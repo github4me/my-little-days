@@ -69,6 +69,8 @@ function fixture() {
         profile: { name: "Baby", birthDate: "", sex: "unspecified" },
         entries: [],
         careRecords: [],
+        extrasSchemaVersion: 1,
+        extraRecords: [],
         family,
         historyId: "history-a",
         revision: "0",
@@ -142,11 +144,19 @@ function makeWorld({ offline = true, queued = false } = {}) {
     beforeDelete: async () => {},
     beforeAuthSignOut: async () => {},
     beforeAuthSignIn: async () => {},
+    beforeIdentify: async () => {},
     beforeMutation: async () => {},
     mutationReceipts: new Map(),
     deletionReceipt: null,
     beforeReceiptSave: async () => {},
     personalClears: 0,
+    notificationCalls: [],
+    notificationOptIn: new Map(),
+    beforeNotificationEnable: async () => {},
+    beforeNotificationClear: async () => {},
+    beforeIdentitySave: async () => {},
+    personalExtras: [],
+    beforeReminderDrain: async () => {},
     beforePersonalClear: async () => {},
     recordsSent: [],
     beforeRecord: async () => {},
@@ -156,6 +166,18 @@ function makeWorld({ offline = true, queued = false } = {}) {
       profile: { name: "Baby", birthDate: "", sex: "unspecified" },
       entries: [],
     },
+  };
+  let timerClock = 0;
+  let timerSequence = 0;
+  world.timers = new Map();
+  world.advanceTimers = (milliseconds) => {
+    timerClock += milliseconds;
+    for (const [id, timer] of world.timers) {
+      if (timer.at <= timerClock) {
+        world.timers.delete(id);
+        timer.callback();
+      }
+    }
   };
   const contexts = new Map();
   let activeReact;
@@ -251,6 +273,40 @@ function makeWorld({ offline = true, queued = false } = {}) {
         `00000000-0000-4000-8000-${String(++operationSequence).padStart(12, "0")}`,
     },
     "expo-sqlite": { openDatabaseAsync: async () => database },
+    "./personalExtras": {
+      loadPersonalExtras: async () => {
+        if (world.personalCaptureError)
+          throw new Error(world.personalCaptureError);
+        return structuredClone(world.personalExtras);
+      },
+    },
+    "../personalWrites": {
+      drainReminderWrites: async () => world.beforeReminderDrain(),
+    },
+    "./familyReminders": {
+      loadFamilyReminderOptIn: async (origin) =>
+        world.notificationOptIn.get(origin) ?? false,
+      setFamilyReminderOptIn: async (origin, enabled) => {
+        world.notificationCalls.push({ kind: "permission", origin, enabled });
+        await world.beforeNotificationEnable();
+        world.notificationOptIn.set(origin, enabled);
+      },
+      syncFamilyReminders: async (origin, records) => {
+        world.notificationCalls.push({
+          kind: "sync",
+          origin,
+          records: structuredClone(records),
+        });
+      },
+      suspendFamilyReminders: async () => {
+        world.notificationCalls.push({ kind: "suspend" });
+      },
+      clearFamilyReminders: async () => {
+        world.notificationCalls.push({ kind: "clear" });
+        await world.beforeNotificationClear();
+        world.notificationOptIn.clear();
+      },
+    },
     config: {
       familyConfig: {
         apiUrl: "https://pilot.example.invalid",
@@ -261,6 +317,7 @@ function makeWorld({ offline = true, queued = false } = {}) {
       hasSession: async () => world.session,
       loadIdentity: async () => structuredClone(world.cachedIdentity),
       saveIdentity: async (identity) => {
+        await world.beforeIdentitySave();
         world.cachedIdentity = structuredClone(identity);
       },
       signIn: async () => {
@@ -292,6 +349,12 @@ function makeWorld({ offline = true, queued = false } = {}) {
         world.http.push({ url, operation });
         if (world.offline) throw new PilotApiError("network_unavailable");
         if (url === "/v1/me") {
+          await world.beforeIdentify();
+          if (world.identityError)
+            throw new PilotApiError(
+              world.identityError.code,
+              world.identityError.status,
+            );
           if (world.identityDenied)
             throw new PilotApiError("identity_not_supported", 403);
           return structuredClone(world.identity);
@@ -308,7 +371,8 @@ function makeWorld({ offline = true, queued = false } = {}) {
                 "milestone",
                 "care",
               ],
-              maxSeedBytes: 10485760,
+              maxSeedBytes: 33554432,
+              extrasSchemaVersion: 1,
             }
           );
         if (url.endsWith("/record-operations")) {
@@ -324,7 +388,11 @@ function makeWorld({ offline = true, queued = false } = {}) {
               world.recordReceipts.get(operation.operationId),
             );
           const collection =
-              operation.collection === "entry" ? "entries" : "careRecords",
+              operation.collection === "entry"
+                ? "entries"
+                : operation.collection === "extra"
+                  ? "extraRecords"
+                  : "careRecords",
             field = collection === "entries" ? "entry" : "record";
           const found = world.server[collection].find(
             (r) => r[field].id === operation.recordId,
@@ -340,7 +408,10 @@ function makeWorld({ offline = true, queued = false } = {}) {
           world.server.revision = String(Number(world.server.revision) + 1);
           if (operation.kind !== "delete")
             world.server[collection].push({
-              [field]: operation.entry ?? operation.careRecord,
+              [field]:
+                operation.entry ??
+                operation.careRecord ??
+                operation.extraRecord,
               version: world.server.revision,
               recordedBy: found?.recordedBy ?? world.identity.user.id,
               lastEditedBy: world.identity.user.id,
@@ -409,6 +480,14 @@ function makeWorld({ offline = true, queued = false } = {}) {
           ) {
             world.identity.families = [structuredClone(world.server.family)];
           } else if (url === "/v2/families") {
+            world.server.extraRecords = (operation.seed.extraRecords ?? []).map(
+              (record) => ({
+                record: structuredClone(record),
+                version: "1",
+                recordedBy: "user-a",
+                lastEditedBy: "user-a",
+              }),
+            );
             world.server.profile = structuredClone(
               operation.seed.source.profile,
             );
@@ -507,8 +586,12 @@ function makeWorld({ offline = true, queued = false } = {}) {
         Error,
         AbortController,
         structuredClone,
-        setTimeout,
-        clearTimeout,
+        setTimeout: (callback, delay) => {
+          const id = ++timerSequence;
+          world.timers.set(id, { callback, at: timerClock + delay });
+          return id;
+        },
+        clearTimeout: (id) => world.timers.delete(id),
         fetch: async (url, request) => {
           assert.equal(
             url,
@@ -613,6 +696,312 @@ async function boot(world) {
   return controller;
 }
 
+test("cached bootstrap stays checking until identity is verified, and offline stays unverified", async () => {
+  const world = makeWorld({ offline: false, queued: true });
+  const identityGate = deferred();
+  world.beforeIdentify = () => identityGate.promise;
+  const controller = world.mount();
+  try {
+    await until(() => controller.result().user, "cached identity");
+    assert.equal(controller.result().authStatus, "checking");
+    assert.equal(controller.result().ready, true);
+    world.identityError = { code: "network_unavailable", status: 0 };
+    identityGate.resolve();
+    await until(() => !controller.result().booting, "offline identity check");
+    assert.equal(controller.result().authStatus, "unverified");
+    assert.equal(world.read().queue.length, 1);
+    assert.notEqual(world.read().draft, null);
+    assert.equal(world.personalClears, 0);
+    assert.equal(world.authSignOutCalls, 0);
+    world.identityError = null;
+    await controller.result().refresh();
+    assert.equal(controller.result().authStatus, "authenticated");
+    assert.equal(controller.result().error, null);
+  } finally {
+    identityGate.resolve();
+    controller.unmount();
+  }
+});
+
+test("expired session survives cancelled reauthentication without changing cached work", async () => {
+  const world = makeWorld({ queued: true });
+  const controller = await boot(world);
+  world.offline = false;
+  world.identityError = { code: "sign_in_required", status: 401 };
+  try {
+    await controller.result().refresh();
+    const before = world.disk.get(world.account);
+    assert.equal(controller.result().authStatus, "reauth_required");
+    world.beforeAuthSignIn = async () => {
+      throw new Error("sign_in_cancelled");
+    };
+    await assert.rejects(controller.result().signIn(), /sign_in_cancelled/);
+    assert.equal(controller.result().authStatus, "reauth_required");
+    assert.equal(controller.result().error, "sign_in_required");
+    assert.equal(controller.result().notice, "sign_in_cancelled");
+    assert.equal(world.disk.get(world.account), before);
+    assert.equal(world.personalClears, 0);
+    assert.equal(world.authSignOutCalls, 0);
+    world.advanceTimers(4999);
+    assert.equal(controller.result().notice, "sign_in_cancelled");
+    world.advanceTimers(1);
+    assert.equal(controller.result().notice, null);
+    assert.equal(controller.result().error, "sign_in_required");
+    assert.equal(controller.result().authStatus, "reauth_required");
+  } finally {
+    controller.unmount();
+  }
+});
+
+test("failed reauthentication cannot replace the expired-session state", async () => {
+  const world = ownerWorld();
+  const controller = await boot(world);
+  try {
+    world.identityError = { code: "unauthorized", status: 401 };
+    await controller.result().refresh();
+    world.beforeAuthSignIn = async () => {
+      throw new Error("sign_in_failed");
+    };
+    await assert.rejects(controller.result().signIn(), /sign_in_failed/);
+    assert.equal(controller.result().authStatus, "reauth_required");
+    assert.equal(controller.result().error, "sign_in_required");
+    world.advanceTimers(5000);
+    assert.equal(controller.result().error, "sign_in_required");
+    world.beforeAuthSignIn = async () => {};
+    world.identityError = { code: "network_unavailable", status: 0 };
+    await assert.rejects(controller.result().signIn(), /network_unavailable/);
+    assert.equal(controller.result().authStatus, "reauth_required");
+  } finally {
+    controller.unmount();
+  }
+});
+
+test("successful reauthentication without a family clears the expired error", async () => {
+  const world = ownerWorld();
+  const controller = await boot(world);
+  try {
+    world.identityError = { code: "unauthorized", status: 401 };
+    await controller.result().refresh();
+    assert.equal(controller.result().authStatus, "reauth_required");
+    world.identityError = null;
+    await controller.result().signIn();
+    assert.equal(controller.result().authStatus, "authenticated");
+    assert.equal(controller.result().error, null);
+    assert.equal(controller.result().snapshot, null);
+    assert.equal(controller.result().user.id, "user-a");
+  } finally {
+    controller.unmount();
+  }
+});
+
+test("successful no-family refresh clears an obsolete sign-in error", async () => {
+  const world = ownerWorld();
+  const controller = await boot(world);
+  try {
+    world.beforeAuthSignIn = async () => {
+      throw new Error("sign_in_failed");
+    };
+    await assert.rejects(controller.result().signIn(), /sign_in_failed/);
+    assert.equal(controller.result().error, "sign_in_failed");
+    await controller.result().refresh();
+    assert.equal(controller.result().authStatus, "authenticated");
+    assert.equal(controller.result().error, null);
+  } finally {
+    controller.unmount();
+  }
+});
+
+test("first cancelled login stays signed out and uses a temporary notice", async () => {
+  const world = ownerWorld();
+  world.session = false;
+  world.cachedIdentity = null;
+  const controller = world.mount();
+  try {
+    await until(() => !controller.result().booting, "signed-out bootstrap");
+    world.beforeAuthSignIn = async () => {
+      throw new Error("sign_in_cancelled");
+    };
+    await assert.rejects(controller.result().signIn(), /sign_in_cancelled/);
+    assert.equal(controller.result().authStatus, "signed_out");
+    assert.equal(controller.result().user, null);
+    assert.equal(controller.result().error, null);
+    assert.equal(controller.result().notice, "sign_in_cancelled");
+    world.advanceTimers(5000);
+    assert.equal(controller.result().notice, null);
+    assert.equal(world.session, false);
+    assert.equal(world.personalClears, 0);
+  } finally {
+    controller.unmount();
+  }
+});
+
+test("cancelling login preserves a verified session and an old timer cannot clear a newer notice", async () => {
+  const world = makeWorld({ offline: false });
+  const controller = await boot(world);
+  try {
+    const before = world.disk.get(world.account);
+    world.beforeAuthSignIn = async () => {
+      throw new Error("sign_in_cancelled");
+    };
+    await assert.rejects(controller.result().signIn(), /sign_in_cancelled/);
+    assert.equal(controller.result().authStatus, "authenticated");
+    assert.equal(controller.result().error, null);
+    assert.equal(controller.result().snapshot.family.id, "family-a");
+    assert.equal(world.disk.get(world.account), before);
+    const oldTimer = [...world.timers.values()][0].callback;
+    world.advanceTimers(2500);
+    await assert.rejects(controller.result().signIn(), /sign_in_cancelled/);
+    oldTimer();
+    assert.equal(controller.result().notice, "sign_in_cancelled");
+    world.advanceTimers(2500);
+    assert.equal(controller.result().notice, "sign_in_cancelled");
+    world.advanceTimers(2500);
+    assert.equal(controller.result().notice, null);
+    await assert.rejects(controller.result().signIn(), /sign_in_cancelled/);
+    const cancelledTimer = [...world.timers.values()][0].callback;
+    await controller.result().signOut();
+    cancelledTimer();
+    assert.equal(controller.result().notice, "signed_out");
+    assert.equal(controller.result().authStatus, "signed_out");
+  } finally {
+    controller.unmount();
+  }
+});
+
+test("cancellation notice expiry does not dismiss an unresolved local-save failure", async () => {
+  const world = makeWorld({ offline: false });
+  const controller = await boot(world);
+  try {
+    world.beforeCommit = async () => {
+      throw new Error("disk_full");
+    };
+    await assert.rejects(
+      controller
+        .result()
+        .setDraft({ ...controller.result().draft, amount: "150" }),
+      /local_save_failed/,
+    );
+    world.beforeAuthSignIn = async () => {
+      throw new Error("sign_in_cancelled");
+    };
+    await assert.rejects(controller.result().signIn(), /sign_in_cancelled/);
+    assert.equal(controller.result().error, "local_save_failed");
+    world.advanceTimers(5000);
+    assert.equal(controller.result().notice, null);
+    assert.equal(controller.result().error, "local_save_failed");
+  } finally {
+    controller.unmount();
+  }
+});
+
+test("identity-only no-family verification does not clear a failed local write", async () => {
+  const world = ownerWorld();
+  const controller = await boot(world);
+  try {
+    world.beforeCommit = async () => {
+      throw new Error("disk_full");
+    };
+    await assert.rejects(
+      controller.result().discardDraft(),
+      /local_save_failed/,
+    );
+    await controller.result().refresh();
+    assert.equal(controller.result().authStatus, "authenticated");
+    assert.equal(controller.result().error, "local_save_failed");
+    world.advanceTimers(5000);
+    assert.equal(controller.result().error, "local_save_failed");
+  } finally {
+    controller.unmount();
+  }
+});
+
+test("unmount cancels transient notice cleanup without letting stale callbacks update state", async () => {
+  const world = ownerWorld();
+  const controller = await boot(world);
+  world.beforeAuthSignIn = async () => {
+    throw new Error("sign_in_cancelled");
+  };
+  await assert.rejects(controller.result().signIn(), /sign_in_cancelled/);
+  const staleTimer = [...world.timers.values()][0].callback;
+  controller.unmount();
+  assert.equal(world.timers.size, 0);
+  staleTimer();
+  assert.equal(controller.result().notice, "sign_in_cancelled");
+});
+
+test("known expired authentication blocks destructive intent and receipt writes", async () => {
+  const world = ownerWorld();
+  world.ownerSetupDisk.set(world.account, "private-personal-history");
+  const controller = await boot(world);
+  try {
+    world.identityError = { code: "token_expired", status: 401 };
+    await controller.result().refresh();
+    assert.equal(controller.result().authStatus, "reauth_required");
+    const before = world.disk.get(world.account);
+    const mutations = world.http.filter((request) => request.operation).length;
+    await assert.rejects(
+      controller.result().deleteAccount(),
+      /sign_in_required/,
+    );
+    await assert.rejects(
+      controller.result().declineInvitation("invite-b"),
+      /sign_in_required/,
+    );
+    assert.equal(world.deletionReceipt, null);
+    assert.equal(world.read().transition, null);
+    assert.equal(world.disk.get(world.account), before);
+    assert.equal(
+      world.http.filter((request) => request.operation).length,
+      mutations,
+    );
+    assert.equal(
+      world.ownerSetupDisk.get(world.account),
+      "private-personal-history",
+    );
+    assert.equal(world.personalClears, 0);
+    await controller.result().signOut();
+    assert.equal(controller.result().authStatus, "signed_out");
+  } finally {
+    controller.unmount();
+  }
+});
+
+test("an action auth rejection pauses authentication and retains its unresolved transition", async () => {
+  const world = ownerWorld();
+  const controller = await boot(world);
+  try {
+    world.beforeMutation = async () => {
+      throw new Error("sign_in_required");
+    };
+    await assert.rejects(
+      controller.result().deleteAccount(),
+      /sign_in_required/,
+    );
+    assert.equal(controller.result().authStatus, "reauth_required");
+    assert.equal(controller.result().transitionPending, true);
+    world.advanceTimers(5000);
+    assert.equal(controller.result().error, "sign_in_required");
+    assert.equal(controller.result().transitionPending, true);
+  } finally {
+    controller.unmount();
+  }
+});
+
+test("a stale server action after explicit logout cannot turn signed out into expired", async () => {
+  const world = ownerWorld();
+  const controller = await boot(world);
+  const deleteAccount = controller.result().deleteAccount;
+  try {
+    await controller.result().signOut();
+    await assert.rejects(deleteAccount(), /sign_in_required/);
+    assert.equal(controller.result().authStatus, "signed_out");
+    assert.equal(world.deletionReceipt, null);
+    assert.equal(world.read(), null);
+  } finally {
+    controller.unmount();
+  }
+});
+
 test("full record offline save survives restart and sends exactly the durably saved operation", async () => {
   const world = makeWorld();
   const first = await boot(world);
@@ -703,6 +1092,8 @@ function ownerSeed(world) {
     schemaVersion: 1,
     source: structuredClone(world.personalSource),
     inviteeEmails: ["family@example.test"],
+    extrasSchemaVersion: 1,
+    extraRecords: structuredClone(world.personalExtras),
     counts: {
       feed: 1,
       diaper: 0,
@@ -713,6 +1104,236 @@ function ownerSeed(world) {
       total: 1,
     },
   };
+}
+test("extras capability is required before new creation or join can clear personal data", async () => {
+  for (const method of ["create", "join"]) {
+    const world = ownerWorld();
+    world.capabilities = {
+      schemaVersion: 2,
+      recordKinds: ["feed", "diaper", "sleep", "growth", "milestone", "care"],
+      maxSeedBytes: 33554432,
+    };
+    const c = await boot(world);
+    await assert.rejects(
+      method === "create"
+        ? c.result().createFamilyFromSeed(ownerSeed(world))
+        : c.result().acceptInvitation("invite-b"),
+      /sharing_unavailable/,
+    );
+    assert.equal(world.personalClears, 0);
+    assert.equal(
+      world.http.some((q) => q.operation?.operationId),
+      false,
+    );
+    c.unmount();
+  }
+});
+test("family creation compares extras again under the personal storage barrier", async () => {
+  const world = ownerWorld();
+  const c = await boot(world);
+  const seed = ownerSeed(world);
+  world.personalExtras.push({
+    id: "play-selection",
+    kind: "play-selection",
+    selection: { included: ["face"], excluded: [] },
+  });
+  await assert.rejects(
+    c.result().createFamilyFromSeed(seed),
+    /owner_source_changed/,
+  );
+  assert.equal(world.personalClears, 0);
+  assert.equal(
+    world.http.some((q) => q.url === "/v2/families"),
+    false,
+  );
+  c.unmount();
+});
+test("a reminder already being scheduled must finish before the final reviewed source comparison", async () => {
+  const world = ownerWorld();
+  const c = await boot(world);
+  const seed = ownerSeed(world);
+  world.beforeReminderDrain = async () => {
+    world.personalExtras.push({
+      id: "reminder-settings",
+      kind: "reminder-settings",
+      settings: null,
+    });
+  };
+  await assert.rejects(
+    c.result().createFamilyFromSeed(seed),
+    /owner_source_changed/,
+  );
+  assert.equal(
+    world.http.some((q) => q.url === "/v2/families"),
+    false,
+  );
+  assert.equal(world.personalClears, 0);
+  c.unmount();
+});
+test("family extras save through the durable versioned outbox and survive refresh", async () => {
+  const world = makeWorld({ offline: false });
+  const c = await boot(world);
+  const record = {
+    id: "play-selection",
+    kind: "play-selection",
+    selection: { included: ["face"], excluded: [] },
+  };
+  await c.result().saveRecord("extra", record);
+  await until(
+    () => world.recordsSent.length === 1 && !c.result().syncing,
+    "extra synchronization",
+  );
+  assert.equal(world.recordsSent[0].durablySaved, true);
+  assert.deepEqual(world.recordsSent[0].operation.extraRecord, record);
+  assert.equal(c.result().sharedExtras[0].record.kind, "play-selection");
+  c.unmount();
+});
+test("extra read failure before dispatch releases creation intent without clearing personal history", async () => {
+  const world = ownerWorld();
+  const c = await boot(world);
+  world.personalCaptureError = "avatar_read_failed";
+  await assert.rejects(
+    c.result().createFamilyFromSeed(ownerSeed(world)),
+    /avatar_read_failed/,
+  );
+  assert.equal(world.read().transition, null);
+  assert.equal(world.personalClears, 0);
+  assert.equal(
+    world.http.some((q) => q.url === "/v2/families"),
+    false,
+  );
+  c.unmount();
+});
+test("a newly submitted seed without the extras review cannot activate a family", async () => {
+  const world = ownerWorld();
+  const c = await boot(world);
+  const seed = ownerSeed(world);
+  delete seed.extrasSchemaVersion;
+  delete seed.extraRecords;
+  await assert.rejects(
+    c.result().createFamilyFromSeed(seed),
+    /owner_source_changed/,
+  );
+  assert.equal(world.personalClears, 0);
+  assert.equal(world.read().transition, null);
+  c.unmount();
+});
+test("family reminder delivery needs explicit local enable and logout clears it", async () => {
+  const world = makeWorld({ offline: false });
+  const c = await boot(world);
+  assert.equal(c.result().notificationsEnabled, false);
+  assert.equal(
+    world.notificationCalls.some((call) => call.kind === "permission"),
+    false,
+  );
+  await c.result().setNotificationsEnabled(true);
+  assert.equal(c.result().notificationsEnabled, true);
+  assert.equal(world.notificationOptIn.size, 1);
+  await c.result().signOut();
+  await until(
+    () => world.notificationCalls.some((call) => call.kind === "clear"),
+    "notification cleanup",
+  );
+  assert.equal(world.notificationOptIn.size, 0);
+  c.unmount();
+});
+
+test("known auth expiry suspends notification delivery before another render", async () => {
+  const world = makeWorld({ offline: false });
+  const c = await boot(world);
+  const enable = c.result().setNotificationsEnabled;
+  await enable(true);
+  const before = world.notificationCalls.length;
+  world.identityError = { code: "unauthorized", status: 401 };
+  await c.result().refresh();
+  assert.ok(
+    world.notificationCalls
+      .slice(before)
+      .some((call) => call.kind === "suspend"),
+  );
+  await assert.rejects(
+    enable(true),
+    /refresh_required|sign_in_required|session_changed/,
+  );
+  assert.equal(
+    world.notificationCalls
+      .slice(before)
+      .some((call) => call.kind === "permission"),
+    false,
+  );
+  c.unmount();
+});
+
+test("pending notification enable cannot schedule after auth expiry without a render", async () => {
+  const world = makeWorld({ offline: false });
+  const c = await boot(world);
+  const permission = deferred();
+  world.beforeNotificationEnable = () => permission.promise;
+  const enable = c.result().setNotificationsEnabled(true);
+  await until(
+    () => world.notificationCalls.some((call) => call.kind === "permission"),
+    "native permission request",
+  );
+  world.identityError = { code: "unauthorized", status: 401 };
+  await c.result().refresh();
+  const before = world.notificationCalls.length;
+  permission.resolve();
+  await assert.rejects(enable, /session_changed|refresh_required/);
+  assert.equal(
+    world.notificationCalls.slice(before).some((call) => call.kind === "sync"),
+    false,
+  );
+  c.unmount();
+});
+
+test("verified revocation cancels notifications before an identity cache write can stall", async () => {
+  const world = makeWorld({ offline: false });
+  const c = await boot(world);
+  await c.result().setNotificationsEnabled(true);
+  const write = deferred();
+  world.beforeIdentitySave = () => write.promise;
+  world.identity.families = [];
+  const before = world.notificationCalls.length;
+  const refresh = c.result().refresh();
+  await tick();
+  assert.ok(
+    world.notificationCalls.slice(before).some((call) => call.kind === "clear"),
+  );
+  write.resolve();
+  await refresh;
+  c.unmount();
+});
+
+for (const method of ["leaveFamily", "closeFamily"]) {
+  test(`${method} waits for native notification cleanup before reporting success`, async () => {
+    const world = makeWorld({ offline: false });
+    if (method === "leaveFamily") {
+      world.server.family.role = "caregiver";
+      world.identity.families[0].role = "caregiver";
+      world.cachedIdentity.families[0].role = "caregiver";
+      world.data.state.snapshot.family.role = "caregiver";
+      world.disk.set(world.account, JSON.stringify(world.data.state));
+    }
+    const c = await boot(world);
+    await c.result().setNotificationsEnabled(true);
+    const cleanup = deferred();
+    world.beforeNotificationClear = () => cleanup.promise;
+    let completed = false;
+    const departure = c
+      .result()
+      [method]()
+      .then(() => {
+        completed = true;
+      });
+    await tick();
+    await tick();
+    assert.ok(world.notificationCalls.some((call) => call.kind === "clear"));
+    assert.equal(completed, false);
+    cleanup.resolve();
+    await departure;
+    assert.equal(world.notificationOptIn.size, 0);
+    c.unmount();
+  });
 }
 test("lost full creation response restarts the same reviewed seed operation before activation cleanup", async () => {
   const world = ownerWorld();
@@ -1212,6 +1833,7 @@ test("lost join response durably retries the same consent and required schema af
       assert.deepEqual(structuredClone(call.operation), {
         declineOtherInvitations: true,
         requiredSchemaVersion: 2,
+        requiredExtrasSchemaVersion: 1,
         operationId: intent.operationId,
       });
     assert.equal(world.read().transition, null);

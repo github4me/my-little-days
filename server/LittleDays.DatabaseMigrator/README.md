@@ -23,9 +23,9 @@ dotnet run --project server/LittleDays.DatabaseMigrator -- --apply
 
 ## New migrations
 
-Add the next uniquely numbered `Scripts/0003_Description.sql`; never modify applied scripts. Use plain transaction-compatible SQL with optional `GO` separators. SQL variable substitution is disabled. Include table-specific runtime grants when adding a table used by the API. The runtime must never receive schema control or journal access. New object types needing additional CREATE permissions require separate bootstrap review.
+Add the next uniquely numbered `Scripts/0004_Description.sql`; never modify applied scripts. Use plain transaction-compatible SQL with optional `GO` separators. SQL variable substitution is disabled. Include table-specific runtime grants when adding a table used by the API. The runtime must never receive schema control or journal access. New object types needing additional CREATE permissions require separate bootstrap review.
 
-`0001_LegacySchemaBaseline.sql` freezes the three historical EF migrations. `0002_VerifyBaselineAndRuntimeGrants.sql` checks key schema invariants and grants runtime DML. Historical EF source remains excluded from the API build and is compiled only into adoption tests. Future migrations belong here, not in EF's migration folder.
+`0001_LegacySchemaBaseline.sql` freezes the three historical EF migrations. `0002_VerifyBaselineAndRuntimeGrants.sql` checks key schema invariants and grants runtime DML. `0003_FamilySharedExtras.sql` adds shared-photo, reminder and play-record constraint support without replacing existing data. Historical EF source remains excluded from the API build and is compiled only into adoption tests. Future migrations belong here, not in EF's migration folder.
 
 Run both backend test projects with actual disposable SQL Server:
 

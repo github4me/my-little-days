@@ -85,6 +85,7 @@ export default function PlayLearning({
   sharedMode = false,
   careVersions,
   canEditCare,
+  sharedPlay,
 }: {
   birthDate: string;
   now: number;
@@ -94,6 +95,14 @@ export default function PlayLearning({
   sharedMode?: boolean;
   careVersions?: Record<string, string>;
   canEditCare?: (id: string) => boolean;
+  sharedPlay?: {
+    selection: PlaySelection;
+    checkins: string[];
+    canChangeSelection: boolean;
+    canToggleCheckin: (activityId: string) => boolean;
+    onChangeSelection: (selection: PlaySelection) => Promise<void>;
+    onToggleCheckin: (activityId: string) => Promise<void>;
+  };
 }) {
   const c = useContext(Theme);
   const { locale } = useI18n();
@@ -128,8 +137,19 @@ export default function PlayLearning({
   const checkinLock = useRef(false);
   const currentDay = useRef(day);
   currentDay.current = day;
-  const checkinsReady = checkins?.day === day;
-  const doneToday = checkinsReady ? checkins.ids : [];
+  const checkinsReady = sharedMode ? !!sharedPlay : checkins?.day === day;
+  const doneToday = sharedMode
+    ? (sharedPlay?.checkins ?? [])
+    : checkins?.day === day
+      ? checkins.ids
+      : [];
+  const currentSelection = sharedMode
+    ? (sharedPlay?.selection ?? { included: [], excluded: [] })
+    : selection;
+  const selectionReady = sharedMode || ready;
+  const canChangeSelection = !sharedMode || !!sharedPlay?.canChangeSelection;
+  const canToggleCheckin = (id: string) =>
+    !sharedMode || !!sharedPlay?.canToggleCheckin(id);
   useEffect(() => {
     let active = true;
     setCheckins(null);
@@ -150,16 +170,17 @@ export default function PlayLearning({
     };
   }, [day, checkinRetry, sharedMode]);
   async function toggleCheckin(id: string) {
-    if (sharedMode || !checkinsReady || checkinLock.current) return;
+    if (!checkinsReady || checkinLock.current || !canToggleCheckin(id)) return;
     checkinLock.current = true;
     setChecking(true);
     const next = doneToday.includes(id)
       ? doneToday.filter((v) => v !== id)
       : [...doneToday, id];
     try {
-      await savePlayCheckins(day, next);
+      if (sharedMode) await sharedPlay!.onToggleCheckin(id);
+      else await savePlayCheckins(day, next);
       if (currentDay.current === day) {
-        setCheckins({ day, ids: next });
+        if (!sharedMode) setCheckins({ day, ids: next });
         setCheckinError(null);
       }
     } catch {
@@ -202,15 +223,16 @@ export default function PlayLearning({
     (actualSupported
       ? ageBands.find((b) => actualMonths >= b.min && actualMonths < b.max)!.min
       : 0);
-  const selectedIds = ready ? selectedPlayIds(actualMonths, selection) : [];
+  const selectedIds = selectionReady
+    ? selectedPlayIds(actualMonths, currentSelection)
+    : [];
   const pendingActivity = playActivities.find((a) => a.id === pendingSelection);
   const shown =
     mode === "choose"
       ? activitiesForBand(months)
       : playActivities.filter((a) => selectedIds.includes(a.id));
   function requestSelection(id: string) {
-    if (sharedMode) return;
-    if (!ready || lock.current) return;
+    if (!canChangeSelection || !selectionReady || lock.current) return;
     const a = playActivities.find((v) => v.id === id)!;
     if (
       !selectedIds.includes(id) &&
@@ -222,14 +244,16 @@ export default function PlayLearning({
     void updateSelection(id, !selectedIds.includes(id));
   }
   async function updateSelection(id: string, selected: boolean) {
-    if (sharedMode) return;
-    if (!ready || lock.current) return;
+    if (!canChangeSelection || !selectionReady || lock.current) return;
     lock.current = true;
     setSaving(true);
     try {
-      const next = changePlaySelection(selection, id, selected);
-      await savePlaySelection(next);
-      setSelection(next);
+      const next = changePlaySelection(currentSelection, id, selected);
+      if (sharedMode) await sharedPlay!.onChangeSelection(next);
+      else {
+        await savePlaySelection(next);
+        setSelection(next);
+      }
       setPendingSelection(null);
       setError(null);
     } catch {
@@ -250,10 +274,15 @@ export default function PlayLearning({
     <View style={{ gap: 16 }}>
       {sharedMode ? (
         <T raw style={{ color: c.muted, fontSize: 12 }}>
-          {text(
-            "日常照护记录与家庭共享。早教指南可阅读，个人设置和打卡不会带入共享家庭。",
-            "Daily care records are shared with your family. Play guides remain readable; personal settings and check-ins are not carried into a shared family.",
-          )}
+          {sharedPlay
+            ? text(
+                "早教设置和打卡与家庭共享。管理员选择活动；成员可打卡并取消自己添加的打卡，管理员可管理全部打卡。",
+                "Play settings and check-ins are shared with your family. The admin chooses activities. Members can add or undo their own check-ins; the admin can manage all check-ins.",
+              )
+            : text(
+                "日常照护记录与家庭共享。当前服务尚不支持共享早教设置和打卡，可先阅读活动指南。",
+                "Daily care records are shared. This server does not yet support shared play settings or check-ins; activity guides remain available to read.",
+              )}
         </T>
       ) : null}
       <Modal
@@ -530,7 +559,12 @@ export default function PlayLearning({
                     `今天做过 ${doneToday.length} 项，自在选择就好`,
                     `${doneToday.length} checked in today. Choose freely.`,
                   )
-                : text("正在读取今日打卡…", "Loading today's check-ins…")}
+                : sharedMode
+                  ? text(
+                      "当前服务暂不支持共享打卡",
+                      "Shared check-ins are not available on this server",
+                    )
+                  : text("正在读取今日打卡…", "Loading today's check-ins…")}
             </T>
           ) : null}
           {checkinError ? (
@@ -688,15 +722,21 @@ export default function PlayLearning({
                       )}
                       accessibilityState={{
                         checked: doneToday.includes(a.id),
-                        disabled: !checkinsReady || checking,
+                        disabled:
+                          !checkinsReady || checking || !canToggleCheckin(a.id),
                       }}
-                      disabled={sharedMode || !checkinsReady || checking}
+                      disabled={
+                        !checkinsReady || checking || !canToggleCheckin(a.id)
+                      }
                       onPress={() => void toggleCheckin(a.id)}
                       style={{
                         minHeight: 44,
                         justifyContent: "center",
                         flexShrink: 1,
-                        opacity: checkinsReady && !checking ? 1 : 0.5,
+                        opacity:
+                          checkinsReady && !checking && canToggleCheckin(a.id)
+                            ? 1
+                            : 0.5,
                       }}
                     >
                       <T
@@ -726,15 +766,19 @@ export default function PlayLearning({
                     )}
                     accessibilityState={{
                       checked: saved,
-                      disabled: !ready || saving,
+                      disabled:
+                        !selectionReady || saving || !canChangeSelection,
                     }}
-                    disabled={sharedMode || !ready || saving}
+                    disabled={!selectionReady || saving || !canChangeSelection}
                     onPress={() => requestSelection(a.id)}
                     style={{
                       minHeight: 44,
                       justifyContent: "center",
                       paddingHorizontal: 4,
-                      opacity: ready && !saving ? 1 : 0.5,
+                      opacity:
+                        selectionReady && !saving && canChangeSelection
+                          ? 1
+                          : 0.5,
                     }}
                   >
                     <T raw style={{ color: c.primary, fontSize: 13 }}>

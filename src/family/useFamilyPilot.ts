@@ -19,6 +19,16 @@ import type {
 } from "./contracts";
 import type { State, Entry, CareRecord } from "../domain";
 import { serializeOwnerSeed, type OwnerSeedDraft } from "./ownerSeed";
+import { loadPersonalExtras } from "./personalExtras";
+import { drainReminderWrites } from "../personalWrites";
+import type { FamilyExtraRecord } from "./extras";
+import {
+  clearFamilyReminders,
+  suspendFamilyReminders,
+  loadFamilyReminderOptIn,
+  setFamilyReminderOptIn,
+  syncFamilyReminders,
+} from "./familyReminders";
 import {
   clearPersonalForFamilyActivation,
   setPersonalStorageBlocked,
@@ -32,8 +42,9 @@ import {
   enqueueRecord,
   isFullSnapshot,
   projectedFullState,
+  projectedExtraRecords,
   recordsForSend,
-  requireFullCapabilities,
+  requireExtraCapabilities,
   validateFullSnapshot,
 } from "./fullState";
 import type { PilotIdentity } from "./identity";
@@ -75,11 +86,24 @@ const retryable = (error: unknown) =>
   error.status === 408 ||
   error.status === 429 ||
   error.status >= 500;
+const authenticationRequired = (cause: unknown) =>
+  ["sign_in_required", "unauthorized"].includes(errorCode(cause)) ||
+  (cause instanceof PilotApiError && cause.status === 401);
+
+export type FamilyAuthStatus =
+  | "signed_out"
+  | "checking"
+  | "authenticated"
+  | "reauth_required"
+  | "unverified";
 
 export function useFamilyPilot() {
   const configured = !!familyConfig,
     webUnsupported = Platform.OS === "web";
   const [identity, setIdentity] = useState<PilotIdentity | null>(null);
+  const [authStatus, setAuthStatus] = useState<FamilyAuthStatus>(
+    configured && !webUnsupported ? "checking" : "signed_out",
+  );
   const [deletionStatus, setDeletionStatus] = useState<AccountDeletion | null>(
     null,
   );
@@ -88,14 +112,23 @@ export function useFamilyPilot() {
   const verified = useRef(false);
   const [booting, setBooting] = useState(configured && !webUnsupported);
   const [activationSerial, setActivationSerial] = useState(0);
+  const [notificationsEnabled, setNotificationsEnabledValue] = useState(false);
+  const [notificationError, setNotificationError] = useState<string | null>(
+    null,
+  );
+  const notificationContext = useRef<string | null>(null);
+  const notificationGeneration = useRef(0);
   const markReady = (value: boolean) => {
     verified.current = value;
+    if (!value) void stopNotificationDelivery().catch(() => {});
     if (mounted.current) setReady(value);
   };
   const [busy, setBusy] = useState(false),
     [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null),
-    [notice, setNotice] = useState<string | null>(null);
+    [notice, setNoticeValue] = useState<string | null>(null);
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const noticeToken = useRef(0);
   const current = useRef(state),
     durable = useRef(state),
     who = useRef(identity),
@@ -120,6 +153,47 @@ export function useFamilyPilot() {
   };
   const accountKey = (id: string) =>
     `${familyConfig?.apiUrl}|${familyConfig?.tenantId}|${id}`;
+  function stopNotificationDelivery(clearPreference = false): Promise<void> {
+    // Invalidate callbacks and the native foreground handler synchronously;
+    // React effects can run later than a revoked grant or an expired token.
+    const generation = ++notificationGeneration.current;
+    notificationContext.current = null;
+    if (mounted.current) setNotificationsEnabledValue(false);
+    return (
+      clearPreference ? clearFamilyReminders() : suspendFamilyReminders()
+    ).catch((cause) => {
+      if (mounted.current && notificationGeneration.current === generation)
+        setNotificationError(
+          cause instanceof Error ? cause.message : "request_failed",
+        );
+      throw cause;
+    });
+  }
+  function setNotice(value: string | null) {
+    const token = ++noticeToken.current;
+    if (noticeTimer.current !== null) clearTimeout(noticeTimer.current);
+    noticeTimer.current = null;
+    if (mounted.current) setNoticeValue(value);
+    if (value === "sign_in_cancelled") {
+      const e = epoch.current;
+      noticeTimer.current = setTimeout(() => {
+        if (isCurrent(e) && token === noticeToken.current) {
+          noticeTimer.current = null;
+          setNoticeValue(null);
+        }
+      }, 5000);
+    }
+  }
+  function pauseAuthentication() {
+    if (signedOut.current) return;
+    authPaused.current = true;
+    setAuthStatus("reauth_required");
+    markReady(false);
+  }
+  function requireAuthentication() {
+    if (authPaused.current || signedOut.current)
+      throw new Error("sign_in_required");
+  }
   function showIdentity(value: PilotIdentity | null) {
     who.current = value;
     if (mounted.current) setIdentity(value);
@@ -184,20 +258,42 @@ export function useFamilyPilot() {
     }
   }
   async function identify(e: number, expectedAccountId?: string) {
-    const result = await familyRequest<PilotIdentity>(
-      "/v1/me",
-      undefined,
-      requests.current.signal,
-    );
+    let result: PilotIdentity;
+    try {
+      result = await familyRequest<PilotIdentity>(
+        "/v1/me",
+        undefined,
+        requests.current.signal,
+      );
+    } catch (cause) {
+      check(e);
+      if (authenticationRequired(cause)) pauseAuthentication();
+      else if (!authPaused.current) {
+        setAuthStatus("unverified");
+        void stopNotificationDelivery().catch(() => {});
+      }
+      throw cause;
+    }
     check(e);
-    if (!result?.user?.id || !Array.isArray(result.families))
+    if (!result?.user?.id || !Array.isArray(result.families)) {
+      if (!authPaused.current) setAuthStatus("unverified");
+      void stopNotificationDelivery().catch(() => {});
       throw new Error("invalid_response");
+    }
     if (expectedAccountId && result.user.id !== expectedAccountId) {
+      await stopNotificationDelivery(true).catch(() => {});
+      check(e);
       await auth.signOut();
+      check(e);
+      signedOut.current = true;
+      authPaused.current = false;
+      setAuthStatus("signed_out");
       throw new Error("account_mismatch");
     }
     if (who.current && who.current.user.id !== result.user.id)
       throw new Error("session_changed");
+    authPaused.current = false;
+    setAuthStatus("authenticated");
     if (!who.current) {
       const stored = await loadPilot(accountKey(result.user.id));
       check(e);
@@ -214,13 +310,20 @@ export function useFamilyPilot() {
           f.membershipId === cached.family.membershipId,
       );
     if (revoked) showState(revokeCache(current.current));
+    if (revoked || result.accountDeletion) {
+      // Clear before identity/cache writes: a stalled or failed disk write must
+      // not leave this family's notifications active after verified removal.
+      await stopNotificationDelivery(true).catch(() => {});
+      check(e);
+    }
     // Save the newly verified grant independently of the SQLite cache. On a
     // subsequent launch it also prevents exposure of an obsolete row whose
     // cleanup failed because the disk was full.
     await auth.saveIdentity(result);
     check(e);
-    if (revoked || result.accountDeletion)
+    if (revoked || result.accountDeletion) {
       await persist(revokeCache, e, false, true);
+    }
     return result;
   }
   async function snapshot(
@@ -251,6 +354,10 @@ export function useFamilyPilot() {
     )
       throw new Error("membership_changed");
     const previous = current.current.snapshot;
+    if (previous && !matchesOrigin(originForSnapshot(previous), result)) {
+      await stopNotificationDelivery(true);
+      check(e);
+    }
     // Once the server has disproved the old grant/history, a local disk error
     // must not make that old family or obsolete admin permissions return.
     await persist((s) => applyFullSnapshot(s, result), e, false);
@@ -266,6 +373,8 @@ export function useFamilyPilot() {
     const me = await identify(e);
     const f = me.families[0];
     if (me.accountDeletion || !f) {
+      await stopNotificationDelivery(true);
+      check(e);
       await persist(revokeCache, e, false);
       markReady(true);
     } else {
@@ -274,20 +383,35 @@ export function useFamilyPilot() {
     return me;
   }
   async function resumeTransition(e: number) {
+    requireAuthentication();
     const intent = current.current.transition;
     if (!intent) return;
+    await stopNotificationDelivery();
+    check(e);
     if (intent.userId !== who.current?.user.id)
       throw new Error("account_mismatch");
     if (intent.phase === "pending") {
       if (["create", "join"].includes(intent.kind)) {
         setPersonalStorageBlocked(true);
+        await drainReminderWrites();
         await drainPersonalStorageWrites();
         if (!intent.dispatched && intent.path === "/v2/families") {
-          const seed = intent.body.seed as OwnerSeedDraft;
-          const latest = { ...seed, source: await loadState() };
-          if (serializeOwnerSeed(latest) !== serializeOwnerSeed(seed)) {
+          try {
+            const seed = intent.body.seed as OwnerSeedDraft;
+            const latest = {
+              ...seed,
+              source: await loadState(),
+              ...(seed.extrasSchemaVersion === 1
+                ? { extraRecords: await loadPersonalExtras() }
+                : {}),
+            };
+            if (serializeOwnerSeed(latest) !== serializeOwnerSeed(seed))
+              throw new Error("owner_source_changed");
+          } catch (cause) {
+            // No request was sent: release the intent so the user can repair
+            // unreadable source data and explicitly review it again.
             await persist((s) => ({ ...s, transition: null }), e, false, true);
-            throw new Error("owner_source_changed");
+            throw cause;
           }
         }
         if (!intent.dispatched)
@@ -408,6 +532,9 @@ export function useFamilyPilot() {
             familyId: activated.familyId,
             membershipId: activated.membershipId,
             historyId: activated.historyId,
+            ...((intent.body.seed as OwnerSeedDraft).extrasSchemaVersion === 1
+              ? { extrasSchemaVersion: 1 as const }
+              : {}),
           };
         } else if (intent.kind === "join") {
           const joined = response as unknown as FamilySummary;
@@ -420,6 +547,9 @@ export function useFamilyPilot() {
           activation = {
             familyId: joined.id,
             membershipId: joined.membershipId,
+            ...(intent.body.requiredExtrasSchemaVersion === 1
+              ? { extrasSchemaVersion: 1 as const }
+              : {}),
           };
         }
         await persist(
@@ -441,6 +571,7 @@ export function useFamilyPilot() {
         check(e);
         if (
           retryable(cause) ||
+          authenticationRequired(cause) ||
           ["sign_in_required", "unauthorized", "local_save_failed"].includes(
             errorCode(cause),
           )
@@ -467,6 +598,13 @@ export function useFamilyPilot() {
     // A response is not a replacement dataset. Keep the workspace frozen until
     // verified membership and its full snapshot are durably refreshed.
     const committed = current.current.transition;
+    if (
+      committed?.phase === "committed" &&
+      ["leave", "close", "delete-account"].includes(committed.kind)
+    ) {
+      await stopNotificationDelivery(true);
+      check(e);
+    }
     if (
       committed?.phase === "committed" &&
       ["create", "join"].includes(committed.kind)
@@ -531,6 +669,11 @@ export function useFamilyPilot() {
           e,
           false,
         );
+      if (
+        expected.extrasSchemaVersion === 1 &&
+        actual.extrasSchemaVersion !== 1
+      )
+        throw new Error("extras_sharing_unavailable");
       await clearPersonalForFamilyActivation();
       check(e);
       setActivationSerial((value) => value + 1);
@@ -562,6 +705,8 @@ export function useFamilyPilot() {
       }
       const f = me.families[0];
       if (!f || me.accountDeletion) {
+        await stopNotificationDelivery(true);
+        check(e);
         if (
           current.current.snapshot ||
           current.current.draft ||
@@ -574,6 +719,11 @@ export function useFamilyPilot() {
         failures.current = 0;
         nextRefresh.current = Date.now() + 30000;
         markReady(true);
+        // Identity-only refresh cannot resolve a failed local write. Successful
+        // authentication still clears obsolete login and connectivity errors.
+        setError((previous) =>
+          previous === "local_save_failed" ? previous : null,
+        );
         return;
       }
       // Refresh grants/history before sending offline work, not merely after it.
@@ -600,6 +750,7 @@ export function useFamilyPilot() {
           const code = errorCode(cause);
           if (
             retryable(cause) ||
+            authenticationRequired(cause) ||
             [
               "sign_in_required",
               "unauthorized",
@@ -662,6 +813,8 @@ export function useFamilyPilot() {
               "identity_not_supported",
             ].includes(code)
           ) {
+            await stopNotificationDelivery(true).catch(() => {});
+            check(e);
             await persist(revokeCache, e, false);
             throw cause;
           }
@@ -676,7 +829,9 @@ export function useFamilyPilot() {
       setError(null);
     } catch (cause) {
       if (!isCurrent(e)) return;
-      const code = errorCode(cause);
+      const code = authenticationRequired(cause)
+        ? "sign_in_required"
+        : errorCode(cause);
       if (
         [
           "sign_in_required",
@@ -690,8 +845,7 @@ export function useFamilyPilot() {
         ].includes(code)
       )
         markReady(false);
-      if (code === "sign_in_required" || code === "unauthorized")
-        authPaused.current = true;
+      if (authenticationRequired(cause)) pauseAuthentication();
       if (
         [
           "forbidden",
@@ -702,6 +856,8 @@ export function useFamilyPilot() {
         who.current
       ) {
         markReady(false);
+        await stopNotificationDelivery(true).catch(() => {});
+        if (!isCurrent(e)) return;
         const denied = { ...who.current, families: [], pendingInvitations: [] };
         showIdentity(denied);
         await auth.saveIdentity(denied).catch(() => {});
@@ -731,11 +887,13 @@ export function useFamilyPilot() {
   async function action<T>(
     task: (e: number) => Promise<T>,
     allowTransition = false,
+    preserveError = false,
   ): Promise<T> {
     if (commands.current) throw new Error("action_busy");
     commands.current = true;
     setBusy(true);
-    setError(authPaused.current ? "sign_in_required" : null);
+    if (!preserveError)
+      setError(authPaused.current ? "sign_in_required" : null);
     setNotice(null);
     const e = epoch.current;
     try {
@@ -743,7 +901,19 @@ export function useFamilyPilot() {
         throw new Error("transition_pending");
       return await task(e);
     } catch (cause) {
-      if (isCurrent(e)) setError(errorCode(cause));
+      if (isCurrent(e)) {
+        const code = errorCode(cause);
+        if (code === "sign_in_cancelled") setNotice(code);
+        else {
+          if (authenticationRequired(cause)) pauseAuthentication();
+          setError(
+            authPaused.current &&
+              !["local_save_failed", "sign_out_failed"].includes(code)
+              ? "sign_in_required"
+              : code,
+          );
+        }
+      }
       throw cause;
     } finally {
       commands.current = false;
@@ -762,7 +932,15 @@ export function useFamilyPilot() {
           status: deletion.status,
           requestedAt: deletion.requestedAt,
         });
-      if (!(await auth.hasSession())) return;
+      const hasSession = await auth.hasSession();
+      check(e);
+      if (!hasSession) {
+        await stopNotificationDelivery(true);
+        check(e);
+        signedOut.current = true;
+        setAuthStatus("signed_out");
+        return;
+      }
       const cached = await auth.loadIdentity();
       check(e);
       if (cached) {
@@ -799,7 +977,13 @@ export function useFamilyPilot() {
       }
       await sync();
     } catch (cause) {
-      if (isCurrent(e)) setError(errorCode(cause));
+      if (isCurrent(e)) {
+        if (authenticationRequired(cause)) pauseAuthentication();
+        else if (!authPaused.current) setAuthStatus("unverified");
+        setError(
+          authenticationRequired(cause) ? "sign_in_required" : errorCode(cause),
+        );
+      }
     } finally {
       if (isCurrent(e)) setBooting(false);
     }
@@ -825,6 +1009,9 @@ export function useFamilyPilot() {
       requests.current.abort();
       subscription.remove();
       clearInterval(timer);
+      if (noticeTimer.current !== null) clearTimeout(noticeTimer.current);
+      noticeToken.current++;
+      void stopNotificationDelivery().catch(() => {});
     };
   }, [start]);
 
@@ -839,9 +1026,12 @@ export function useFamilyPilot() {
     try {
       await syncLock.current;
       check(e);
+      requireAuthentication();
       if (current.current.transition) throw new Error("transition_pending");
       if (!who.current || who.current.accountDeletion)
         throw new Error("account_deleted");
+      await stopNotificationDelivery();
+      check(e);
       const intent: PilotTransition = {
         operationId: randomUUID(),
         path,
@@ -862,22 +1052,128 @@ export function useFamilyPilot() {
       lifecycleActive.current = false;
     }
   }
+  const notificationOrigin =
+    ready &&
+    authStatus === "authenticated" &&
+    !state.transition &&
+    isFullSnapshot(state.snapshot) &&
+    state.snapshot.extrasSchemaVersion === 1 &&
+    identity
+      ? JSON.stringify([
+          accountKey(identity.user.id),
+          state.snapshot.family.id,
+          state.snapshot.family.membershipId,
+          state.snapshot.historyId,
+        ])
+      : null;
+  notificationContext.current = notificationOrigin;
+  useEffect(() => {
+    let active = true;
+    const generation = notificationGeneration.current;
+    setNotificationError(null);
+    const update = async () => {
+      if (notificationOrigin) {
+        if (
+          notificationContext.current !== notificationOrigin ||
+          authPaused.current ||
+          signedOut.current ||
+          !verified.current
+        )
+          return;
+        await syncFamilyReminders(
+          notificationOrigin,
+          projectedExtraRecords(state).map((r) => r.record),
+          projectedFullState(state)?.entries ?? [],
+        );
+        const enabled = await loadFamilyReminderOptIn(notificationOrigin);
+        if (
+          active &&
+          notificationContext.current === notificationOrigin &&
+          notificationGeneration.current === generation
+        )
+          setNotificationsEnabledValue(enabled);
+      } else {
+        setNotificationsEnabledValue(false);
+        if (
+          !booting &&
+          (authStatus === "signed_out" ||
+            (authStatus === "authenticated" &&
+              !identity?.families.length &&
+              !state.transition))
+        )
+          await stopNotificationDelivery(true);
+        else await stopNotificationDelivery();
+      }
+    };
+    void update().catch((cause) => {
+      if (
+        active &&
+        (!notificationOrigin ||
+          (notificationContext.current === notificationOrigin &&
+            notificationGeneration.current === generation))
+      )
+        setNotificationError(
+          cause instanceof Error ? cause.message : "request_failed",
+        );
+    });
+    return () => {
+      active = false;
+    };
+  }, [
+    notificationOrigin,
+    state.snapshot,
+    state.records,
+    state.transition,
+    booting,
+    authStatus,
+  ]);
+
   return {
+    notificationsEnabled,
+    notificationError,
+    setNotificationsEnabled: async (enabled: boolean) => {
+      const origin = notificationContext.current;
+      const generation = notificationGeneration.current;
+      const e = epoch.current;
+      const stillCurrent = () =>
+        isCurrent(e) &&
+        verified.current &&
+        !authPaused.current &&
+        !signedOut.current &&
+        !lifecycleActive.current &&
+        !current.current.transition &&
+        notificationContext.current === origin &&
+        notificationGeneration.current === generation;
+      if (!origin || !stillCurrent()) throw new Error("refresh_required");
+      await setFamilyReminderOptIn(origin, enabled);
+      if (!stillCurrent()) throw new Error("session_changed");
+      await syncFamilyReminders(
+        origin,
+        projectedExtraRecords(current.current).map((r) => r.record),
+        projectedFullState(current.current)?.entries ?? [],
+      );
+      if (!stillCurrent()) throw new Error("session_changed");
+      setNotificationError(null);
+      setNotificationsEnabledValue(enabled);
+    },
     activationSerial,
     activationPending:
       !!state.transition && ["create", "join"].includes(state.transition.kind),
     booting,
+    authStatus,
     ready,
     sharedMode:
       !!state.snapshot || !!identity?.families.length || !!state.transition,
     sharedState: ready && !state.transition ? projectedFullState(state) : null,
+    sharedExtras:
+      ready && !state.transition ? projectedExtraRecords(state) : [],
     fullSnapshot:
       ready && !state.transition && isFullSnapshot(state.snapshot)
         ? state.snapshot
         : null,
     recordPending: state.records?.filter((q) => q.status !== "failed") ?? [],
     recordConflicts: state.records?.filter((q) => q.status === "failed") ?? [],
-    canEditRecord: (collection: "entry" | "care", id: string) =>
+    canEditRecord: (collection: "entry" | "care" | "extra", id: string) =>
       ready &&
       !state.transition &&
       isFullSnapshot(state.snapshot) &&
@@ -889,8 +1185,8 @@ export function useFamilyPilot() {
           q.status !== "failed",
       ),
     saveRecord: (
-      collection: "entry" | "care",
-      value: Entry | CareRecord,
+      collection: "entry" | "care" | "extra",
+      value: Entry | CareRecord | FamilyExtraRecord,
       baseVersion?: string,
     ) =>
       action(async (e) => {
@@ -909,14 +1205,16 @@ export function useFamilyPilot() {
           ...(baseVersion ? { baseVersion } : {}),
           ...(collection === "entry"
             ? { entry: value as Entry }
-            : { careRecord: value as CareRecord }),
+            : collection === "extra"
+              ? { extraRecord: value as FamilyExtraRecord }
+              : { careRecord: value as CareRecord }),
         };
         await persist((s) => enqueueRecord(s, op), e);
         setNotice("saved_locally");
         void refreshNow();
       }),
     deleteRecord: (
-      collection: "entry" | "care",
+      collection: "entry" | "care" | "extra",
       id: string,
       baseVersion: string,
     ) =>
@@ -969,7 +1267,9 @@ export function useFamilyPilot() {
       action(async (e) => {
         if (who.current?.families.length || current.current.snapshot)
           throw new Error("already_in_family");
-        requireFullCapabilities(
+        if (seed.extrasSchemaVersion !== 1 || !Array.isArray(seed.extraRecords))
+          throw new Error("owner_source_changed");
+        requireExtraCapabilities(
           await familyRequest<FamilyCapabilities>(
             "/v2/capabilities",
             undefined,
@@ -1096,30 +1396,34 @@ export function useFamilyPilot() {
       state.queue.some((q) => q.status !== "accepted") ||
       !!state.records?.some((q) => q.status !== "accepted"),
     signIn: () =>
-      action(async (e) => {
-        if (cleanupPending.current) throw new Error("sign_out_failed");
-        if (!configured) throw new Error("not_configured");
-        if (webUnsupported) throw new Error("native_required");
-        authenticating.current = true;
-        const previous = who.current;
-        try {
-          await syncLock.current;
-          await writes.current;
-          check(e);
-          await auth.signIn(previous?.user.email);
-          check(e);
-          signedOut.current = false;
-          authPaused.current = false;
-          // Preserve previous work on disk, but don't show it under a new identity.
-          showIdentity(null);
-          markReady(false);
-          showState(emptyPilotState(), true);
-          await identify(e, previous?.user.id);
-        } finally {
-          authenticating.current = false;
-        }
-        await refreshNow();
-      }, true),
+      action(
+        async (e) => {
+          if (cleanupPending.current) throw new Error("sign_out_failed");
+          if (!configured) throw new Error("not_configured");
+          if (webUnsupported) throw new Error("native_required");
+          authenticating.current = true;
+          const previous = who.current;
+          try {
+            await syncLock.current;
+            await writes.current;
+            check(e);
+            await auth.signIn(previous?.user.email);
+            check(e);
+            signedOut.current = false;
+            if (!authPaused.current) setAuthStatus("checking");
+            // Preserve previous work on disk, but don't show it under a new identity.
+            showIdentity(null);
+            markReady(false);
+            showState(emptyPilotState(), true);
+            await identify(e, previous?.user.id);
+          } finally {
+            authenticating.current = false;
+          }
+          await refreshNow();
+        },
+        true,
+        true,
+      ),
     signOut: () =>
       action(async (beforeLogoutEpoch) => {
         if (
@@ -1129,6 +1433,9 @@ export function useFamilyPilot() {
           throw new Error("transition_pending");
         lifecycleActive.current = true;
         try {
+          // Final logout cleanup below still attempts credentials and cache if
+          // the native notification service is temporarily unavailable.
+          await stopNotificationDelivery().catch(() => {});
           await syncLock.current;
           check(beforeLogoutEpoch);
           // Commit the discard before deleting credentials. If the process dies
@@ -1146,7 +1453,8 @@ export function useFamilyPilot() {
           epoch.current++;
           const e = epoch.current;
           signedOut.current = true;
-          authPaused.current = true;
+          authPaused.current = false;
+          setAuthStatus("signed_out");
           requests.current.abort();
           requests.current = new AbortController();
           syncLock.current = null;
@@ -1156,6 +1464,7 @@ export function useFamilyPilot() {
           setSyncing(false);
           const results = await Promise.allSettled([
             auth.signOut(),
+            stopNotificationDelivery(true),
             (async () => {
               await writes.current;
               if (logoutAccount.current)
@@ -1188,7 +1497,7 @@ export function useFamilyPilot() {
       }),
     acceptInvitation: (id: string) =>
       action(async (e) => {
-        requireFullCapabilities(
+        requireExtraCapabilities(
           await familyRequest<FamilyCapabilities>(
             "/v2/capabilities",
             undefined,
@@ -1201,7 +1510,11 @@ export function useFamilyPilot() {
         if (!invitation) throw new Error("invitation_unavailable");
         await mutate(
           `/v1/invitations/${id}/accept`,
-          { declineOtherInvitations: true, requiredSchemaVersion: 2 },
+          {
+            declineOtherInvitations: true,
+            requiredSchemaVersion: 2,
+            requiredExtrasSchemaVersion: 1,
+          },
           e,
           "join",
           invitation.familyId,

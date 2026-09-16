@@ -122,8 +122,17 @@ function wrapperWorld() {
   let nodes = [];
   const world = {
     source: sourceFixture(),
+    extras: [
+      {
+        id: "play-selection",
+        kind: "play-selection",
+        selection: { included: ["face"], excluded: [] },
+      },
+    ],
+    captureError: null,
     pilot: {
       user: { id: "owner", email: owner },
+      authStatus: "authenticated",
       snapshot: null,
       inbox: [],
       transitionPending: false,
@@ -197,6 +206,12 @@ function wrapperWorld() {
       },
     },
     "./OwnerSetupCard": { __esModule: true, default: "OwnerSetupCard" },
+    "./personalExtras": {
+      loadPersonalExtras: async () => {
+        if (world.captureError) throw world.captureError;
+        return plain(world.extras);
+      },
+    },
     "./pilotStorage": {
       async loadOwnerSetup(key, email) {
         world.loads.push({ key, email });
@@ -304,8 +319,34 @@ test("owner mobile Save rejects records or profile changed since review", async 
   }
 });
 
+test("owner review includes detached extra data and rejects changes before creation", async () => {
+  const world = wrapperWorld();
+  const card = await world.ready();
+  const draft = await card.onPrepare(recipient);
+  assert.equal(draft.extrasSchemaVersion, 1);
+  assert.deepEqual(plain(draft.extraRecords), world.extras);
+  world.extras[0].selection.included.push("changed");
+  assert.equal(draft.extraRecords[0].selection.included.length, 1);
+  await assert.rejects(card.onSave(draft), /owner_source_changed/);
+  assert.equal(world.saves.length, 0);
+});
+
+test("an unreadable personal photo or reminder never silently disappears from review", async () => {
+  const world = wrapperWorld();
+  const card = await world.ready();
+  world.captureError = new Error("owner_extra_read_failed");
+  await assert.rejects(card.onPrepare(recipient), /owner_extra_read_failed/);
+  assert.equal(world.saves.length, 0);
+});
+
 test("owner mobile stale callbacks cannot save after account, session or family lifecycle changes", async () => {
   for (const change of [
+    (world) => {
+      world.pilot.authStatus = "reauth_required";
+    },
+    (world) => {
+      world.pilot.authStatus = "unverified";
+    },
     (world) => {
       world.pilot.user = { id: "different", email: "different@example.test" };
     },

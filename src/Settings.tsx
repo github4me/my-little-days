@@ -68,6 +68,8 @@ export default function Settings({
   familyUiPreview = false,
   sharedMode = false,
   sharedOwner = false,
+  sharedAvatarEditable = false,
+  sharedReminders,
   profileVersion,
   initialProfileExpanded = false,
   state,
@@ -86,6 +88,8 @@ export default function Settings({
   familyUiPreview?: boolean;
   sharedMode?: boolean;
   sharedOwner?: boolean;
+  sharedAvatarEditable?: boolean;
+  sharedReminders?: React.ReactNode;
   profileVersion?: string;
   initialProfileExpanded?: boolean;
   state: State;
@@ -319,7 +323,7 @@ export default function Settings({
                     overflow: "hidden",
                   }}
                 >
-                  {!sharedMode && avatarUri ? (
+                  {avatarUri ? (
                     <Image
                       accessibilityLabel={t("宝宝头像")}
                       resizeMode="cover"
@@ -335,14 +339,14 @@ export default function Settings({
                   <T raw style={{ color: c.muted, fontSize: 12 }}>
                     {sharedMode
                       ? copy(
-                          "共享档案暂不包含照片。",
-                          "Photos are not included in the shared profile.",
+                          "宝宝头像与家庭共享，由管理员管理。",
+                          "The baby photo is shared with the family and managed by the admin.",
                         )
                       : t("仅保存在这台设备，不会上传")}
                   </T>
                 </View>
               </View>
-              {sharedMode ? null : Platform.OS === "web" ? (
+              {sharedMode && !sharedOwner ? null : Platform.OS === "web" ? (
                 <T style={{ color: c.muted, fontSize: 12 }}>
                   网页预览不支持保存本机头像，请在手机安装版中设置。
                 </T>
@@ -351,11 +355,11 @@ export default function Settings({
                   <Button
                     label={avatarUri ? "更换照片" : "选择照片"}
                     secondary
-                    disabled={busy}
+                    disabled={busy || (sharedMode && !sharedAvatarEditable)}
                     style={{ flex: 1 }}
                     onPress={() =>
                       run(async () => {
-                        if (sharing.current) return;
+                        if (sharedMode && !sharedAvatarEditable) return;
                         const result =
                           await ImagePicker.launchImageLibraryAsync({
                             mediaTypes: ["images"],
@@ -365,10 +369,21 @@ export default function Settings({
                           });
                         if (
                           result.canceled ||
-                          sharing.current ||
+                          sharing.current !== sharedMode ||
                           !mounted.current
                         )
                           return;
+                        if (sharedMode) {
+                          await onAvatarChange(result.assets[0].uri);
+                          if (mounted.current)
+                            setMessage(
+                              copy(
+                                "头像已保存，等待家庭同步。",
+                                "Photo saved, waiting for family sync.",
+                              ),
+                            );
+                          return;
+                        }
                         const nextAvatar = await copyAvatarFile(
                           result.assets[0].uri,
                         );
@@ -387,12 +402,12 @@ export default function Settings({
                     <Button
                       label="移除头像"
                       secondary
-                      disabled={busy}
+                      disabled={busy || (sharedMode && !sharedAvatarEditable)}
                       style={{ flex: 1 }}
                       onPress={() =>
                         run(async () => {
                           await onAvatarChange(null);
-                          await deleteAvatarFile(avatarUri);
+                          if (!sharedMode) await deleteAvatarFile(avatarUri);
                           setMessage("宝宝头像已移除");
                         })
                       }
@@ -663,12 +678,14 @@ export default function Settings({
       </SettingsSection>
       <SettingsSection title="照护提醒" busy={busy}>
         {sharedMode ? (
-          <T raw style={{ color: c.muted, fontSize: 13 }}>
-            {copy(
-              "个人离线提醒不会用于共享家庭；退出共享后可管理原有提醒。",
-              "Personal offline reminders are not used for the shared family. Manage them in offline mode.",
-            )}
-          </T>
+          (sharedReminders ?? (
+            <T raw style={{ color: c.muted, fontSize: 13 }}>
+              {copy(
+                "请先更新家庭服务并刷新，再管理共享提醒。",
+                "Update the family service and refresh to manage shared reminders.",
+              )}
+            </T>
+          ))
         ) : (
           <>
             <T style={{ color: c.muted, fontSize: 13 }}>

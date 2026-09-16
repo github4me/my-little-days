@@ -9,8 +9,137 @@ import {
 } from "./family/demoScenarios";
 import { canEditSharedFeed } from "./family/pilotState";
 import { prepareOwnerSeed, summarizeOwnerSeed } from "./family/ownerSeed";
+import {
+  familyInvitationCapacity,
+  MAX_INVITED_FAMILY_MEMBERS,
+} from "./family/invitationCapacity";
 
 const now = Date.UTC(2026, 8, 14, 12);
+
+test("invitation capacity counts only distinct live reservations and active nonowners", () => {
+  const state = createFamilyDemo("owner", now);
+  const snapshot = state.snapshot!;
+  const live = snapshot.invitations[0];
+  snapshot.invitations.push(
+    { ...live, id: "duplicate", email: live.email.toUpperCase() },
+    { ...live, id: "active-member", email: "sample.member@example.com" },
+    { ...live, id: "owner", email: "sample.admin@example.com" },
+    {
+      ...live,
+      id: "expired-boundary",
+      email: "past@example.com",
+      expiresAt: new Date(now).toISOString(),
+    },
+    {
+      ...live,
+      id: "invalid-date",
+      email: "invalid@example.com",
+      expiresAt: "invalid",
+    },
+    ...(["revoked", "declined", "accepted", "expired"] as const).map(
+      (status) => ({
+        ...live,
+        id: status,
+        email: `${status}@example.com`,
+        status,
+      }),
+    ),
+  );
+  assert.deepEqual(
+    familyInvitationCapacity(snapshot.members, snapshot.invitations, now),
+    {
+      limit: MAX_INVITED_FAMILY_MEMBERS,
+      activeMembers: 1,
+      pendingInvitations: 1,
+      used: 2,
+      remaining: 3,
+    },
+  );
+});
+
+test("demo reserves at most five invited-person slots and frees revoked reservations", () => {
+  let state = createFamilyDemo("owner", now);
+  // One active member and one existing pending invite consume two places.
+  for (let index = 0; index < 3; index++)
+    state = reduceFamilyDemo(
+      state,
+      { type: "create-invitation", email: `extra${index}@example.com` },
+      now,
+    );
+  assert.throws(
+    () =>
+      reduceFamilyDemo(
+        state,
+        { type: "create-invitation", email: "sixth@example.com" },
+        now,
+      ),
+    /invitation_limit/,
+  );
+  state = reduceFamilyDemo(
+    state,
+    { type: "revoke-invitation", id: state.snapshot!.invitations[0].id },
+    now,
+  );
+  assert.doesNotThrow(() =>
+    reduceFamilyDemo(
+      state,
+      { type: "create-invitation", email: "replacement@example.com" },
+      now,
+    ),
+  );
+});
+
+test("demo can renew a pending invitation at capacity without another reservation", () => {
+  let state = createFamilyDemo("owner", now);
+  for (let index = 0; index < 3; index++)
+    state = reduceFamilyDemo(
+      state,
+      { type: "create-invitation", email: `extra${index}@example.com` },
+      now,
+    );
+  const prior = state.snapshot!.invitations[0];
+  const renewed = reduceFamilyDemo(
+    state,
+    { type: "create-invitation", email: prior.email.toUpperCase() },
+    now + 1000,
+  );
+  assert.equal(
+    renewed.snapshot!.invitations.find((item) => item.id === prior.id)?.status,
+    "revoked",
+  );
+  assert.equal(
+    familyInvitationCapacity(
+      renewed.snapshot!.members,
+      renewed.snapshot!.invitations,
+      now + 1000,
+    ).used,
+    5,
+  );
+  assert.throws(
+    () =>
+      reduceFamilyDemo(
+        state,
+        { type: "create-invitation", email: "sample.member@example.com" },
+        now,
+      ),
+    /invitation_already_created/,
+  );
+});
+
+test("demo invitations expire at the exact boundary and can be invited again", () => {
+  const state = createFamilyDemo("owner", now);
+  state.snapshot!.invitations[0].expiresAt = new Date(now).toISOString();
+  assert.doesNotThrow(() =>
+    reduceFamilyDemo(
+      state,
+      {
+        type: "create-invitation",
+        email: state.snapshot!.invitations[0].email,
+      },
+      now,
+    ),
+  );
+});
 
 test("family demo scenarios use fresh, fictional fixtures and do not share state", () => {
   assert.equal(demoScenarios.length, 9);

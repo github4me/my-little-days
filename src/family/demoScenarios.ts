@@ -11,6 +11,10 @@ import type { FeedDraft } from "./pilotState";
 import type { State } from "../domain";
 import { prepareOwnerSeed, type OwnerSeedDraft } from "./ownerSeed";
 import {
+  familyInvitationCapacity,
+  MAX_INVITED_FAMILY_MEMBERS,
+} from "./invitationCapacity";
+import {
   canEditSharedFeed,
   feedFromDraft,
   originForSnapshot,
@@ -440,6 +444,11 @@ export function reduceFamilyDemo(
       if (!invite || Date.parse(invite.expiresAt) <= now)
         throw new Error("invitation_unavailable");
       state.snapshot = demoSnapshot(false, now);
+      if (
+        familyInvitationCapacity(state.snapshot.members, [], now)
+          .activeMembers > MAX_INVITED_FAMILY_MEMBERS
+      )
+        throw new Error("invitation_limit");
       state.snapshot.family.id = invite.familyId;
       state.snapshot.members[0].displayName = invite.ownerDisplayName;
       state.inbox = [];
@@ -458,16 +467,25 @@ export function reduceFamilyDemo(
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254)
         throw new Error("invalid_input");
       if (
-        snapshot.invitations.some(
-          (item) =>
-            item.email.toLowerCase() === email && item.status === "pending",
-        ) ||
         snapshot.members.some(
           (member) =>
             member.email?.toLowerCase() === email && member.status === "active",
         )
       )
         throw new Error("invitation_already_created");
+      const existing = snapshot.invitations.filter(
+        (item) =>
+          item.email.toLowerCase() === email &&
+          item.status === "pending" &&
+          Date.parse(item.expiresAt) > now,
+      );
+      if (
+        !existing.length &&
+        !familyInvitationCapacity(snapshot.members, snapshot.invitations, now)
+          .remaining
+      )
+        throw new Error("invitation_limit");
+      for (const invitation of existing) invitation.status = "revoked";
       snapshot.invitations.unshift({
         id: nextId(),
         email,

@@ -88,8 +88,8 @@ public sealed class PilotDatabase(DbContextOptions<PilotDatabase> options) : DbC
             entity.Property(x => x.RecordJson).HasColumnType("nvarchar(max)");
             entity.Property(x => x.Version).IsRowVersion();
             entity.HasOne<FamilyRow>().WithMany().HasForeignKey(x => x.FamilyId).OnDelete(DeleteBehavior.Restrict);
-            entity.ToTable(t => t.HasCheckConstraint("CK_FamilyRecords_Collection", "[Collection] IN ('entry', 'care')"));
-            entity.ToTable(t => t.HasCheckConstraint("CK_FamilyRecords_Json", "ISJSON([RecordJson]) = 1 AND DATALENGTH([RecordJson]) <= 131072"));
+            entity.ToTable(t => t.HasCheckConstraint("CK_FamilyRecords_Collection", "[Collection] IN ('entry', 'care', 'extra')"));
+            entity.ToTable(t => t.HasCheckConstraint("CK_FamilyRecords_Json", "ISJSON([RecordJson]) = 1 AND (DATALENGTH([RecordJson]) <= 131072 OR ([Collection] = 'extra' AND [Id] = 'avatar' AND COALESCE(JSON_VALUE([RecordJson], '$.kind'), '') = 'avatar' AND DATALENGTH([RecordJson]) <= 35651584))"));
         });
     }
 }

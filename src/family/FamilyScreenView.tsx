@@ -26,6 +26,7 @@ import {
 import type { useFamilyPilot } from "./useFamilyPilot";
 import type { OwnerSeedSummary } from "./ownerSeed";
 import { OwnerSeedCountsView } from "./OwnerSetupCard";
+import { familyInvitationCapacity } from "./invitationCapacity";
 
 type Translate = (
   key: FamilyMessageKey,
@@ -38,16 +39,19 @@ type Confirmation = {
   action: () => Promise<void>;
   acknowledgement?: string;
   allowDuringTransition?: boolean;
+  requiresAuthentication: boolean;
 };
 
 function Disclosure({
   title,
   children,
   initiallyOpen = false,
+  status,
 }: {
   title: string;
   children: React.ReactNode;
   initiallyOpen?: boolean;
+  status?: string;
 }) {
   const c = useContext(Theme);
   const { locale } = useI18n();
@@ -69,9 +73,20 @@ function Disclosure({
           { opacity: pressed ? 0.65 : 1 },
         ]}
       >
-        <T raw style={styles.sectionTitle}>
-          {title}
-        </T>
+        <View style={{ flex: 1, gap: 4 }}>
+          <T raw style={styles.sectionTitle}>
+            {title}
+          </T>
+          {status ? (
+            <T
+              raw
+              accessibilityLiveRegion="polite"
+              style={styles.muted(c.muted)}
+            >
+              {status}
+            </T>
+          ) : null}
+        </View>
         <T
           raw
           accessibilityElementsHidden
@@ -439,11 +454,34 @@ export default function FamilyScreenView({
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   const [acknowledged, setAcknowledged] = useState(false);
   const [localError, setLocalError] = useState<FamilyMessageKey | null>(null);
+  const [confirmationError, setConfirmationError] = useState<string | null>(
+    null,
+  );
   const [acting, setActing] = useState(false);
   const lock = useRef(false);
   const mounted = useRef(true);
   const busy = acting || pilot.busy;
+  const authenticated = pilot.authStatus === "authenticated";
+  const needsSignIn = pilot.authStatus === "reauth_required";
+  const accountStatusKey: FamilyMessageKey = {
+    signed_out: "accountSignedOut",
+    checking: "accountChecking",
+    authenticated: "accountSignedIn",
+    reauth_required: "accountExpired",
+    unverified: "accountUnverified",
+  }[pilot.authStatus] as FamilyMessageKey;
   const snapshot = pilot.snapshot;
+  const inviteCapacity = snapshot
+    ? familyInvitationCapacity(snapshot.members, snapshot.invitations)
+    : null;
+  const replacesPendingInvitation = snapshot?.invitations.some(
+    (invite) =>
+      invite.status === "pending" &&
+      Date.parse(invite.expiresAt) > Date.now() &&
+      invite.email.toLowerCase() === recipient.trim().toLowerCase(),
+  );
+  const invitationAtCapacity =
+    inviteCapacity?.remaining === 0 && !replacesPendingInvitation;
   const owner = snapshot?.family.role === "owner";
   const activeMembers =
     snapshot?.members.filter((member) => member.status === "active") ?? [];
@@ -452,7 +490,8 @@ export default function FamilyScreenView({
   );
   const transfer = snapshot?.ownershipTransfer;
   const deletion = pilot.deletionStatus ?? pilot.accountDeletion;
-  const workspaceBusy = busy || pilot.transitionPending || !!deletion;
+  const workspaceBusy =
+    busy || !authenticated || pilot.transitionPending || !!deletion;
 
   useEffect(() => {
     mounted.current = true;
@@ -478,11 +517,18 @@ export default function FamilyScreenView({
     lock.current = true;
     setActing(true);
     setLocalError(null);
+    if (close) setConfirmationError(null);
     try {
       await action();
       if (mounted.current && close) setConfirmation(null);
-    } catch {
+    } catch (cause) {
       // The controller publishes safe error codes; never show exception payloads.
+      if (mounted.current && close)
+        setConfirmationError(
+          cause instanceof Error && /^[a-z_]+$/.test(cause.message)
+            ? cause.message
+            : "request_failed",
+        );
     } finally {
       lock.current = false;
       if (mounted.current) setActing(false);
@@ -496,6 +542,10 @@ export default function FamilyScreenView({
     action: () => Promise<void>,
     acknowledgement?: FamilyMessageKey,
   ) {
+    const requiresAuthentication =
+      label !== "signOut" && label !== "discardDraft";
+    if (requiresAuthentication && !authenticated) return;
+    setConfirmationError(null);
     setAcknowledged(false);
     setConfirmation({
       title: m(title),
@@ -504,22 +554,32 @@ export default function FamilyScreenView({
       action,
       acknowledgement: acknowledgement ? m(acknowledgement) : undefined,
       allowDuringTransition: label === "signOut",
+      requiresAuthentication,
     });
   }
 
   const memberName = (id: string) =>
     snapshot?.members.find((member) => member.id === id)?.displayName ||
     m("memberFallback");
+  const obsoleteAuthError =
+    pilot.error === "sign_in_cancelled" ||
+    (authenticated &&
+      (pilot.error === "sign_in_required" || pilot.error === "unauthorized"));
   const error = localError
     ? m(localError)
-    : pilot.error
+    : pilot.error && !obsoleteAuthError
       ? familyErrorMessage(locale, pilot.error)
       : null;
   const notice = pilot.notice
     ? familyNoticeMessage(locale, pilot.notice)
     : null;
-  const needsSignIn =
-    pilot.error === "sign_in_required" || pilot.error === "unauthorized";
+  const confirmationAuthBlocked =
+    !!confirmation?.requiresAuthentication && !authenticated;
+  const modalError = confirmationAuthBlocked
+    ? m(needsSignIn ? "accountExpiredAction" : "accountVerifyAction")
+    : confirmationError
+      ? familyErrorMessage(locale, confirmationError)
+      : null;
   const staleDraft =
     !!pilot.draft &&
     !!snapshot &&
@@ -755,6 +815,9 @@ export default function FamilyScreenView({
             {m("account")}
           </T>
           <T raw style={styles.muted(c.muted)}>
+            {m(accountStatusKey)}
+          </T>
+          <T raw style={styles.muted(c.muted)}>
             {m("signInDescription")}
           </T>
           <Button
@@ -777,25 +840,38 @@ export default function FamilyScreenView({
         </Card>
       ) : (
         <>
-          {needsSignIn ? (
-            <Button
-              label={m("signIn")}
-              disabled={busy}
-              onPress={() => void run(pilot.signIn)}
-            />
-          ) : null}
-          <Disclosure title={m("account")}>
+          <Disclosure
+            title={m("account")}
+            status={m(accountStatusKey)}
+            initiallyOpen={!authenticated}
+          >
             <T raw style={{ fontWeight: "600" }}>
               {pilot.user.displayName}
             </T>
             <T raw selectable style={styles.muted(c.muted)}>
               {pilot.user.email}
             </T>
-            {!snapshot ? (
+            {!authenticated ? (
+              <T raw style={styles.muted(c.muted)}>
+                {m("accountCachedDetails")}
+              </T>
+            ) : null}
+            {needsSignIn ? (
+              <>
+                <T raw>{m("accountExpiredAction")}</T>
+                <Button
+                  label={m("signInAgain")}
+                  disabled={busy}
+                  onPress={() => void run(pilot.signIn)}
+                />
+              </>
+            ) : !snapshot || !authenticated ? (
               <Button
                 label={m(pilot.syncing ? "refreshing" : "refresh")}
                 secondary
-                disabled={busy || pilot.syncing}
+                disabled={
+                  busy || pilot.syncing || pilot.authStatus === "checking"
+                }
                 onPress={() => void run(pilot.refresh)}
               />
             ) : null}
@@ -857,7 +933,9 @@ export default function FamilyScreenView({
                 onPress={() => void run(pilot.refresh)}
               />
             </Card>
-          ) : !demo && pilot.sharedMode && !pilot.ready ? (
+          ) : !authenticated ? null : !demo &&
+            pilot.sharedMode &&
+            !pilot.ready ? (
             <Card>
               <T raw>
                 {locale === "zh-CN"
@@ -1274,6 +1352,14 @@ export default function FamilyScreenView({
 
               {owner ? (
                 <Disclosure title={m("inviteSection")}>
+                  {inviteCapacity ? (
+                    <T raw accessibilityLiveRegion="polite">
+                      {m("invitationSlots", inviteCapacity)}
+                    </T>
+                  ) : null}
+                  <T raw style={styles.muted(c.muted)}>
+                    {m("invitationCapacityHint")}
+                  </T>
                   <T raw style={styles.muted(c.muted)}>
                     {m("recipientHint")}
                   </T>
@@ -1284,13 +1370,21 @@ export default function FamilyScreenView({
                     keyboardType="email-address"
                     autoCapitalize="none"
                     autoCorrect={false}
-                    editable={!busy}
+                    editable={!workspaceBusy}
                     maxLength={254}
                   />
                   <Button
                     label={m("createInvitation")}
-                    disabled={busy || !recipient.trim()}
-                    onPress={() =>
+                    disabled={
+                      workspaceBusy || !recipient.trim() || invitationAtCapacity
+                    }
+                    onPress={() => {
+                      if (
+                        workspaceBusy ||
+                        !recipient.trim() ||
+                        invitationAtCapacity
+                      )
+                        return;
                       void run(async () => {
                         setCreatedInvite(null);
                         const email = recipient.trim();
@@ -1299,8 +1393,8 @@ export default function FamilyScreenView({
                           setCreatedInvite(email);
                           setRecipient("");
                         }
-                      })
-                    }
+                      });
+                    }}
                   />
                   {createdInvite ? (
                     <View style={[styles.notice, { backgroundColor: c.soft }]}>
@@ -1529,9 +1623,9 @@ export default function FamilyScreenView({
                     label={confirmation.acknowledgement}
                   />
                 ) : null}
-                {error ? (
+                {modalError ? (
                   <T raw accessibilityRole="alert">
-                    {error}
+                    {modalError}
                   </T>
                 ) : null}
                 <Button
@@ -1540,12 +1634,21 @@ export default function FamilyScreenView({
                   }
                   disabled={
                     busy ||
+                    confirmationAuthBlocked ||
                     (!!confirmation?.acknowledgement && !acknowledged) ||
                     (pilot.transitionPending &&
                       !confirmation?.allowDuringTransition)
                   }
                   onPress={() => {
-                    if (confirmation) void run(confirmation.action, true);
+                    if (
+                      confirmation &&
+                      !confirmationAuthBlocked &&
+                      !busy &&
+                      (!confirmation.acknowledgement || acknowledged) &&
+                      (!pilot.transitionPending ||
+                        confirmation.allowDuringTransition)
+                    )
+                      void run(confirmation.action, true);
                   }}
                 />
                 <Button

@@ -35,7 +35,12 @@ export type PilotTransition = {
   phase: "pending" | "committed" | "rejected";
   error?: string;
   dispatched?: boolean;
-  activation?: { familyId: string; membershipId: string; historyId?: string };
+  activation?: {
+    familyId: string;
+    membershipId: string;
+    historyId?: string;
+    extrasSchemaVersion?: 1;
+  };
 };
 export type QueuedFeed = {
   origin: SharingOrigin;
@@ -388,7 +393,7 @@ export function parseStoredPilot(raw: string | null): PilotState {
       !q.operation.membershipId ||
       !q.operation.historyId ||
       !q.origin ||
-      !["entry", "care"].includes(q.operation.collection) ||
+      !["entry", "care", "extra"].includes(q.operation.collection) ||
       !["create", "update", "delete"].includes(q.operation.kind) ||
       !["pending", "accepted", "failed"].includes(q.status)
     )
