@@ -12,26 +12,38 @@ public sealed partial class FamilyService(PilotDatabase db, PilotConfiguration c
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private DateTimeOffset Now => clock.GetUtcNow();
 
-    // All families currently share ONE SQL transaction-owned application lock.
-    // Every authenticated data read/write participates, including snapshot and retries.
-    // This serializes across processes/replicas, makes removal and receipt checks atomic,
-    // and prevents a one-family-per-account race between different families. No process lock.
-    public async Task<T> Transaction<T>(Func<Task<T>> action, CancellationToken ct = default)
+    // Lifecycle operations take the global exclusive barrier: joining, account
+    // deletion and multi-family invitation changes still serialize atomically.
+    // Ordinary work takes global shared THEN family exclusive. Different families
+    // can read/write concurrently, but no grant can change during their transaction.
+    // The original resource name also safely excludes older API instances.
+    public Task<T> Transaction<T>(Func<Task<T>> action, CancellationToken ct = default) => TransactionCore(action, null, ct);
+    public Task<T> FamilyTransaction<T>(Guid familyId, Func<Task<T>> action, CancellationToken ct = default) => TransactionCore(action, familyId, ct);
+    private Task<T> ReadTransaction<T>(Func<Task<T>> action, CancellationToken ct) => TransactionCore(action, null, ct, readOnly: true);
+    private async Task<T> TransactionCore<T>(Func<Task<T>> action, Guid? familyId, CancellationToken ct, bool readOnly = false)
     {
         await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
-        await db.Database.ExecuteSqlRawAsync("""
+        var mode = familyId is null && !readOnly ? "Exclusive" : "Shared";
+        await db.Database.ExecuteSqlInterpolatedAsync($"""
             DECLARE @result int;
             EXEC @result = sys.sp_getapplock @Resource = N'LittleDays:FamilyPilot:v1',
-                @LockMode = 'Exclusive', @LockOwner = 'Transaction', @LockTimeout = 10000;
+                @LockMode = {mode}, @LockOwner = 'Transaction', @LockTimeout = 10000;
             IF @result < 0 THROW 51000, 'Pilot transaction lock unavailable.', 1;
             """, ct);
+        if (familyId is not null)
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                DECLARE @result int;
+                EXEC @result = sys.sp_getapplock @Resource = {$"LittleDays:Family:{familyId:D}"},
+                    @LockMode = 'Exclusive', @LockOwner = 'Transaction', @LockTimeout = 10000;
+                IF @result < 0 THROW 51000, 'Family transaction lock unavailable.', 1;
+                """, ct);
         var result = await action();
-        await db.SaveChangesAsync(ct);
+        if (!readOnly) await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
         return result;
     }
 
-    public Task<MeResult> Me(PilotIdentity user, CancellationToken ct) => Transaction(async () =>
+    public Task<MeResult> Me(PilotIdentity user, CancellationToken ct) => ReadTransaction(async () =>
     {
         var deletion = await db.AccountDeletions.FindAsync([user.ObjectId], ct);
         if (deletion is not null) return new MeResult(new(user.ObjectId, "", ""), [], [], new(deletion.OperationId, deletion.Status, deletion.RequestedAt));
@@ -65,6 +77,7 @@ public sealed partial class FamilyService(PilotDatabase db, PilotConfiguration c
         }
         if (await db.Memberships.AnyAsync(x => x.UserId == user.ObjectId && x.Active, ct))
             throw new ApiException(409, "already_in_family");
+        await CheckCreationCapacity(user, ct);
         // The legacy creation contract has no consent option. Require the reviewed
         // full-family flow when creating would also reject incoming invitations.
         if (await LiveReceivedInvitations(user, Now).AnyAsync(ct))
@@ -78,16 +91,19 @@ public sealed partial class FamilyService(PilotDatabase db, PilotConfiguration c
         return result;
     }, ct);
 
-    public Task<FamilySnapshot> Snapshot(PilotIdentity user, Guid familyId, CancellationToken ct) => Transaction(async () =>
+    public async Task<FamilySnapshot> Snapshot(PilotIdentity user, Guid familyId, CancellationToken ct) =>
+        (await ConditionalSnapshot(user, familyId, null, ct)).Snapshot!;
+
+    public Task<ConditionalSnapshot<FamilySnapshot>> ConditionalSnapshot(PilotIdentity user, Guid familyId, string? ifNoneMatch, CancellationToken ct) => FamilyTransaction(familyId, async () =>
     {
         var grant = await RequireGrant(user, familyId, null, ct);
         var family = await Family(familyId, ct);
-        // Persist time-driven state before calculating revision/ETag so conditional GETs do not
-        // keep showing a pending invitation after its expiry boundary.
-        var now = Now;
-        var expired = await db.Invitations.Where(x => x.FamilyId == familyId && x.Status == "pending" && x.ExpiresAt <= now).ToArrayAsync(ct);
-        foreach (var invitation in expired) invitation.Status = "expired";
-        if (expired.Length > 0) family.Revision++;
+        await ExpireInvitations(family, ct);
+        var etag = $"\"{config.Family.HistoryId:D}:{Revision(family)}:{grant.Id:D}\"";
+        if (ifNoneMatch == etag) return new ConditionalSnapshot<FamilySnapshot>(etag, null);
+        await CheckMemberSnapshotCapacity(familyId, ct);
+        if (await db.Feeds.CountAsync(x => x.FamilyId == familyId && !x.Deleted, ct) > config.Pilot.MaxFeeds)
+            throw new ApiException(409, "family_snapshot_limit");
         var members = await db.Memberships.Where(x => x.FamilyId == familyId && (x.Active || grant.Role == "owner")).OrderBy(x => x.GrantedAt).ToArrayAsync(ct);
         var feeds = await db.Feeds.Where(x => x.FamilyId == familyId && !x.Deleted).OrderByDescending(x => x.Start).ThenBy(x => x.Id).ToArrayAsync(ct);
         // Only the owner receives recipient emails and invitation administration state.
@@ -96,10 +112,11 @@ public sealed partial class FamilyService(PilotDatabase db, PilotConfiguration c
                 .OrderBy(x => x.Status == "pending" ? 0 : 1).ThenByDescending(x => x.CreatedAt).Take(100).ToArrayAsync(ct)
             : [];
         var transfer = await db.OwnershipTransfers.SingleOrDefaultAsync(x => x.FamilyId == familyId && x.Status == "pending", ct);
-        return new FamilySnapshot(Summary(family, grant), config.Family.HistoryId, Revision(family),
+        var snapshot = new FamilySnapshot(Summary(family, grant), config.Family.HistoryId, Revision(family),
             members.Select(x => Member(x, grant.Role == "owner")).ToArray(), invitations.Select(Invitation).ToArray(),
             feeds.Select(x => new SharedFeed(x.Id, Convert.ToBase64String(x.Version), x.RecordedBy, x.LastEditedBy,
                 x.Start, x.End, x.Amount, x.Note)).ToArray(), transfer is null ? null : Transfer(transfer));
+        return new ConditionalSnapshot<FamilySnapshot>(etag, FamilyAvailability.RequireResponseBudget(snapshot));
     }, ct);
 
     public Task<InvitationResult> CreateInvitation(PilotIdentity user, Guid familyId, CreateInvitationRequest request, CancellationToken ct) => Transaction(async () =>
@@ -153,7 +170,7 @@ public sealed partial class FamilyService(PilotDatabase db, PilotConfiguration c
         return result;
     }, ct);
 
-    public Task<FamilySummary> UpdateProfile(PilotIdentity user, Guid familyId, ProfileRequest request, CancellationToken ct) => Transaction(async () =>
+    public Task<FamilySummary> UpdateProfile(PilotIdentity user, Guid familyId, ProfileRequest request, CancellationToken ct) => FamilyTransaction(familyId, async () =>
     {
         ValidateId(request.OperationId);
         var grant = await RequireOwner(user, familyId, ct);
@@ -302,7 +319,7 @@ public sealed partial class FamilyService(PilotDatabase db, PilotConfiguration c
         return new AccountDeletion(row.OperationId, row.Status, row.RequestedAt);
     }, ct);
 
-    public Task<AccountDeletion> DeletionStatus(DeletionStatusRequest request, CancellationToken ct) => Transaction(async () =>
+    public Task<AccountDeletion> DeletionStatus(DeletionStatusRequest request, CancellationToken ct) => ReadTransaction(async () =>
     {
         if (!IsReceiptSecret(request.ReceiptSecret)) throw new ApiException(404, "deletion_unavailable");
         var hash = ReceiptSecretHash(request.ReceiptSecret);
@@ -359,6 +376,8 @@ public sealed partial class FamilyService(PilotDatabase db, PilotConfiguration c
         // invitations need not be deleted. Active membership may never grow past the cap.
         if (await db.Memberships.CountAsync(x => x.FamilyId == invitation.FamilyId && x.Active, ct) >= config.Pilot.EffectiveMaxMembers)
             throw new ApiException(409, "invitation_limit");
+        if (await db.Memberships.CountAsync(x => x.FamilyId == invitation.FamilyId, ct) >= FamilyAvailability.MaxMemberHistory)
+            throw new ApiException(409, "family_member_history_limit");
         await CheckCapacity(invitation.FamilyId, ct);
         var others = await LiveReceivedInvitations(user, Now).Where(x => x.Id != invitationId).ToArrayAsync(ct);
         if (others.Length > 0 && !request.DeclineOtherInvitations)
@@ -465,7 +484,7 @@ public sealed partial class FamilyService(PilotDatabase db, PilotConfiguration c
         return result;
     }, ct);
 
-    public Task<FeedReceipt> ApplyFeed(PilotIdentity user, Guid familyId, FeedOperation operation, CancellationToken ct) => Transaction(async () =>
+    public Task<FeedReceipt> ApplyFeed(PilotIdentity user, Guid familyId, FeedOperation operation, CancellationToken ct) => FamilyTransaction(familyId, async () =>
     {
         ValidateFeed(operation);
         var grant = await RequireGrant(user, familyId, operation.MembershipId, ct);
@@ -474,7 +493,7 @@ public sealed partial class FamilyService(PilotDatabase db, PilotConfiguration c
         var hash = Fingerprint("feed", new { familyId, operation });
         var old = await Receipt(user, operation.OperationId, hash, ct);
         if (old is not null) return ReadResult<FeedReceipt>(old);
-        await CheckCapacity(familyId, ct);
+        if (operation.Kind != "delete") await CheckCapacity(familyId, ct);
         var row = await db.Feeds.SingleOrDefaultAsync(x => x.FamilyId == familyId && x.Id == operation.RecordId, ct);
         if (operation.Kind == "create")
         {
@@ -488,6 +507,8 @@ public sealed partial class FamilyService(PilotDatabase db, PilotConfiguration c
             throw new ApiException(412, "record_changed");
         if (operation.Kind != "create" && grant.Role != "owner" && row.RecordedBy != user.ObjectId)
             throw new ApiException(403, "record_forbidden");
+        if (operation.Kind != "delete" && (operation.Kind == "create" || FamilyAvailability.MeasureResponseBytes(operation.Feed!.Note) > FamilyAvailability.MeasureResponseBytes(row.Note)))
+            await CheckLegacyResponseBudget(familyId, operation.RecordId, operation.Feed!.Note, ct);
         row.LastEditedBy = user.ObjectId;
         if (operation.Kind == "delete") row.Deleted = true;
         else
@@ -561,6 +582,45 @@ public sealed partial class FamilyService(PilotDatabase db, PilotConfiguration c
     private async Task CheckCapacity(Guid familyId, CancellationToken ct)
     {
         if (await db.Operations.CountAsync(x => x.FamilyId == familyId, ct) >= config.Pilot.MaxOperationsPerFamily) Invalid();
+    }
+    private async Task CheckCreationCapacity(PilotIdentity user, CancellationToken ct)
+    {
+        // Minimal closure tombstones survive purge, so repeated create/close cycles
+        // cannot reset this cross-instance abuse budget by waiting for cleanup.
+        var since = Now.AddDays(-1);
+        if (await db.Families.CountAsync(x => x.DeletedBy == user.ObjectId && x.DeletedAt >= since, ct) >= FamilyAvailability.MaxClosuresPerDay)
+            throw new ApiException(429, "family_creation_limit");
+    }
+    private async Task CheckLegacyResponseBudget(Guid familyId, Guid recordId, string note, CancellationToken ct)
+    {
+        // Legacy feeds are already bounded to at most 10,000 rows. Account for
+        // serializer escaping (not raw character length), including when an
+        // operator configured more than the safe default of 1,000 feeds.
+        var bytes = FamilyAvailability.SnapshotMetadataReserve + 512L + FamilyAvailability.MeasureResponseBytes(note);
+        await foreach (var other in db.Feeds.AsNoTracking().Where(x => x.FamilyId == familyId && x.Id != recordId && !x.Deleted)
+            .Select(x => x.Note).AsAsyncEnumerable().WithCancellation(ct))
+        {
+            bytes += 512L + FamilyAvailability.MeasureResponseBytes(other);
+            if (bytes > FamilyAvailability.MaxSnapshotBytes) throw new ApiException(409, "family_snapshot_limit");
+        }
+    }
+    private async Task CheckMemberSnapshotCapacity(Guid familyId, CancellationToken ct)
+    {
+        if (await db.Memberships.CountAsync(x => x.FamilyId == familyId, ct) > FamilyAvailability.MaxMemberHistory)
+            throw new ApiException(409, "family_snapshot_limit");
+    }
+    private async Task ExpireInvitations(FamilyRow family, CancellationToken ct)
+    {
+        // Time-driven state must precede an ETag comparison. A set-based expiry
+        // avoids materializing a historical family's pending invitation payloads.
+        var now = Now;
+        var expired = await db.Invitations.Where(x => x.FamilyId == family.Id && x.Status == "pending" && x.ExpiresAt <= now)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(x => x.Status, "expired"), ct);
+        if (expired > 0)
+        {
+            family.Revision++;
+            await db.SaveChangesAsync(ct);
+        }
     }
     private async Task<OperationRow?> Receipt(PilotIdentity user, Guid id, string hash, CancellationToken ct)
     {

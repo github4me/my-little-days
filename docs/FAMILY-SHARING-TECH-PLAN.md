@@ -1,6 +1,14 @@
 # Family Sharing — Technical Plan
 
-Status: **Full-sharing roadmap; only the invitation pilot is approved for this iteration**
+Status: **Historical design — superseded; not a current deployment or security guide**
+
+The pilot scope and deferred-feature statements below describe the September 14
+design only. The service now contains production family data, even when accessed
+from a preview app. Use the [current API contract](FAMILY-API-CONTRACT.md),
+[full Azure guide](AZURE-FAMILY-SETUP.md) and
+[manual operations runbook](AZURE-MANUAL-SETUP-RUNBOOK.md). Do not use the historical
+admission, locking, rollout or retention assumptions below to configure or restore
+the current service.
 
 Updated: 14 September 2026 (original plan: 8 September 2026)
 

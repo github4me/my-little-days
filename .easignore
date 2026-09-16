@@ -1,17 +1,20 @@
 # Keep local dependencies, exports, secrets and working drafts out of EAS uploads.
 node_modules/
 .expo/
+.incoming-update/
 dist/
-dist-ios/
-dist-web/
-dist-ui-demo/
+dist-*/
+work/
 server/
+docs/FAMILY-SHARING-TECH-PLAN.md
+artifacts/
 **/bin/
 **/obj/
 **/TestResults/
-*.log
+.dotnet-tools/
 .env*
+*.log
+*.pfx
+*.p12
+*private-key*.pem
 .DS_Store
-.incoming-update/
-work/
-docs/FAMILY-SHARING-TECH-PLAN.md

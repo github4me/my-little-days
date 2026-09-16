@@ -62,13 +62,13 @@ public sealed class MigrationTests
     public async Task FreshCheckDoesNotWriteAndApplyIsRepeatable()
     {
         await using var db = await TestDatabase.Create();
-        Assert.Equal(3, db.Runner().Pending().Count);
+        Assert.Equal(4, db.Runner().Pending().Count);
         Assert.Equal(0, await db.Count("SELECT COUNT(*) FROM sys.tables WHERE is_ms_shipped=0"));
         db.Runner().Apply();
-        Assert.Equal(3, await db.Count("SELECT COUNT(*) FROM dbo.DatabaseMigrations"));
+        Assert.Equal(4, await db.Count("SELECT COUNT(*) FROM dbo.DatabaseMigrations"));
         Assert.Empty(db.Runner().Pending());
         db.Runner().Apply();
-        Assert.Equal(3, await db.Count("SELECT COUNT(*) FROM dbo.DatabaseMigrations"));
+        Assert.Equal(4, await db.Count("SELECT COUNT(*) FROM dbo.DatabaseMigrations"));
         Assert.Equal(3, await db.Count("SELECT COUNT(*) FROM dbo.__EFMigrationsHistory"));
     }
 
@@ -81,21 +81,21 @@ public sealed class MigrationTests
         Assert.ThrowsAny<Exception>(() => db.Runner(scripts: [new(scripts[0].Name, scripts[0].Contents + "\n-- changed"), scripts[1]]).Pending());
         Assert.ThrowsAny<Exception>(() => db.Runner(scripts: [scripts[1]]).Pending());
         Assert.ThrowsAny<Exception>(() => db.Runner(scripts: [new("0000_Earlier.sql", "SELECT 1"), .. scripts]).Pending());
-        db.Runner(scripts: [.. scripts, new("0004_AddExample.sql", "CREATE TABLE dbo.Example(Id int NOT NULL);")]).Apply();
-        Assert.Equal(4, await db.Count("SELECT COUNT(*) FROM dbo.DatabaseMigrations"));
+        db.Runner(scripts: [.. scripts, new("0005_AddExample.sql", "CREATE TABLE dbo.Example(Id int NOT NULL);")]).Apply();
+        Assert.Equal(5, await db.Count("SELECT COUNT(*) FROM dbo.DatabaseMigrations"));
     }
 
     [SqlFact]
     public async Task FailureRollsBackSchemaDataAndJournalAndCanRetry()
     {
         await using var db = await TestDatabase.Create();
-        var fail = new SqlScript("0004_Failure.sql", "CREATE TABLE dbo.Example(Id int); INSERT dbo.Example VALUES (1); THROW 51000, 'Synthetic failure', 1;");
+        var fail = new SqlScript("0005_Failure.sql", "CREATE TABLE dbo.Example(Id int); INSERT dbo.Example VALUES (1); THROW 51000, 'Synthetic failure', 1;");
         Assert.ThrowsAny<Exception>(() => db.Runner(scripts: [.. MigrationRunner.Scripts(), fail]).Apply());
         Assert.Equal(0, await db.Count("SELECT COUNT(*) FROM sys.tables WHERE is_ms_shipped=0"));
         db.Runner().Apply();
         Assert.ThrowsAny<Exception>(() => db.Runner(scripts: [.. MigrationRunner.Scripts(), fail]).Apply());
         Assert.Equal(0, await db.Count("SELECT COUNT(*) FROM sys.tables WHERE name='Example'"));
-        Assert.Equal(3, await db.Count("SELECT COUNT(*) FROM dbo.DatabaseMigrations"));
+        Assert.Equal(4, await db.Count("SELECT COUNT(*) FROM dbo.DatabaseMigrations"));
     }
 
     [SqlFact]
@@ -128,7 +128,7 @@ public sealed class MigrationTests
             Assert.Equal(1, await db.Count("SELECT COUNT(*) FROM dbo.Families WHERE BabyName=N'Synthetic baby'"));
             Assert.Equal(1, await db.Count("SELECT COUNT(*) FROM dbo.Feeds WHERE Amount=36.80 AND Note=N'Synthetic feed'"));
             Assert.Equal(version, await db.Count("SELECT CHECKSUM(Version) FROM dbo.Feeds"));
-            Assert.Equal(3, await db.Count("SELECT COUNT(*) FROM dbo.DatabaseMigrations"));
+            Assert.Equal(4, await db.Count("SELECT COUNT(*) FROM dbo.DatabaseMigrations"));
             Assert.Empty(db.Runner().Pending());
         }
     }
@@ -189,7 +189,7 @@ public sealed class MigrationTests
             return connection;
         }
         new MigrationRunner(Limited, db.Name).Apply();
-        Assert.Equal(3, await db.Count("SELECT COUNT(*) FROM dbo.DatabaseMigrations"));
+        Assert.Equal(4, await db.Count("SELECT COUNT(*) FROM dbo.DatabaseMigrations"));
     }
 }
 

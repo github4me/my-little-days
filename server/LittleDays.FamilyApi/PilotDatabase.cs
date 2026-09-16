@@ -23,6 +23,7 @@ public sealed class PilotDatabase(DbContextOptions<PilotDatabase> options) : DbC
             entity.Property(x => x.BabySex).HasMaxLength(11).HasDefaultValue("unspecified");
             entity.Property(x => x.SchemaVersion).HasDefaultValue(1);
             entity.Property(x => x.ProfileVersion).IsRowVersion();
+            entity.HasIndex(x => x.DeletedAt).HasFilter("[DeletedAt] IS NOT NULL AND [PurgedAt] IS NULL");
         });
         model.Entity<MembershipRow>(entity =>
         {
@@ -105,6 +106,7 @@ public sealed class FamilyRow
     public int SchemaVersion { get; set; } = 1;
     public byte[] ProfileVersion { get; set; } = [];
     public DateTimeOffset? DeletedAt { get; set; }
+    public DateTimeOffset? PurgedAt { get; set; }
     public Guid? DeletedBy { get; set; }
     public Guid? DeleteOperationId { get; set; }
 }
@@ -152,6 +154,7 @@ public sealed class AccountDeletionRow
     public string Status { get; set; } = "pending";
     public DateTimeOffset RequestedAt { get; set; }
     public DateTimeOffset? CompletedAt { get; set; }
+    public DateTimeOffset? LastIdentityAttemptAt { get; set; }
     public string ReceiptHash { get; set; } = "";
     public string? PendingEmail { get; set; }
 }

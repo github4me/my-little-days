@@ -616,6 +616,64 @@ test("family mode can refresh incoming invitations without the account panel", a
   );
 });
 
+test("non-modal network actions show progress on the initiating button only", async () => {
+  for (const locale of ["en", "zh-CN"]) {
+    const zh = locale === "zh-CN";
+    const working = zh ? "正在处理…" : "Working…";
+    let resolveInvitation;
+    const invitation = new Promise((resolve) => {
+      resolveInvitation = resolve;
+    });
+    const view = fixture(
+      { snapshot: snapshot("owner"), createInvitation: () => invitation },
+      locale,
+    );
+    view.render();
+    view
+      .nodes()
+      .find(
+        (node) =>
+          node.type === "TextInput" &&
+          node.props.accessibilityLabel ===
+            (zh ? "受邀邮箱" : "Recipient email"),
+      )
+      .props.onChangeText("pending@example.test");
+    view.render();
+    view.buttons(zh ? "添加邀请" : "Add invitation")[0].props.onPress();
+    view.render();
+    assert.equal(view.buttons(working).length, 1);
+    assert.equal(view.buttons(working)[0].props.disabled, true);
+    assert.equal(view.buttons(zh ? "刷新" : "Refresh").length, 1);
+    resolveInvitation();
+    await tick();
+    view.render();
+    assert.equal(view.buttons(working).length, 0);
+    assert.equal(view.buttons(zh ? "添加邀请" : "Add invitation").length, 1);
+
+    let rejectSignIn;
+    const signingIn = new Promise((_, reject) => {
+      rejectSignIn = reject;
+    });
+    const expired = fixture(
+      { authStatus: "reauth_required", signIn: () => signingIn },
+      locale,
+      false,
+      "account",
+    );
+    expired.render();
+    expired.buttons(zh ? "重新登录" : "Sign in again")[0].props.onPress();
+    expired.render();
+    assert.equal(expired.buttons(working).length, 1);
+    assert.equal(expired.buttons(working)[0].props.disabled, true);
+    assert.equal(expired.buttons(zh ? "退出登录" : "Sign out").length, 1);
+    rejectSignIn(new Error("sign_in_cancelled"));
+    await tick();
+    expired.render();
+    assert.equal(expired.buttons(working).length, 0);
+    assert.equal(expired.buttons(zh ? "重新登录" : "Sign in again").length, 1);
+  }
+});
+
 test("family recovery retains sign out when shared history is not ready", () => {
   const screen = fixture(
     { sharedMode: true, ready: false, error: "invalid_response" },

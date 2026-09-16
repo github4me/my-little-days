@@ -55,7 +55,8 @@ test("legacy favorites migrate only when a modern selection is missing, never re
 test("browser avatar capture does not follow arbitrary URLs or read native paths", async () => {
   assert.equal(await readAvatarDataUrl(null), null);
   const photo = "data:image/png;base64,iVBORw0KGgo=";
-  assert.equal(await readAvatarDataUrl(photo), photo);
+  // A signature alone is not a decodable, bounded image and must not bypass sanitization.
+  await assert.rejects(() => readAvatarDataUrl(photo), /avatar_read_failed/);
   await assert.rejects(
     () => readAvatarDataUrl("https://example.test/private"),
     /avatar_read_failed/,

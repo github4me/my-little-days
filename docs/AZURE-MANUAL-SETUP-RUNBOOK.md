@@ -1,8 +1,10 @@
 # My Little Days: manual Azure and GitHub setup runbook
 
-Last updated: 16 September 2026 (Australia/Sydney).
+Last updated: 17 September 2026 (Australia/Sydney).
 
 This is the operator's step-by-step reference for infrastructure, SQL bootstrap, customer authentication, API settings and releases. It records known values without storing secrets. Existing names containing `pilot` are compatibility identifiers: do not rename them or create replacement resources just because the product now supports full family sharing.
+
+**Security release prerequisite (17 September):** follow the [security remediation and release checklist](SECURITY-REMEDIATION-2026-09-17.md) before the next database/API deployment. It documents the required `FAMILY_DB_APPROVED_FIREWALL_RULES_JSON` protected-environment variable, additive DbUp migration 0004, the restore maintenance gate and the new native-only preview runtime. No live firewall/settings changes or production restore were performed by that code remediation. Independent recovery evidence remains required; a maintenance flag is not a recovery ledger.
 
 ## 1. Current status and where to resume
 

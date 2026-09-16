@@ -46,7 +46,7 @@ jobs:
           ./infra/tests/deploy-pilot.Tests.ps1
           ./infra/tests/github-infra.Tests.ps1
       - name: Check workflow permissions and triggers
-        run: node --test infra/tests/github-workflow.test.cjs
+        run: node --test infra/tests/github-workflow.test.cjs infra/tests/action-pins.test.cjs
 
   preview:
     name: Preview Azure changes with a read-only identity
@@ -92,7 +92,7 @@ jobs:
         run: ./infra/github-infra.ps1 -Mode WhatIf -CheckOnly
       - name: Install the reviewed Bicep compiler
         run: az bicep install --version v0.46.1
-      - uses: azure/login@935127ca5bb3c4b02c9c2c10060028383878f33f # v3
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3
         with:
           client-id: ${{ vars.AZURE_INFRA_PREVIEW_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
@@ -152,7 +152,7 @@ jobs:
         run: ./infra/github-infra.ps1 -Mode Deploy -CheckOnly
       - name: Install the reviewed Bicep compiler
         run: az bicep install --version v0.46.1
-      - uses: azure/login@935127ca5bb3c4b02c9c2c10060028383878f33f # v3
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3
         with:
           client-id: ${{ vars.AZURE_INFRA_DEPLOY_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}

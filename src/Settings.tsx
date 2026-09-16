@@ -126,6 +126,7 @@ export default function Settings({
   const [busy, setBusy] = useState(false),
     lock = useRef(false),
     mounted = useRef(true);
+  const [savingProfile, setSavingProfile] = useState(false);
   const [error, setError] = useState(""),
     [message, setMessage] = useState("");
   const [pending, setPending] = useState<State | null>(null),
@@ -192,10 +193,11 @@ export default function Settings({
       mounted.current = false;
     };
   }, [sharedMode]);
-  async function run(task: () => Promise<void>) {
+  async function run(task: () => Promise<void>, profileSave = false) {
     if (lock.current) return;
     lock.current = true;
     setBusy(true);
+    setSavingProfile(profileSave);
     setError("");
     setMessage("");
     try {
@@ -205,7 +207,10 @@ export default function Settings({
         setError(e instanceof Error ? e.message : "操作失败，请重试");
     } finally {
       lock.current = false;
-      if (mounted.current) setBusy(false);
+      if (mounted.current) {
+        setBusy(false);
+        setSavingProfile(false);
+      }
     }
   }
   async function refresh() {
@@ -460,7 +465,7 @@ export default function Settings({
               />
             </View>
             <Button
-              label="保存档案"
+              label={savingProfile ? "正在保存" : "保存档案"}
               disabled={busy || (sharedMode && !sharedOwner)}
               onPress={() =>
                 run(async () => {
@@ -484,7 +489,7 @@ export default function Settings({
                   await onCommit(next, false, draftProfileVersion.current);
                   setProfileDirty(false);
                   setMessage("宝宝档案已保存");
-                })
+                }, true)
               }
             />
             {sharedMode && profileDirty ? (

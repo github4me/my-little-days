@@ -56,6 +56,7 @@ import { familyDemoEnabled } from "./src/family/demoConfig";
 import FeedStopButton from "./src/FeedStopButton";
 import FinishFeedDialog from "./src/FinishFeedDialog";
 import { finishFeed } from "./src/feedFinish";
+import { finishLiveSleep } from "./src/sleepTimer";
 import CareIcon from "./src/CareIcon";
 import PlayLearning from "./src/PlayLearning";
 import { rescheduleAutoFeedReminders } from "./src/reminders";
@@ -171,6 +172,7 @@ function BabyApp({
     [avatarFailed, setAvatarFailed] = useState(false),
     [fatal, setFatal] = useState(""),
     [message, setMessage] = useState(""),
+    [sleepNotice, setSleepNotice] = useState(""),
     [tab, setTab] = useState("today"),
     [settingsPage, setSettingsPage] = useState<
       "main" | "privacy" | "family" | "family-demo"
@@ -271,6 +273,7 @@ function BabyApp({
     setRescue(null);
     setOpenProfile(false);
     setMessage("");
+    setSleepNotice("");
     editVersion.current = null;
   }, [familyContext]);
   useEffect(() => {
@@ -353,6 +356,7 @@ function BabyApp({
     next: State,
     recovery = false,
     profileVersion?: string,
+    optimistic = false,
   ) {
     if (family.sharedMode) {
       if (recovery || !family.sharedState || !family.fullSnapshot)
@@ -373,9 +377,19 @@ function BabyApp({
     if (lock.current) throw new Error("正在保存，请稍后再试");
     lock.current = true;
     setBusy(true);
+    const previous = stateRef.current;
+    const generation = privateDataGeneration.current;
+    let optimisticState: State | null = null;
     try {
       const checked = validateState(next);
+      if (optimistic) {
+        optimisticState = checked;
+        stateRef.current = checked;
+        setState(checked);
+      }
       await saveState(checked, recovery);
+      if (generation !== privateDataGeneration.current || sharingRef.current)
+        return;
       stateRef.current = checked;
       setState(checked);
       try {
@@ -384,12 +398,27 @@ function BabyApp({
       } catch {
         // Saving a record must not fail just because a previously configured notification cannot refresh.
       }
+    } catch (error) {
+      if (
+        optimisticState &&
+        stateRef.current === optimisticState &&
+        generation === privateDataGeneration.current &&
+        !sharingRef.current
+      ) {
+        stateRef.current = previous;
+        setState(previous);
+      }
+      throw error;
     } finally {
       lock.current = false;
       setBusy(false);
     }
   }
-  async function upsert(e: Entry, explicitVersion?: string) {
+  async function upsert(
+    e: Entry,
+    explicitVersion?: string,
+    optimistic = false,
+  ) {
     const current = stateRef.current!;
     if (
       current.profile.birthDate &&
@@ -407,12 +436,51 @@ function BabyApp({
         explicitVersion ?? draft?.version ?? versionFor(e.id),
       );
     } else
-      await commit({
-        ...current,
-        entries: [...current.entries.filter((x) => x.id !== e.id), e],
-      });
+      await commit(
+        {
+          ...current,
+          entries: [...current.entries.filter((x) => x.id !== e.id), e],
+        },
+        false,
+        undefined,
+        optimistic,
+      );
     setEditor(null);
     setMessage(family.sharedMode ? "" : "已保存到本机");
+  }
+  async function toggleSleep(active?: Entry) {
+    const context = familyContext;
+    const tappedAt = Date.now();
+    const stoppedAt = new Date(tappedAt).toISOString();
+    setNow(tappedAt);
+    setSleepNotice("");
+    if (!active) {
+      await upsert({ ...newEntry("sleep"), start: stoppedAt }, undefined, true);
+      return;
+    }
+    const finished = finishLiveSleep(active, stoppedAt);
+    if (family.sharedMode) await family.finishSleep(active.id, stoppedAt);
+    else {
+      const current = stateRef.current!;
+      await commit(
+        {
+          ...current,
+          entries: [
+            ...current.entries.filter((entry) => entry.id !== active.id),
+            ...(finished ? [finished] : []),
+          ],
+        },
+        false,
+        undefined,
+        true,
+      );
+    }
+    if (activeFamilyContext.current !== context) return;
+    setMessage("");
+    if (!finished)
+      setSleepNotice(
+        "本次睡眠不足 1 分钟，已按误触取消，不计入记录。如需保留，请补录睡眠。",
+      );
   }
   async function updateAvatar(uri: string | null) {
     if (family.sharedMode) {
@@ -554,13 +622,13 @@ function BabyApp({
     (e) =>
       e.type === "sleep" &&
       !e.end &&
-      (!family.sharedMode || family.canEditRecord("entry", e.id)),
+      (!family.sharedMode || family.canControlSleep(e.id)),
   );
   const feedCandidates = entries.filter(
     (e) =>
       e.type === "feed" &&
       e.feedRunning &&
-      (!family.sharedMode || family.canEditRecord("entry", e.id)),
+      (!family.sharedMode || family.canControlFeed(e.id)),
   );
   const active =
     activeCandidates.find((e) => owned(e.id)) ?? activeCandidates[0];
@@ -922,22 +990,25 @@ function BabyApp({
                     </Pressable>
                   </View>
                   <View style={{ height: 1, backgroundColor: c.heroLine }} />
+                  <T
+                    style={{
+                      color: c.heroMuted,
+                      fontSize: 11,
+                      fontWeight: "600",
+                    }}
+                  >
+                    今日数据
+                  </T>
                   <View style={row}>
                     {[
-                      [
-                        summary.feedCount ? String(summary.feedMl) : "—",
-                        "mL 已记录奶量",
-                      ],
+                      [String(summary.feedMl), "mL 已记录奶量"],
                       [
                         summary.sleepMinutes
                           ? (summary.sleepMinutes / 60).toFixed(1)
-                          : "—",
+                          : "0",
                         "小时 已记录睡眠",
                       ],
-                      [
-                        summary.diaperCount ? String(summary.diaperCount) : "—",
-                        "次 换尿布",
-                      ],
+                      [String(summary.diaperCount), "次 换尿布"],
                     ].map(([v, l]) => (
                       <View key={l}>
                         <T
@@ -1028,7 +1099,7 @@ function BabyApp({
                             disabled={
                               busy ||
                               (family.sharedMode &&
-                                !family.canEditRecord("entry", activeFeed.id))
+                                !family.canControlFeed(activeFeed.id))
                             }
                             onPress={() =>
                               setFinishingFeed({
@@ -1052,20 +1123,11 @@ function BabyApp({
                                   : "睡了"
                                 : "＋记录"
                             }
-                            disabled={busy}
+                            disabled={busy || (type === "sleep" && family.busy)}
                             secondary
                             onPress={() => {
                               if (type === "sleep")
-                                void act(async () => {
-                                  await upsert(
-                                    active
-                                      ? {
-                                          ...active,
-                                          end: new Date().toISOString(),
-                                        }
-                                      : newEntry("sleep"),
-                                  );
-                                });
+                                void act(() => toggleSleep(active));
                               else beginEditor(newEntry(type));
                             }}
                           />
@@ -1090,6 +1152,14 @@ function BabyApp({
                             补录睡眠 ›
                           </T>
                         </Pressable>
+                      ) : null}
+                      {type === "sleep" && sleepNotice ? (
+                        <T
+                          accessibilityRole="alert"
+                          style={{ color: c.muted, fontSize: 13 }}
+                        >
+                          {sleepNotice}
+                        </T>
                       ) : null}
                     </Card>
                   );
@@ -1492,10 +1562,19 @@ function BabyApp({
                 (e) => e.id === finishingFeed.entry.id,
               );
               if (!current) throw new Error("喂养计时状态无效");
-              await upsert(
-                finishFeed(current, finishingFeed.stoppedAt, amount),
-                finishingFeed.baseVersion,
-              );
+              if (family.sharedMode)
+                await family.finishFeed(
+                  current.id,
+                  finishingFeed.stoppedAt,
+                  amount,
+                  finishingFeed.baseVersion,
+                  finishingFeed.entry,
+                );
+              else
+                await upsert(
+                  finishFeed(current, finishingFeed.stoppedAt, amount),
+                  finishingFeed.baseVersion,
+                );
               setFinishingFeed(null);
             }}
           />

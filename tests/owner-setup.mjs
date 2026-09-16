@@ -49,6 +49,8 @@ function loader(overrides = {}) {
       Map,
       Set,
       require(name) {
+        if (name === "./storageProtection")
+          return { protectFamilyStorage: async () => {} };
         if (Object.hasOwn(overrides, name)) return overrides[name];
         if (!name.startsWith("."))
           throw new Error(`Unexpected dependency: ${name}`);

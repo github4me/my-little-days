@@ -6,6 +6,8 @@ import type {
   SharedFeedInput,
 } from "./contracts";
 import type { QueuedRecord } from "./fullState";
+import { finishLiveSleep } from "../sleepTimer";
+import { finishFeed } from "../feedFinish";
 
 export type FeedDraft = {
   recordId: string;
@@ -398,6 +400,35 @@ export function parseStoredPilot(raw: string | null): PilotState {
       !["pending", "accepted", "failed"].includes(q.status)
     )
       throw new Error("local_data_invalid");
+  for (const q of state.records ?? []) {
+    if (q.sleepFollowUp === undefined && q.feedFollowUp === undefined) continue;
+    try {
+      const followUp = q.sleepFollowUp ?? q.feedFollowUp;
+      if (
+        !followUp ||
+        (q.sleepFollowUp !== undefined && q.feedFollowUp !== undefined) ||
+        typeof followUp.operationId !== "string" ||
+        !followUp.operationId ||
+        followUp.operationId === q.operation.operationId ||
+        typeof followUp.stoppedAt !== "string" ||
+        q.operation.collection !== "entry" ||
+        q.operation.kind === "delete" ||
+        !q.operation.entry ||
+        q.operation.entry.id !== q.operation.recordId
+      )
+        throw new Error("local_data_invalid");
+      if (q.sleepFollowUp)
+        finishLiveSleep(q.operation.entry, followUp.stoppedAt);
+      else
+        finishFeed(
+          q.operation.entry,
+          followUp.stoppedAt,
+          q.feedFollowUp!.amount,
+        );
+    } catch {
+      throw new Error("local_data_invalid");
+    }
+  }
   if (state.snapshot) revision(state.snapshot.revision);
   if (
     state.transition &&

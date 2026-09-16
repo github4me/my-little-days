@@ -4,7 +4,11 @@ import {
   acceptRecordReceipt,
   applyFullSnapshot,
   canEditRecord,
+  canControlSleep,
+  canControlFeed,
   enqueueRecord,
+  enqueueSleepFinish,
+  enqueueFeedFinish,
   projectedFullState,
   recordsForSend,
   requireFullCapabilities,
@@ -264,5 +268,391 @@ test("an unresolved lifecycle operation hides full records and blocks record sub
   assert.throws(
     () => enqueueRecord(base, operation(snapshot().entries[0].entry)),
     /transition_pending/,
+  );
+});
+
+const stopped = (milliseconds: number) =>
+  new Date(Date.parse(start) + milliseconds).toISOString();
+function pendingSleep() {
+  const base = applyFullSnapshot(emptyPilotState(), snapshot());
+  return enqueueRecord(base, {
+    ...operation({ id: "new-sleep", type: "sleep", start, note: "" }),
+    kind: "create",
+    baseVersion: undefined,
+  });
+}
+function committedSleep(state: ReturnType<typeof pendingSleep>) {
+  const incoming = snapshot();
+  incoming.revision = "2";
+  incoming.entries.push({
+    ...metadata,
+    version: "created-version",
+    entry: state.records![0].operation.entry!,
+  });
+  return incoming;
+}
+test("pending sleep can stop immediately without changing the original operation, including restart", () => {
+  const pending = pendingSleep();
+  const original = JSON.stringify(pending.records![0].operation);
+  assert.equal(canControlSleep(pending, "new-sleep"), true);
+  const finished = enqueueSleepFinish(
+    pending,
+    "new-sleep",
+    stopped(59_999),
+    "stop-id",
+  );
+  assert.equal(canControlSleep(finished, "new-sleep"), false);
+  assert.equal(
+    projectedFullState(finished)?.entries.some((e) => e.id === "new-sleep"),
+    false,
+  );
+  assert.equal(JSON.stringify(finished.records![0].operation), original);
+  const restarted = parseStoredPilot(JSON.stringify(finished));
+  assert.deepEqual(restarted.records, finished.records);
+  assert.equal(
+    JSON.stringify(recordsForSend(restarted, restarted)[0].operation),
+    original,
+  );
+  assert.throws(
+    () =>
+      enqueueSleepFinish(restarted, "new-sleep", stopped(60_000), "another"),
+    /record_pending/,
+  );
+});
+test("accepted sleep create promotes a stable delete only after a sufficiently fresh snapshot", () => {
+  const pending = pendingSleep();
+  const stoppedState = enqueueSleepFinish(
+    pending,
+    "new-sleep",
+    stopped(10_000),
+    "stop-id",
+  );
+  const accepted = acceptRecordReceipt(stoppedState, "operation", {
+    operationId: "operation",
+    historyId: "history",
+    revision: "2",
+  });
+  assert.equal(applyFullSnapshot(accepted, snapshot()), accepted);
+  assert.equal(recordsForSend(accepted, accepted).length, 0);
+  const promoted = applyFullSnapshot(accepted, committedSleep(pending));
+  assert.equal(promoted.records?.length, 1);
+  assert.deepEqual(promoted.records![0].operation, {
+    operationId: "stop-id",
+    recordId: "new-sleep",
+    collection: "entry",
+    kind: "delete",
+    baseVersion: "created-version",
+    membershipId: "grant",
+    historyId: "history",
+  });
+  assert.equal(promoted.records![0].sleepFollowUp, undefined);
+  assert.equal(
+    projectedFullState(promoted)?.entries.some((e) => e.id === "new-sleep"),
+    false,
+  );
+});
+test("a full minute queues a finished sleep and ordinary saved sleeps use their current row version", () => {
+  const pending = pendingSleep();
+  const finished = enqueueSleepFinish(
+    pending,
+    "new-sleep",
+    stopped(60_000),
+    "stop-id",
+  );
+  assert.equal(
+    projectedFullState(finished)?.entries.find((e) => e.id === "new-sleep")
+      ?.end,
+    stopped(60_000),
+  );
+  const accepted = acceptRecordReceipt(finished, "operation", {
+    operationId: "operation",
+    historyId: "history",
+    revision: "2",
+  });
+  const promoted = applyFullSnapshot(accepted, committedSleep(pending));
+  assert.equal(promoted.records![0].operation.kind, "update");
+  assert.equal(promoted.records![0].operation.entry?.end, stopped(60_000));
+  const direct = enqueueSleepFinish(
+    applyFullSnapshot(emptyPilotState(), snapshot()),
+    "sleep",
+    stopped(120_000),
+    "direct-id",
+  );
+  assert.equal(direct.records![0].operation.baseVersion, metadata.version);
+  assert.equal(direct.records![0].operation.entry?.end, stopped(120_000));
+});
+test("sleep completion never overwrites an intervening remote edit or deletion", () => {
+  for (const change of ["edit", "delete", "author"] as const) {
+    const pending = pendingSleep();
+    const stoppedState = enqueueSleepFinish(
+      pending,
+      "new-sleep",
+      stopped(10_000),
+      "stop-id",
+    );
+    const accepted = acceptRecordReceipt(stoppedState, "operation", {
+      operationId: "operation",
+      historyId: "history",
+      revision: "2",
+    });
+    const incoming = committedSleep(pending);
+    const record = incoming.entries.at(-1)!;
+    if (change === "edit")
+      record.entry = { ...record.entry, note: "remote edit" };
+    if (change === "delete") incoming.entries.pop();
+    if (change === "author") record.lastEditedBy = "other-admin";
+    const result = applyFullSnapshot(accepted, incoming);
+    assert.equal(result.records![0].status, "failed");
+    assert.equal(result.records![0].error, "record_changed");
+    assert.equal(recordsForSend(result, result).length, 0);
+  }
+});
+test("sleep follow-up is rejected across grants, for forbidden records, and on malformed local data", () => {
+  const pending = enqueueSleepFinish(
+    pendingSleep(),
+    "new-sleep",
+    stopped(1000),
+    "stop-id",
+  );
+  const other = committedSleep(pending);
+  other.family.membershipId = "other-grant";
+  other.members[0].membershipId = "other-grant";
+  assert.equal(applyFullSnapshot(pending, other).records?.length, 0);
+  assert.equal(revokeCache(pending).records?.length, 0);
+  const forbidden = snapshot();
+  forbidden.family.role = "caregiver";
+  forbidden.members[0].role = "caregiver";
+  forbidden.entries[1].recordedBy = "someone-else";
+  assert.equal(
+    canControlSleep(applyFullSnapshot(emptyPilotState(), forbidden), "sleep"),
+    false,
+  );
+  assert.throws(
+    () =>
+      parseStoredPilot(
+        JSON.stringify({
+          ...pending,
+          records: [
+            {
+              ...pending.records![0],
+              sleepFollowUp: { operationId: "stop-id", stoppedAt: "bad" },
+            },
+          ],
+        }),
+      ),
+    /local_data_invalid/,
+  );
+});
+
+function pendingFeed(breast = false) {
+  const entry: Entry = {
+    id: "new-feed",
+    type: "feed",
+    start,
+    note: "Feed note",
+    feedRunning: true,
+    feedKind: breast ? "breast-left" : "formula",
+    ...(breast ? {} : { amount: 120 }),
+  };
+  return enqueueRecord(applyFullSnapshot(emptyPilotState(), snapshot()), {
+    ...operation(entry),
+    kind: "create",
+    baseVersion: undefined,
+  });
+}
+test("pending feed completion keeps the chosen amount immediately and the original start immutable", () => {
+  const pending = pendingFeed();
+  const original = JSON.stringify(pending.records![0].operation);
+  assert.equal(canControlFeed(pending, "new-feed"), true);
+  const finished = enqueueFeedFinish(
+    pending,
+    "new-feed",
+    stopped(20_000),
+    85,
+    "feed-stop",
+  );
+  const entry = projectedFullState(finished)?.entries.find(
+    (e) => e.id === "new-feed",
+  );
+  assert.equal(entry?.amount, 85);
+  assert.equal(entry?.end, stopped(20_000));
+  assert.equal(entry?.feedRunning, undefined);
+  assert.equal(canControlFeed(finished, "new-feed"), false);
+  assert.equal(JSON.stringify(finished.records![0].operation), original);
+  assert.deepEqual(
+    parseStoredPilot(JSON.stringify(finished)).records,
+    finished.records,
+  );
+  assert.equal(
+    JSON.stringify(recordsForSend(finished, finished)[0].operation),
+    original,
+  );
+  assert.throws(
+    () =>
+      enqueueFeedFinish(finished, "new-feed", stopped(30_000), 90, "duplicate"),
+    /record_pending/,
+  );
+});
+test("feed follow-up becomes a fresh versioned update after the original receipt and snapshot", () => {
+  for (const breast of [false, true]) {
+    const pending = pendingFeed(breast);
+    const finished = enqueueFeedFinish(
+      pending,
+      "new-feed",
+      stopped(120_000),
+      breast ? undefined : 123.5,
+      "feed-stop",
+    );
+    const accepted = acceptRecordReceipt(finished, "operation", {
+      operationId: "operation",
+      historyId: "history",
+      revision: "2",
+    });
+    const promoted = applyFullSnapshot(accepted, committedSleep(pending));
+    const op = promoted.records![0].operation;
+    assert.equal(op.operationId, "feed-stop");
+    assert.equal(op.kind, "update");
+    assert.equal(op.baseVersion, "created-version");
+    assert.equal(op.entry?.amount, breast ? undefined : 123.5);
+    assert.equal(op.entry?.feedRunning, undefined);
+    assert.equal(promoted.records![0].feedFollowUp, undefined);
+  }
+});
+test("feed finish rejects stale dialog versions, forbidden changes and malformed durable follow-ups", () => {
+  const value = snapshot();
+  value.entries[0].entry = { ...value.entries[0].entry, feedRunning: true };
+  const base = applyFullSnapshot(emptyPilotState(), value);
+  assert.throws(
+    () =>
+      enqueueFeedFinish(
+        base,
+        "feed",
+        stopped(120_000),
+        85,
+        "stop",
+        "old-version",
+      ),
+    /record_changed/,
+  );
+  const finished = enqueueFeedFinish(
+    base,
+    "feed",
+    stopped(120_000),
+    85,
+    "stop",
+    metadata.version,
+  );
+  assert.equal(finished.records![0].operation.baseVersion, metadata.version);
+  assert.equal(finished.records![0].operation.entry?.amount, 85);
+  value.family.role = "caregiver";
+  value.members[0].role = "caregiver";
+  value.entries[0].recordedBy = "other";
+  assert.equal(
+    canControlFeed(applyFullSnapshot(emptyPilotState(), value), "feed"),
+    false,
+  );
+  const followUp = enqueueFeedFinish(
+    pendingFeed(),
+    "new-feed",
+    stopped(1000),
+    85,
+    "stop",
+  );
+  assert.throws(
+    () =>
+      parseStoredPilot(
+        JSON.stringify({
+          ...followUp,
+          records: [
+            {
+              ...followUp.records![0],
+              feedFollowUp: {
+                operationId: "stop",
+                stoppedAt: stopped(1000),
+                amount: -5,
+              },
+            },
+          ],
+        }),
+      ),
+    /local_data_invalid/,
+  );
+});
+test("feed completion preserves a remote winner and is never rebound to a replacement grant", () => {
+  const pending = pendingFeed();
+  const stoppedState = enqueueFeedFinish(
+    pending,
+    "new-feed",
+    stopped(120_000),
+    85,
+    "stop",
+  );
+  const accepted = acceptRecordReceipt(stoppedState, "operation", {
+    operationId: "operation",
+    historyId: "history",
+    revision: "2",
+  });
+  const edited = committedSleep(pending);
+  edited.entries.at(-1)!.entry = {
+    ...edited.entries.at(-1)!.entry,
+    amount: 95,
+  };
+  const conflicted = applyFullSnapshot(accepted, edited);
+  assert.equal(conflicted.records![0].status, "failed");
+  assert.equal(conflicted.records![0].error, "record_changed");
+  assert.equal(
+    projectedFullState(conflicted)?.entries.find((e) => e.id === "new-feed")
+      ?.amount,
+    95,
+  );
+  edited.family.membershipId = "replacement";
+  edited.members[0].membershipId = "replacement";
+  assert.equal(applyFullSnapshot(stoppedState, edited).records?.length, 0);
+  assert.equal(revokeCache(stoppedState).records?.length, 0);
+});
+test("Stop-captured feed content guards both pending and acknowledged starts with no captured version", () => {
+  const pending = pendingFeed();
+  const original = pending.records![0].operation.entry!;
+  assert.throws(
+    () =>
+      enqueueFeedFinish(
+        pending,
+        "new-feed",
+        stopped(120_000),
+        85,
+        "stop",
+        undefined,
+        { ...original, note: "older dialog" },
+      ),
+    /record_changed/,
+  );
+  const acknowledged = applyFullSnapshot(
+    emptyPilotState(),
+    committedSleep(pending),
+  );
+  const finished = enqueueFeedFinish(
+    acknowledged,
+    "new-feed",
+    stopped(120_000),
+    85,
+    "stop",
+    undefined,
+    original,
+  );
+  assert.equal(finished.records![0].operation.entry?.amount, 85);
+  const sameContentNewAuthor = committedSleep(pending);
+  sameContentNewAuthor.entries.at(-1)!.lastEditedBy = "another-admin";
+  assert.throws(
+    () =>
+      enqueueFeedFinish(
+        applyFullSnapshot(emptyPilotState(), sameContentNewAuthor),
+        "new-feed",
+        stopped(120_000),
+        85,
+        "stop",
+        undefined,
+        original,
+      ),
+    /record_changed/,
   );
 });

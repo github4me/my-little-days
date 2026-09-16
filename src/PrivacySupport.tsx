@@ -130,6 +130,12 @@ export default function PrivacySupport({ onBack }: { onBack: () => void }) {
             "Language, theme, view preferences, notification permissions and this phone’s notification opt-in are not shared. Family records are stored on the server; local cache and pending changes are not a backup and are not copied into personal offline records. Local backup export and import are unavailable while sharing.",
           )}
         </T>
+        <T raw style={{ color: c.muted, fontSize: 13 }}>
+          {copy(
+            "此版本在 iOS 上将应用的 SQLite 数据目录排除在系统备份之外，包括家庭缓存、待同步修改和个人离线记录。个人模式仍可手动导出备份；换机或卸载前请保存。更新应用不能撤回旧系统备份、截图或先前导出的副本。",
+            "On iOS this version excludes the app’s SQLite data directory from system backups, including family cache, pending changes and personal offline records. Personal mode still supports manual backup export; save a copy before changing phones or uninstalling. An app update cannot recall older system backups, screenshots or previously exported copies.",
+          )}
+        </T>
       </Card>
 
       <Card style={{ gap: 16 }}>
@@ -156,7 +162,10 @@ export default function PrivacySupport({ onBack }: { onBack: () => void }) {
         <PrivacySection
           icon="↻"
           title="软件更新"
-          children="应用会安全检查更新。更新服务可能收到设备系统版本和随机安装标记，但不包含宝宝记录或照片。"
+          children={copy(
+            "此安全版本仅通过安装新版应用更新，不接受远程代码热更新。安装更新不会上传宝宝记录或照片。",
+            "This security version is updated by installing a new app build; remote code updates are disabled. Installing an update does not upload baby records or photos.",
+          )}
           last
         />
       </Card>

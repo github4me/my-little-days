@@ -4,9 +4,11 @@ import { Platform } from "react-native";
 import type { Entry } from "../domain";
 import { t } from "../i18n";
 import type { FamilyExtraRecord } from "./extras";
+import { protectFamilyStorage } from "./storageProtection";
 import {
   FamilyReminderCoordinator,
   type FamilyReminderPreferences,
+  type FamilyReminderCleanup,
 } from "./familyReminderCoordinator";
 import {
   familyReminderPlans,
@@ -14,20 +16,51 @@ import {
 } from "./familyReminderPlan";
 
 let database: Promise<SQLite.SQLiteDatabase> | undefined;
-async function db() {
-  return (database ??= (async () => {
+function db(): Promise<SQLite.SQLiteDatabase> {
+  if (database) return database;
+  const opening = (async () => {
+    await protectFamilyStorage();
     const value = await SQLite.openDatabaseAsync(
       "little-days-family-notifications.db",
     );
-    // Only a device preference, never a copy of family care/record payloads.
-    await value.execAsync(
-      "CREATE TABLE IF NOT EXISTS device_opt_in (id INTEGER PRIMARY KEY CHECK(id = 1), origin TEXT NOT NULL, enabled INTEGER NOT NULL CHECK(enabled IN (0, 1))); ",
-    );
-    return value;
-  })());
+    try {
+      // Only a device preference, never a copy of family care/record payloads.
+      await value.execAsync(
+        "CREATE TABLE IF NOT EXISTS device_opt_in (id INTEGER PRIMARY KEY CHECK(id = 1), origin TEXT NOT NULL, enabled INTEGER NOT NULL CHECK(enabled IN (0, 1))); CREATE TABLE IF NOT EXISTS cleanup_retry (id INTEGER PRIMARY KEY CHECK(id = 1), clear_preference INTEGER NOT NULL CHECK(clear_preference IN (0, 1)));",
+      );
+      return value;
+    } catch (error) {
+      await value.closeAsync().catch(() => undefined);
+      throw error;
+    }
+  })();
+  database = opening;
+  // A transient protection/disk failure must not poison every later cleanup.
+  void opening.catch(() => {
+    if (database === opening) database = undefined;
+  });
+  return opening;
 }
 
 const coordinator = new FamilyReminderCoordinator({
+  async loadCleanup() {
+    const row = await (
+      await db()
+    ).getFirstAsync<{ clear_preference: number }>(
+      "SELECT clear_preference FROM cleanup_retry WHERE id = 1",
+    );
+    return row ? { clearPreference: row.clear_preference === 1 } : null;
+  },
+  async saveCleanup(value: FamilyReminderCleanup | null) {
+    if (value)
+      await (
+        await db()
+      ).runAsync(
+        "INSERT OR REPLACE INTO cleanup_retry(id, clear_preference) VALUES (1, ?)",
+        value.clearPreference ? 1 : 0,
+      );
+    else await (await db()).runAsync("DELETE FROM cleanup_retry WHERE id = 1");
+  },
   async load() {
     const row = await (
       await db()
@@ -69,11 +102,18 @@ const coordinator = new FamilyReminderCoordinator({
     await Notifications.cancelScheduledNotificationAsync(id);
   },
   async dismiss() {
+    let failed = false;
     for (const notification of await Notifications.getPresentedNotificationsAsync())
-      if (isFamilyReminderData(notification.request.content.data))
-        await Notifications.dismissNotificationAsync(
-          notification.request.identifier,
-        );
+      if (isFamilyReminderData(notification.request.content.data)) {
+        try {
+          await Notifications.dismissNotificationAsync(
+            notification.request.identifier,
+          );
+        } catch {
+          failed = true;
+        }
+      }
+    if (failed) throw new Error("reminder_cleanup_failed");
   },
   async schedule(origin, plan) {
     const channelId = plan.silent ? "family-quiet" : "family-care";

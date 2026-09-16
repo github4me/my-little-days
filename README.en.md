@@ -6,11 +6,13 @@ An offline baby-care and growth tracker built with Expo, React Native, and TypeS
 
 ## Features
 
+Security candidate 0.2.1 requires a new native build: shared photos are sanitized, failed family-reminder cleanup is retried, and iOS SQLite data is excluded from OS backups (export personal-mode records manually). Remote OTA execution is disabled in this candidate. See the [security remediation checklist](docs/SECURITY-REMEDIATION-2026-09-17.md) for API limits, deployment steps and the still-open recovery acceptance gate.
+
 - **Installed iPhone name:** Chinese system-language preferences show “小日子”; English uses “My Little Days”, with English as the fallback for unmatched languages. This native setting requires a new installed build, not only a JavaScript update.
 
 - **Baby profile:** name, birth date, sex, and an optional photo, stored locally in offline mode and shared with the family in shared mode. Tap the Home avatar to open the profile settings.
 - **Feeding:** formula, expressed milk, and breastfeeding records; quick milk-volume choices and optional end times. Formula shortcuts adapt to the baby's age on the feed date when a birth date is set, without changing the entered amount; expressed milk and unknown ages keep the existing choices. These are recording shortcuts, not feeding targets ([sources and age bands](docs/FEED-AMOUNT-PRESETS.md)). Start a timer without an end time, then tap Stop on Home to confirm the session. Bottle feeds show the original amount and a wheel for adjusting the actual volume in 5 mL steps before saving; breastfeeding remains duration-only. The end time is captured at Stop, not confirmation; cancelling continues the feed. When adding an end time to a past feed, it initially defaults to 20 minutes after the start and can be edited.
-- **Sleep:** start and stop a sleep session, add past sessions, and resume the timer display after reopening the app.
+- **Sleep:** start/stop updates the screen immediately, without waiting for the API. Live sessions shorter than one minute are discarded as accidental taps with an explanation; manually backfilled sessions are exempt. Add/edit past sessions and resume timers after reopening. Empty today's totals show zero.
 - **Diapers:** pee, poo, and mixed changes.
 - **Growth:** weight, length, and head circumference, with bundled WHO reference curves for ages 0–24 months. View individual metrics or all three in different colors.
 - **History:** select 7 days, 2 weeks, 1 month, 3 months, 6 months, or All. Charts and daily history follow the selected range; longer charts group days to stay readable. Today's details are expanded, earlier days are collapsed, and dates beyond the first seven recorded days can be expanded. Long daily lists and growth records show five entries initially. Editing and deletion are supported; deletion requires confirmation and has no undo.
@@ -66,7 +68,7 @@ The browser stores original local data in localStorage, separate from the instal
 
 The repository includes `preview` and `production` EAS build profiles. Preview uses internal distribution and the `preview` update channel; production uses the `production` channel and automatic build-number increments.
 
-The current source version is **0.2.0**. Authentication, browser-session and SecureStore dependencies plus the `mylittledays` URL scheme require a compatible native binary. Do not publish family-sharing JavaScript to the old 0.1.1 runtime. The existing signed preview build 18 and compatible OTA releases are recorded in the [installation and release runbook](docs/AZURE-MANUAL-SETUP-RUNBOOK.md#124-build-install-and-identify-the-exact-version). Identify the exact installed build and update; assess a new build when native dependencies or configuration change. Two-phone acceptance remains required.
+The current source version is **0.2.1**, iOS build **19**. The database backup-protection module and photo encoder require a new native binary; neither the old 0.1.1 nor 0.2.0 runtime can receive these changes through JavaScript alone. Older preview build 18 and OTA releases are historical records in the [installation and release runbook](docs/AZURE-MANUAL-SETUP-RUNBOOK.md#124-build-install-and-identify-the-exact-version). Install the new candidate over the existing app without uninstalling a data-bearing installation. Two-phone acceptance remains required.
 
 With access to the Expo project and the required Apple signing credentials:
 
@@ -78,11 +80,7 @@ npx eas-cli build --platform ios --profile preview
 
 Install using the link provided by EAS. An installed build can run independently of the development computer. Keep the existing application identity when updating an installation containing records.
 
-After installing and validating the new native family-sharing runtime, a subsequent compatible JavaScript update can use the matching preview environment and channel:
-
-```sh
-npx eas-cli update --channel preview --environment preview --message "Describe the update"
-```
+Remote OTA updates are disabled in this security candidate. Publish a new native build for each reviewed release. Re-enabling OTA requires a separate signed-update setup, privately controlled key, embedded verification certificate and new runtime; follow the [security release checklist](docs/SECURITY-REMEDIATION-2026-09-17.md), not the old unsigned publication command.
 
 Further native dependency or configuration changes may require another build. Public or external TestFlight distribution remains gated on privacy, account/family deletion, reviewer access, retention, and live device checks. App Store distribution requires a production build, Apple credentials, and an App Store Connect app record; uploading a build is separate from submitting it for Apple's review. See [Expo's iOS submission guide](https://docs.expo.dev/submit/ios/).
 
@@ -90,7 +88,7 @@ Further native dependency or configuration changes may require another build. Pu
 
 Offline records remain in local SQLite without an account. Signing in alone does not upload them. Explicit family creation uploads the reviewed history, current baby avatar, reminder rules/settings and play selections/check-ins. Joining downloads and durably saves the family data before replacing the original local content; it never uploads or merges the joiner’s personal data. Shared cache and saved queues are isolated from the personal database and unavailable for local export. Device preferences, notification permission and notification delivery remain local; each phone must opt into family reminders.
 
-The app uses Expo's update service to check for and download software updates. This can exchange technical metadata with that service; baby records and photos are not included in the app's update requests.
+This security candidate does not accept remote code updates. On iOS its SQLite directory, including personal records and family cache/queues, is excluded from OS backups. Personal mode still supports manual JSON export. Older system backups and copies cannot be recalled by an app update.
 
 Backups are unencrypted JSON containing the original local baby profile, tracking entries, and daily-care records. They do not include the local avatar, theme/language preferences, reminder schedules, activity selections/check-ins, or family data and credentials. Shared mode disables local import/export. Export a local backup before uninstalling or changing phones. Backup files leave the app when you explicitly export/share them; selecting a cloud destination uses the service you choose.
 

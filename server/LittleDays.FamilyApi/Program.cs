@@ -28,6 +28,7 @@ builder.Services.AddDbContext<PilotDatabase>(options => options.UseSqlServer(con
 
 var config = PilotConfiguration.Load(builder.Configuration);
 builder.Services.AddSingleton(config);
+builder.Services.AddSingleton<RecoveryGate>();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<FamilyService>();
 builder.Services.AddPublicIdentityAdmission(builder.Configuration, config);
@@ -85,16 +86,16 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJw
 builder.Services.AddAuthorization();
 builder.Services.AddRateLimiter(options =>
 {
-    // Finite partition count: one aggregate limit and 256 authenticated-account buckets.
-    // These availability limits are per instance; SQL limits and authorization remain cross-instance.
-    options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(_ =>
-        RateLimitPartition.GetFixedWindowLimiter("pilot-global", _ => new FixedWindowRateLimiterOptions
+    // Only validated JWT identities receive an account partition. Anonymous traffic
+    // has a separate aggregate budget; neither forwarded headers nor caller-supplied
+    // IDs can claim a different bucket. Distinct accounts never share hash buckets.
+    // These limits are per instance; SQL authorization/quotas remain cross-instance.
+    options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
+        RateLimitPartition.GetFixedWindowLimiter(RateLimitKey(context), _ => new FixedWindowRateLimiterOptions
         { PermitLimit = config.Pilot.RequestsPerMinute, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
     options.AddPolicy("sensitive", context =>
     {
-        var oid = context.User.FindFirstValue("oid");
-        var key = Guid.TryParse(oid, out var account) ? (account.GetHashCode() & 255).ToString(System.Globalization.CultureInfo.InvariantCulture) : "anonymous";
-        return RateLimitPartition.GetFixedWindowLimiter(key, _ => new FixedWindowRateLimiterOptions
+        return RateLimitPartition.GetFixedWindowLimiter(RateLimitKey(context), _ => new FixedWindowRateLimiterOptions
         { PermitLimit = config.Pilot.SensitiveRequestsPerMinute, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 });
     });
     options.OnRejected = async (context, ct) =>
@@ -121,6 +122,9 @@ app.Use(async (context, next) =>
         var bodyLimit = context.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>();
         if (bodyLimit is { IsReadOnly: false }) bodyLimit.MaxRequestBodySize = limit;
         if (context.Request.ContentLength > limit) throw new ApiException(422, "invalid_input");
+        if ((context.Request.Path.StartsWithSegments("/v1") || context.Request.Path.StartsWithSegments("/v2")) &&
+            context.RequestServices.GetRequiredService<RecoveryGate>().Blocked)
+            throw new ApiException(503, "recovery_blocked");
         await next(context);
     }
     catch (ApiException error) { await Error(context, error.Status, error.Code); }
@@ -139,6 +143,9 @@ app.UseAuthentication();
 app.UseRateLimiter();
 app.UseAuthorization();
 app.MapGet("/health/live", () => Results.Json(new { status = "ok" })).DisableRateLimiting();
+app.MapGet("/health/ready", (RecoveryGate gate) => gate.Blocked
+    ? Results.Json(new { code = "recovery_blocked" }, statusCode: 503)
+    : Results.Json(new { status = "ready" })).DisableRateLimiting();
 app.MapPost("/v1/account-deletion-status", (DeletionStatusRequest request, FamilyService service, CancellationToken ct) => service.DeletionStatus(request, ct));
 var api = app.MapGroup("/v1").RequireAuthorization();
 api.AddEndpointFilter(async (context, next) =>
@@ -153,10 +160,9 @@ api.MapPost("/families", (HttpContext context, CreateFamilyRequest request, Fami
 api.MapGet("/families/{familyId:guid}/snapshot", async (Guid familyId, HttpContext context, FamilyService service, CancellationToken ct) =>
 {
     // Authorization is performed transactionally before any conditional-response comparison.
-    var snapshot = await service.Snapshot(PublicIdentityAdmission.Get(context), familyId, ct);
-    var etag = $"\"{snapshot.HistoryId:D}:{snapshot.Revision}:{snapshot.Family.MembershipId:D}\"";
-    context.Response.Headers.ETag = etag;
-    return context.Request.Headers.IfNoneMatch.ToString() == etag ? Results.StatusCode(304) : Results.Json(snapshot);
+    var result = await service.ConditionalSnapshot(PublicIdentityAdmission.Get(context), familyId, context.Request.Headers.IfNoneMatch.ToString(), ct);
+    context.Response.Headers.ETag = result.ETag;
+    return result.Snapshot is null ? Results.StatusCode(304) : Results.Json(result.Snapshot, FamilyAvailability.SnapshotJson);
 });
 api.MapPost("/families/{familyId:guid}/invitations", (Guid familyId, HttpContext context, CreateInvitationRequest request, FamilyService service, CancellationToken ct) =>
     service.CreateInvitation(PublicIdentityAdmission.Get(context), familyId, request, ct)).RequireRateLimiting("sensitive");
@@ -193,13 +199,12 @@ fullApi.AddEndpointFilter(async (context, next) =>
 });
 fullApi.MapGet("/capabilities", () => new FullFamilyCapabilities(2, FullDomainValidation.RecordKinds, FullDomainValidation.MaxSeedBytes));
 fullApi.MapPost("/families", (HttpContext context, CreateFullFamilyRequest request, FamilyService service, CancellationToken ct) =>
-    service.CreateFullFamily(PublicIdentityAdmission.Get(context), request, ct)).RequireRateLimiting("sensitive");
+    FullCreation(context, request, service, ct)).RequireRateLimiting("sensitive");
 fullApi.MapGet("/families/{familyId:guid}/snapshot", async (Guid familyId, HttpContext context, FamilyService service, CancellationToken ct) =>
 {
-    var snapshot = await service.FullSnapshot(PublicIdentityAdmission.Get(context), familyId, ct);
-    var etag = $"\"v2-extras1:{snapshot.HistoryId:D}:{snapshot.Revision}:{snapshot.Family.MembershipId:D}\"";
-    context.Response.Headers.ETag = etag;
-    return context.Request.Headers.IfNoneMatch.ToString() == etag ? Results.StatusCode(304) : Results.Json(snapshot);
+    var result = await service.ConditionalFullSnapshot(PublicIdentityAdmission.Get(context), familyId, context.Request.Headers.IfNoneMatch.ToString(), ct);
+    context.Response.Headers.ETag = result.ETag;
+    return result.Snapshot is null ? Results.StatusCode(304) : Results.Json(result.Snapshot, FamilyAvailability.SnapshotJson);
 });
 fullApi.MapPost("/families/{familyId:guid}/record-operations", (Guid familyId, HttpContext context, FullRecordOperation request, FamilyService service, CancellationToken ct) =>
     service.ApplyFullRecord(PublicIdentityAdmission.Get(context), familyId, request, ct));
@@ -207,11 +212,18 @@ fullApi.MapPost("/families/{familyId:guid}/profile", (Guid familyId, HttpContext
     service.UpdateFullProfile(PublicIdentityAdmission.Get(context), familyId, request, ct));
 app.Run();
 
+static async Task<IResult> FullCreation(HttpContext context, CreateFullFamilyRequest request, FamilyService service, CancellationToken ct) =>
+    Results.Json(await service.CreateFullFamily(PublicIdentityAdmission.Get(context), request, ct), FamilyAvailability.SnapshotJson);
+
 static async Task Error(HttpContext context, int status, string code)
 {
     if (context.Response.HasStarted) return;
     context.Response.StatusCode = status;
     await context.Response.WriteAsJsonAsync(new { code }, context.RequestAborted);
 }
+
+static string RateLimitKey(HttpContext context) =>
+    context.User.Identity?.IsAuthenticated == true && Guid.TryParse(context.User.FindFirstValue("oid"), out var account)
+        ? $"account:{account:D}" : "anonymous";
 
 public partial class Program { }

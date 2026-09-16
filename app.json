@@ -19,7 +19,7 @@
       }
     },
     "slug": "little-days",
-    "version": "0.2.0",
+    "version": "0.2.1",
     "scheme": "mylittledays",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
@@ -32,7 +32,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.littledays.babylog",
-      "buildNumber": "18",
+      "buildNumber": "19",
       "runtimeVersion": {
         "policy": "appVersion"
       },
@@ -75,6 +75,7 @@
     },
     "owner": "expo4chao",
     "updates": {
+      "enabled": false,
       "url": "https://u.expo.dev/a5210f78-8729-46d4-82a4-7d1d40d30ac6"
     },
     "runtimeVersion": {

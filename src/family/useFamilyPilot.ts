@@ -39,7 +39,11 @@ import {
   acceptRecordReceipt,
   applyFullSnapshot,
   canEditRecord,
+  canControlSleep,
+  canControlFeed,
   enqueueRecord,
+  enqueueSleepFinish,
+  enqueueFeedFinish,
   isFullSnapshot,
   projectedFullState,
   projectedExtraRecords,
@@ -810,6 +814,7 @@ export function useFamilyPilot() {
       }
       // Refresh grants/history before sending offline work, not merely after it.
       await snapshot(e, f.id);
+      let mutationAttempted = false;
       for (const queued of recordsForSend(durable.current, current.current)) {
         check(e);
         if (!foreground.current) break;
@@ -818,6 +823,7 @@ export function useFamilyPilot() {
         );
         if (!item) continue;
         try {
+          mutationAttempted = true;
           const receipt = await familyRequest<FeedReceipt>(
             `/v2/families/${f.id}/record-operations`,
             item.operation,
@@ -868,6 +874,7 @@ export function useFamilyPilot() {
         )?.operation;
         if (!op) continue;
         try {
+          mutationAttempted = true;
           const receipt = await familyRequest<FeedReceipt>(
             `/v1/families/${f.id}/feed-operations`,
             op,
@@ -905,9 +912,16 @@ export function useFamilyPilot() {
           // Independent records continue even if one edit was rejected.
         }
       }
-      await snapshot(e, f.id);
+      // An idle refresh already has authoritative data. Read again only after
+      // a write attempt, including conflicts, to reconcile receipts/winners.
+      if (mutationAttempted) await snapshot(e, f.id);
       failures.current = 0;
-      nextRefresh.current = Date.now() + 30000;
+      // The fresh snapshot can materialize a timer stop that was waiting for
+      // its original create/update receipt. Send it on the next foreground
+      // tick instead of leaving an accidental sleep on the server for 30s.
+      nextRefresh.current =
+        Date.now() +
+        (recordsForSend(durable.current, current.current).length ? 0 : 30000);
       setError(null);
     } catch (cause) {
       if (!isCurrent(e)) return;
@@ -963,7 +977,20 @@ export function useFamilyPilot() {
     return promise;
   }
   async function refreshNow() {
-    if (syncLock.current) await syncLock.current;
+    const e = epoch.current;
+    if (syncLock.current) {
+      await syncLock.current;
+      if (!isCurrent(e)) return;
+      // A save made during an earlier sync may already have been sent and
+      // reconciled. Only start another round for work it did not complete.
+      const s = current.current;
+      if (
+        !s.transition &&
+        !s.records?.some((q) => q.status !== "failed") &&
+        !s.queue.some((q) => q.status !== "failed")
+      )
+        return;
+    }
     return sync();
   }
   async function action<T>(
@@ -1317,6 +1344,47 @@ export function useFamilyPilot() {
           q.operation.recordId === id &&
           q.status !== "failed",
       ),
+    canControlSleep: (id: string) => ready && canControlSleep(state, id),
+    finishSleep: (id: string, stoppedAt: string) =>
+      action(async (e) => {
+        if (!verified.current) throw new Error("refresh_required");
+        family();
+        const operationId = randomUUID();
+        await persist(
+          (s) => enqueueSleepFinish(s, id, stoppedAt, operationId),
+          e,
+        );
+        setNotice("saved_locally");
+        void refreshNow();
+      }),
+    canControlFeed: (id: string) => ready && canControlFeed(state, id),
+    finishFeed: (
+      id: string,
+      stoppedAt: string,
+      amount?: number,
+      baseVersion?: string,
+      expectedEntry?: Entry,
+    ) =>
+      action(async (e) => {
+        if (!verified.current) throw new Error("refresh_required");
+        family();
+        const operationId = randomUUID();
+        await persist(
+          (s) =>
+            enqueueFeedFinish(
+              s,
+              id,
+              stoppedAt,
+              amount,
+              operationId,
+              baseVersion,
+              expectedEntry,
+            ),
+          e,
+        );
+        setNotice("saved_locally");
+        void refreshNow();
+      }),
     saveRecord: (
       collection: "entry" | "care" | "extra",
       value: Entry | CareRecord | FamilyExtraRecord,
@@ -1575,6 +1643,10 @@ export function useFamilyPilot() {
           throw new Error("transition_pending");
         lifecycleActive.current = true;
         try {
+          // Logout discards this workspace after durable local confirmation.
+          // Cancel its background transfer rather than waiting for a large
+          // snapshot timeout; drain it before touching cache/credentials.
+          requests.current.abort();
           // Final logout cleanup below still attempts credentials and cache if
           // the native notification service is temporarily unavailable.
           await stopNotificationDelivery().catch(() => {});
@@ -1624,6 +1696,10 @@ export function useFamilyPilot() {
           setError(null);
           setNotice("signed_out");
         } finally {
+          // A failed local discard leaves the user signed in. Do not leave
+          // that still-current session with a permanently aborted signal.
+          if (isCurrent(beforeLogoutEpoch) && requests.current.signal.aborted)
+            requests.current = new AbortController();
           lifecycleActive.current = false;
         }
       }, true),

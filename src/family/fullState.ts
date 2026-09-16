@@ -2,8 +2,11 @@ import {
   validateCareRecord,
   validateEntry,
   validateState,
+  type Entry,
   type State,
 } from "../domain";
+import { finishLiveSleep } from "../sleepTimer";
+import { finishFeed as finishLiveFeed } from "../feedFinish";
 import type {
   FamilyCapabilities,
   FamilySnapshot,
@@ -32,6 +35,10 @@ export type QueuedRecord = {
   status: "pending" | "accepted" | "failed";
   error?: string;
   receiptRevision?: string;
+  // The original operation may already be on the server. Keep its ID and
+  // payload immutable until its receipt and an authorized snapshot arrive.
+  sleepFollowUp?: { operationId: string; stoppedAt: string };
+  feedFollowUp?: { operationId: string; stoppedAt: string; amount?: number };
 };
 const revision = (value: string) => {
   if (!/^\d{1,20}$/.test(value)) throw new Error("invalid_response");
@@ -216,6 +223,214 @@ export function enqueueRecord(
     ],
   };
 }
+
+function controllableEntry(state: PilotState, id: string): Entry | undefined {
+  const snapshot = state.snapshot;
+  if (
+    state.transition ||
+    !isFullSnapshot(snapshot) ||
+    !canEditRecord(snapshot, "entry", id)
+  )
+    return undefined;
+  const queued = (state.records ?? []).find(
+    (q) =>
+      q.operation.collection === "entry" &&
+      q.operation.recordId === id &&
+      q.status !== "failed" &&
+      matchesOrigin(q.origin, snapshot),
+  );
+  return queued
+    ? queued.operation.kind !== "delete" &&
+      !queued.sleepFollowUp &&
+      !queued.feedFollowUp
+      ? queued.operation.entry
+      : undefined
+    : snapshot.entries.find((r) => r.entry.id === id)?.entry;
+}
+export function canControlSleep(state: PilotState, id: string): boolean {
+  const entry = controllableEntry(state, id);
+  return entry?.type === "sleep" && !entry.end;
+}
+export function canControlFeed(state: PilotState, id: string): boolean {
+  const entry = controllableEntry(state, id);
+  return entry?.type === "feed" && !!entry.feedRunning && !entry.end;
+}
+
+export function enqueueSleepFinish(
+  state: PilotState,
+  id: string,
+  stoppedAt: string,
+  operationId: string,
+): PilotState {
+  return enqueueTimerFinish(state, id, stoppedAt, operationId, "sleep");
+}
+
+export function enqueueFeedFinish(
+  state: PilotState,
+  id: string,
+  stoppedAt: string,
+  amount: number | undefined,
+  operationId: string,
+  baseVersion?: string,
+  expectedEntry?: Entry,
+): PilotState {
+  return enqueueTimerFinish(
+    state,
+    id,
+    stoppedAt,
+    operationId,
+    "feed",
+    amount,
+    baseVersion,
+    expectedEntry,
+  );
+}
+
+function enqueueTimerFinish(
+  state: PilotState,
+  id: string,
+  stoppedAt: string,
+  operationId: string,
+  type: "sleep" | "feed",
+  amount?: number,
+  baseVersion?: string,
+  expectedEntry?: Entry,
+): PilotState {
+  const snapshot = state.snapshot;
+  if (!isFullSnapshot(snapshot)) throw new Error("full_sharing_unavailable");
+  if (state.transition) throw new Error("transition_pending");
+  if (!canEditRecord(snapshot, "entry", id))
+    throw new Error("record_forbidden");
+  const queued = (state.records ?? []).find(
+    (q) =>
+      q.operation.collection === "entry" &&
+      q.operation.recordId === id &&
+      q.status !== "failed" &&
+      matchesOrigin(q.origin, snapshot),
+  );
+  if (
+    queued?.sleepFollowUp ||
+    queued?.feedFollowUp ||
+    queued?.operation.kind === "delete"
+  )
+    throw new Error("record_pending");
+  const record = snapshot.entries.find((r) => r.entry.id === id);
+  const entry = queued?.operation.entry ?? record?.entry;
+  if (
+    !entry ||
+    !(type === "sleep" ? canControlSleep(state, id) : canControlFeed(state, id))
+  )
+    throw new Error("record_changed");
+  if (
+    (baseVersion !== undefined && record?.version !== baseVersion) ||
+    (expectedEntry && !sameEntry(entry, expectedEntry)) ||
+    (type === "feed" &&
+      !queued &&
+      baseVersion === undefined &&
+      record?.lastEditedBy !== originForSnapshot(snapshot).userId)
+  )
+    throw new Error("record_changed");
+  const finished =
+    type === "sleep"
+      ? finishLiveSleep(entry, stoppedAt)
+      : finishLiveFeed(entry, stoppedAt, amount);
+  if (
+    !operationId ||
+    (state.records ?? []).some(
+      (q) =>
+        q.operation.operationId === operationId ||
+        q.sleepFollowUp?.operationId === operationId ||
+        q.feedFollowUp?.operationId === operationId,
+    )
+  )
+    throw new Error("invalid_operation");
+  if (queued) {
+    return {
+      ...state,
+      records: state.records!.map((q) =>
+        q === queued
+          ? {
+              ...q,
+              ...(type === "sleep"
+                ? { sleepFollowUp: { operationId, stoppedAt } }
+                : {
+                    feedFollowUp: {
+                      operationId,
+                      stoppedAt,
+                      ...(finished?.amount !== undefined
+                        ? { amount: finished.amount }
+                        : {}),
+                    },
+                  }),
+            }
+          : q,
+      ),
+    };
+  }
+  return enqueueRecord(state, {
+    operationId,
+    recordId: id,
+    collection: "entry",
+    kind: finished ? "update" : "delete",
+    baseVersion: record!.version,
+    membershipId: snapshot.family.membershipId,
+    historyId: snapshot.historyId,
+    ...(finished ? { entry: finished } : {}),
+  });
+}
+
+function sameEntry(left: Entry, right: Entry) {
+  // Domain entries have only scalar fields; ignore JSON property order.
+  const fields = new Set([...Object.keys(left), ...Object.keys(right)]);
+  return [...fields].every(
+    (field) => left[field as keyof Entry] === right[field as keyof Entry],
+  );
+}
+
+function promoteTimerFinish(
+  q: QueuedRecord,
+  snapshot: FullFamilySnapshot,
+): QueuedRecord[] {
+  const followUp = q.sleepFollowUp ?? q.feedFollowUp;
+  if (!followUp) return [];
+  const record = snapshot.entries.find(
+    (r) => r.entry.id === q.operation.recordId,
+  );
+  if (!canEditRecord(snapshot, "entry", q.operation.recordId))
+    return [{ ...q, status: "failed", error: "record_forbidden" }];
+  // A receipt only gives the family revision, not the record's row version.
+  // Never adopt a newer version if somebody changed the original result.
+  if (
+    !record ||
+    !q.operation.entry ||
+    record.lastEditedBy !== q.origin.userId ||
+    !sameEntry(record.entry, q.operation.entry)
+  )
+    return [{ ...q, status: "failed", error: "record_changed" }];
+  const finished = q.sleepFollowUp
+    ? finishLiveSleep(q.operation.entry, q.sleepFollowUp.stoppedAt)
+    : finishLiveFeed(
+        q.operation.entry,
+        q.feedFollowUp!.stoppedAt,
+        q.feedFollowUp!.amount,
+      );
+  return [
+    {
+      origin: q.origin,
+      status: "pending",
+      operation: {
+        operationId: followUp.operationId,
+        recordId: q.operation.recordId,
+        collection: "entry",
+        kind: finished ? "update" : "delete",
+        baseVersion: record.version,
+        membershipId: q.origin.membershipId,
+        historyId: q.origin.historyId,
+        ...(finished ? { entry: finished } : {}),
+      },
+    },
+  ];
+}
 export function applyFullSnapshot(
   state: PilotState,
   incoming: FullFamilySnapshot,
@@ -231,7 +446,7 @@ export function applyFullSnapshot(
         q.receiptRevision &&
         revision(snapshot.revision) >= revision(q.receiptRevision)
       )
-        return [];
+        return promoteTimerFinish(q, snapshot);
       if (
         !canEditRecord(snapshot, q.operation.collection, q.operation.recordId)
       )
@@ -298,6 +513,20 @@ export function projectedFullState(state: PilotState): State | null {
     if (op.collection === "entry") {
       if (op.kind === "delete") entries.delete(op.recordId);
       else if (op.entry) entries.set(op.recordId, op.entry);
+      if (q.sleepFollowUp && op.entry) {
+        const finished = finishLiveSleep(op.entry, q.sleepFollowUp.stoppedAt);
+        if (finished) entries.set(op.recordId, finished);
+        else entries.delete(op.recordId);
+      }
+      if (q.feedFollowUp && op.entry)
+        entries.set(
+          op.recordId,
+          finishLiveFeed(
+            op.entry,
+            q.feedFollowUp.stoppedAt,
+            q.feedFollowUp.amount,
+          ),
+        );
     } else if (op.collection === "care") {
       if (op.kind === "delete") care.delete(op.recordId);
       else if (op.careRecord) care.set(op.recordId, op.careRecord);

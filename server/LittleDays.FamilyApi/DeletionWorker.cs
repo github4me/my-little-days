@@ -18,16 +18,21 @@ public sealed class DeletionWorkerSettings
 // SQL content cleanup is independent from directory availability. A crash after Graph succeeds
 // is safe: the identity adapter verifies absence on retry before we mark the durable job complete.
 public sealed class DeletionProcessor(PilotDatabase db, PilotConfiguration config, TimeProvider clock,
-    IAccountIdentityDeletion identityDeletion)
+    IAccountIdentityDeletion identityDeletion, RecoveryGate? recovery = null)
 {
     public async Task<bool> Process(CancellationToken ct)
     {
+        if (recovery?.Blocked == true) return false;
         var service = new FamilyService(db, config, clock);
-        var pendingIds = await service.Transaction(async () =>
+        var closed = await db.Families.AsNoTracking().Where(x => x.DeletedAt != null && x.PurgedAt == null)
+            .OrderBy(x => x.DeletedAt).ThenBy(x => x.Id).Select(x => x.Id).Take(FamilyAvailability.CleanupBatchSize).ToArrayAsync(ct);
+        foreach (var familyId in closed)
         {
-            var closed = await db.Families.Where(x => x.DeletedAt != null).ToArrayAsync(ct);
-            foreach (var family in closed)
+            if (recovery?.Blocked == true) return false;
+            await service.FamilyTransaction(familyId, async () =>
             {
+                var family = await db.Families.SingleAsync(x => x.Id == familyId, ct);
+                if (family.DeletedAt is null || family.PurgedAt is not null) return false;
                 await db.Feeds.Where(x => x.FamilyId == family.Id).ExecuteDeleteAsync(ct);
                 await db.FamilyRecords.Where(x => x.FamilyId == family.Id).ExecuteDeleteAsync(ct);
                 await db.Invitations.Where(x => x.FamilyId == family.Id).ExecuteDeleteAsync(ct);
@@ -35,10 +40,22 @@ public sealed class DeletionProcessor(PilotDatabase db, PilotConfiguration confi
                 await db.Operations.Where(x => x.FamilyId == family.Id).ExecuteDeleteAsync(ct);
                 await db.Memberships.Where(x => x.FamilyId == family.Id).ExecuteDeleteAsync(ct);
                 family.BabyName = ""; family.BabyBirthDate = null; family.BabySex = "unspecified";
-            }
-            var jobs = await db.AccountDeletions.Where(x => x.Status == "pending").ToArrayAsync(ct);
-            foreach (var job in jobs)
+                family.PurgedAt = clock.GetUtcNow();
+                return true;
+            }, ct);
+            db.ChangeTracker.Clear();
+        }
+        var jobs = await db.AccountDeletions.AsNoTracking().Where(x => x.Status == "pending")
+            .OrderBy(x => x.RequestedAt).ThenBy(x => x.UserId).Select(x => x.UserId).Take(FamilyAvailability.CleanupBatchSize).ToArrayAsync(ct);
+        foreach (var userId in jobs)
+        {
+            if (recovery?.Blocked == true) return false;
+            // An account can have authored records in several families. Preserve
+            // the global lifecycle barrier, but release it between bounded jobs.
+            await service.Transaction(async () =>
             {
+                var job = await db.AccountDeletions.SingleAsync(x => x.UserId == userId, ct);
+                if (job.Status != "pending") return false;
                 var memberEmails = await db.Memberships.Where(x => x.UserId == job.UserId).Select(x => x.Email).ToArrayAsync(ct);
                 var bindingEmail = config.Pilot.Identities.SingleOrDefault(x => x.ObjectId == job.UserId)?.Email;
                 var emails = memberEmails.Append(bindingEmail ?? "").Append(job.PendingEmail ?? "").Where(x => x.Length > 0).Distinct().ToArray();
@@ -59,15 +76,30 @@ public sealed class DeletionProcessor(PilotDatabase db, PilotConfiguration confi
                 foreach (var family in await db.Families.Where(x => familyIds.Contains(x.Id) && x.DeletedAt == null).ToArrayAsync(ct)) family.Revision++;
                 job.Status = "awaiting_identity_deletion";
                 job.PendingEmail = null;
-            }
-            await db.SaveChangesAsync(ct);
-            return await db.AccountDeletions.Where(x => x.Status == "awaiting_identity_deletion").Select(x => x.UserId).ToArrayAsync(ct);
-        }, ct);
+                return true;
+            }, ct);
+            db.ChangeTracker.Clear();
+        }
+        // Failed directory attempts rotate behind unattempted/older jobs, rather
+        // than starving everything after the first permanently failing batch.
+        var pendingIds = await db.AccountDeletions.AsNoTracking().Where(x => x.Status == "awaiting_identity_deletion")
+            .OrderBy(x => x.LastIdentityAttemptAt).ThenBy(x => x.RequestedAt).ThenBy(x => x.UserId)
+            .Select(x => x.UserId).Take(FamilyAvailability.CleanupBatchSize).ToArrayAsync(ct);
         var complete = true;
         foreach (var id in pendingIds)
         {
+            if (recovery?.Blocked == true) return false;
             try
             {
+                var attempt = await service.Transaction(async () =>
+                {
+                    var job = await db.AccountDeletions.SingleAsync(x => x.UserId == id, ct);
+                    if (job.Status != "awaiting_identity_deletion") return false;
+                    job.LastIdentityAttemptAt = clock.GetUtcNow();
+                    return true;
+                }, ct);
+                if (!attempt) continue;
+                if (recovery?.Blocked == true) return false;
                 await identityDeletion.DeleteIdentityAsync(id, ct);
                 await service.Transaction(async () =>
                 {
@@ -79,12 +111,14 @@ public sealed class DeletionProcessor(PilotDatabase db, PilotConfiguration confi
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception) { complete = false; db.ChangeTracker.Clear(); }
         }
-        return complete;
+        return complete &&
+            !await db.Families.AnyAsync(x => x.DeletedAt != null && x.PurgedAt == null, ct) &&
+            !await db.AccountDeletions.AnyAsync(x => x.Status != "completed", ct);
     }
 }
 
 public sealed class DeletionWorker(IServiceScopeFactory scopes, ILogger<DeletionWorker> logger,
-    DeletionWorkerSettings settings, TimeProvider clock) : BackgroundService
+    DeletionWorkerSettings settings, TimeProvider clock, RecoveryGate recovery) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -95,6 +129,7 @@ public sealed class DeletionWorker(IServiceScopeFactory scopes, ILogger<Deletion
         {
             try
             {
+                if (recovery.Blocked) continue;
                 await using var scope = scopes.CreateAsyncScope();
                 if (!await scope.ServiceProvider.GetRequiredService<DeletionProcessor>().Process(stoppingToken))
                     logger.LogWarning("One or more directory deletions remain pending; other queued requests were still processed.");

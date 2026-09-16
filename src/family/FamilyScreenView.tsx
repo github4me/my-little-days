@@ -492,6 +492,9 @@ export default function FamilyScreenView({
     null,
   );
   const [acting, setActing] = useState(false);
+  const [activeAction, setActiveAction] = useState<FamilyMessageKey | null>(
+    null,
+  );
   const lock = useRef(false);
   const mounted = useRef(true);
   const busy = acting || pilot.busy;
@@ -564,10 +567,15 @@ export default function FamilyScreenView({
     snapshot?.family.babyBirthDate,
   ]);
 
-  async function run(action: () => Promise<void>, close = false) {
+  async function run(
+    action: () => Promise<void>,
+    close = false,
+    actionKey: FamilyMessageKey | null = null,
+  ) {
     if (lock.current) return;
     lock.current = true;
     setActing(true);
+    setActiveAction(actionKey);
     setLocalError(null);
     if (close) setConfirmationError(null);
     try {
@@ -583,7 +591,10 @@ export default function FamilyScreenView({
         );
     } finally {
       lock.current = false;
-      if (mounted.current) setActing(false);
+      if (mounted.current) {
+        setActing(false);
+        setActiveAction(null);
+      }
     }
   }
 
@@ -868,13 +879,21 @@ export default function FamilyScreenView({
             })}
           </T>
           <Button
-            label={m("checkDeletionStatus")}
+            label={m(
+              activeAction === "checkDeletionStatus"
+                ? "working"
+                : "checkDeletionStatus",
+            )}
             secondary
             disabled={busy}
             onPress={() =>
-              void run(async () => {
-                await pilot.checkDeletionStatus();
-              })
+              void run(
+                async () => {
+                  await pilot.checkDeletionStatus();
+                },
+                false,
+                "checkDeletionStatus",
+              )
             }
           />
           {deletion.status === "completed" && !pilot.transitionPending ? (
@@ -992,9 +1011,13 @@ export default function FamilyScreenView({
                 <>
                   <T raw>{m("accountExpiredAction")}</T>
                   <Button
-                    label={m("signInAgain")}
+                    label={m(
+                      activeAction === "signInAgain"
+                        ? "working"
+                        : "signInAgain",
+                    )}
                     disabled={busy}
-                    onPress={() => void run(pilot.signIn)}
+                    onPress={() => void run(pilot.signIn, false, "signInAgain")}
                   />
                 </>
               ) : !snapshot || !authenticated ? (
@@ -1505,7 +1528,11 @@ export default function FamilyScreenView({
                     maxLength={254}
                   />
                   <Button
-                    label={m("createInvitation")}
+                    label={m(
+                      activeAction === "createInvitation"
+                        ? "working"
+                        : "createInvitation",
+                    )}
                     disabled={
                       workspaceBusy || !recipient.trim() || invitationAtCapacity
                     }
@@ -1516,15 +1543,19 @@ export default function FamilyScreenView({
                         invitationAtCapacity
                       )
                         return;
-                      void run(async () => {
-                        setCreatedInvite(null);
-                        const email = recipient.trim();
-                        await pilot.createInvitation(email);
-                        if (mounted.current) {
-                          setCreatedInvite(email);
-                          setRecipient("");
-                        }
-                      });
+                      void run(
+                        async () => {
+                          setCreatedInvite(null);
+                          const email = recipient.trim();
+                          await pilot.createInvitation(email);
+                          if (mounted.current) {
+                            setCreatedInvite(email);
+                            setRecipient("");
+                          }
+                        },
+                        false,
+                        "createInvitation",
+                      );
                     }}
                   />
                   {createdInvite ? (

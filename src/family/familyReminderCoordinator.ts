@@ -1,6 +1,7 @@
 import type { FamilyReminderPlan } from "./familyReminderPlan";
 
 export type FamilyReminderPreferences = { origin: string; enabled: boolean };
+export type FamilyReminderCleanup = { clearPreference: boolean };
 export type ScheduledFamilyReminder = {
   id: string;
   origin: string;
@@ -9,6 +10,8 @@ export type ScheduledFamilyReminder = {
 type Dependencies = {
   load(): Promise<FamilyReminderPreferences | null>;
   save(value: FamilyReminderPreferences | null): Promise<void>;
+  loadCleanup(): Promise<FamilyReminderCleanup | null>;
+  saveCleanup(value: FamilyReminderCleanup | null): Promise<void>;
   requestPermission(): Promise<void>;
   list(): Promise<ScheduledFamilyReminder[]>;
   schedule(origin: string, plan: FamilyReminderPlan): Promise<string>;
@@ -23,6 +26,8 @@ export class FamilyReminderCoordinator {
   private generation = 0;
   private origin: string | null = null;
   private enabled = false;
+  private startupCleanup = true;
+  private cleanupPending: FamilyReminderCleanup | null = null;
 
   constructor(private readonly dependencies: Dependencies) {}
 
@@ -38,15 +43,90 @@ export class FamilyReminderCoordinator {
 
   loadOptIn(origin: string): Promise<boolean> {
     return this.enqueue(async () => {
+      await this.retryCleanup();
       const preference = await this.dependencies.load();
       return preference?.origin === origin && preference.enabled;
     });
   }
 
   private async cancelAll(): Promise<void> {
-    for (const notification of await this.dependencies.list())
-      await this.dependencies.cancel(notification.id);
-    await this.dependencies.dismiss();
+    const failures: unknown[] = [];
+    let notifications: ScheduledFamilyReminder[] = [];
+    try {
+      notifications = await this.dependencies.list();
+    } catch (cause) {
+      failures.push(cause);
+    }
+    for (const notification of notifications) {
+      try {
+        await this.dependencies.cancel(notification.id);
+      } catch (cause) {
+        failures.push(cause);
+      }
+    }
+    try {
+      await this.dependencies.dismiss();
+    } catch (cause) {
+      failures.push(cause);
+    }
+    if (failures.length) throw new Error("reminder_cleanup_failed");
+  }
+
+  private async cleanup(clearPreference = false): Promise<void> {
+    this.enabled = false;
+    const failures: unknown[] = [];
+    let pending = {
+      clearPreference:
+        clearPreference || !!this.cleanupPending?.clearPreference,
+    };
+    this.cleanupPending = pending;
+    try {
+      const stored = await this.dependencies.loadCleanup();
+      pending = {
+        clearPreference: pending.clearPreference || !!stored?.clearPreference,
+      };
+      this.cleanupPending = pending;
+    } catch (cause) {
+      // A previously unreadable journal may contain a stronger clear request.
+      // Never overwrite that unknown intent with a weaker suspension.
+      pending = { clearPreference: true };
+      this.cleanupPending = pending;
+      failures.push(cause);
+    }
+    // Journal and preference writes must never prevent native cleanup attempts.
+    try {
+      await this.dependencies.saveCleanup(pending);
+    } catch (cause) {
+      failures.push(cause);
+    }
+    if (pending.clearPreference) {
+      try {
+        await this.dependencies.save(null);
+      } catch (cause) {
+        failures.push(cause);
+      }
+    }
+    try {
+      await this.cancelAll();
+    } catch (cause) {
+      failures.push(cause);
+    }
+    if (!failures.length) {
+      try {
+        await this.dependencies.saveCleanup(null);
+      } catch (cause) {
+        failures.push(cause);
+      }
+    }
+    if (failures.length) throw new Error("reminder_cleanup_failed");
+    this.cleanupPending = null;
+    this.startupCleanup = false;
+  }
+
+  private async retryCleanup(): Promise<void> {
+    // Reconcile on every process start too: an unavailable disk may have
+    // prevented the previous process from writing its retry journal.
+    if (this.startupCleanup || this.cleanupPending) await this.cleanup();
   }
 
   setOptIn(origin: string, enabled: boolean): Promise<void> {
@@ -55,8 +135,9 @@ export class FamilyReminderCoordinator {
     this.enabled = false;
     return this.enqueue(async () => {
       if (generation !== this.generation) return;
+      await this.cleanup();
+      if (generation !== this.generation) return;
       await this.dependencies.save({ origin, enabled: false });
-      await this.cancelAll();
       if (!enabled || generation !== this.generation) return;
       await this.dependencies.requestPermission();
       if (generation !== this.generation) return;
@@ -74,37 +155,44 @@ export class FamilyReminderCoordinator {
     this.origin = origin;
     return this.enqueue(async () => {
       if (generation !== this.generation) return;
-      const preference = await this.dependencies.load();
-      if (generation !== this.generation) return;
-      this.enabled = preference?.origin === origin && preference.enabled;
-      if (!this.enabled) {
-        await this.cancelAll();
-        if (generation === this.generation && preference?.origin !== origin)
-          await this.dependencies.save({ origin, enabled: false });
-        return;
-      }
-      const scheduled = await this.dependencies.list();
-      const wanted = new Set(plans.map((plan) => plan.fingerprint));
-      const existing = new Set<string>();
-      for (const notification of scheduled) {
-        if (
-          notification.origin === origin &&
-          wanted.has(notification.fingerprint) &&
-          !existing.has(notification.fingerprint)
-        )
-          existing.add(notification.fingerprint);
-        else await this.dependencies.cancel(notification.id);
+      this.enabled = false;
+      await this.retryCleanup();
+      try {
+        const preference = await this.dependencies.load();
         if (generation !== this.generation) return;
-      }
-      for (const plan of plans) {
-        if (generation !== this.generation) return;
-        if (existing.has(plan.fingerprint)) continue;
-        const id = await this.dependencies.schedule(origin, plan);
-        if (generation !== this.generation) {
-          await this.dependencies.cancel(id);
+        if (preference?.origin !== origin || !preference.enabled) {
+          await this.cleanup();
+          if (generation === this.generation && preference?.origin !== origin)
+            await this.dependencies.save({ origin, enabled: false });
           return;
         }
-        existing.add(plan.fingerprint);
+        const scheduled = await this.dependencies.list();
+        const wanted = new Set(plans.map((plan) => plan.fingerprint));
+        const existing = new Set<string>();
+        for (const notification of scheduled) {
+          if (
+            notification.origin === origin &&
+            wanted.has(notification.fingerprint) &&
+            !existing.has(notification.fingerprint)
+          )
+            existing.add(notification.fingerprint);
+          else await this.dependencies.cancel(notification.id);
+          if (generation !== this.generation) return;
+        }
+        for (const plan of plans) {
+          if (generation !== this.generation) return;
+          if (existing.has(plan.fingerprint)) continue;
+          const id = await this.dependencies.schedule(origin, plan);
+          if (generation !== this.generation) {
+            await this.dependencies.cancel(id);
+            return;
+          }
+          existing.add(plan.fingerprint);
+        }
+        if (generation === this.generation) this.enabled = true;
+      } catch (cause) {
+        await this.cleanup();
+        throw cause;
       }
     });
   }
@@ -113,16 +201,13 @@ export class FamilyReminderCoordinator {
     ++this.generation;
     this.origin = null;
     this.enabled = false;
-    return this.enqueue(() => this.cancelAll());
+    return this.enqueue(() => this.cleanup());
   }
 
   clear(): Promise<void> {
     ++this.generation;
     this.origin = null;
     this.enabled = false;
-    return this.enqueue(async () => {
-      await this.dependencies.save(null);
-      await this.cancelAll();
-    });
+    return this.enqueue(() => this.cleanup(true));
   }
 }

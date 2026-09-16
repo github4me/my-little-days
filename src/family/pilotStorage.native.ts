@@ -1,4 +1,5 @@
 import * as SQLite from "expo-sqlite";
+import { protectFamilyStorage } from "./storageProtection";
 import { parseStoredPilot, type PilotState } from "./pilotState";
 import type { OwnerSeedDraft } from "./ownerSeed";
 import {
@@ -12,14 +13,27 @@ function serialized<T>(operation: () => Promise<T>): Promise<T> {
   operations = result.catch(() => {});
   return result;
 }
-const db = () =>
-  (database ??= (async () => {
+function db(): Promise<SQLite.SQLiteDatabase> {
+  if (database) return database;
+  const opening = (async () => {
+    await protectFamilyStorage();
     const d = await SQLite.openDatabaseAsync("little-days-family-pilot.db");
-    await d.execAsync(
-      "PRAGMA journal_mode = WAL; CREATE TABLE IF NOT EXISTS pilot_accounts (account_id TEXT PRIMARY KEY NOT NULL, payload TEXT NOT NULL); CREATE TABLE IF NOT EXISTS owner_setup_drafts (account_id TEXT PRIMARY KEY NOT NULL, payload TEXT NOT NULL);",
-    );
-    return d;
-  })());
+    try {
+      await d.execAsync(
+        "PRAGMA journal_mode = WAL; CREATE TABLE IF NOT EXISTS pilot_accounts (account_id TEXT PRIMARY KEY NOT NULL, payload TEXT NOT NULL); CREATE TABLE IF NOT EXISTS owner_setup_drafts (account_id TEXT PRIMARY KEY NOT NULL, payload TEXT NOT NULL);",
+      );
+      return d;
+    } catch (error) {
+      await d.closeAsync().catch(() => undefined);
+      throw error;
+    }
+  })();
+  database = opening;
+  void opening.catch(() => {
+    if (database === opening) database = undefined;
+  });
+  return opening;
+}
 export async function loadPilot(accountId: string): Promise<PilotState> {
   return serialized(async () => {
     const row = await (

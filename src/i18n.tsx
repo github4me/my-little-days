@@ -126,6 +126,7 @@ const english: Record<string, string> = {
   "尿 + 便": "Pee + poo",
   "一点一滴，都是成长": "Every little moment is growth",
   照顾此刻: "Care right now",
+  今日数据: "Today's totals",
   "mL 已记录奶量": "mL fed today",
   "小时 已记录睡眠": "hours slept today",
   "次 换尿布": "diaper changes",
@@ -133,6 +134,9 @@ const english: Record<string, string> = {
   "还没有记录，轻点开始": "No record yet — tap to start",
   醒了: "Awake",
   睡了: "Sleep",
+  睡眠计时状态无效: "This sleep timer is no longer running.",
+  "本次睡眠不足 1 分钟，已按误触取消，不计入记录。如需保留，请补录睡眠。":
+    "This sleep lasted less than 1 minute and was cancelled as an accidental tap. It will not count as a record. Use Add past sleep to keep it.",
   "＋记录": "+ Add",
   "补录睡眠 ›": "Add past sleep ›",
   "＋测量": "+ Measure",

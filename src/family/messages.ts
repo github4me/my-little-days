@@ -1,6 +1,22 @@
 import type { AppLocale } from "../i18n";
 
 const messages = {
+  errorReminderCleanup: [
+    "部分家庭提醒尚未清理完成，新的提醒已暂停。请重试；如旧提醒仍出现，可暂时在手机设置中关闭本应用通知。不要清空本机资料。",
+    "Some family reminders could not be cleared; new reminders are paused. Retry. If old reminders still appear, temporarily turn off this app’s notifications in phone settings. Do not clear local data.",
+  ],
+  errorFamilyQuota: [
+    "家庭资料已达到安全容量上限，未共享的修改仍保留在本机待处理。请联系支持人员协助处理；不要反复提交或清空本机资料。",
+    "This family has reached a safety limit. Unshared changes remain on this device for review. Contact support for help; do not repeatedly submit or clear local data.",
+  ],
+  errorFamilyCreationLimit: [
+    "短时间内创建并解散家庭次数过多，请稍后再试。现有资料不会因此清理。",
+    "Too many families were created and closed recently. Try again later; this does not clear your existing data.",
+  ],
+  errorRecoveryBlocked: [
+    "服务正在进行安全恢复核验，暂时无法访问或更改家庭资料。请稍后重试，不要清空本机资料。",
+    "The service is undergoing a safety recovery check. Family access and changes are temporarily unavailable. Try again later; do not clear local data.",
+  ],
   title: ["家庭邀请试点", "Family invitation pilot"],
   back: ["返回", "Back"],
   demoNotice: [
@@ -749,6 +765,13 @@ const errorMessages: Record<string, FamilyMessageKey> = {
   history_changed: "errorHistoryChanged",
   invalid_input: "errorInvalidInput",
   rate_limited: "errorRateLimited",
+  family_record_limit: "errorFamilyQuota",
+  family_storage_limit: "errorFamilyQuota",
+  family_snapshot_limit: "errorFamilyQuota",
+  family_member_history_limit: "errorFamilyQuota",
+  family_creation_limit: "errorFamilyCreationLimit",
+  recovery_blocked: "errorRecoveryBlocked",
+  reminder_cleanup_failed: "errorReminderCleanup",
   network_error: "errorNetwork",
   offline: "errorNetwork",
   record_pending: "errorBusyRecord",

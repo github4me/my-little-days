@@ -143,7 +143,9 @@ All three profile fields are required. Only the owner can update them. Success r
 | Care kind | temperature, bath, wash, oral, nails |
 | Temperature | 25–45; method armpit, ear, forehead, rectal or other |
 
-Decimal values retain precision without the legacy two-decimal restriction. Unknown/duplicate domain JSON fields and caller-supplied authors fail. Each collection permits 100,000 records; ordinary tombstones count toward the cap. [Server limits](../server/README.md#limits-and-concurrency) document request, membership, operation-ledger and rate limits.
+Decimal values retain precision without the legacy two-decimal restriction. Unknown/duplicate domain JSON fields and caller-supplied authors fail. The domain parser retains its historical per-collection validation ceiling, but the service now enforces a tighter **10,000 total record IDs per family across collections**, including ordinary tombstones. Aggregate ceilings also limit stored record JSON to 64 MiB (SQL UTF-16 bytes) and serialized snapshots to 32 MiB, with reserved envelope/member space. A seed below its upload-size ceiling can still exceed these aggregate limits. [Server limits](../server/README.md#limits-and-concurrency) document request, membership, operation-ledger and rate limits.
+
+Capacity failures use explicit `409 family_record_limit`, `family_storage_limit`, `family_snapshot_limit` or `family_member_history_limit`; preserve local work for review instead of clearing it or retrying indefinitely. Excessive create/close cycling returns `429 family_creation_limit`. `503 recovery_blocked` means an operator has closed access during recovery verification; do not replace local state. Snapshot ETags are compared only after current account/grant/history authorization, before materializing unchanged record payloads. These changes do not add pagination or weaken conflict checks. See the [security release checklist](SECURITY-REMEDIATION-2026-09-17.md) before deploying to an existing database.
 
 ## Shared lifecycle
 

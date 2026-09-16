@@ -65,6 +65,54 @@ public sealed class HttpTests(SqlFixture sql) : IClassFixture<SqlFixture>
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/health/live")).StatusCode);
     }
 
+    [Fact]
+    public async Task AnonymousAndAuthenticatedAccountsCannotSpendAnotherAccountsBudget()
+    {
+        var s = new Scenario(sql);
+        s.Config.Pilot.RequestsPerMinute = 3;
+        // These GUIDs deliberately collided in the former 256 sensitive buckets.
+        s.Owner.ObjectId = Guid.Parse("00000001-0000-0000-0000-000000000000");
+        s.Caregiver.ObjectId = Guid.Parse("00000101-0000-0000-0000-000000000000");
+        await using var host = new TestHost(s.Config);
+        using var anonymous = host.CreateClient();
+        using var owner = host.CreateClient();
+        using var caregiver = host.CreateClient();
+        owner.DefaultRequestHeaders.Authorization = new("Bearer", host.Token(s.Owner));
+        caregiver.DefaultRequestHeaders.Authorization = new("Bearer", host.Token(s.Caregiver));
+        Assert.Equal(HttpStatusCode.OK, (await owner.GetAsync("/v2/capabilities")).StatusCode);
+        for (var i = 0; i < 3; i++)
+        {
+            // Spoofed proxy metadata must not mint another anonymous budget.
+            anonymous.DefaultRequestHeaders.Remove("X-Forwarded-For");
+            anonymous.DefaultRequestHeaders.Add("X-Forwarded-For", $"198.51.100.{i + 1}");
+            Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync("/v1/me")).StatusCode);
+        }
+        Assert.Equal(HttpStatusCode.TooManyRequests, (await anonymous.GetAsync("/v1/me")).StatusCode);
+        for (var i = 0; i < 2; i++) Assert.Equal(HttpStatusCode.OK, (await owner.GetAsync("/v2/capabilities")).StatusCode);
+        Assert.Equal(HttpStatusCode.TooManyRequests, (await owner.GetAsync("/v2/capabilities")).StatusCode);
+        for (var i = 0; i < 3; i++) Assert.Equal(HttpStatusCode.OK, (await caregiver.GetAsync("/v2/capabilities")).StatusCode);
+        Assert.Equal(HttpStatusCode.TooManyRequests, (await caregiver.GetAsync("/v2/capabilities")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await anonymous.GetAsync("/health/live")).StatusCode);
+    }
+
+    [Fact]
+    public async Task SensitiveQuotaUsesWholeValidatedAccountNotSharedHashBucket()
+    {
+        var s = new Scenario(sql);
+        s.Config.Pilot.SensitiveRequestsPerMinute = 1;
+        s.Owner.ObjectId = Guid.Parse("00000001-0000-0000-0000-000000000000");
+        s.Caregiver.ObjectId = Guid.Parse("00000101-0000-0000-0000-000000000000");
+        await using var host = new TestHost(s.Config);
+        using var owner = host.CreateClient();
+        using var caregiver = host.CreateClient();
+        owner.DefaultRequestHeaders.Authorization = new("Bearer", host.Token(s.Owner));
+        caregiver.DefaultRequestHeaders.Authorization = new("Bearer", host.Token(s.Caregiver));
+        // Invalid binding reaches no SQL, but still exercises the real endpoint limiter.
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, (await owner.PostAsJsonAsync("/v1/families", new { operationId = "invalid" })).StatusCode);
+        Assert.Equal(HttpStatusCode.TooManyRequests, (await owner.PostAsJsonAsync("/v1/families", new { operationId = "invalid" })).StatusCode);
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, (await caregiver.PostAsJsonAsync("/v1/families", new { operationId = "invalid" })).StatusCode);
+    }
+
     [SqlFact]
     public async Task HttpWireFlowAndConditionalSnapshotReauthorizeAfterRevocation()
     {
@@ -187,13 +235,14 @@ public sealed class HttpTests(SqlFixture sql) : IClassFixture<SqlFixture>
 
 // Test-only metadata supply: the production JWT signature/issuer/audience/lifetime and claim
 // checks still run. No authentication bypass or static token exists in the deployable project.
-public sealed class TestHost(PilotConfiguration config, string? connection = null) : WebApplicationFactory<Program>
+public sealed class TestHost(PilotConfiguration config, string? connection = null, IReadOnlyDictionary<string, string?>? overrides = null) : WebApplicationFactory<Program>
 {
     private readonly RSA rsa = RSA.Create(2048);
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Testing");
         foreach (var pair in Values(config)) builder.UseSetting(pair.Key, pair.Value);
+        foreach (var pair in overrides ?? new Dictionary<string, string?>()) builder.UseSetting(pair.Key, pair.Value);
         builder.UseSetting("ConnectionStrings:FamilyDatabase", connection ?? "Server=unconfigured.invalid;Database=unused;Integrated Security=true");
         builder.ConfigureTestServices(services => services.PostConfigure<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme, options =>
         {
@@ -227,6 +276,7 @@ public sealed class TestHost(PilotConfiguration config, string? connection = nul
             ["Family:PublicBaseUrl"] = config.Family.PublicBaseUrl,
             ["Family:HistoryId"] = config.Family.HistoryId.ToString(),
             ["Pilot:RequestsPerMinute"] = config.Pilot.RequestsPerMinute.ToString(),
+            ["Pilot:SensitiveRequestsPerMinute"] = config.Pilot.SensitiveRequestsPerMinute.ToString(),
             ["AccountDeletion:WorkerEnabled"] = "false"
         };
         for (var i = 0; i < config.Pilot.Identities.Length; i++)

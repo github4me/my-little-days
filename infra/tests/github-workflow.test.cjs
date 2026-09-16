@@ -301,7 +301,7 @@ test("preview and deployment use distinct OIDC clients, not stored Azure credent
     assert.equal(logins.length, 1);
     assert.equal(
       logins[0].uses,
-      "azure/login@935127ca5bb3c4b02c9c2c10060028383878f33f",
+      "azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906",
     );
     assert.equal(logins[0].with["client-id"], `\${{ vars.${clientVariable} }}`);
     assert.equal(logins[0].with["tenant-id"], "${{ vars.AZURE_TENANT_ID }}");

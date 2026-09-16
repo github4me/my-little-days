@@ -2,7 +2,8 @@
   "build": {
     "preview": {
       "distribution": "internal",
-      "channel": "preview"
+      "channel": "preview",
+      "environment": "preview"
     },
     "ui-preview": {
       "extends": "preview",

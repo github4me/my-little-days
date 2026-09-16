@@ -247,6 +247,7 @@ function makeWorld({ offline = true, queued = false } = {}) {
     },
   };
   const overrides = {
+    "./storageProtection": { protectFamilyStorage: async () => {} },
     storage: {
       clearPersonalForFamilyActivation: async () => {
         await world.beforePersonalClear();
@@ -374,7 +375,7 @@ function makeWorld({ offline = true, queued = false } = {}) {
     },
     api: {
       PilotApiError,
-      familyRequest: async (url, operation) => {
+      familyRequest: async (url, operation, signal) => {
         world.http.push({ url, operation });
         if (world.offline) throw new PilotApiError("network_unavailable");
         if (url === "/v1/me") {
@@ -455,7 +456,7 @@ function makeWorld({ offline = true, queued = false } = {}) {
           return receipt;
         }
         if (url.endsWith("/snapshot")) {
-          await world.beforeSnapshot();
+          await world.beforeSnapshot(signal);
           if (world.snapshotOffline)
             throw new PilotApiError("network_unavailable");
           if (world.snapshotUnsupported)
@@ -724,6 +725,132 @@ async function boot(world) {
     "cached offline bootstrap",
   );
   return controller;
+}
+
+test("idle refresh downloads one snapshot and coalesces repeated refresh taps", async () => {
+  const world = makeWorld({ offline: false });
+  const c = await boot(world);
+  const gate = deferred();
+  try {
+    world.http.length = 0;
+    world.beforeSnapshot = () => gate.promise;
+    const first = c.result().refresh();
+    await until(
+      () => world.http.some((r) => r.url.endsWith("/snapshot")),
+      "refresh snapshot",
+    );
+    const second = c.result().refresh();
+    assert.ok(
+      c.result().sharedState,
+      "cached UI remains visible during refresh",
+    );
+    gate.resolve();
+    await Promise.all([first, second]);
+    assert.equal(world.http.filter((r) => r.url === "/v1/me").length, 1);
+    assert.equal(
+      world.http.filter((r) => r.url.endsWith("/snapshot")).length,
+      1,
+    );
+  } finally {
+    gate.resolve();
+    c.unmount();
+  }
+});
+
+test("a save included in an in-flight refresh does not schedule an empty second sync", async () => {
+  const world = makeWorld({ offline: false });
+  const c = await boot(world);
+  const gate = deferred();
+  try {
+    world.http.length = 0;
+    world.beforeSnapshot = () => gate.promise;
+    const refresh = c.result().refresh();
+    await until(
+      () => world.http.some((r) => r.url.endsWith("/snapshot")),
+      "pre-write snapshot",
+    );
+    const entry = {
+      id: "responsive-diaper",
+      type: "diaper",
+      start: new Date().toISOString(),
+      diaperKind: "wet",
+      note: "",
+    };
+    await c.result().saveRecord("entry", entry);
+    assert.equal(c.result().sharedState.entries[0].id, entry.id);
+    assert.equal(world.recordsSent.length, 0);
+    gate.resolve();
+    await refresh;
+    for (let i = 0; i < 5; i++) await tick();
+    assert.equal(world.recordsSent.length, 1);
+    assert.equal(world.http.filter((r) => r.url === "/v1/me").length, 1);
+    assert.equal(
+      world.http.filter((r) => r.url.endsWith("/snapshot")).length,
+      2,
+      "grants before write and authoritative result after write",
+    );
+    assert.equal(world.read().records.length, 0);
+  } finally {
+    gate.resolve();
+    c.unmount();
+  }
+});
+
+for (const failDiscard of [false, true]) {
+  test(`logout cancels a stalled API snapshot${failDiscard ? " and a failed local discard permits later refresh" : " without waiting for timeout"}`, async () => {
+    const world = makeWorld({ offline: false });
+    const c = await boot(world);
+    let requestSignal;
+    let release;
+    world.beforeSnapshot = (signal) =>
+      new Promise((resolve, reject) => {
+        requestSignal = signal;
+        release = resolve;
+        signal.addEventListener(
+          "abort",
+          () => reject(new Error("network_unavailable")),
+          { once: true },
+        );
+      });
+    try {
+      const refresh = c.result().refresh();
+      await until(() => requestSignal, "blocked cancellable snapshot");
+      if (failDiscard)
+        world.beforeCommit = async () => {
+          throw new Error("disk full");
+        };
+      const logout = c.result().signOut();
+      // Attach before yielding so a deliberate local failure is handled.
+      const result = logout.then(
+        () => null,
+        (error) => error,
+      );
+      await until(
+        () => requestSignal.aborted,
+        "logout abort without server reply",
+      );
+      const error = await result;
+      await refresh;
+      if (failDiscard) {
+        assert.match(error.message, /local_save_failed/);
+        assert.equal(world.authSignOutCalls, 0);
+        assert.ok(c.result().user);
+        world.beforeCommit = async () => {};
+        world.beforeSnapshot = async (signal) =>
+          assert.equal(signal.aborted, false);
+        await c.result().refresh();
+        assert.equal(c.result().error, null);
+      } else {
+        assert.equal(error, null);
+        assert.equal(c.result().user, null);
+        assert.equal(c.result().sharedState, null);
+        assert.equal(world.read(), null);
+      }
+    } finally {
+      release?.();
+      c.unmount();
+    }
+  });
 }
 
 test("cached bootstrap stays checking until identity is verified, and offline stays unverified", async () => {
@@ -1657,6 +1784,164 @@ test("full record offline save survives restart and sends exactly the durably sa
   assert.equal(next.result().sharedState.entries[0].weight, 3.725);
   assert.equal(world.read().records.length, 0);
   next.unmount();
+});
+
+const liveSleep = {
+  id: "live-sleep",
+  type: "sleep",
+  start: "2026-09-01T01:00:00.000Z",
+  note: "",
+};
+test("live sleep controls project start and quick discard without waiting for the API", async () => {
+  const world = makeWorld({ offline: false });
+  const receipt = deferred();
+  world.beforeRecord = async (operation) => {
+    if (operation.kind === "create") await receipt.promise;
+  };
+  const c = await boot(world);
+  try {
+    await c.result().saveRecord("entry", liveSleep);
+    await until(() => world.recordsSent.length === 1, "in-flight sleep create");
+    assert.equal(c.result().canEditRecord("entry", liveSleep.id), false);
+    assert.equal(c.result().canControlSleep(liveSleep.id), true);
+    const original = structuredClone(world.recordsSent[0].operation);
+    await c.result().finishSleep(liveSleep.id, "2026-09-01T01:00:10.000Z");
+    assert.equal(c.result().sharedState.entries.length, 0);
+    assert.equal(c.result().canControlSleep(liveSleep.id), false);
+    assert.deepEqual(world.read().records[0].operation, original);
+    assert.ok(world.read().records[0].sleepFollowUp);
+    await assert.rejects(
+      c.result().finishSleep(liveSleep.id, "2026-09-01T01:00:11.000Z"),
+      /record_pending/,
+    );
+    receipt.resolve();
+    await until(
+      () => world.recordsSent.length === 2 && !c.result().syncing,
+      "durable quick-sleep removal",
+    );
+    assert.equal(world.recordsSent[1].operation.kind, "delete");
+    assert.notEqual(
+      world.recordsSent[1].operation.operationId,
+      original.operationId,
+    );
+    assert.ok(world.recordsSent.every((sent) => sent.durablySaved));
+    assert.equal(world.server.entries.length, 0);
+  } finally {
+    receipt.resolve();
+    c.unmount();
+  }
+});
+test("offline completed sleep survives restart and sends original create then versioned finish", async () => {
+  const world = makeWorld();
+  const first = await boot(world);
+  await first.result().saveRecord("entry", liveSleep);
+  await first.result().finishSleep(liveSleep.id, "2026-09-01T01:01:00.000Z");
+  const original = structuredClone(world.read().records[0].operation);
+  const followUpId = world.read().records[0].sleepFollowUp.operationId;
+  assert.equal(
+    first.result().sharedState.entries[0].end,
+    "2026-09-01T01:01:00.000Z",
+  );
+  first.unmount();
+  world.offline = false;
+  const next = world.mount();
+  try {
+    await until(
+      () => world.recordsSent.length === 1 && !next.result().syncing,
+      "restarted original sleep create",
+    );
+    assert.equal(
+      next.result().sharedState.entries[0].end,
+      "2026-09-01T01:01:00.000Z",
+    );
+    await next.result().refresh();
+    assert.deepEqual(world.recordsSent[0].operation, original);
+    assert.equal(world.recordsSent[1].operation.operationId, followUpId);
+    assert.equal(world.recordsSent[1].operation.baseVersion, "1");
+    assert.equal(world.server.entries[0].entry.end, "2026-09-01T01:01:00.000Z");
+    assert.equal(world.read().records.length, 0);
+  } finally {
+    next.unmount();
+  }
+});
+test("failed durable sleep stop rolls back projection and does not send the stop", async () => {
+  const world = makeWorld();
+  const c = await boot(world);
+  try {
+    await c.result().saveRecord("entry", liveSleep);
+    world.beforeCommit = async () => {
+      throw new Error("disk_full");
+    };
+    await assert.rejects(
+      c.result().finishSleep(liveSleep.id, "2026-09-01T01:00:10.000Z"),
+      /local_save_failed/,
+    );
+    assert.equal(c.result().canControlSleep(liveSleep.id), true);
+    assert.equal(c.result().sharedState.entries[0].end, undefined);
+    assert.equal(world.read().records[0].sleepFollowUp, undefined);
+    assert.equal(world.recordsSent.length, 0);
+  } finally {
+    c.unmount();
+  }
+});
+test("lost sleep-create response retries the immutable ID before applying the durable stop", async () => {
+  const world = makeWorld({ offline: false });
+  let failResponse = true;
+  world.beforeRecord = async () => {
+    if (failResponse) {
+      failResponse = false;
+      throw new Error("network_unavailable");
+    }
+  };
+  const c = await boot(world);
+  try {
+    await c.result().saveRecord("entry", liveSleep);
+    await until(
+      () => world.recordsSent.length === 1 && !c.result().syncing,
+      "lost sleep-create response",
+    );
+    assert.equal(c.result().error, "network_unavailable");
+    const original = structuredClone(world.recordsSent[0].operation);
+    world.offline = true;
+    await c.result().finishSleep(liveSleep.id, "2026-09-01T01:00:10.000Z");
+    world.offline = false;
+    await c.result().refresh();
+    await c.result().refresh();
+    assert.deepEqual(world.recordsSent[1].operation, original);
+    assert.equal(world.recordsSent.at(-1).operation.kind, "delete");
+    assert.equal(world.server.entries.length, 0);
+    assert.equal(world.read().records.length, 0);
+  } finally {
+    c.unmount();
+  }
+});
+test("accepted sleep with an unavailable snapshot resumes its stop safely after restart", async () => {
+  const world = makeWorld();
+  const first = await boot(world);
+  await first.result().saveRecord("entry", liveSleep);
+  await first.result().finishSleep(liveSleep.id, "2026-09-01T01:00:10.000Z");
+  world.beforeRecord = async () => {
+    world.snapshotOffline = true;
+  };
+  world.offline = false;
+  await first.result().refresh();
+  assert.equal(world.read().records[0].status, "accepted");
+  assert.equal(first.result().sharedState.entries.length, 0);
+  first.unmount();
+  world.snapshotOffline = false;
+  world.beforeRecord = async () => {};
+  const next = world.mount();
+  try {
+    await until(
+      () => world.recordsSent.length === 2 && !next.result().syncing,
+      "resuming accepted sleep stop",
+    );
+    assert.equal(world.recordsSent[1].operation.kind, "delete");
+    assert.equal(world.server.entries.length, 0);
+    assert.equal(world.read().records.length, 0);
+  } finally {
+    next.unmount();
+  }
 });
 test("directory revocation stays hidden after restart even when family SQLite purge fails", async () => {
   const world = makeWorld({ offline: false });
@@ -3175,5 +3460,153 @@ test("explicit logout can discard an unresolved offline lifecycle intent without
     assert.equal(controller.result().draft, null);
   } finally {
     controller.unmount();
+  }
+});
+
+const liveFeed = {
+  id: "live-feed",
+  type: "feed",
+  feedKind: "formula",
+  feedRunning: true,
+  amount: 120,
+  start: "2026-09-01T01:00:00.000Z",
+  note: "Feed note",
+};
+test("pending feed can finish with actual amount while its start API response is delayed", async () => {
+  const world = makeWorld({ offline: false });
+  const receipt = deferred();
+  world.beforeRecord = async (op) => {
+    if (op.kind === "create") await receipt.promise;
+  };
+  const c = await boot(world);
+  try {
+    await c.result().saveRecord("entry", liveFeed);
+    await until(() => world.recordsSent.length === 1, "pending feed start");
+    assert.equal(c.result().canControlFeed(liveFeed.id), true);
+    assert.equal(c.result().canEditRecord("entry", liveFeed.id), false);
+    const original = structuredClone(world.recordsSent[0].operation);
+    await c
+      .result()
+      .finishFeed(
+        liveFeed.id,
+        "2026-09-01T01:10:00.000Z",
+        85,
+        undefined,
+        liveFeed,
+      );
+    assert.equal(c.result().sharedState.entries[0].amount, 85);
+    assert.equal(c.result().sharedState.entries[0].feedRunning, undefined);
+    assert.equal(c.result().canControlFeed(liveFeed.id), false);
+    assert.deepEqual(world.read().records[0].operation, original);
+    await assert.rejects(
+      c.result().finishFeed(liveFeed.id, "2026-09-01T01:10:00.000Z", 90),
+      /record_pending/,
+    );
+    receipt.resolve();
+    await until(
+      () => world.recordsSent.length === 2 && !c.result().syncing,
+      "finished feed shared",
+    );
+    assert.equal(world.recordsSent[1].operation.kind, "update");
+    assert.equal(world.recordsSent[1].operation.entry.amount, 85);
+    assert.equal(world.recordsSent[1].operation.entry.feedRunning, undefined);
+    assert.ok(world.recordsSent.every((sent) => sent.durablySaved));
+    assert.equal(world.server.entries[0].entry.amount, 85);
+  } finally {
+    receipt.resolve();
+    c.unmount();
+  }
+});
+test("durable offline feed finish survives restart with original create and stable selected-amount update", async () => {
+  const world = makeWorld();
+  const first = await boot(world);
+  await first.result().saveRecord("entry", liveFeed);
+  await first
+    .result()
+    .finishFeed(
+      liveFeed.id,
+      "2026-09-01T01:10:00.000Z",
+      123.5,
+      undefined,
+      liveFeed,
+    );
+  const original = structuredClone(world.read().records[0].operation);
+  const finishId = world.read().records[0].feedFollowUp.operationId;
+  first.unmount();
+  world.offline = false;
+  const next = world.mount();
+  try {
+    await until(
+      () => world.recordsSent.length >= 1 && !next.result().syncing,
+      "restored feed start",
+    );
+    assert.equal(next.result().sharedState.entries[0].amount, 123.5);
+    await next.result().refresh();
+    assert.deepEqual(world.recordsSent[0].operation, original);
+    assert.equal(world.recordsSent[1].operation.operationId, finishId);
+    assert.equal(world.recordsSent[1].operation.entry.amount, 123.5);
+    assert.equal(world.read().records.length, 0);
+  } finally {
+    next.unmount();
+  }
+});
+test("feed confirmation rejects changed original content after a pending start has been acknowledged", async () => {
+  const world = makeWorld({ offline: false });
+  const c = await boot(world);
+  try {
+    await c.result().saveRecord("entry", liveFeed);
+    await until(
+      () => world.recordsSent.length === 1 && !c.result().syncing,
+      "saved feed start",
+    );
+    world.server.entries[0].entry = { ...liveFeed, note: "remote edit" };
+    world.server.entries[0].version = "2";
+    world.server.entries[0].lastEditedBy = "other-user";
+    world.server.revision = "2";
+    await c.result().refresh();
+    await assert.rejects(
+      c
+        .result()
+        .finishFeed(
+          liveFeed.id,
+          "2026-09-01T01:10:00.000Z",
+          85,
+          undefined,
+          liveFeed,
+        ),
+      /record_changed/,
+    );
+    assert.equal(world.recordsSent.length, 1);
+    assert.equal(c.result().sharedState.entries[0].note, "remote edit");
+  } finally {
+    c.unmount();
+  }
+});
+test("feed confirmation disk failure keeps the running feed and does not store the changed amount", async () => {
+  const world = makeWorld();
+  const c = await boot(world);
+  try {
+    await c.result().saveRecord("entry", liveFeed);
+    world.beforeCommit = async () => {
+      throw new Error("disk_full");
+    };
+    await assert.rejects(
+      c
+        .result()
+        .finishFeed(
+          liveFeed.id,
+          "2026-09-01T01:10:00.000Z",
+          85,
+          undefined,
+          liveFeed,
+        ),
+      /local_save_failed/,
+    );
+    assert.equal(c.result().canControlFeed(liveFeed.id), true);
+    assert.equal(c.result().sharedState.entries[0].amount, 120);
+    assert.equal(world.read().records[0].feedFollowUp, undefined);
+    assert.equal(world.recordsSent.length, 0);
+  } finally {
+    c.unmount();
   }
 });

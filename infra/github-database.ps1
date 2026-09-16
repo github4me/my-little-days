@@ -22,6 +22,61 @@ function Invoke-DatabaseAz([string[]]$Arguments) {
 function Get-Rules {
     return @(Invoke-DatabaseAz @('sql', 'server', 'firewall-rule', 'list', '--resource-group', $script:group, '--server', $script:server))
 }
+function Test-ExactPublicIPv4([string]$Address) {
+    $ip = $null
+    if (![System.Net.IPAddress]::TryParse($Address, [ref]$ip) -or
+        $ip.AddressFamily -ne [System.Net.Sockets.AddressFamily]::InterNetwork -or $Address -cne $ip.ToString()) { return $false }
+    $bytes = $ip.GetAddressBytes()
+    return !($bytes[0] -in @(0,10,127) -or $bytes[0] -ge 224 -or
+        ($bytes[0] -eq 100 -and $bytes[1] -ge 64 -and $bytes[1] -le 127) -or
+        ($bytes[0] -eq 169 -and $bytes[1] -eq 254) -or
+        ($bytes[0] -eq 172 -and $bytes[1] -ge 16 -and $bytes[1] -le 31) -or
+        ($bytes[0] -eq 192 -and ($bytes[1] -eq 168 -or ($bytes[1] -eq 0 -and $bytes[2] -in @(0,2)) -or ($bytes[1] -eq 88 -and $bytes[2] -eq 99))) -or
+        ($bytes[0] -eq 198 -and ($bytes[1] -in @(18,19) -or ($bytes[1] -eq 51 -and $bytes[2] -eq 100))) -or
+        ($bytes[0] -eq 203 -and $bytes[1] -eq 0 -and $bytes[2] -eq 113))
+}
+function Get-ApprovedRules {
+    # Set only after operator review in the protected family-database environment.
+    # Example shape: {"app-20-21-22-23":"20.21.22.23"}; {} approves no existing rules.
+    $raw = $env:FAMILY_DB_APPROVED_FIREWALL_RULES_JSON
+    if ([string]::IsNullOrWhiteSpace($raw)) { throw 'Configure FAMILY_DB_APPROVED_FIREWALL_RULES_JSON with the reviewed exact-IP policy before migration.' }
+    $document = $null
+    try {
+        $document = [System.Text.Json.JsonDocument]::Parse($raw)
+        if ($document.RootElement.ValueKind -ne [System.Text.Json.JsonValueKind]::Object) { throw 'Policy must be an object.' }
+        $approved = [Collections.Generic.Dictionary[string,string]]::new([StringComparer]::Ordinal)
+        $names = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        foreach ($property in $document.RootElement.EnumerateObject()) {
+            if ($property.Name -cnotmatch '^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$' -or $property.Name -like 'github-db-*' -or
+                !$names.Add($property.Name) -or $property.Value.ValueKind -ne [System.Text.Json.JsonValueKind]::String) { throw 'Invalid or duplicate approved rule.' }
+            $address = $property.Value.GetString()
+            if (!(Test-ExactPublicIPv4 $address)) { throw 'Approved rule must contain one canonical public IPv4.' }
+            $approved.Add($property.Name, $address)
+        }
+        return ,$approved
+    } catch { throw 'Invalid FAMILY_DB_APPROVED_FIREWALL_RULES_JSON. Approve unique rule names with exact public IPv4 addresses only; no ranges, stale runner rules or unknown exceptions.' }
+    finally { if ($null -ne $document) { $document.Dispose() } }
+}
+function Assert-ApprovedRules([object[]]$Rules, [Collections.Generic.Dictionary[string,string]]$Approved, [string]$RunnerAddress = '') {
+    $names = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $runRules = 0
+    foreach ($existing in $Rules) {
+        if ($existing.name -isnot [string] -or !$names.Add($existing.name) -or
+            $existing.startIpAddress -isnot [string] -or $existing.endIpAddress -isnot [string] -or
+            !(Test-ExactPublicIPv4 $existing.startIpAddress) -or $existing.startIpAddress -cne $existing.endIpAddress) {
+            throw 'SQL firewall contains an invalid address, duplicate, broad range or all-Azure rule. Review it separately; no unrelated rule was changed.'
+        }
+        if ($existing.name -like 'github-db-*') {
+            if (!$RunnerAddress -or $existing.name -cne $script:rule -or $existing.startIpAddress -cne $RunnerAddress) {
+                throw 'A temporary migration firewall rule already exists or differs. Review it before releasing; no unrelated rule was changed.'
+            }
+            $runRules++
+        } elseif (!$Approved.ContainsKey($existing.name) -or $Approved[$existing.name] -cne $existing.startIpAddress) {
+            throw 'SQL firewall contains an unapproved rule or IP. Compare every rule with the protected exact-IP policy; no unrelated rule was changed.'
+        }
+    }
+    if ($RunnerAddress -and $runRules -ne 1) { throw 'Exact runner-IP firewall verification failed.' }
+}
 function Remove-RunRule {
     # Never enumerate and delete other runs' or manually configured rules.
     $null = Invoke-DatabaseAz @('sql', 'server', 'firewall-rule', 'delete', '--resource-group', $script:group, '--server', $script:server, '--name', $script:rule)
@@ -59,20 +114,10 @@ if ($Mode -eq 'Cleanup') {
 if ($env:FAMILY_DB_MIGRATIONS_ENABLED -cne 'true') { throw 'Configure and approve the family-database environment before enabling migrations.' }
 if (!(Test-Path -LiteralPath $MigratorPath -PathType Leaf)) { throw 'Reviewed migrator artifact is missing.' }
 if ([string]::IsNullOrWhiteSpace($env:GITHUB_ENV)) { throw 'GitHub environment file is required for cleanup recovery.' }
-$rules = Get-Rules
-if (@($rules | Where-Object { $_.startIpAddress -ceq '0.0.0.0' }).Count -gt 0) {
-    throw 'Broad SQL firewall access is configured. Review it before releasing; do not enable Allow Azure services.'
-}
-if (@($rules | Where-Object { $_.name -like 'github-db-*' }).Count -gt 0) {
-    throw 'A temporary migration firewall rule already exists. Review and remove the stale rule before a new release.'
-}
+$approvedRules = Get-ApprovedRules
+Assert-ApprovedRules -Rules (Get-Rules) -Approved $approvedRules
 $address = [string](Invoke-RestMethod -Uri 'https://api.ipify.org' -TimeoutSec 20)
-$ip = $null
-if (![System.Net.IPAddress]::TryParse($address, [ref]$ip) -or $ip.AddressFamily -ne [System.Net.Sockets.AddressFamily]::InterNetwork) { throw 'Runner public IPv4 could not be verified.' }
-$bytes = $ip.GetAddressBytes()
-if ($address -cne $ip.ToString() -or $bytes[0] -in @(0,10,127) -or $bytes[0] -ge 224 -or
-    ($bytes[0] -eq 169 -and $bytes[1] -eq 254) -or ($bytes[0] -eq 192 -and $bytes[1] -eq 168) -or
-    ($bytes[0] -eq 172 -and $bytes[1] -ge 16 -and $bytes[1] -le 31)) { throw 'Refusing a non-public or ambiguous runner IPv4.' }
+if (!(Test-ExactPublicIPv4 $address)) { throw 'Refusing a non-public or ambiguous runner IPv4.' }
 # Record intent before the request: a timed-out creation can still have succeeded.
 Add-Content -LiteralPath $env:GITHUB_ENV -Value "FAMILY_DB_RULE_CREATED=$rule"
 $env:FAMILY_DB_RULE_CREATED = $rule
@@ -80,8 +125,8 @@ $migrationFailure = $null
 try {
     $null = Invoke-DatabaseAz @('sql', 'server', 'firewall-rule', 'create', '--resource-group', $group, '--server', $server,
         '--name', $rule, '--start-ip-address', $address, '--end-ip-address', $address)
-    $created = @(Get-Rules | Where-Object { $_.name -ceq $rule })
-    if ($created.Count -ne 1 -or $created[0].startIpAddress -cne $address -or $created[0].endIpAddress -cne $address) { throw 'Exact runner-IP firewall verification failed.' }
+    # Recheck all rules, not just ours: configuration drift during create must fail closed too.
+    Assert-ApprovedRules -Rules (Get-Rules) -Approved $approvedRules -RunnerAddress $address
     $env:FAMILY_DB_SERVER = "$server.database.windows.net"
     $env:FAMILY_DB_TENANT_ID = $tenant
     $extra = @()

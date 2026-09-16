@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   FamilyReminderCoordinator,
   type FamilyReminderPreferences,
+  type FamilyReminderCleanup,
   type ScheduledFamilyReminder,
 } from "./family/familyReminderCoordinator";
 import type { FamilyReminderPlan } from "./family/familyReminderPlan";
@@ -22,29 +23,53 @@ function fixture(initial: FamilyReminderPreferences | null = null) {
   let scheduleCalls = 0;
   let dismissed = 0;
   let blockSchedule: (() => Promise<void>) | null = null;
-  const coordinator = new FamilyReminderCoordinator({
+  let cleanup: FamilyReminderCleanup | null = null;
+  const failures = new Set<string>();
+  const attempts: string[] = [];
+  const dependencies = {
     load: async () => stored,
-    save: async (value) => {
+    save: async (value: FamilyReminderPreferences | null) => {
+      attempts.push("save");
+      if (failures.has("save")) throw new Error("disk_failed");
       stored = value;
+    },
+    loadCleanup: async () => {
+      attempts.push("loadCleanup");
+      if (failures.has("loadCleanup")) throw new Error("disk_failed");
+      return cleanup;
+    },
+    saveCleanup: async (value: FamilyReminderCleanup | null) => {
+      attempts.push(value ? "markCleanup" : "clearCleanup");
+      if (failures.has("saveCleanup")) throw new Error("disk_failed");
+      cleanup = value;
     },
     requestPermission: async () => {
       permissionRequests++;
     },
-    list: async () => [...scheduled.values()],
-    schedule: async (origin, value) => {
+    list: async () => {
+      attempts.push("list");
+      if (failures.has("list")) throw new Error("native_failed");
+      return [...scheduled.values()];
+    },
+    schedule: async (origin: string, value: FamilyReminderPlan) => {
       scheduleCalls++;
       if (blockSchedule) await blockSchedule();
       const id = `notification-${scheduleCalls}`;
       scheduled.set(id, { id, origin, fingerprint: value.fingerprint });
       return id;
     },
-    cancel: async (id) => {
+    cancel: async (id: string) => {
+      attempts.push(`cancel:${id}`);
+      if (failures.has(`cancel:${id}`)) throw new Error("native_failed");
       scheduled.delete(id);
     },
     dismiss: async () => {
+      attempts.push("dismiss");
       dismissed++;
+      if (failures.has("dismiss")) throw new Error("native_failed");
     },
-  });
+  };
+  const coordinator = new FamilyReminderCoordinator(dependencies);
   return {
     coordinator,
     scheduled,
@@ -52,6 +77,10 @@ function fixture(initial: FamilyReminderPreferences | null = null) {
     requests: () => permissionRequests,
     calls: () => scheduleCalls,
     dismissed: () => dismissed,
+    failures,
+    attempts,
+    getCleanup: () => cleanup,
+    restart: () => new FamilyReminderCoordinator(dependencies),
     block: (value: () => Promise<void>) => {
       blockSchedule = value;
     },
@@ -157,6 +186,8 @@ test("changing family while enable awaits permission cannot save old-family cons
     save: async (value) => {
       preference = value;
     },
+    loadCleanup: async () => null,
+    saveCleanup: async () => {},
     requestPermission: () => {
       started();
       return new Promise((resolve) => {
@@ -178,4 +209,88 @@ test("changing family while enable awaits permission cannot save old-family cons
   assert.equal(coordinator.shouldShow("family-a"), false);
   assert.equal(coordinator.shouldShow("family-b"), false);
   assert.deepEqual(preference, { origin: "family-b", enabled: false });
+});
+
+test("failed preference clearing still cancels every native reminder and dismisses presented notifications", async () => {
+  const f = fixture({ origin: "family-a", enabled: true });
+  await f.coordinator.sync("family-a", [
+    plan,
+    { ...plan, fingerprint: "another" },
+  ]);
+  f.failures.add("save");
+  f.attempts.length = 0;
+  await assert.rejects(f.coordinator.clear(), /reminder_cleanup_failed/);
+  assert.equal(f.coordinator.shouldShow("family-a"), false);
+  assert.equal(f.scheduled.size, 0);
+  assert.ok(f.attempts.includes("cancel:notification-1"));
+  assert.ok(f.attempts.includes("cancel:notification-2"));
+  assert.ok(f.attempts.includes("dismiss"));
+  assert.equal(f.getCleanup()?.clearPreference, true);
+});
+test("cleanup independently attempts cancellation, dismissal and journal writes despite each injected failure", async () => {
+  for (const failure of [
+    "list",
+    "cancel:notification-1",
+    "dismiss",
+    "loadCleanup",
+    "saveCleanup",
+  ]) {
+    const f = fixture({ origin: "family-a", enabled: true });
+    await f.coordinator.sync("family-a", [
+      plan,
+      { ...plan, fingerprint: "another" },
+    ]);
+    f.failures.add(failure);
+    f.attempts.length = 0;
+    await assert.rejects(f.coordinator.clear(), /reminder_cleanup_failed/);
+    assert.equal(f.coordinator.shouldShow("family-a"), false);
+    assert.ok(f.attempts.includes("save"), failure);
+    assert.ok(f.attempts.includes("dismiss"), failure);
+    if (failure !== "list")
+      assert.ok(f.attempts.includes("cancel:notification-2"), failure);
+    f.failures.clear();
+    await f.coordinator.sync("family-a", [plan]);
+    assert.equal(f.coordinator.shouldShow("family-a"), false);
+    assert.equal(f.scheduled.size, 0);
+    assert.equal(f.getCleanup(), null);
+  }
+});
+test("durable failed cleanup survives restart and cannot reschedule until cleanup and preference invalidation succeed", async () => {
+  const f = fixture({ origin: "family-a", enabled: true });
+  await f.coordinator.sync("family-a", [plan]);
+  f.failures.add("save");
+  f.failures.add("cancel:notification-1");
+  await assert.rejects(f.coordinator.clear(), /reminder_cleanup_failed/);
+  const restarted = f.restart();
+  await assert.rejects(
+    restarted.sync("family-a", [plan]),
+    /reminder_cleanup_failed/,
+  );
+  assert.equal(restarted.shouldShow("family-a"), false);
+  assert.equal(f.calls(), 1);
+  f.failures.clear();
+  await restarted.sync("family-a", [plan]);
+  assert.equal(f.scheduled.size, 0);
+  assert.equal(f.getStored()?.enabled ?? false, false);
+  assert.equal(f.getCleanup(), null);
+  assert.equal(restarted.shouldShow("family-a"), false);
+});
+test("startup reconciles unknown old native reminders before admitting delivery", async () => {
+  const f = fixture({ origin: "family-a", enabled: true });
+  f.scheduled.set("old", {
+    id: "old",
+    origin: "family-old",
+    fingerprint: "old",
+  });
+  f.failures.add("cancel:old");
+  await assert.rejects(
+    f.coordinator.sync("family-a", [plan]),
+    /reminder_cleanup_failed/,
+  );
+  assert.equal(f.calls(), 0);
+  assert.equal(f.coordinator.shouldShow("family-a"), false);
+  f.failures.clear();
+  await f.coordinator.sync("family-a", [plan]);
+  assert.equal(f.scheduled.has("old"), false);
+  assert.equal(f.coordinator.shouldShow("family-a"), true);
 });

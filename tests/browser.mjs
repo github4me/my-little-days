@@ -2090,8 +2090,108 @@ assert.equal(
   await page.getByRole("button", { name: /^View record:/ }).count(),
   6,
 );
+// Live sleep responds locally, rejects accidental sub-minute sessions, and
+// keeps the manual backfill path unrestricted. Use an isolated synthetic state.
+const sleepClock = new Date("2026-09-17T03:14:00+10:00");
+await page.clock.setFixedTime(sleepClock);
+await page.evaluate(() => {
+  localStorage.setItem("little-days-v1-language", "zh");
+  localStorage.setItem(
+    "little-days-v1",
+    JSON.stringify({
+      schemaVersion: 1,
+      profile: { name: "Sleep test", birthDate: "", sex: "unspecified" },
+      entries: [],
+    }),
+  );
+});
+await page.reload();
+await page.getByText("今日数据", { exact: true }).waitFor();
+assert.equal(await page.getByText("0", { exact: true }).count(), 3);
+await page.getByRole("button", { name: "睡了", exact: true }).click();
+await page.getByText("正在睡觉", { exact: true }).waitFor();
+await page.getByRole("button", { name: "醒了", exact: true }).waitFor();
+await page.reload();
+await page.getByText("正在睡觉", { exact: true }).waitFor();
+await page.clock.setFixedTime(new Date(sleepClock.getTime() + 59_999));
+await page.getByRole("button", { name: "醒了", exact: true }).click();
+await page
+  .getByText(
+    "本次睡眠不足 1 分钟，已按误触取消，不计入记录。如需保留，请补录睡眠。",
+    { exact: true },
+  )
+  .waitFor();
+assert.equal(await page.getByText("正在睡觉", { exact: true }).count(), 0);
+assert.equal(
+  await page.evaluate(
+    () => JSON.parse(localStorage.getItem("little-days-v1")).entries.length,
+  ),
+  0,
+);
+assert.equal(await page.getByText("0", { exact: true }).count(), 3);
+
+// An explicitly backfilled zero-minute record is allowed, unlike live reversal.
+await page.getByRole("button", { name: "补录睡眠 ›", exact: true }).click();
+await page.getByRole("button", { name: "已睡醒 / 补录", exact: true }).click();
+await page.getByLabel("入睡时间日期", { exact: true }).fill("2026-09-17");
+await page.getByLabel("入睡时间时刻", { exact: true }).fill("03:10");
+await page.getByLabel("醒来时间日期", { exact: true }).fill("2026-09-17");
+await page.getByLabel("醒来时间时刻", { exact: true }).fill("03:10");
+await page.getByRole("button", { name: "保存记录", exact: true }).click();
+await page
+  .getByRole("button", { name: "关闭记录编辑", exact: true })
+  .waitFor({ state: "detached" });
+assert.equal(
+  await page.evaluate(
+    () => JSON.parse(localStorage.getItem("little-days-v1")).entries.length,
+  ),
+  1,
+);
+
+await page.clock.setFixedTime(sleepClock);
+await page.getByRole("button", { name: "睡了", exact: true }).click();
+await page.getByText("正在睡觉", { exact: true }).waitFor();
+await page.clock.setFixedTime(new Date(sleepClock.getTime() + 60_000));
+await page.getByRole("button", { name: "醒了", exact: true }).click();
+await page.getByRole("button", { name: "睡了", exact: true }).waitFor();
+const sleepRecords = await page.evaluate(
+  () => JSON.parse(localStorage.getItem("little-days-v1")).entries,
+);
+assert.equal(sleepRecords.length, 2);
+assert.equal(sleepRecords.filter((entry) => !entry.end).length, 0);
+assert.ok(
+  sleepRecords.some(
+    (entry) => Date.parse(entry.end) - Date.parse(entry.start) === 60_000,
+  ),
+);
+
+// A failed local save must undo the optimistic state instead of claiming sleep
+// is durably running. Do not turn this into an unhandled page exception.
+await page.evaluate(() => {
+  window.sleepTestSetItem = Storage.prototype.setItem;
+  Storage.prototype.setItem = function (key, value) {
+    if (key === "little-days-v1") throw new Error("sleep_test_storage_full");
+    return window.sleepTestSetItem.call(this, key, value);
+  };
+});
+await page.getByRole("button", { name: "睡了", exact: true }).click();
+await page.getByText(/sleep_test_storage_full/).waitFor();
+assert.equal(await page.getByText("正在睡觉", { exact: true }).count(), 0);
+await page.evaluate(() => {
+  Storage.prototype.setItem = window.sleepTestSetItem;
+  delete window.sleepTestSetItem;
+});
+await page.getByRole("tab", { name: "我的", exact: true }).click();
+await chooseEnglish();
+await page.getByRole("tab", { name: "Today", exact: true }).click();
+await page.getByText("Today's totals", { exact: true }).waitFor();
+await page.getByRole("button", { name: "Sleep", exact: true }).click();
+await page.getByText("Sleeping now", { exact: true }).waitFor();
+await page.getByRole("button", { name: "Awake", exact: true }).click();
+await page.getByText(/This sleep lasted less than 1 minute/).waitFor();
+await assertNoUntranslatedChinese("live sleep feedback and today's totals");
 assert.deepEqual(errors, []);
 console.log(
-  "PASS: existing local flows, calendar/history, dark/narrow layout, bilingual unconfigured family sharing and preserved local history.",
+  "PASS: existing local flows, calendar/history, dark/narrow layout, bilingual family/account and live sleep/today summaries, preserved local history.",
 );
 await browser.close();
