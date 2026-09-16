@@ -1,5 +1,6 @@
 import React, { useContext, useEffect, useRef, useState } from "react";
 import {
+  Keyboard,
   KeyboardAvoidingView,
   Image,
   Modal,
@@ -285,6 +286,7 @@ export default function OwnerSetupCard({
             style={styles.button}
             onPress={() =>
               void act(async () => {
+                Keyboard.dismiss();
                 const prepared = await onPrepare(emails);
                 if (prepared.inviteeEmails.length > MAX_INVITED_FAMILY_MEMBERS)
                   throw new Error("owner_recipient_limit");

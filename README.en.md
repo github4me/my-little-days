@@ -8,7 +8,7 @@ An offline baby-care and growth tracker built with Expo, React Native, and TypeS
 
 - **Installed iPhone name:** Chinese system-language preferences show “小日子”; English uses “My Little Days”, with English as the fallback for unmatched languages. This native setting requires a new installed build, not only a JavaScript update.
 
-- **Baby profile:** name, birth date, sex, and an optional photo stored on the device. Tap the Home avatar to open the profile settings.
+- **Baby profile:** name, birth date, sex, and an optional photo, stored locally in offline mode and shared with the family in shared mode. Tap the Home avatar to open the profile settings.
 - **Feeding:** formula, expressed milk, and breastfeeding records; quick milk-volume choices and optional end times. Formula shortcuts adapt to the baby's age on the feed date when a birth date is set, without changing the entered amount; expressed milk and unknown ages keep the existing choices. These are recording shortcuts, not feeding targets ([sources and age bands](docs/FEED-AMOUNT-PRESETS.md)). Start a timer without an end time, then tap Stop on Home to confirm the session. Bottle feeds show the original amount and a wheel for adjusting the actual volume in 5 mL steps before saving; breastfeeding remains duration-only. The end time is captured at Stop, not confirmation; cancelling continues the feed. When adding an end time to a past feed, it initially defaults to 20 minutes after the start and can be edited.
 - **Sleep:** start and stop a sleep session, add past sessions, and resume the timer display after reopening the app.
 - **Diapers:** pee, poo, and mixed changes.
@@ -24,23 +24,23 @@ An offline baby-care and growth tracker built with Expo, React Native, and TypeS
 - **Privacy, support, and credits:** More has separate expandable Privacy & support and Credits sections. Credits thanks Trista from FPH and Mia, Violet, and Bill in her group for their suggestions and ideas, and the group's mums and dads for their support. More parents are welcome to join in. Activity guidance is for parents, not a screen-based course for babies or a developmental assessment.
 - **Backups:** export and import validated JSON files. Imports replace the current records after confirmation rather than merging them.
 
-## Family sharing — full record integration, live deployment checks remain
+## Family sharing — full record integration, native and operational acceptance pending
 
-Open **More → Family sharing**. Offline use needs no account. After optional sign-in, create a family or accept an invitation; shared records appear directly in Home, Records (calendar and bars), Growth and Daily care.
+Sign in through **More → My account**, then select **Family sharing** below the baby profile to open family management directly. Offline use needs no account. After sign-in, create a family or accept an invitation; shared records appear directly in Home, Records (calendar and bars), Growth and Daily care.
 
-- First-time admins review their baby profile and complete feed, nappy, sleep, growth, legacy milestone and daily-care history before uploading. Family creation, imported history and invitations commit atomically. Finish running timers before migration.
-- Admins enter family members’ email addresses. **No invitation email or push is sent.** Recipients install independently, opt into registration/sign-in and accept or decline their matched invitation. One active family per account.
-- Joining downloads the admin’s history; the joiner’s original records are never uploaded or merged. Only after server acknowledgment and a verified full snapshot does activation clear original local records, recovery copies, photos, reminders and learning check-ins. Failed or uncertain transitions preserve the source and retry the same operation.
+- First-time admins review their baby profile, complete feed, nappy, sleep, growth, legacy milestone and daily-care history, current baby avatar, reminder rules/settings and all play selections/check-ins before uploading. Family creation, these records and invitations commit atomically. After the family data is verified and durably saved on the device, successful activation also clears the creator's original personal data and recovery copies, without retaining a recoverable personal copy. Finish running timers before migration.
+- Admins enter family members’ email addresses. **No invitation email or push is sent.** Recipients install independently, opt into registration/sign-in and accept or decline their matched invitation. One active family per account, with up to five people besides the admin. Active members and distinct unexpired pending invitations share those five places; revocation, decline, expiry or departure releases a place.
+- Joining downloads the admin’s family data; the joiner’s original records are never uploaded or merged. Only after server acknowledgment, validation and durable storage of the full snapshot does activation clear and replace original local records, recovery copies, avatar, reminders and play selections/check-ins, without keeping a recoverable personal copy. Unconfirmed actions or failed downloads/storage preserve the source and pause activation; failed cleanup retains the same operation for recovery.
 - Explicit saves use a durable, context-bound queue. First successful server commit wins for a record version; conflicts notify and refresh, while separate overlapping entries are retained. Members change their own records; admins may edit/delete any record and manage the profile, invitations and membership.
 - Leaving or removal revokes server access immediately; contributions remain with the family. Devices purge family cache and unsent work when revocation is detected. Admins can remove members without advance notice. Local import/export is unavailable in shared mode, and old family content cannot be copied into a new family.
 - A nominated member must accept ownership transfer. An admin must transfer, or remove other members and close the family, before deleting their account. Account deletion differs from ordinary departure: associated content and directory identity enter deletion processing, with a secure status receipt.
-- Photos, local notification schedules, activity selections/check-ins and personal display preferences are not shared. Parent activity guides remain readable; saved daily-care sessions use the family source. The separate development-only UI demo does not bypass real authentication.
+- The current baby avatar, reminder rules/settings and play selections/check-ins are shared; the device photo library is not uploaded. The admin manages the avatar, activity selection and saved reminder-form settings. Language, theme, view preferences and notification permission remain device-local. Each phone separately opts into and schedules its notifications; downloading rules never enables delivery. See [shared data details](docs/FAMILY-EXTRAS.md). The separate development-only UI demo does not bypass real authentication.
 
 Follow [full Azure setup](docs/AZURE-FAMILY-SETUP.md) and [server instructions](server/README.md). Bicep reuses the existing Linux B1 plan and provisions a separate Web App, managed identity and free-offer-only SQL without requiring Key Vault. SQL pauses at free-limit exhaustion with no paid fallback. Cleanup retries every 120 minutes by default; capacity and costs still need measurement.
 
 The [GitHub infrastructure workflow](docs/AZURE-GITHUB-INFRA.md) checks relevant pushes/PRs; trusted-branch Azure preview is read-only and apply still requires environment approval. API-code deployment remains a separate manual workflow. Existing resource names, SQL roles and environments containing `pilot` are retained for deployment compatibility, not as feature limitations.
 
-Source and local checks do not establish a live release. Customer-tenant setup, Graph consent/credentials, managed-identity SQL, protected GitHub environments, a new native build and two-iPhone validation remain required.
+The existing Azure database/API and iOS preview publication are recorded in the [release evidence](docs/AZURE-MANUAL-SETUP-RUNBOOK.md#shared-extras-release-evidence-16-september-2026). Publication does not establish device acceptance. Two-phone photo decoding, SQLite activation/recovery, notifications and family flows, plus real deletion, backup retention and restore exercises still need recorded outcomes.
 
 ## Run locally
 
@@ -65,7 +65,7 @@ The browser stores original local data in localStorage, separate from the instal
 
 The repository includes `preview` and `production` EAS build profiles. Preview uses internal distribution and the `preview` update channel; production uses the `production` channel and automatic build-number increments.
 
-The current source version is **0.2.0**. Added authentication, browser-session and SecureStore dependencies plus the `mylittledays` URL scheme require a new native binary. The version bump separates its `appVersion` update runtime from older 0.1.1 installations: do not publish family-sharing JavaScript to that old runtime. No new IPA, TestFlight build, or OTA release was produced in this implementation. Configure the family-sharing public environment values and complete two-phone validation before distribution.
+The current source version is **0.2.0**. Authentication, browser-session and SecureStore dependencies plus the `mylittledays` URL scheme require a compatible native binary. Do not publish family-sharing JavaScript to the old 0.1.1 runtime. The existing signed preview build 18 and compatible OTA releases are recorded in the [installation and release runbook](docs/AZURE-MANUAL-SETUP-RUNBOOK.md#124-build-install-and-identify-the-exact-version). Identify the exact installed build and update; assess a new build when native dependencies or configuration change. Two-phone acceptance remains required.
 
 With access to the Expo project and the required Apple signing credentials:
 
@@ -87,7 +87,7 @@ Further native dependency or configuration changes may require another build. Pu
 
 ## Data and privacy
 
-Offline records remain in local SQLite without an account. Signing in alone does not upload them. Explicit family creation migrates the reviewed history; joining another family downloads that family and clears the original local content only after verified activation. Shared cache and saved queues are isolated from the personal database and unavailable for local export. Photos and notifications are not shared.
+Offline records remain in local SQLite without an account. Signing in alone does not upload them. Explicit family creation uploads the reviewed history, current baby avatar, reminder rules/settings and play selections/check-ins. Joining downloads and durably saves the family data before replacing the original local content; it never uploads or merges the joiner’s personal data. Shared cache and saved queues are isolated from the personal database and unavailable for local export. Device preferences, notification permission and notification delivery remain local; each phone must opt into family reminders.
 
 The app uses Expo's update service to check for and download software updates. This can exchange technical metadata with that service; baby records and photos are not included in the app's update requests.
 

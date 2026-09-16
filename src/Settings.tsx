@@ -66,6 +66,8 @@ function SettingsSection({
 
 export default function Settings({
   familyUiPreview = false,
+  accountPanel,
+  familySharingVisible = false,
   sharedMode = false,
   sharedOwner = false,
   sharedAvatarEditable = false,
@@ -86,6 +88,8 @@ export default function Settings({
   onOpenFamily,
 }: {
   familyUiPreview?: boolean;
+  accountPanel?: React.ReactNode;
+  familySharingVisible?: boolean;
   sharedMode?: boolean;
   sharedOwner?: boolean;
   sharedAvatarEditable?: boolean;
@@ -276,6 +280,7 @@ export default function Settings({
           </T>
         </Card>
       )}
+      {accountPanel}
       <Card>
         <Pressable
           accessibilityRole="button"
@@ -498,6 +503,30 @@ export default function Settings({
           </>
         ) : null}
       </Card>
+      {familySharingVisible || familyUiPreview ? (
+        <Card>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={copy("家庭共享", "Family sharing")}
+            onPress={onOpenFamily}
+            style={({ pressed }) => [
+              row,
+              { minHeight: 44, opacity: pressed ? 0.7 : 1 },
+            ]}
+          >
+            <T raw style={{ flex: 1, fontSize: 18, fontWeight: "700" }}>
+              {copy("家庭共享", "Family sharing")}
+            </T>
+            <T
+              raw
+              accessibilityElementsHidden
+              style={{ color: c.primary, fontSize: 22 }}
+            >
+              ›
+            </T>
+          </Pressable>
+        </Card>
+      ) : null}
       <SettingsSection title="语言" busy={busy}>
         <T style={{ color: c.muted, fontSize: 13 }}>
           跟随系统语言，或在这里固定选择显示语言。
@@ -1087,28 +1116,9 @@ export default function Settings({
           </>
         )}
       </SettingsSection>
-      <SettingsSection title={copy("家庭共享", "Family sharing")} busy={busy}>
-        <T style={{ color: c.muted, fontSize: 13 }}>
-          {familyUiPreview
-            ? "预览邀请和成员管理界面。仅使用样例，不登录、不联网、不保存。"
-            : copy(
-                "可继续离线使用；登录后创建家庭或接受邀请，与家人共享宝宝记录。",
-                "Keep using the app offline, or sign in to create a family or accept an invitation and share baby records.",
-              )}
-        </T>
-        <Button
-          label={
-            familyUiPreview
-              ? "界面预览（无需登录）"
-              : copy("管理家庭共享", "Manage family sharing")
-          }
-          secondary
-          onPress={onOpenFamily}
-        />
-      </SettingsSection>
       <SettingsSection title="隐私与支持" busy={busy}>
         <T style={{ color: c.muted, fontSize: 13 }}>
-          了解本机数据、备份和软件更新
+          了解本机记录、家庭共享、备份和软件更新
         </T>
         <Button label="隐私与支持" secondary onPress={onOpenPrivacy} />
       </SettingsSection>
@@ -1127,8 +1137,8 @@ export default function Settings({
         </T>
         <T style={{ color: c.muted, fontSize: 12, textAlign: "center" }}>
           {copy(
-            "本机记录无需账号 · 可选家庭共享 · 不上传照片",
-            "No account for offline records · Optional family sharing · No photo uploads",
+            "本机记录无需账号 · 家庭共享前查看并确认资料",
+            "No account for offline records · Review and confirm before sharing",
           )}
         </T>
         <T style={{ color: c.muted, fontSize: 12, textAlign: "center" }}>

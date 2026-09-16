@@ -227,25 +227,25 @@ const english: Record<string, string> = {
   中文: "Chinese",
   简体中文: "Simplified Chinese",
   隐私与支持: "Privacy & support",
-  "了解本机数据、备份和软件更新":
-    "Learn about on-device data, backups, and updates",
+  "了解本机记录、家庭共享、备份和软件更新":
+    "Learn about offline records, family sharing, backups, and updates",
   返回我的: "Back to More",
   了解数据如何留在本机: "See how your data stays on this device",
-  "你的数据，由你掌控": "Your data stays with you",
+  "你的数据，由你掌控": "Your data, your choices",
   "小日子是一款离线记录工具：我们不提供账号、服务器或云同步。":
     "Little Days is an offline journal: we do not provide accounts, servers, or cloud sync.",
   本机记录: "On-device records",
-  "宝宝档案、照护记录、主题、语言和提醒设定都保存在这台设备上。":
-    "Baby profiles, care records, theme, language, and reminder settings stay on this device.",
+  "未启用家庭共享时，宝宝档案、记录、头像、早教和提醒资料保存在这台设备上，不会自动上传。主题、语言和视图偏好始终由本机保存。":
+    "Without family sharing, baby profiles, records, avatars, play data and reminders stay on this device and are not uploaded automatically. Theme, language and view preferences always remain on-device.",
   宝宝照片: "Baby photos",
-  "只有在你主动选择照片时才会请求相册权限。头像会复制到本机，可随时在宝宝档案中移除。":
-    "Photo access is requested only when you choose a photo. The avatar is copied on-device and can be removed from the baby profile at any time.",
+  "只有在你主动选择照片时才会访问所选照片。个人模式的头像保存在本机；创建家庭时会上传确认的当前头像，供家庭成员查看，之后由管理员修改或移除。不会上传整个相册。":
+    "The app accesses a photo only when you choose it. Personal avatars stay on-device. Creating a family uploads the confirmed current avatar for family members to view; the admin can then change or remove it. The app does not upload your entire photo library.",
   本地提醒: "Local reminders",
-  "照护提醒由手机本地安排，不会将提醒内容上传到服务器。":
-    "Care reminders are scheduled locally on your phone. Their content is not uploaded to a server.",
+  "个人模式的提醒仅保存在本机。家庭模式会共享提醒规则与设置，但通知由每台手机自行安排。下载规则不会自动开启通知，需在该手机选择启用并取得系统权限；关闭本机通知不会删除家庭规则。":
+    "Personal reminders stay on-device. Family mode shares reminder rules and settings, but each phone schedules its own notifications. Downloading rules does not enable notifications: opt in on that phone and grant system permission. Disabling notifications on one phone does not delete family rules.",
   备份与删除: "Backups and deletion",
-  "备份文件只会在你主动导出和分享时离开应用。删除应用会移除设备上的本机数据，请先导出备份。":
-    "Backup files leave the app only when you choose to export and share them. Deleting the app removes its on-device data, so export first.",
+  "个人离线模式可主动导出备份，换机或卸载前请妥善保存；家庭共享期间不提供本机备份导出或导入。卸载应用不会删除服务器上的家庭记录或账户；如需删除账户，请使用「我的账户」中的删除流程并查看确认说明。":
+    "In personal offline mode, export and keep a backup before changing phones or uninstalling. Local backup export and import are unavailable while sharing. Uninstalling does not delete server-side family records or your account. To delete your account, use My account and review the deletion confirmation.",
   软件更新: "Software updates",
   "应用会安全检查更新。更新服务可能收到设备系统版本和随机安装标记，但不包含宝宝记录或照片。":
     "The app securely checks for updates. The update service may receive the operating-system version and a random installation token, never baby records or photos.",

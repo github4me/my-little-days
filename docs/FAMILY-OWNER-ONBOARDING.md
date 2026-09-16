@@ -1,6 +1,6 @@
 # First invitation — mobile and Azure handoff
 
-> Archived pre-release design. The v2 implementation now supports real-history creation and shared main-app activation. Use [full Azure setup](AZURE-FAMILY-SETUP.md), [the current README](../README.en.md#family-sharing--full-record-integration-live-deployment-checks-remain) and the v2 API contract. Statements below about local-only preparation describe the earlier pilot, not current release behavior.
+> Archived pre-release design from 14 September 2026. Current v2 creation uploads reviewed history, the selected avatar, reminder rules/settings and play data; activation installs the family in the main app. The current limit is five people besides the admin. Use [full Azure setup](AZURE-FAMILY-SETUP.md), [shared extras](FAMILY-EXTRAS.md), [the current README](../README.en.md#family-sharing--full-record-integration-native-and-operational-acceptance-pending) and [the v2 API contract](FAMILY-API-CONTRACT.md). The local-only preparation, three-email limit and excluded extras below describe the earlier pilot, not current behavior or acceptance evidence.
 
 Status (14 September 2026): **mobile review/local preparation implemented; real-history upload and shared main-app activation are not implemented.** Deploying the current API or setting environment variables does not enable them. No Azure resources were changed for this iteration.
 

@@ -858,8 +858,8 @@ const fullMessages: Partial<Record<FamilyMessageKey, [string, string]>> = {
     "Signing out discards unsent changes and drafts and clears all family data from this device. Shared records remain with the family.",
   ],
   signOutDuringTransition: [
-    "上次家庭操作尚未确认，服务端可能已经完成。请刷新以继续同一次操作。",
-    "The previous family action is unconfirmed and may have completed on the server. Refresh to continue the same operation.",
+    "上次家庭操作尚未确认，服务端可能已经完成。退出登录会丢弃本设备上的家庭缓存、草稿、未发送修改和重试意图，并清除登录信息；不会撤销服务端已接受的操作。下次登录会刷新最新状态。已保存的账户删除查询凭证会保留，方便继续查询删除进度。",
+    "The previous family action is unconfirmed and may have completed on the server. Signing out discards this device’s family cache, drafts, unsent changes and retry intent, and clears sign-in details. It does not undo operations already accepted by the server. Your next sign-in refreshes the latest status. Any saved account-deletion receipt is kept so you can still check its progress.",
   ],
   oneFamily: [
     "每个账户只能加入一个家庭。",

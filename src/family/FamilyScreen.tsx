@@ -17,6 +17,7 @@ export default function FamilyScreen({
     <FamilyScreenView
       onBack={onBack}
       pilot={pilot}
+      section="family"
       ownerSetup={<OwnerSetup pilot={pilot} source={source} />}
     />
   );

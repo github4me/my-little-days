@@ -102,15 +102,16 @@ async function openDemo(page, zh) {
   await page
     .getByRole("tab", { name: zh ? "我的" : "More", exact: true })
     .click();
-  const disclosure = button(
-    page,
-    zh ? "展开家庭共享" : "Expand Family sharing",
-  );
-  if (await disclosure.isVisible()) await disclosure.click();
-  await button(
-    page,
-    zh ? "界面预览（无需登录）" : "Preview screens — no login",
-  ).click();
+  // The sharing row is directly below the baby profile and opens in one tap.
+  const profile = button(page, zh ? "展开宝宝档案" : "Expand baby profile");
+  const sharing = button(page, zh ? "家庭共享" : "Family sharing");
+  const profileBox = await profile.boundingBox();
+  const sharingBox = await sharing.boundingBox();
+  assert.ok(profileBox && sharingBox && sharingBox.y > profileBox.y);
+  await expect(
+    button(page, zh ? "展开家庭共享" : "Expand Family sharing"),
+  ).toHaveCount(0);
+  await button(page, zh ? "家庭共享" : "Family sharing").click();
   await expect(
     page.getByRole("heading", {
       name: zh ? "界面预览" : "UI preview",
@@ -377,6 +378,13 @@ async function firstInvitationFlow(page, zh, width) {
   await expect(page.getByLabel(emailsLabel, { exact: true })).toHaveValue(
     "invalid-address",
   );
+  // Exercise a reduced usable viewport, as when a mobile keyboard occupies
+  // the lower screen. Native iOS keyboard insets still need device acceptance.
+  const fullViewport = page.viewportSize();
+  await page.setViewportSize({ width, height: 420 });
+  await page.getByLabel(emailsLabel, { exact: true }).focus();
+  await button(page, reviewLabel).scrollIntoViewIfNeeded();
+  await expect(button(page, reviewLabel)).toBeInViewport();
   await button(page, reviewLabel).click();
   await expect(page.getByRole("alert")).toContainText(
     label(
@@ -387,6 +395,7 @@ async function firstInvitationFlow(page, zh, width) {
   await expect(
     page.getByRole("heading", { name: reviewTitle, exact: true }),
   ).toHaveCount(0);
+  await page.setViewportSize(fullViewport);
   await page
     .getByLabel(emailsLabel, { exact: true })
     .fill(

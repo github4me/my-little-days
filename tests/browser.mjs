@@ -506,7 +506,7 @@ await page
 await page
   .getByRole("button", { name: "Privacy & support", exact: true })
   .click();
-await page.getByText("Your data stays with you", { exact: true }).waitFor();
+await page.getByText("Your data, your choices", { exact: true }).waitFor();
 await page.getByText("Software updates", { exact: true }).waitFor();
 await page.getByText("contact@reticle.com.au", { exact: true }).waitFor();
 assert.equal(
@@ -2027,17 +2027,22 @@ await page.screenshot({
     "little-days-calendar-filter-zh.png",
   ),
 });
-// An unconfigured family sharing must be usable as an explanation page without
-// touching existing local history or attempting a customer login on the web.
+// Account setup lives directly in More. Signed-out users must not have a
+// family-management entry or need another navigation step to see setup status.
 const localHistoryBeforePilot = await page.evaluate(() =>
   localStorage.getItem("little-days-v1"),
 );
 await page.getByRole("tab", { name: "我的", exact: true }).click();
-await page.getByRole("button", { name: "展开家庭共享", exact: true }).click();
-await page.getByRole("button", { name: "管理家庭共享", exact: true }).click();
-await page
-  .getByRole("heading", { name: "家庭服务尚未配置", exact: true })
-  .waitFor();
+await page.getByRole("heading", { name: "我的账户", exact: true }).waitFor();
+assert.equal(
+  await page.getByRole("button", { name: "家庭共享", exact: true }).count(),
+  0,
+);
+assert.equal(
+  await page.getByRole("button", { name: "管理家庭共享", exact: true }).count(),
+  0,
+);
+await page.getByText("家庭服务尚未配置", { exact: true }).waitFor();
 assert.equal(
   await page.getByRole("button", { name: "登录家庭账户", exact: true }).count(),
   0,
@@ -2049,21 +2054,16 @@ assert.equal(
   ),
   true,
 );
-await page.getByRole("button", { name: "返回", exact: true }).click();
 await chooseEnglish();
-const pilotDisclosure = page.getByRole("button", {
-  name: "Expand Family sharing",
-  exact: true,
-});
-if (await pilotDisclosure.isVisible()) await pilotDisclosure.click();
+await page.getByRole("heading", { name: "My account", exact: true }).waitFor();
+assert.equal(
+  await page
+    .getByRole("button", { name: "Family sharing", exact: true })
+    .count(),
+  0,
+);
 await page
-  .getByRole("button", { name: "Manage family sharing", exact: true })
-  .click();
-await page
-  .getByRole("heading", {
-    name: "Family service is not configured",
-    exact: true,
-  })
+  .getByText("Family service is not configured", { exact: true })
   .waitFor();
 assert.equal(
   await page.getByRole("button", { name: "Sign in", exact: true }).count(),
@@ -2079,7 +2079,6 @@ assert.equal(
   await page.evaluate(() => localStorage.getItem("little-days-v1")),
   localHistoryBeforePilot,
 );
-await page.getByRole("button", { name: "Back", exact: true }).click();
 await page.getByRole("tab", { name: "Records", exact: true }).click();
 await page.getByRole("button", { name: "Calendar", exact: true }).click();
 await page

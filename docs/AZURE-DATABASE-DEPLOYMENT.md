@@ -83,7 +83,7 @@ The existing **family-pilot** environment remains the API deployment gate. Confi
 
 ## Future changes and failure recovery
 
-- Add `0003_DescriptiveChange.sql`, then `0004_...` under `server/LittleDays.DatabaseMigrator/Scripts`. They are embedded automatically. Never edit, rename, delete or insert before applied migrations. Add a test for the intended schema/data behavior.
+- After the existing `0003_FamilySharedExtras.sql`, add `0004_DescriptiveChange.sql`, then `0005_...` under `server/LittleDays.DatabaseMigrator/Scripts`. They are embedded automatically. Never edit, rename, delete or insert before applied migrations. Add a test for the intended schema/data behavior.
 - `dbo.DatabaseMigrations` stores ordered script names, normalized SHA-256 checksums and applied timestamps. Repeated runs skip already-applied scripts. CRLF/LF checkout differences are normalized. Checksums detect changed files, not all possible out-of-band schema drift; SQL changes must remain controlled and reviewed.
 - Each run uses an exclusive SQL application lock and a single transaction covering all pending scripts and journal entries. A failed run rolls back that run; it never automatically runs destructive down migrations. Scripts must be transaction-compatible: no explicit COMMIT/ROLLBACK or nontransactional operations. Split long transformations across compatible releases.
 - Database changes run **before** the API is replaced. Use additive, backward-compatible changes so the existing API remains usable during deployment or after an API-deployment failure. Remove old columns only in a later reviewed release after all consumers have stopped using them. Back up/review recovery before destructive changes.

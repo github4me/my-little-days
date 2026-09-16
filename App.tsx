@@ -43,6 +43,8 @@ import type { RecordView } from "./src/recordCalendar";
 import Settings from "./src/Settings";
 import PrivacySupport from "./src/PrivacySupport";
 import FamilyScreen from "./src/family/FamilyScreen";
+import FamilyScreenView from "./src/family/FamilyScreenView";
+import { FamilySyncBanner } from "./src/family/FamilySyncStatus";
 import { useFamilyPilot } from "./src/family/useFamilyPilot";
 import { familyErrorMessage } from "./src/family/messages";
 import SharedReminders from "./src/family/SharedReminders";
@@ -284,6 +286,11 @@ function BabyApp({
   const [growthHistoryExpanded, setGrowthHistoryExpanded] = useState(false);
   const [openProfile, setOpenProfile] = useState(false);
   const mainScroll = useRef<ScrollView>(null);
+  function openFamilyPage() {
+    setTab("settings");
+    setSettingsPage(familyDemoEnabled ? "family-demo" : "family");
+    mainScroll.current?.scrollTo({ y: 0, animated: false });
+  }
   const [finishingFeed, setFinishingFeed] = useState<{
     entry: Entry;
     stoppedAt: string;
@@ -405,7 +412,7 @@ function BabyApp({
         entries: [...current.entries.filter((x) => x.id !== e.id), e],
       });
     setEditor(null);
-    setMessage(family.sharedMode ? "已保存，等待家庭同步" : "已保存到本机");
+    setMessage(family.sharedMode ? "" : "已保存到本机");
   }
   async function updateAvatar(uri: string | null) {
     if (family.sharedMode) {
@@ -434,7 +441,14 @@ function BabyApp({
     return (
       <Theme.Provider value={c}>
         <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }}>
-          <ScrollView contentContainerStyle={{ padding: 20, gap: 16 }}>
+          <ScrollView
+            contentContainerStyle={{ padding: 20, gap: 16 }}
+            automaticallyAdjustKeyboardInsets
+            keyboardDismissMode={
+              Platform.OS === "ios" ? "interactive" : "on-drag"
+            }
+            keyboardShouldPersistTaps="handled"
+          >
             {family.booting ? (
               <ActivityIndicator />
             ) : (
@@ -689,6 +703,10 @@ function BabyApp({
           <ScrollView
             ref={mainScroll}
             contentContainerStyle={{ padding: 20, gap: 20, paddingBottom: 28 }}
+            automaticallyAdjustKeyboardInsets
+            keyboardDismissMode={
+              Platform.OS === "ios" ? "interactive" : "on-drag"
+            }
             keyboardShouldPersistTaps="handled"
           >
             <View>
@@ -752,42 +770,17 @@ function BabyApp({
                 <T style={{ fontSize: 13 }}>{t(message)}　×</T>
               </Pressable>
             ) : null}
-            {family.sharedMode ? (
-              <Card>
-                <T raw>
-                  {resolveLocale(language) === "zh-CN"
-                    ? `家庭共享 · ${family.recordPending.length} 条待同步`
-                    : `Family sharing · ${family.recordPending.length} pending`}
-                </T>
-                {family.recordConflicts.length ? (
-                  <>
-                    <T raw>
-                      {resolveLocale(language) === "zh-CN"
-                        ? "部分修改未共享：其他人已先保存，或记录权限发生变化。已刷新最新内容；请重新打开记录查看后修改。"
-                        : "Some changes were not shared because another save arrived first or access changed. The latest records are refreshed. Reopen a record to review before editing again."}
-                    </T>
-                    {family.recordConflicts.map((q) => (
-                      <Button
-                        key={q.operation.operationId}
-                        secondary
-                        label={
-                          resolveLocale(language) === "zh-CN"
-                            ? "清除此条冲突草稿"
-                            : "Dismiss this conflict draft"
-                        }
-                        onPress={() =>
-                          void act(() =>
-                            family.discardRecordConflict(
-                              q.operation.operationId,
-                            ),
-                          )
-                        }
-                      />
-                    ))}
-                  </>
-                ) : null}
-              </Card>
-            ) : null}
+            <FamilySyncBanner
+              pilot={family}
+              onOpenFamily={() => {
+                if (family.authStatus === "authenticated") openFamilyPage();
+                else {
+                  setTab("settings");
+                  setSettingsPage("main");
+                  mainScroll.current?.scrollTo({ y: 0, animated: false });
+                }
+              }}
+            />
             {deleting ? (
               <Modal
                 transparent
@@ -1378,6 +1371,10 @@ function BabyApp({
                   }
                   profileVersion={family.fullSnapshot?.family.profileVersion}
                   familyUiPreview={familyDemoEnabled}
+                  accountPanel={
+                    <FamilyScreenView pilot={family} section="account" />
+                  }
+                  familySharingVisible={!!family.user || family.sharedMode}
                   initialProfileExpanded={openProfile}
                   state={state}
                   avatarUri={avatarUri}
@@ -1395,12 +1392,7 @@ function BabyApp({
                   language={language}
                   onLanguageChange={changeLanguage}
                   onOpenPrivacy={() => setSettingsPage("privacy")}
-                  onOpenFamily={() => {
-                    setSettingsPage(
-                      familyDemoEnabled ? "family-demo" : "family",
-                    );
-                    mainScroll.current?.scrollTo({ y: 0, animated: false });
-                  }}
+                  onOpenFamily={openFamilyPage}
                   onDarkMode={async (v) => {
                     const previous = themePreference;
                     setThemePreference(v);

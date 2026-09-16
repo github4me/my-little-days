@@ -27,6 +27,7 @@ import type { useFamilyPilot } from "./useFamilyPilot";
 import type { OwnerSeedSummary } from "./ownerSeed";
 import { OwnerSeedCountsView } from "./OwnerSetupCard";
 import { familyInvitationCapacity } from "./invitationCapacity";
+import { FamilySyncDetails } from "./FamilySyncStatus";
 
 type Translate = (
   key: FamilyMessageKey,
@@ -430,12 +431,14 @@ export default function FamilyScreenView({
   onBack,
   pilot,
   demo = false,
+  section = "all",
   ownerSetup,
   initialDataSummary,
 }: {
-  onBack: () => void;
+  onBack?: () => void;
   pilot: ReturnType<typeof useFamilyPilot>;
   demo?: boolean;
+  section?: "all" | "account" | "family";
   ownerSetup?: React.ReactNode;
   initialDataSummary?: OwnerSeedSummary;
 }) {
@@ -454,6 +457,9 @@ export default function FamilyScreenView({
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   const [acknowledged, setAcknowledged] = useState(false);
   const [localError, setLocalError] = useState<FamilyMessageKey | null>(null);
+  const [dismissedFeedback, setDismissedFeedback] = useState<string | null>(
+    null,
+  );
   const [confirmationError, setConfirmationError] = useState<string | null>(
     null,
   );
@@ -463,6 +469,11 @@ export default function FamilyScreenView({
   const busy = acting || pilot.busy;
   const authenticated = pilot.authStatus === "authenticated";
   const needsSignIn = pilot.authStatus === "reauth_required";
+  const showAccount =
+    section !== "family" ||
+    !authenticated ||
+    pilot.transitionPending ||
+    (pilot.sharedMode && !pilot.ready);
   const accountStatusKey: FamilyMessageKey = {
     signed_out: "accountSignedOut",
     checking: "accountChecking",
@@ -570,9 +581,26 @@ export default function FamilyScreenView({
     : pilot.error && !obsoleteAuthError
       ? familyErrorMessage(locale, pilot.error)
       : null;
-  const notice = pilot.notice
-    ? familyNoticeMessage(locale, pilot.notice)
+  const notice =
+    pilot.notice && (demo || pilot.notice !== "saved_locally")
+      ? familyNoticeMessage(locale, pilot.notice)
+      : null;
+  const feedback = error ?? notice;
+  const feedbackKey = feedback
+    ? JSON.stringify([
+        pilot.user?.id,
+        snapshot?.family.id,
+        pilot.authStatus,
+        localError
+          ? ["local", localError]
+          : error
+            ? ["error", pilot.error]
+            : ["notice", pilot.notice],
+      ])
     : null;
+  useEffect(() => {
+    setDismissedFeedback(null);
+  }, [feedbackKey]);
   const confirmationAuthBlocked =
     !!confirmation?.requiresAuthentication && !authenticated;
   const modalError = confirmationAuthBlocked
@@ -684,37 +712,72 @@ export default function FamilyScreenView({
 
   return (
     <View style={styles.screen}>
-      <View style={styles.spread}>
-        <T raw accessibilityRole="header" style={styles.title}>
-          {m("title")}
-        </T>
-        <Button
-          label={m("back")}
-          secondary
-          onPress={onBack}
-          style={{ minHeight: 44, paddingHorizontal: 14 }}
-        />
-      </View>
-      <View style={[styles.notice, { backgroundColor: c.soft }]}>
-        <T raw style={{ fontSize: 13, lineHeight: 20 }}>
-          {m(demo ? "demoNotice" : "pilotNotice")}
-        </T>
-      </View>
-
-      {error ? (
-        <View
-          style={[styles.notice, { borderColor: c.primary, borderWidth: 1 }]}
-        >
-          <T raw accessibilityRole="alert">
-            {error}
-          </T>
-        </View>
+      {section !== "account" ? (
+        <>
+          <View style={styles.spread}>
+            <T raw accessibilityRole="header" style={styles.title}>
+              {m("title")}
+            </T>
+            {onBack ? (
+              <Button
+                label={m("back")}
+                secondary
+                onPress={onBack}
+                style={{ minHeight: 44, paddingHorizontal: 14 }}
+              />
+            ) : null}
+          </View>
+          <View style={[styles.notice, { backgroundColor: c.soft }]}>
+            <T raw style={{ fontSize: 13, lineHeight: 20 }}>
+              {m(demo ? "demoNotice" : "pilotNotice")}
+            </T>
+          </View>
+        </>
       ) : null}
-      {notice && !error ? (
-        <View style={[styles.notice, { backgroundColor: c.soft }]}>
-          <T raw accessibilityLiveRegion="polite">
-            {notice}
-          </T>
+
+      {feedback && (demo || dismissedFeedback !== feedbackKey) ? (
+        <View
+          style={[
+            styles.notice,
+            error
+              ? { borderColor: c.primary, borderWidth: 1 }
+              : { backgroundColor: c.soft },
+          ]}
+        >
+          <View style={[styles.spread, { alignItems: "flex-start" }]}>
+            <T
+              raw
+              accessibilityRole={error ? "alert" : undefined}
+              accessibilityLiveRegion={error ? undefined : "polite"}
+              style={{ flex: 1 }}
+            >
+              {feedback}
+            </T>
+            {!demo ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={
+                  locale === "zh-CN" ? "关闭提示" : "Dismiss message"
+                }
+                onPress={() => setDismissedFeedback(feedbackKey)}
+                style={{
+                  minWidth: 44,
+                  minHeight: 44,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  margin: -8,
+                }}
+              >
+                <T
+                  raw
+                  accessibilityElementsHidden
+                  style={{ color: c.muted, fontSize: 22 }}
+                >
+                  ×
+                </T>
+              </Pressable>
+            ) : null}
+          </View>
         </View>
       ) : null}
 
@@ -799,8 +862,19 @@ export default function FamilyScreenView({
       ) : !pilot.configured || pilot.webUnsupported ? (
         <Card style={styles.card}>
           <T raw accessibilityRole="header" style={styles.sectionTitle}>
-            {m(!pilot.configured ? "unconfigured" : "nativeOnly")}
+            {m(
+              section === "account"
+                ? "account"
+                : !pilot.configured
+                  ? "unconfigured"
+                  : "nativeOnly",
+            )}
           </T>
+          {section === "account" ? (
+            <T raw style={styles.muted(c.muted)}>
+              {m(!pilot.configured ? "unconfigured" : "nativeOnly")}
+            </T>
+          ) : null}
           <T raw style={styles.muted(c.muted)}>
             {m(
               !pilot.configured
@@ -840,84 +914,88 @@ export default function FamilyScreenView({
         </Card>
       ) : (
         <>
-          <Disclosure
-            title={m("account")}
-            status={m(accountStatusKey)}
-            initiallyOpen={!authenticated}
-          >
-            <T raw style={{ fontWeight: "600" }}>
-              {pilot.user.displayName}
-            </T>
-            <T raw selectable style={styles.muted(c.muted)}>
-              {pilot.user.email}
-            </T>
-            {!authenticated ? (
-              <T raw style={styles.muted(c.muted)}>
-                {m("accountCachedDetails")}
+          {showAccount ? (
+            <Disclosure
+              title={m("account")}
+              status={m(accountStatusKey)}
+              initiallyOpen={!authenticated}
+            >
+              <T raw style={{ fontWeight: "600" }}>
+                {pilot.user.displayName}
               </T>
-            ) : null}
-            {needsSignIn ? (
-              <>
-                <T raw>{m("accountExpiredAction")}</T>
-                <Button
-                  label={m("signInAgain")}
-                  disabled={busy}
-                  onPress={() => void run(pilot.signIn)}
-                />
-              </>
-            ) : !snapshot || !authenticated ? (
-              <Button
-                label={m(pilot.syncing ? "refreshing" : "refresh")}
-                secondary
-                disabled={
-                  busy || pilot.syncing || pilot.authStatus === "checking"
-                }
-                onPress={() => void run(pilot.refresh)}
-              />
-            ) : null}
-            <Button
-              label={m("signOut")}
-              secondary
-              disabled={busy || pilot.activationPending}
-              onPress={() =>
-                confirm(
-                  "signOutTitle",
-                  m(
-                    pilot.transitionPending
-                      ? "signOutDuringTransition"
-                      : pilot.hasPrivateWork
-                        ? "signOutWithWork"
-                        : "signOutDescription",
-                  ),
-                  "signOut",
-                  pilot.signOut,
-                )
-              }
-            />
-            {!pilot.accountDeletion ? (
-              <>
+              <T raw selectable style={styles.muted(c.muted)}>
+                {pilot.user.email}
+              </T>
+              {!authenticated ? (
                 <T raw style={styles.muted(c.muted)}>
-                  {m(
-                    owner ? "deleteAccountBlocked" : "deleteAccountDescription",
-                  )}
+                  {m("accountCachedDetails")}
                 </T>
+              ) : null}
+              {needsSignIn ? (
+                <>
+                  <T raw>{m("accountExpiredAction")}</T>
+                  <Button
+                    label={m("signInAgain")}
+                    disabled={busy}
+                    onPress={() => void run(pilot.signIn)}
+                  />
+                </>
+              ) : !snapshot || !authenticated ? (
                 <Button
-                  label={m("deleteAccount")}
+                  label={m(pilot.syncing ? "refreshing" : "refresh")}
                   secondary
-                  disabled={workspaceBusy || owner}
-                  onPress={() =>
-                    confirm(
-                      "deleteAccountTitle",
-                      m("deleteAccountDescription"),
-                      "deleteAccount",
-                      pilot.deleteAccount,
-                      "deleteAccountConsent",
-                    )
+                  disabled={
+                    busy || pilot.syncing || pilot.authStatus === "checking"
                   }
+                  onPress={() => void run(pilot.refresh)}
                 />
-              </>
-            ) : null}
-          </Disclosure>
+              ) : null}
+              <Button
+                label={m("signOut")}
+                secondary
+                disabled={busy || pilot.activationPending}
+                onPress={() =>
+                  confirm(
+                    "signOutTitle",
+                    m(
+                      pilot.transitionPending
+                        ? "signOutDuringTransition"
+                        : pilot.hasPrivateWork
+                          ? "signOutWithWork"
+                          : "signOutDescription",
+                    ),
+                    "signOut",
+                    pilot.signOut,
+                  )
+                }
+              />
+              {!pilot.accountDeletion ? (
+                <>
+                  <T raw style={styles.muted(c.muted)}>
+                    {m(
+                      owner
+                        ? "deleteAccountBlocked"
+                        : "deleteAccountDescription",
+                    )}
+                  </T>
+                  <Button
+                    label={m("deleteAccount")}
+                    secondary
+                    disabled={workspaceBusy || owner}
+                    onPress={() =>
+                      confirm(
+                        "deleteAccountTitle",
+                        m("deleteAccountDescription"),
+                        "deleteAccount",
+                        pilot.deleteAccount,
+                        "deleteAccountConsent",
+                      )
+                    }
+                  />
+                </>
+              ) : null}
+            </Disclosure>
+          ) : null}
 
           {pilot.transitionPending ? (
             <Card style={styles.card}>
@@ -933,7 +1011,7 @@ export default function FamilyScreenView({
                 onPress={() => void run(pilot.refresh)}
               />
             </Card>
-          ) : !authenticated ? null : !demo &&
+          ) : section === "account" || !authenticated ? null : !demo &&
             pilot.sharedMode &&
             !pilot.ready ? (
             <Card>
@@ -950,6 +1028,14 @@ export default function FamilyScreenView({
             </Card>
           ) : !snapshot ? (
             <>
+              {section === "family" ? (
+                <Button
+                  label={m(pilot.syncing ? "refreshing" : "refresh")}
+                  secondary
+                  disabled={busy || pilot.syncing}
+                  onPress={() => void run(pilot.refresh)}
+                />
+              ) : null}
               <Disclosure
                 title={m("joinSection")}
                 initiallyOpen={!ownerSetup || !!pilot.inbox.length}
@@ -1160,7 +1246,14 @@ export default function FamilyScreenView({
             </>
           )}
 
-          {snapshot && !workspaceBusy && pilot.conflicts.length ? (
+          {section !== "account" && !demo ? (
+            <FamilySyncDetails pilot={pilot} />
+          ) : null}
+
+          {section !== "account" &&
+          snapshot &&
+          !workspaceBusy &&
+          pilot.conflicts.length ? (
             <Disclosure
               title={m("preservedSection", { count: pilot.conflicts.length })}
               initiallyOpen
@@ -1221,7 +1314,10 @@ export default function FamilyScreenView({
             </Disclosure>
           ) : null}
 
-          {snapshot && !pilot.transitionPending && !pilot.accountDeletion ? (
+          {section !== "account" &&
+          snapshot &&
+          !pilot.transitionPending &&
+          !pilot.accountDeletion ? (
             <>
               <Disclosure
                 title={m("membersCount", { count: snapshot.members.length })}
@@ -1303,52 +1399,57 @@ export default function FamilyScreenView({
                 ) : null}
               </Disclosure>
 
-              <Disclosure title={m("profile")}>
-                <T raw style={styles.muted(c.muted)}>
-                  {m("profileDescription")}
-                </T>
-                {owner && demo ? (
-                  <>
-                    <Input
-                      label={m("babyName")}
-                      value={profileName}
-                      onChangeText={setProfileName}
-                      maxLength={60}
-                      editable={!workspaceBusy}
-                    />
-                    <Input
-                      label={m("babyBirthDate")}
-                      value={profileBirthDate}
-                      onChangeText={setProfileBirthDate}
-                      placeholder="YYYY-MM-DD"
-                      maxLength={10}
-                      editable={!workspaceBusy}
-                    />
-                    <Button
-                      label={m("saveProfile")}
-                      disabled={workspaceBusy || !profileName.trim()}
-                      onPress={() => {
-                        const date = profileBirthDate.trim();
-                        const iso = date ? localISO(date, "00:00") : null;
-                        if (date && (!iso || Date.parse(iso) > Date.now())) {
-                          setLocalError("profileDateError");
-                          return;
-                        }
-                        void run(() =>
-                          pilot.updateProfile(profileName.trim(), date || null),
-                        );
-                      }}
-                    />
-                  </>
-                ) : (
-                  <>
-                    <T raw>{snapshot.family.babyName}</T>
-                    <T raw style={styles.muted(c.muted)}>
-                      {snapshot.family.babyBirthDate || m("noBirthDate")}
-                    </T>
-                  </>
-                )}
-              </Disclosure>
+              {demo ? (
+                <Disclosure title={m("profile")}>
+                  <T raw style={styles.muted(c.muted)}>
+                    {m("profileDescription")}
+                  </T>
+                  {owner ? (
+                    <>
+                      <Input
+                        label={m("babyName")}
+                        value={profileName}
+                        onChangeText={setProfileName}
+                        maxLength={60}
+                        editable={!workspaceBusy}
+                      />
+                      <Input
+                        label={m("babyBirthDate")}
+                        value={profileBirthDate}
+                        onChangeText={setProfileBirthDate}
+                        placeholder="YYYY-MM-DD"
+                        maxLength={10}
+                        editable={!workspaceBusy}
+                      />
+                      <Button
+                        label={m("saveProfile")}
+                        disabled={workspaceBusy || !profileName.trim()}
+                        onPress={() => {
+                          const date = profileBirthDate.trim();
+                          const iso = date ? localISO(date, "00:00") : null;
+                          if (date && (!iso || Date.parse(iso) > Date.now())) {
+                            setLocalError("profileDateError");
+                            return;
+                          }
+                          void run(() =>
+                            pilot.updateProfile(
+                              profileName.trim(),
+                              date || null,
+                            ),
+                          );
+                        }}
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <T raw>{snapshot.family.babyName}</T>
+                      <T raw style={styles.muted(c.muted)}>
+                        {snapshot.family.babyBirthDate || m("noBirthDate")}
+                      </T>
+                    </>
+                  )}
+                </Disclosure>
+              ) : null}
 
               {owner ? (
                 <Disclosure title={m("inviteSection")}>

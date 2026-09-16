@@ -12,12 +12,13 @@ import ts from "typescript";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
-function fixture(overrides = {}, locale = "en", demo = false) {
+function fixture(overrides = {}, locale = "en", demo = false, section = "all") {
   let active = "",
     slot = 0,
     nodes = [];
   const values = new Map(),
     refs = new Map(),
+    effects = new Map(),
     calls = [];
   const palette = {
     bg: "#F4F9FD",
@@ -43,7 +44,17 @@ function fixture(overrides = {}, locale = "en", demo = false) {
       };
     },
     useContext: () => palette,
-    useEffect: () => {},
+    useEffect(effect, dependencies) {
+      const key = `${active}:effect:${slot++}`;
+      const previous = effects.get(key);
+      if (
+        !previous ||
+        dependencies.some((value, index) => !Object.is(value, previous[index]))
+      ) {
+        effects.set(key, dependencies);
+        effect();
+      }
+    },
     useRef(value) {
       const key = `${active}:ref:${slot++}`;
       if (!refs.has(key)) refs.set(key, { current: value });
@@ -80,6 +91,7 @@ function fixture(overrides = {}, locale = "en", demo = false) {
     ),
   };
   const native = {
+    Keyboard: { dismiss: () => calls.push({ name: "dismissKeyboard" }) },
     ...Object.fromEntries(
       [
         "ActivityIndicator",
@@ -189,6 +201,8 @@ function fixture(overrides = {}, locale = "en", demo = false) {
           return load("src/family/OwnerSetupCard.tsx");
         if (name === "./FamilyScreenView")
           return load("src/family/FamilyScreenView.tsx");
+        if (name === "./FamilySyncStatus")
+          return { FamilySyncDetails: () => null };
         if (name === "./useFamilyPilot")
           return { useFamilyPilot: () => controller };
         throw new Error(`Unexpected screen dependency: ${name}`);
@@ -224,7 +238,22 @@ function fixture(overrides = {}, locale = "en", demo = false) {
     render() {
       nodes = [];
       visit(
-        react.createElement(Screen, { onBack() {}, pilot: controller, demo }),
+        react.createElement(Screen, {
+          onBack() {},
+          pilot: controller,
+          demo,
+          section,
+        }),
+      );
+      return nodes;
+    },
+    renderOwnerSetup(props) {
+      nodes = [];
+      visit(
+        react.createElement(
+          load("src/family/OwnerSetupCard.tsx").default,
+          props,
+        ),
       );
       return nodes;
     },
@@ -252,6 +281,65 @@ function fixture(overrides = {}, locale = "en", demo = false) {
     nodes: () => nodes,
   };
 }
+
+test("owner review dismisses the email keyboard before preparation without losing multiline input", async () => {
+  const world = fixture();
+  const emails = "one@example.test\ntwo@example.test";
+  let preparedEmails;
+  const props = {
+    mode: "full",
+    profile: { name: "Baby", sex: "unspecified" },
+    summary: {
+      counts: {
+        feed: 0,
+        diaper: 0,
+        sleep: 0,
+        growth: 0,
+        milestone: 0,
+        care: 0,
+        total: 0,
+      },
+      runningCount: 0,
+    },
+    onPrepare: async (value) => {
+      world.calls.push({ name: "prepare" });
+      preparedEmails = value;
+      throw new Error("owner_invalid_email");
+    },
+    onSave: async () => {
+      throw new Error("Review must not save records");
+    },
+  };
+  world.renderOwnerSetup(props);
+  world
+    .nodes()
+    .find(
+      (node) => node.props?.accessibilityLabel === "Show Create a family group",
+    )
+    .props.onPress();
+  world.renderOwnerSetup(props);
+  world
+    .nodes()
+    .find((node) => node.type === "TextInput")
+    .props.onChangeText(emails);
+  world.renderOwnerSetup(props);
+  world.buttons("Review setup")[0].props.onPress();
+  await tick();
+  assert.deepEqual(
+    world.calls.map((call) => call.name),
+    ["dismissKeyboard", "prepare"],
+  );
+  assert.equal(preparedEmails, emails);
+  world.renderOwnerSetup(props);
+  assert.equal(
+    world.nodes().find((node) => node.type === "TextInput").props.value,
+    emails,
+  );
+  assert.match(
+    world.text(),
+    /Enter 1–5 valid, different family email addresses/,
+  );
+});
 
 const feed = (id, user) => ({
   id,
@@ -287,6 +375,252 @@ const snapshot = (role = "caregiver") => ({
   feeds: [],
   historyId: "history",
   revision: "1",
+});
+
+test("embedded account includes account controls and omits family management and page chrome", () => {
+  for (const role of ["owner", "caregiver"]) {
+    const screen = fixture(
+      { snapshot: snapshot(role) },
+      "en",
+      false,
+      "account",
+    );
+    screen.render();
+    assert.match(screen.text(), /My account/);
+    assert.match(screen.text(), /test@example.invalid/);
+    assert.equal(screen.buttons("Sign out").length, 1);
+    assert.equal(screen.buttons("Request account deletion").length, 1);
+    assert.equal(screen.buttons("Back").length, 0);
+    assert.equal(screen.buttons("Add invitation").length, 0);
+    assert.equal(screen.buttons("Leave family").length, 0);
+    assert.doesNotMatch(
+      screen.text(),
+      /Family sharing|Creating a family shares|Test baby profile|Family members|Create a family group|All family records are connected/,
+    );
+  }
+});
+
+test("account stays identifiable when signed out or family services are unavailable", () => {
+  for (const locale of ["en", "zh-CN"]) {
+    for (const overrides of [
+      { user: null },
+      { user: null, configured: false },
+      { user: null, webUnsupported: true },
+    ]) {
+      const screen = fixture(overrides, locale, false, "account");
+      screen.render();
+      assert.match(screen.text(), locale === "en" ? /My account/ : /我的账户/);
+      assert.equal(screen.buttons(locale === "en" ? "Back" : "返回").length, 0);
+      if (overrides.configured !== false && !overrides.webUnsupported) {
+        assert.equal(
+          screen.buttons(locale === "en" ? "Sign in" : "登录家庭账户").length,
+          1,
+        );
+      }
+    }
+  }
+});
+
+test("family mode omits the normal account and duplicate legacy baby profile", () => {
+  for (const role of ["owner", "caregiver"]) {
+    const screen = fixture({ snapshot: snapshot(role) }, "en", false, "family");
+    screen.render();
+    assert.doesNotMatch(screen.text(), /My account|Test baby profile/);
+    assert.equal(screen.buttons("Sign out").length, 0);
+    assert.equal(screen.buttons("Request account deletion").length, 0);
+    assert.equal(
+      screen.buttons("Add invitation").length,
+      role === "owner" ? 1 : 0,
+    );
+    assert.equal(
+      screen.buttons("Leave family").length,
+      role === "caregiver" ? 1 : 0,
+    );
+  }
+});
+
+test("family mode retains reauthentication and unconfirmed-transition recovery", () => {
+  const expired = fixture(
+    { authStatus: "reauth_required", snapshot: snapshot() },
+    "en",
+    false,
+    "family",
+  );
+  expired.render();
+  assert.match(expired.text(), /Session expired/);
+  assert.equal(expired.buttons("Sign in again").length, 1);
+  assert.equal(expired.buttons("Sign out").length, 1);
+  assert.equal(
+    expired.buttons("Request account deletion")[0].props.disabled,
+    true,
+  );
+  for (const section of ["account", "family"]) {
+    const recovery = fixture({ transitionPending: true }, "en", false, section);
+    recovery.render();
+    assert.match(recovery.text(), /Confirming a family change/);
+    assert.equal(recovery.buttons("Sign out")[0].props.disabled, false);
+    assert(recovery.buttons("Refresh").length > 0);
+  }
+});
+
+test("family mode can refresh incoming invitations without the account panel", async () => {
+  const screen = fixture({}, "en", false, "family");
+  screen.render();
+  assert.doesNotMatch(screen.text(), /My account/);
+  assert.equal(screen.buttons("Refresh").length, 1);
+  screen.buttons("Refresh")[0].props.onPress();
+  await tick();
+  assert.deepEqual(
+    screen.calls.map((call) => call.name),
+    ["refresh"],
+  );
+});
+
+test("family recovery retains sign out when shared history is not ready", () => {
+  const screen = fixture(
+    { sharedMode: true, ready: false, error: "invalid_response" },
+    "en",
+    false,
+    "family",
+  );
+  screen.render();
+  assert.match(screen.text(), /My account/);
+  assert.equal(screen.buttons("Sign out").length, 1);
+  assert.equal(screen.buttons("Sign out")[0].props.disabled, false);
+  assert(screen.buttons("Refresh").length > 0);
+});
+
+test("embedded account deletion still requires consent and submits through its confirmation", async () => {
+  const screen = fixture({}, "en", false, "account");
+  screen.render();
+  screen.buttons("Request account deletion")[0].props.onPress();
+  screen.render();
+  assert.equal(
+    screen.buttons("Request account deletion").at(-1).props.disabled,
+    true,
+  );
+  screen
+    .nodes()
+    .findLast((node) => node.props?.accessibilityRole === "checkbox")
+    .props.onPress();
+  screen.render();
+  screen.buttons("Request account deletion").at(-1).props.onPress();
+  await tick();
+  assert.deepEqual(
+    screen.calls.map((call) => call.name),
+    ["deleteAccount"],
+  );
+});
+
+test("account and family modes retain deletion receipts after sign out", () => {
+  for (const section of ["account", "family"]) {
+    const screen = fixture(
+      {
+        user: null,
+        deletionStatus: {
+          deletionId: "deletion",
+          status: "awaiting_identity_deletion",
+          requestedAt: "2026-09-01T01:00:00Z",
+        },
+      },
+      "en",
+      false,
+      section,
+    );
+    screen.render();
+    assert.equal(screen.buttons("Check deletion status").length, 1);
+    assert.equal(screen.buttons("Sign in").length, 0);
+    assert.match(screen.text(), /not yet confirmed deleted/);
+  }
+});
+
+test("real account and family views hide routine local-save notices while demo retains them", () => {
+  for (const section of ["all", "account", "family"]) {
+    const screen = fixture({ notice: "saved_locally" }, "en", false, section);
+    screen.render();
+    assert.doesNotMatch(screen.text(), /Saved on this device|waiting to sync/i);
+  }
+  const demo = fixture({ notice: "saved_locally" }, "en", true);
+  demo.render();
+  assert.match(demo.text(), /Saved on this device/i);
+});
+
+test("dismissing real feedback hides only presentation and new or resolved issues reappear", () => {
+  const screen = fixture(
+    { error: "network_unavailable", transitionPending: true },
+    "en",
+    false,
+    "account",
+  );
+  const dismiss = () => {
+    screen
+      .nodes()
+      .find((node) => node.props?.accessibilityLabel === "Dismiss message")
+      .props.onPress();
+    screen.render();
+  };
+  const alertCount = () =>
+    screen.nodes().filter((node) => node.props?.accessibilityRole === "alert")
+      .length;
+  screen.render();
+  assert.equal(alertCount(), 1);
+  dismiss();
+  assert.equal(alertCount(), 0);
+  assert.equal(screen.controller.error, "network_unavailable");
+  assert.equal(screen.controller.authStatus, "authenticated");
+  assert.equal(screen.controller.transitionPending, true);
+  assert.equal(screen.calls.length, 0);
+
+  screen.controller.error = "local_save_failed";
+  screen.render();
+  assert.equal(alertCount(), 1);
+  dismiss();
+  screen.controller.error = null;
+  screen.render();
+  screen.controller.error = "local_save_failed";
+  screen.render();
+  assert.equal(alertCount(), 1);
+  dismiss();
+  screen.controller.user = { ...screen.controller.user, id: "another-user" };
+  screen.render();
+  assert.equal(alertCount(), 1);
+  dismiss();
+  screen.controller.snapshot = snapshot();
+  screen.render();
+  assert.equal(alertCount(), 1);
+});
+
+test("real notices can be dismissed without clearing the controller and demo feedback stays unchanged", () => {
+  const screen = fixture(
+    { notice: "sign_in_cancelled" },
+    "en",
+    false,
+    "account",
+  );
+  screen.render();
+  assert.match(screen.text(), /This sign-in attempt was cancelled/);
+  screen
+    .nodes()
+    .find((node) => node.props?.accessibilityLabel === "Dismiss message")
+    .props.onPress();
+  screen.render();
+  assert.doesNotMatch(screen.text(), /This sign-in attempt was cancelled/);
+  assert.equal(screen.controller.notice, "sign_in_cancelled");
+  assert.equal(screen.calls.length, 0);
+  const demo = fixture(
+    { error: "network_unavailable", notice: "sign_in_cancelled" },
+    "en",
+    true,
+  );
+  demo.render();
+  assert(
+    demo.nodes().some((node) => node.props?.accessibilityRole === "alert"),
+  );
+  assert(
+    !demo
+      .nodes()
+      .some((node) => node.props?.accessibilityLabel === "Dismiss message"),
+  );
 });
 
 test("invitation form counts members and pending places while allowing pending-email replacement", async () => {
@@ -659,31 +993,78 @@ test("deletion receipt progress remains available after sign-out without claimin
   assert.doesNotMatch(screen.text(), /Account deletion completed/);
 });
 
-test("unresolved transitions still allow explicit sign-out, including a pending account deletion", async () => {
-  for (const deletionStatus of [
-    null,
-    {
-      deletionId: "deletion",
-      status: "pending",
-      requestedAt: "2026-09-01T01:00:00Z",
-    },
-  ]) {
-    const screen = fixture({ transitionPending: true, deletionStatus });
-    screen.render();
-    assert.equal(screen.buttons("Sign out").length, 1);
-    assert.equal(screen.buttons("Sign out")[0].props.disabled, false);
-    screen.buttons("Sign out")[0].props.onPress();
-    screen.render();
-    assert.match(screen.text(), /may have completed on the server/);
-    assert.equal(screen.calls.length, 0);
-    const confirmation = screen.buttons("Sign out").at(-1);
-    assert.equal(confirmation.props.disabled, false);
-    confirmation.props.onPress();
-    await tick();
-    assert.equal(
-      screen.calls.filter((call) => call.name === "signOut").length,
-      1,
-    );
+test("unconfirmed transition sign-out discloses discarded local work and cancellation preserves it in both languages", async () => {
+  for (const locale of ["en", "zh-CN"]) {
+    for (const section of ["account", "family"]) {
+      for (const deletionStatus of [
+        null,
+        {
+          deletionId: "deletion",
+          status: "pending",
+          requestedAt: "2026-09-01T01:00:00Z",
+        },
+      ]) {
+        const screen = fixture(
+          { transitionPending: true, deletionStatus, hasPrivateWork: true },
+          locale,
+          false,
+          section,
+        );
+        const signOut = locale === "en" ? "Sign out" : "退出登录";
+        const cancel = locale === "en" ? "Cancel" : "取消";
+        screen.render();
+        assert.equal(screen.buttons(signOut).length, 1);
+        assert.equal(screen.buttons(signOut)[0].props.disabled, false);
+        screen.buttons(signOut)[0].props.onPress();
+        screen.render();
+        assert.match(
+          screen.modalText(),
+          locale === "en"
+            ? /may have completed on the server/
+            : /服务端可能已经完成/,
+        );
+        assert.match(
+          screen.modalText(),
+          locale === "en"
+            ? /discards.*family cache, drafts, unsent changes and retry intent/
+            : /丢弃.*家庭缓存、草稿、未发送修改和重试意图/,
+        );
+        assert.match(
+          screen.modalText(),
+          locale === "en"
+            ? /does not undo.*accepted.*server/
+            : /不会撤销服务端已接受的操作/,
+        );
+        assert.match(
+          screen.modalText(),
+          locale === "en"
+            ? /account-deletion receipt.*kept/i
+            : /账户删除查询凭证会保留/,
+        );
+        assert.equal(screen.calls.length, 0);
+        screen.buttons(cancel)[0].props.onPress();
+        screen.render();
+        assert.equal(screen.modalText(), "");
+        assert.equal(
+          screen.calls.length,
+          0,
+          "Cancelling must not sign out or discard local work",
+        );
+        assert.equal(screen.controller.hasPrivateWork, true);
+        assert.equal(screen.controller.transitionPending, true);
+        assert.equal(screen.controller.deletionStatus, deletionStatus);
+        screen.buttons(signOut)[0].props.onPress();
+        screen.render();
+        const confirmation = screen.buttons(signOut).at(-1);
+        assert.equal(confirmation.props.disabled, false);
+        confirmation.props.onPress();
+        await tick();
+        assert.equal(
+          screen.calls.filter((call) => call.name === "signOut").length,
+          1,
+        );
+      }
+    }
   }
 });
 
