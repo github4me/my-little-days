@@ -48,17 +48,26 @@ function Disclosure({
   children,
   initiallyOpen = false,
   status,
+  nested = false,
 }: {
   title: string;
   children: React.ReactNode;
   initiallyOpen?: boolean;
   status?: string;
+  nested?: boolean;
 }) {
   const c = useContext(Theme);
   const { locale } = useI18n();
   const [open, setOpen] = useState(initiallyOpen);
+  const Container = nested ? View : Card;
   return (
-    <Card style={styles.card}>
+    <Container
+      style={
+        nested
+          ? { ...styles.nestedDisclosure, borderColor: c.line }
+          : styles.card
+      }
+    >
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={familyMessage(
@@ -75,7 +84,10 @@ function Disclosure({
         ]}
       >
         <View style={{ flex: 1, gap: 4 }}>
-          <T raw style={styles.sectionTitle}>
+          <T
+            raw
+            style={[styles.sectionTitle, nested && styles.nestedSectionTitle]}
+          >
             {title}
           </T>
           {status ? (
@@ -91,13 +103,24 @@ function Disclosure({
         <T
           raw
           accessibilityElementsHidden
-          style={{ color: c.primary, fontSize: 20 }}
+          style={{
+            color: c.primary,
+            fontSize: nested ? 13 : 20,
+            flexShrink: 0,
+          }}
         >
-          {open ? "−" : "+"}
+          {nested
+            ? familyMessage(
+                locale,
+                open ? "collapseSectionAction" : "expandSectionAction",
+              )
+            : open
+              ? "−"
+              : "+"}
         </T>
       </Pressable>
       {open ? <View style={styles.stack}>{children}</View> : null}
-    </Card>
+    </Container>
   );
 }
 
@@ -117,6 +140,11 @@ function Input({
         placeholderTextColor={c.muted}
         style={[
           styles.input,
+          // Let UITextField use its native baseline/descender metrics. Explicit
+          // paragraph line height is still useful for multiline notes and web.
+          Platform.OS !== "ios" || props.multiline
+            ? styles.inputLineHeight
+            : null,
           { color: c.text, backgroundColor: c.bg, borderColor: c.line },
           props.style,
         ]}
@@ -1511,147 +1539,152 @@ export default function FamilyScreenView({
                       <T raw>{createdInvite}</T>
                     </View>
                   ) : null}
-                </Disclosure>
-              ) : null}
-              {owner ? (
-                <Disclosure title={m("invitations")}>
-                  {!snapshot.invitations.length &&
-                  !unlinkedFormerMembers.length ? (
-                    <T raw style={styles.muted(c.muted)}>
-                      {m("noInvitations")}
-                    </T>
-                  ) : (
-                    snapshot.invitations.map((invitation) => {
-                      const pending =
-                        invitation.status === "pending" &&
-                        Date.parse(invitation.expiresAt) > Date.now();
-                      const status =
-                        invitation.status === "pending" && !pending
-                          ? "expired"
-                          : invitation.status;
-                      // Link to this invitation's grant, never to the email:
-                      // the same person can leave and rejoin with a new grant.
-                      const acceptedMember =
-                        status === "accepted" && invitation.acceptedMembershipId
-                          ? snapshot.members.find(
-                              (member) =>
-                                member.membershipId ===
-                                invitation.acceptedMembershipId,
-                            )
-                          : undefined;
-                      const statusLabel: Record<
-                        typeof status,
-                        FamilyMessageKey
-                      > = {
-                        pending: "pendingInvitation",
-                        accepted:
-                          acceptedMember?.status === "removed"
-                            ? "acceptedRemovedInvitation"
-                            : acceptedMember?.status === "left"
-                              ? "acceptedLeftInvitation"
-                              : "acceptedInvitation",
-                        declined: "declinedInvitation",
-                        revoked: "revokedInvitation",
-                        expired: "expiredInvitation",
-                      };
-                      return (
-                        <View
-                          key={invitation.id}
-                          style={[styles.listItem, { borderColor: c.line }]}
-                        >
-                          <T raw>{invitation.email}</T>
-                          <T raw style={styles.muted(c.muted)}>
-                            {m(
-                              status === "declined" &&
-                                invitation.declineReason === "created_family"
-                                ? "declinedCreatedFamily"
-                                : status === "declined" &&
-                                    invitation.declineReason === "joined_family"
-                                  ? "declinedJoinedFamily"
-                                  : statusLabel[status],
-                            )}
-                          </T>
-                          {acceptedMember?.endedAt &&
-                          acceptedMember.status !== "active" ? (
-                            <T raw style={styles.muted(c.muted)}>
-                              {m("endedAt", {
-                                time: displayDate(
-                                  acceptedMember.endedAt,
-                                  locale,
-                                ),
-                              })}
-                            </T>
-                          ) : status === "pending" || status === "expired" ? (
-                            <T raw style={styles.muted(c.muted)}>
-                              {m("expiresAt", {
-                                time: displayDate(invitation.expiresAt, locale),
-                              })}
-                            </T>
-                          ) : null}
-                          {pending ? (
-                            <Button
-                              label={m("revoke")}
-                              secondary
-                              disabled={busy}
-                              onPress={() =>
-                                confirm(
-                                  "revokeTitle",
-                                  m("revokeDescription", {
-                                    email: invitation.email,
-                                  }),
-                                  "revoke",
-                                  async () => {
-                                    await pilot.revokeInvitation(invitation.id);
-                                    setCreatedInvite(null);
-                                  },
-                                )
-                              }
-                            />
-                          ) : null}
-                        </View>
-                      );
-                    })
-                  )}
-                  {unlinkedFormerMembers.length ? (
-                    <>
-                      <T raw style={{ fontWeight: "600" }}>
-                        {m("unlinkedMembershipHistory")}
-                      </T>
+                  <Disclosure title={m("invitations")} nested>
+                    {!snapshot.invitations.length &&
+                    !unlinkedFormerMembers.length ? (
                       <T raw style={styles.muted(c.muted)}>
-                        {m("memberHistoryDescription")}
+                        {m("noInvitations")}
                       </T>
-                      {unlinkedFormerMembers.map((member) => (
-                        <View
-                          key={member.membershipId}
-                          style={[styles.listItem, { borderColor: c.line }]}
-                        >
-                          <T raw style={{ fontWeight: "600" }}>
-                            {member.displayName}
-                          </T>
-                          <T raw style={styles.muted(c.muted)}>
-                            {m(member.role)} ·{" "}
-                            {m(
-                              member.status === "left"
-                                ? "leftMember"
-                                : "removedMember",
-                            )}
-                          </T>
-                          {member.email ? (
+                    ) : (
+                      snapshot.invitations.map((invitation) => {
+                        const pending =
+                          invitation.status === "pending" &&
+                          Date.parse(invitation.expiresAt) > Date.now();
+                        const status =
+                          invitation.status === "pending" && !pending
+                            ? "expired"
+                            : invitation.status;
+                        // Link to this invitation's grant, never to the email:
+                        // the same person can leave and rejoin with a new grant.
+                        const acceptedMember =
+                          status === "accepted" &&
+                          invitation.acceptedMembershipId
+                            ? snapshot.members.find(
+                                (member) =>
+                                  member.membershipId ===
+                                  invitation.acceptedMembershipId,
+                              )
+                            : undefined;
+                        const statusLabel: Record<
+                          typeof status,
+                          FamilyMessageKey
+                        > = {
+                          pending: "pendingInvitation",
+                          accepted:
+                            acceptedMember?.status === "removed"
+                              ? "acceptedRemovedInvitation"
+                              : acceptedMember?.status === "left"
+                                ? "acceptedLeftInvitation"
+                                : "acceptedInvitation",
+                          declined: "declinedInvitation",
+                          revoked: "revokedInvitation",
+                          expired: "expiredInvitation",
+                        };
+                        return (
+                          <View
+                            key={invitation.id}
+                            style={[styles.listItem, { borderColor: c.line }]}
+                          >
+                            <T raw>{invitation.email}</T>
                             <T raw style={styles.muted(c.muted)}>
-                              {member.email}
+                              {m(
+                                status === "declined" &&
+                                  invitation.declineReason === "created_family"
+                                  ? "declinedCreatedFamily"
+                                  : status === "declined" &&
+                                      invitation.declineReason ===
+                                        "joined_family"
+                                    ? "declinedJoinedFamily"
+                                    : statusLabel[status],
+                              )}
                             </T>
-                          ) : null}
-                          {member.endedAt ? (
+                            {acceptedMember?.endedAt &&
+                            acceptedMember.status !== "active" ? (
+                              <T raw style={styles.muted(c.muted)}>
+                                {m("endedAt", {
+                                  time: displayDate(
+                                    acceptedMember.endedAt,
+                                    locale,
+                                  ),
+                                })}
+                              </T>
+                            ) : status === "pending" || status === "expired" ? (
+                              <T raw style={styles.muted(c.muted)}>
+                                {m("expiresAt", {
+                                  time: displayDate(
+                                    invitation.expiresAt,
+                                    locale,
+                                  ),
+                                })}
+                              </T>
+                            ) : null}
+                            {pending ? (
+                              <Button
+                                label={m("revoke")}
+                                secondary
+                                disabled={busy}
+                                onPress={() =>
+                                  confirm(
+                                    "revokeTitle",
+                                    m("revokeDescription", {
+                                      email: invitation.email,
+                                    }),
+                                    "revoke",
+                                    async () => {
+                                      await pilot.revokeInvitation(
+                                        invitation.id,
+                                      );
+                                      setCreatedInvite(null);
+                                    },
+                                  )
+                                }
+                              />
+                            ) : null}
+                          </View>
+                        );
+                      })
+                    )}
+                    {unlinkedFormerMembers.length ? (
+                      <>
+                        <T raw style={{ fontWeight: "600" }}>
+                          {m("unlinkedMembershipHistory")}
+                        </T>
+                        <T raw style={styles.muted(c.muted)}>
+                          {m("memberHistoryDescription")}
+                        </T>
+                        {unlinkedFormerMembers.map((member) => (
+                          <View
+                            key={member.membershipId}
+                            style={[styles.listItem, { borderColor: c.line }]}
+                          >
+                            <T raw style={{ fontWeight: "600" }}>
+                              {member.displayName}
+                            </T>
                             <T raw style={styles.muted(c.muted)}>
-                              {m("endedAt", {
-                                time: displayDate(member.endedAt, locale),
-                              })}
+                              {m(member.role)} ·{" "}
+                              {m(
+                                member.status === "left"
+                                  ? "leftMember"
+                                  : "removedMember",
+                              )}
                             </T>
-                          ) : null}
-                        </View>
-                      ))}
-                    </>
-                  ) : null}
+                            {member.email ? (
+                              <T raw style={styles.muted(c.muted)}>
+                                {member.email}
+                              </T>
+                            ) : null}
+                            {member.endedAt ? (
+                              <T raw style={styles.muted(c.muted)}>
+                                {m("endedAt", {
+                                  time: displayDate(member.endedAt, locale),
+                                })}
+                              </T>
+                            ) : null}
+                          </View>
+                        ))}
+                      </>
+                    ) : null}
+                  </Disclosure>
                 </Disclosure>
               ) : null}
               {owner ? (
@@ -1843,7 +1876,14 @@ const styles = {
     screen: { width: "100%", maxWidth: 680, alignSelf: "center", gap: 14 },
     title: { fontSize: 22, lineHeight: 29, fontWeight: "700", flexShrink: 1 },
     sectionTitle: { fontSize: 17, lineHeight: 24, fontWeight: "700", flex: 1 },
+    nestedSectionTitle: { fontSize: 15, lineHeight: 22, fontWeight: "600" },
     card: { padding: 16, borderRadius: 20, gap: 12 },
+    nestedDisclosure: {
+      borderTopWidth: 1,
+      marginTop: 4,
+      paddingTop: 8,
+      gap: 12,
+    },
     stack: { gap: 12 },
     spread: {
       flexDirection: "row",
@@ -1866,8 +1906,8 @@ const styles = {
       paddingHorizontal: 12,
       paddingVertical: 10,
       fontSize: 15,
-      lineHeight: 22,
     },
+    inputLineHeight: { lineHeight: 22 },
     consent: {
       flexDirection: "row",
       alignItems: "flex-start",

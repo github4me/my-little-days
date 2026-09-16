@@ -454,6 +454,9 @@ test("removal reduces member count and keeps unlinked history inside collapsed i
       view.text(),
       /Departure and removal history|退出与移除历史/,
     );
+    assert.equal(findToggle("Show Invitations", "展开邀请记录"), undefined);
+    findToggle("Show Invite a caregiver", "展开邀请照护者").props.onPress();
+    view.render();
     const history = findToggle("Show Invitations", "展开邀请记录");
     assert.equal(history?.props.accessibilityState.expanded, false);
     history.props.onPress();
@@ -1301,6 +1304,15 @@ test("accepted invitations show the outcome of their own membership without rela
       .find(
         (node) =>
           node.props?.accessibilityLabel ===
+          (locale === "en" ? "Show Invite a caregiver" : "展开邀请照护者"),
+      )
+      .props.onPress();
+    view.render();
+    view
+      .nodes()
+      .find(
+        (node) =>
+          node.props?.accessibilityLabel ===
           (locale === "en" ? "Show Invitations" : "展开邀请记录"),
       )
       .props.onPress();
@@ -1332,7 +1344,7 @@ test("accepted invitations show the outcome of their own membership without rela
   }
 });
 
-test("invitation history stays collapsed when the invite form opens and preserves unbound legacy membership rows", () => {
+test("invitation history is nested in the caregiver form, collapsed initially and preserves unbound legacy rows", () => {
   for (const locale of ["en", "zh-CN"]) {
     const data = snapshotWithMemberHistory("owner");
     data.invitations = [
@@ -1358,6 +1370,7 @@ test("invitation history stays collapsed when the invite form opens and preserve
             node.props?.accessibilityLabel === (locale === "en" ? en : zh),
         );
     view.render();
+    assert.equal(toggle("Show Invitations", "展开邀请记录"), undefined);
     toggle("Show Invite a caregiver", "展开邀请照护者").props.onPress();
     view.render();
     assert.equal(
@@ -1394,8 +1407,51 @@ test("invitation history stays collapsed when the invite form opens and preserve
       view.buttons(locale === "en" ? "Add invitation" : "添加邀请").length,
       1,
     );
+    toggle("Hide Invite a caregiver", "收起邀请照护者").props.onPress();
+    view.render();
+    assert.equal(toggle("Show Invitations", "展开邀请记录"), undefined);
+    assert.equal(
+      view.buttons(locale === "en" ? "Add invitation" : "添加邀请").length,
+      0,
+    );
     assert.equal(view.calls.length, 0);
   }
+});
+
+test("iOS single-line invitation input leaves line metrics to the native field", () => {
+  const view = fixture({ snapshot: snapshot("owner") }, "en", false, "family");
+  const findInput = () =>
+    view
+      .nodes()
+      .find(
+        (node) =>
+          node.type === "TextInput" &&
+          node.props.accessibilityLabel === "Recipient email",
+      );
+  view.render();
+  const input = findInput();
+  const style = Object.assign(
+    {},
+    ...input.props.style.flat(Infinity).filter(Boolean),
+  );
+  assert.equal(
+    style.lineHeight,
+    undefined,
+    "Use native iOS single-line baseline and descender metrics",
+  );
+  assert.equal(
+    style.height,
+    undefined,
+    "Keep intrinsic sizing for larger system text",
+  );
+  assert.ok(style.minHeight >= 44);
+  const email = "mia.huang.gyp@example.invalid";
+  input.props.onChangeText(email);
+  view.render();
+  assert.equal(findInput().props.value, email);
+  assert.equal(findInput().props.keyboardType, "email-address");
+  assert.equal(view.buttons("Add invitation")[0].props.disabled, false);
+  assert.equal(view.calls.length, 0);
 });
 
 test("invitation history distinguishes automatic decline after joining from manual decline", () => {

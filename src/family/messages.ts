@@ -514,6 +514,8 @@ const messages = {
   details: ["详情", "Details"],
   showSection: ["展开{section}", "Show {section}"],
   hideSection: ["收起{section}", "Hide {section}"],
+  expandSectionAction: ["展开", "Expand"],
+  collapseSectionAction: ["收起", "Collapse"],
   working: ["正在处理…", "Working…"],
   errorGeneric: [
     "暂时无法确认操作结果。请保持此页面打开，联网后刷新查看最新状态。",

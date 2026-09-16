@@ -207,6 +207,8 @@ async function englishFlows(page) {
   await confirm(page, "Remove");
   await expect(button(page, "Remove")).toHaveCount(0);
   await expect(button(page, "Hide Family members (1)")).toBeVisible();
+  await expect(button(page, "Show Invitations")).toHaveCount(0);
+  await button(page, "Show Invite a caregiver").click();
   await expect(button(page, "Show Invitations")).toHaveAttribute(
     "aria-expanded",
     "false",
@@ -231,7 +233,7 @@ async function englishFlows(page) {
     page.getByText("Sample Removed Member", { exact: true }),
   ).toHaveCount(1);
   await button(page, "Hide Invitations").click();
-  await button(page, "Show Invite a caregiver").click();
+  await expect(button(page, "Hide Invite a caregiver")).toBeVisible();
   await expect(
     page.getByText("Accepted · later removed", { exact: true }),
   ).toHaveCount(0);
@@ -399,6 +401,114 @@ async function receivedInvitationCreationFlow(page, zh) {
     label("Hide Create a family group", "收起创建家庭群组"),
   ).click();
   await expect(creationGuidance).toHaveCount(0);
+}
+
+async function nestedInvitationHistoryFlow(page, zh, dark, width) {
+  const label = (en, chinese) => (zh ? chinese : en);
+  const showForm = label("Show Invite a caregiver", "展开邀请照护者");
+  const hideForm = label("Hide Invite a caregiver", "收起邀请照护者");
+  const showHistory = label("Show Invitations", "展开邀请记录");
+  const hideHistory = label("Hide Invitations", "收起邀请记录");
+  const recipientLabel = label("Recipient email", "受邀邮箱");
+  const draftEmail = "mia.huang.gyp@example.invalid";
+  const screenshotSuffix = `${zh ? "zh" : "en"}-${dark ? "dark" : "light"}-${width}`;
+  await button(page, label("Admin", "管理员")).click();
+  await expect(button(page, showHistory)).toHaveCount(0);
+  await expect(button(page, hideHistory)).toHaveCount(0);
+  await button(page, showForm).click();
+  const recipient = page.getByLabel(recipientLabel, { exact: true });
+  await recipient.fill(draftEmail);
+  await expect(button(page, showHistory)).toHaveAttribute(
+    "aria-expanded",
+    "false",
+  );
+  await expect(
+    button(page, showHistory).getByText(label("Expand", "展开"), {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("sample.guest@example.com", { exact: true }),
+  ).toHaveCount(0);
+
+  // Find the smallest rendered ancestor that contains both the outer header
+  // and its input. It must also contain history, but not the next admin section.
+  // This verifies one visual group without relying on generated RN Web classes.
+  const form = button(page, hideForm).locator(
+    `xpath=ancestor::*[.//*[@aria-label='${recipientLabel}']][1]`,
+  );
+  await expect(
+    form.getByRole("button", { name: showHistory, exact: true }),
+  ).toHaveCount(1);
+  await expect(
+    form.getByRole("button", {
+      name: label("Show Admin role", "展开管理员权限"),
+      exact: true,
+    }),
+  ).toHaveCount(0);
+  const formBox = await form.boundingBox();
+  const historyBox = await button(page, showHistory).boundingBox();
+  const addBox = await button(
+    page,
+    label("Add invitation", "添加邀请"),
+  ).boundingBox();
+  assert.ok(formBox && historyBox && addBox);
+  assert.ok(historyBox.y >= addBox.y + addBox.height);
+  assert.ok(historyBox.x >= formBox.x && historyBox.y >= formBox.y);
+  assert.ok(historyBox.x + historyBox.width <= formBox.x + formBox.width + 1);
+  assert.ok(historyBox.y + historyBox.height <= formBox.y + formBox.height + 1);
+  await noOverflow(
+    page,
+    `Nested invitation history collapsed/${screenshotSuffix}`,
+  );
+  await form.screenshot({
+    path: path.join(
+      screenshots,
+      `invitation-history-collapsed-${screenshotSuffix}.png`,
+    ),
+    animations: "disabled",
+  });
+
+  await button(page, showHistory).click();
+  await expect(button(page, hideHistory)).toHaveAttribute(
+    "aria-expanded",
+    "true",
+  );
+  await expect(
+    button(page, hideHistory).getByText(label("Collapse", "收起"), {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    form.getByText("sample.guest@example.com", { exact: true }),
+  ).toBeVisible();
+  await expect(recipient).toHaveValue(draftEmail);
+  await expect(button(page, label("Revoke", "撤销"))).toHaveCount(1);
+  await noOverflow(
+    page,
+    `Nested invitation history expanded/${screenshotSuffix}`,
+  );
+  await form.screenshot({
+    path: path.join(
+      screenshots,
+      `invitation-history-expanded-${screenshotSuffix}.png`,
+    ),
+    animations: "disabled",
+  });
+  await button(page, hideHistory).click();
+  await expect(recipient).toHaveValue(draftEmail);
+  await expect(button(page, label("Revoke", "撤销"))).toHaveCount(0);
+  await button(page, hideForm).click();
+  await expect(button(page, showHistory)).toHaveCount(0);
+  await expect(button(page, hideHistory)).toHaveCount(0);
+  await expect(recipient).toHaveCount(0);
+  await button(page, showForm).click();
+  await expect(button(page, showHistory)).toHaveAttribute(
+    "aria-expanded",
+    "false",
+  );
+  await expect(recipient).toHaveValue(draftEmail);
+  await button(page, hideForm).click();
 }
 
 async function firstInvitationFlow(page, zh, width) {
@@ -706,6 +816,7 @@ try {
     await firstInvitationFlow(page, zh, width);
     await receivedInvitationCreationFlow(page, zh);
     if (locale === "en" && width === 390) await englishFlows(page);
+    await nestedInvitationHistoryFlow(page, zh, dark, width);
     for (const scenario of scenarios[locale]) {
       await button(page, scenario).click();
       await noOverflow(
@@ -757,7 +868,7 @@ try {
     await context.close();
   }
   console.log(
-    "PASS: 9 family UI scenarios, first-invitation seed review/cancel/consent with multiple emails, invitation consent, roles, editing, removal, transfer, closure, deletion and reset; English/Chinese, light/dark at 390/320px; all original record types preserved, no family persistence or API/auth traffic.",
+    "PASS: 9 family UI scenarios, first-invitation seed review/cancel/consent with multiple emails, nested collapsed invitation history with preserved drafts, invitation consent, roles, editing, removal, transfer, closure, deletion and reset; English/Chinese, light/dark at 390/320px; all original record types preserved, no family persistence or API/auth traffic.",
   );
 } finally {
   await browser.close();
