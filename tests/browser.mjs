@@ -2195,6 +2195,47 @@ await page.getByText("Sleeping now", { exact: true }).waitFor();
 await page.getByRole("button", { name: "Awake", exact: true }).click();
 await page.getByText(/This sleep lasted less than 1 minute/).waitFor();
 await assertNoUntranslatedChinese("live sleep feedback and today's totals");
+
+// Suggested feeding ends never go past now, including across midnight.
+// Saving a feed started in the current minute must preserve valid seconds.
+for (const [now, startDate, startTime, expectedEnd] of [
+  ["2026-09-17T17:20:45+10:00", null, null, "17:20"],
+  ["2026-09-17T17:20:45+10:00", "2026-09-17", "17:10", "17:20"],
+  ["2026-09-17T23:55:45+10:00", "2026-09-17", "23:50", "23:55"],
+]) {
+  await page.clock.setFixedTime(new Date(now));
+  await page
+    .getByRole("button", { name: "+ Add", exact: true })
+    .first()
+    .click();
+  if (startDate) {
+    await page.getByLabel("Time date", { exact: true }).fill(startDate);
+    await page.getByLabel("Time time", { exact: true }).fill(startTime);
+  }
+  await page
+    .getByRole("button", { name: "+ Add end time (optional)", exact: true })
+    .click();
+  assert.equal(
+    await page.getByLabel("End time date", { exact: true }).inputValue(),
+    "2026-09-17",
+  );
+  assert.equal(
+    await page.getByLabel("End time time", { exact: true }).inputValue(),
+    expectedEnd,
+  );
+  await page.getByRole("button", { name: "Save record", exact: true }).click();
+  await page
+    .getByLabel("Close editor", { exact: true })
+    .waitFor({ state: "detached" });
+  const savedFeed = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem("little-days-v1")).entries.find(
+      (entry) => entry.type === "feed",
+    ),
+  );
+  assert.ok(savedFeed.end);
+  assert.ok(Date.parse(savedFeed.end) <= Date.parse(now));
+  assert.ok(Date.parse(savedFeed.end) >= Date.parse(savedFeed.start));
+}
 assert.deepEqual(errors, []);
 console.log(
   "PASS: existing local flows, calendar/history, dark/narrow layout, bilingual family/account and live sleep/today summaries, preserved local history.",

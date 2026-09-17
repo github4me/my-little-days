@@ -553,7 +553,10 @@ export default function EntryEditor({
                             setEnd(
                               localFields(
                                 new Date(
-                                  Date.parse(startTime) + 20 * 60 * 1000,
+                                  Math.min(
+                                    Date.parse(startTime) + 20 * 60 * 1000,
+                                    Date.now(),
+                                  ),
                                 ).toISOString(),
                               ),
                             );
