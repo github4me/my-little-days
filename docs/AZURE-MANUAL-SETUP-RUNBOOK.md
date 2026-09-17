@@ -1013,3 +1013,12 @@ Reference: [Microsoft Graph read-user permissions](https://learn.microsoft.com/e
 - Cache eviction or secret rotation does not guarantee immediate invalidation of an issued token. Follow the identity incident procedure after a suspected leak; restarting alone is not sufficient.
 
 See [the implementation/security review](AUTHENTICATION-CACHE-REVIEW-2026-09-17.md) and [Microsoft's application-token cache guidance](https://learn.microsoft.com/en-us/entra/msal/dotnet/acquiring-tokens/web-apps-apis/client-credential-flows).
+
+### 23.5 Deployment checkpoint — 17 September 2026
+
+- Released source: `76c045abea41614708639a49c322a879f6af897a`, committed/pushed through the GitHub plugin on `feature/family-invitations`.
+- Manually ran [Deploy family API and database #10](https://github.com/github4me/my-little-days/actions/runs/35186622914), with existing SQL bootstrap confirmed and EF adoption disabled. All five jobs succeeded, including mobile/browser verification, 219 API tests, 58 migration-tool tests, DbUp verification and temporary-rule cleanup. No new schema script was added.
+- Azure OneDeploy: `9066d8ee-8275-4d09-a082-40a94b91ffc7`. The API artifact recorded the same source SHA. No identity, consent, credential, environment, permanent firewall or App Service setting change was made.
+- Public health checks returned `200`. The new `/v1/session` route initially returned `404` immediately after deployment success, then correctly returned anonymous `401` with `Cache-Control: no-store` at 05:45:33 UTC / 15:45:33 Sydney. This propagation interval required neither manual restart nor redeployment. For future releases, verify a release-specific behavior as well as generic liveness before declaring activation.
+- Independent post-migration checks confirmed all 33 permanent exact-IP SQL firewall rules unchanged (including the operator rule), with no temporary runner rule left; .NET 10 and AlwaysOn remained unchanged.
+- Next manual step: deliver a new native iPhone build and perform section 23.3's signed-in, pending-access, logout/account-switch and two-device checks. No Expo/TestFlight build or publication was started by this API deployment. Authenticated production token-cache behavior has not yet been device-validated.
