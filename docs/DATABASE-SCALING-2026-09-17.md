@@ -1,6 +1,6 @@
 # Database indexes and operation-history scaling — 17 September 2026
 
-Status: **implemented locally; not deployed**. This follows [the database review](DATABASE-INDEX-REVIEW-2026-09-17.md). The API and DbUp migrator change together; no mobile, Expo, TestFlight, Bicep, Entra or resource-name change is needed.
+Status: **deployed to Azure on 17 September 2026** from commit `581834c4df2f4bb05421c42e6416d29465dbb8e8` in [release 35172852363](https://github.com/github4me/my-little-days/actions/runs/35172852363). This follows [the database review](DATABASE-INDEX-REVIEW-2026-09-17.md). The API and DbUp migrator changed together; no mobile, Expo, TestFlight, Bicep, Entra or resource-name change was needed.
 
 ## What changes
 
@@ -49,7 +49,7 @@ The new EF mapping disables direct SQL OUTPUT for this trigger-bearing table. Co
 
 ## Step-by-step deployment when approved
 
-1. **Source/review:** review `0005`, the matching API and migrator changes, and local/CI results. Commit/push the reviewed files through the GitHub plugin to the current trusted release branch. This implementation task has not performed that release.
+1. **Source/review:** review `0005`, the matching API and migrator changes, and local/CI results. Commit/push the reviewed files through the GitHub plugin to the current trusted release branch. This release has now completed as recorded below; do not rerun it merely to follow this checklist.
 2. **Azure portal → SQL database → Backups / Monitoring:** confirm the existing database's recovery capability and available storage/compute. Choose a quiet window. New indexes need build space; the receipt backfill holds `TABLOCKX` until the DbUp transaction installs the trigger and commits. It deliberately blocks receipt writes during that one-time window so counts cannot miss a concurrent write. Duration depends on live rows and service capacity; this is not a zero-downtime guarantee.
 3. **GitHub → Actions → Deploy family API and database → Run workflow:** select the trusted branch (currently `feature/family-invitations`). Confirm **SQL identities and runtime role are bootstrapped; I reviewed this release's SQL changes**. Leave **Adopt a reviewed existing database with legacy EF history** unchecked. No bootstrap rerun, new identity, secret, firewall list or app setting is needed.
 4. **Review before dispatch:** the last observed `family-database` and `family-pilot` environments had no required reviewers. Do not assume the run will pause for approval. Check their current protection settings and complete review before starting. If reviewers have since been configured, approve the appropriate database/API gate when ready. Do not change these settings merely to run this migration.
@@ -79,3 +79,13 @@ Still intentionally unchanged:
 - Full snapshots, avatars/JSON size aggregation and the mobile client's unused conditional snapshot support still need a separately measured sync optimization. Adding another index cannot eliminate all payload work.
 - Incoming invitations across families remain uncapped by product policy. Batching removes the N+1 family lookup and bounds individual queries, not all memory/transaction work for an exceptionally large inbox.
 - No partitioning, automated index rebuild job, compression policy, retention-policy change or SQL tier resize is introduced without workload evidence and separate review.
+
+## Azure release evidence
+
+- Source `581834c4df2f4bb05421c42e6416d29465dbb8e8` was committed/pushed through the GitHub plugin on `feature/family-invitations`. The explicit [manual release](https://github.com/github4me/my-little-days/actions/runs/35172852363) ran full CI despite the commit's skip-CI marker: **193 API + 58 DbUp tests**, none skipped, app verification, both browser suites and firewall/workflow checks all passed. All five release jobs succeeded.
+- `0005_QueryIndexesAndOperationCounts.sql` applied once at **2026-09-17 02:05:34.7639415 UTC / 12:05:34 Sydney**. Its normalized SHA-256 is `53B8DD1C1C397325E16FA294318BD8C11B530A313F08CF7FF015B206BF73D7A0`.
+- Independent read-only SQL checks at 02:06:46–48 UTC found all five journal hashes correct, no pending scripts and a passing full catalog/critical-column/trigger check. All **31 indexes** were enabled. The counter agreed with all **68 receipts** present at that checkpoint, with zero mismatched families. The trigger handles INSERT/UPDATE/DELETE and is enabled; effective runtime counter permissions allow SELECT but not INSERT/UPDATE/DELETE/ALTER.
+- Temporary migration access was removed. The post-release firewall configuration matched the preflight configuration exactly: 33 exact-address rules, no broad Azure-services rule or temporary runner rule, and the operator's requested administration rule retained. No permanent firewall, infrastructure, identity, history-ID or service-setting change was made.
+- GitHub and Azure agree on App Service deployment `77d06c49-6e13-4da1-8afa-955e28e12266`; Azure reports it active and complete. Independent HTTP checks returned **200** from `/health/live` and `/health/ready`, and **401 / unauthorized** from unauthenticated `/v2/capabilities`.
+- The existing environments remain branch-restricted without required reviewers. This was an explicitly user-authorized, supervised release, not independent reviewer approval. No approval controls were changed or bypassed.
+- **Next manual check:** on the existing iPhone installation, sign in if needed, refresh family data and confirm the next intended record save syncs normally (and appears on the second signed-in phone if available). No reinstall or new build is required. These phone checks, real directory deletion and restore-recovery/native security acceptance remain separate from successful deployment. No Expo build, OTA or TestFlight submission was performed.

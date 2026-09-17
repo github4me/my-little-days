@@ -16,7 +16,7 @@ Status below combines the historical setup conversation with the explicitly date
 | --- | --- | --- |
 | Bicep infrastructure | Successful deployment output supplied | Reuse existing resources |
 | SQL identity bootstrap | User confirmed rows created | Do not recreate the database |
-| DbUp | Migrations 0001–0004 applied; 0004 journal checksum, columns and indexes independently verified on 17 September | Future scripts start with 0005 and use the same workflow/journal |
+| DbUp | Migrations 0001–0005 applied; all journal hashes, indexes, counter trigger and aggregate counter reconciliation independently verified on 17 September | Future scripts start with 0006 and update the version-specific verifier; see section 22 |
 | API deployment identity and GitHub setup | User reported completed | Its client ID still needs recording in the private operator inventory |
 | Customer mobile/API registrations | IDs supplied and recorded below | Verify redirect, scope, consent and token version |
 | Customer default domain, OTP flow, Graph credentials | Completion not confirmed | Complete sections 8–9 |
@@ -24,7 +24,7 @@ Status below combines the historical setup conversation with the explicitly date
 | Customer admission compatibility | Strict support for the observed `creationType=null`, `federated`/`mail` OTP account format deployed in `2fec7dcbfff90f72631600cd1c4a5d68ff07102f` | Release 35043608849 passed all CI, migration, deployment and liveness checks. Live Graph lookup returns exactly the same enabled account. Native sign-in still needs the user's device retry; do not recreate the account |
 | App Service runtime settings | API starts; exact deployed settings and customer authentication not audited | Verify section 10; do not recreate valid settings |
 | API liveness | Direct liveness/readiness GETs returned 200 on 17 September; unauthenticated capabilities returned 401 | Proceed to authenticated/native checks; this does not verify SQL or Graph |
-| Latest API/database workflow | Release 35167068255 succeeded for `d41b7a1`; migration and temporary firewall cleanup independently verified | Test signed-in refresh/read/sync on the phone; do not rerun Bicep or initialization |
+| Latest API/database workflow | Release 35172852363 succeeded for `581834c`; migration, receipt counters, temporary firewall cleanup and API health independently verified | Test signed-in refresh/read/sync on the phone; do not rerun Bicep or initialization |
 | Native sign-in and two-device acceptance | Not verified | Complete sections 12–13 |
 | Expo preview variables | Read back through EAS CLI: all four public values match, with `EXPO_PUBLIC_FAMILY_UI_DEMO=0` | Verify actual build environment selection and device provisioning before building |
 | Expo account/project and devices | CLI confirmed `expo4chao/little-days`, expected project ID and two iPhones on Apple team `A9974KXQ4G`; user confirmed the same phones will be used | Verify both are included in signing; no cloud build started by these checks |
@@ -950,8 +950,10 @@ A hostname such as `login.reticle.com.au` is an example, not configured or selec
 
 ## 22. Database indexes and large operation histories
 
-Implemented locally on 17 September 2026; **not deployed by this task**. Migration `0005_QueryIndexesAndOperationCounts.sql` adds the reviewed access paths and transactionally maintained receipt counts. The matching API removes per-write receipt counts and purges deleted-account/closed-family receipts in committed 1,000-row batches. Active-family receipts are not expired, and existing operation limits and idempotency rules remain unchanged.
+**Deployed on 17 September 2026:** source `581834c4df2f4bb05421c42e6416d29465dbb8e8`, [release 35172852363](https://github.com/github4me/my-little-days/actions/runs/35172852363), all five jobs successful. Migration `0005_QueryIndexesAndOperationCounts.sql` adds the reviewed access paths and transactionally maintained receipt counts. The matching API removes per-write receipt counts and purges deleted-account/closed-family receipts in committed 1,000-row batches. Active-family receipts are not expired, and existing operation limits and idempotency rules remain unchanged.
 
 Follow [the detailed migration and deployment checklist](DATABASE-SCALING-2026-09-17.md#step-by-step-deployment-when-approved). Use the existing **Deploy family API and database** workflow after source review; leave EF adoption disabled. The one-time counter backfill locks receipt writes until its migration transaction commits, so select a quiet window. No new Azure/GitHub variable, identity, secret, infrastructure deployment, Expo update or TestFlight build is required. The last observed environments had no required reviewers; confirm protection before dispatch rather than expecting an approval pause.
 
-Record the actual source SHA, workflow run, migration/catalog-check result and signed-in phone verification here after an authorized release. Local tests and implementation do not establish live deployment.
+Migration 0005 applied at 02:05:34.7639415 UTC / 12:05:34 Sydney. Independent checks verified all five journal hashes, all 31 enabled indexes, the expected trigger and SELECT-only runtime counter access. At the checkpoint all 68 receipts matched their counters; no family count differed. Firewall rules exactly matched preflight, including retained operator access and no leftover runner rule. Azure reports deployment `77d06c49-6e13-4da1-8afa-955e28e12266` active/complete. Independent liveness/readiness checks returned 200, and unauthenticated capabilities returned 401. Full evidence and migration checksum are in the linked guide.
+
+**Remaining manual step:** refresh the existing signed-in iPhone, then verify the next intended record save syncs normally and appears on the other phone if available. No reinstall, Expo release or TestFlight build is needed for these backend changes. Record device acceptance separately; health and SQL checks alone do not establish it. No infrastructure, permanent firewall, identity or approval setting was changed for this release.

@@ -1,6 +1,6 @@
 # Database design and index review — 17 September 2026
 
-Implementation follow-up: the approved changes are now implemented locally in migration `0005` and the API/migrator. See [implementation, scaling limits and deployment steps](DATABASE-SCALING-2026-09-17.md). The live evidence below remains the **pre-change** audit; it does not assert that migration `0005` has been deployed.
+Implementation follow-up: the approved changes in migration `0005` and the API/migrator were deployed in [release 35172852363](https://github.com/github4me/my-little-days/actions/runs/35172852363). See [implementation, scaling limits and verified release evidence](DATABASE-SCALING-2026-09-17.md). The live evidence below remains the **pre-change** audit, not the post-release catalog.
 
 ## Conclusion and scope
 
