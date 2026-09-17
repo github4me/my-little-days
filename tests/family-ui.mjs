@@ -118,6 +118,8 @@ function fixture(
     configured: true,
     webUnsupported: false,
     authStatus: overrides.user === null ? "signed_out" : "authenticated",
+    tokenRecognized: overrides.user !== null,
+    sessionAvailable: overrides.user !== null,
     user: {
       id: "user",
       displayName: "Test member",
@@ -738,6 +740,52 @@ test("account and family modes retain deletion receipts after sign out", () => {
   }
 });
 
+test("deletion receipts retain saved-session cleanup without an authoritative user", async () => {
+  for (const locale of ["en", "zh-CN"]) {
+    for (const status of ["pending", "completed"]) {
+      const view = fixture(
+        {
+          user: null,
+          authStatus: "token_confirmed",
+          sessionAvailable: true,
+          tokenRecognized: true,
+          deletionStatus: {
+            deletionId: "deletion",
+            status,
+            requestedAt: "2026-09-01T01:00:00Z",
+          },
+        },
+        locale,
+      );
+      view.render();
+      assert.doesNotMatch(view.text(), /Sign-in recognized|已识别登录信息/);
+      const signOut = locale === "en" ? "Sign out" : "退出登录";
+      assert.equal(view.buttons(signOut)[0].props.disabled, false);
+      if (status === "pending") {
+        view.buttons(signOut)[0].props.onPress();
+        view.render();
+        assert.equal(view.buttons(signOut).at(-1).props.disabled, false);
+        view.buttons(signOut).at(-1).props.onPress();
+      } else {
+        view
+          .buttons(
+            locale === "en"
+              ? "Done; clear status receipt"
+              : "完成并清除查询凭证",
+          )[0]
+          .props.onPress();
+      }
+      await tick();
+      assert.deepEqual(
+        view.calls.map((call) => call.name),
+        status === "pending"
+          ? ["signOut"]
+          : ["signOut", "dismissDeletionStatus"],
+      );
+    }
+  }
+});
+
 test("real account and family views hide routine local-save notices while demo retains them", () => {
   for (const section of ["all", "account", "family"]) {
     const screen = fixture({ notice: "saved_locally" }, "en", false, section);
@@ -1058,6 +1106,241 @@ test("cached startup describes connecting without claiming authentication or exp
   noCache.render();
   assert.match(noCache.text(), /Checking sign-in…/);
   assert.doesNotMatch(noCache.text(), /saved on this device/);
+});
+
+test("recognized sign-in shows pending access with no family or account-management actions, even without cached identity", async () => {
+  for (const locale of ["en", "zh-CN"]) {
+    for (const section of ["account", "family"]) {
+      for (const cached of [false, true]) {
+        const view = fixture(
+          {
+            ...(!cached ? { user: null } : {}),
+            authStatus: "token_confirmed",
+            tokenRecognized: true,
+            syncing: true,
+            snapshot: snapshot("owner"),
+            inbox: [{ id: "invite", ownerDisplayName: "Private inviter" }],
+          },
+          locale,
+          false,
+          section,
+        );
+        view.render();
+        assert.match(
+          view.text(),
+          locale === "en" ? /Sign-in recognized/ : /已识别登录信息/,
+        );
+        assert.match(
+          view.text(),
+          locale === "en" ? /Connecting to family service/ : /正在连接家庭服务/,
+        );
+        assert.match(
+          view.text(),
+          locale === "en"
+            ? /Account and family access checks are still pending/
+            : /账户与家庭访问权限仍待核验/,
+        );
+        assert.doesNotMatch(
+          view.text(),
+          /Signed out|Signed in|Session expired|未登录|已登录|登录已过期|Fictional|Private inviter/,
+        );
+        if (cached) {
+          assert.match(view.text(), /Test member/);
+          assert.match(
+            view.text(),
+            locale === "en"
+              ? /do not confirm current account or family access/
+              : /不代表当前账户或家庭访问权限已获确认/,
+          );
+        } else {
+          assert.doesNotMatch(view.text(), /Test member|test@example.invalid/);
+        }
+        const allowedLabels =
+          locale === "en"
+            ? ["Back", "Refreshing…", "Sign out"]
+            : ["返回", "正在刷新…", "退出登录"];
+        assert.ok(
+          view
+            .nodes()
+            .filter((node) => node.type === "Button")
+            .every((node) => allowedLabels.includes(node.props.label)),
+          "Only navigation, refresh and sign-out may be offered while access is pending",
+        );
+        assert.equal(
+          view.nodes().filter((node) => node.type === "TextInput").length,
+          0,
+        );
+        assert.equal(
+          view.buttons(locale === "en" ? "Refreshing…" : "正在刷新…")[0].props
+            .disabled,
+          true,
+        );
+        const signOut = locale === "en" ? "Sign out" : "退出登录";
+        assert.equal(view.buttons(signOut)[0].props.disabled, false);
+        view.buttons(signOut)[0].props.onPress();
+        view.render();
+        assert.equal(view.buttons(signOut).at(-1).props.disabled, false);
+        view.buttons(signOut).at(-1).props.onPress();
+        await tick();
+        assert.deepEqual(
+          view.calls.map((call) => call.name),
+          ["signOut"],
+        );
+      }
+    }
+  }
+});
+
+test("saved credentials without a recognized subject retain neutral refresh and sign-out recovery", async () => {
+  for (const locale of ["en", "zh-CN"]) {
+    const view = fixture(
+      {
+        user: null,
+        authStatus: "unverified",
+        sessionAvailable: true,
+        tokenRecognized: false,
+        error: "network_unavailable",
+        snapshot: snapshot("owner"),
+        inbox: [{ id: "invite", ownerDisplayName: "Private inviter" }],
+      },
+      locale,
+    );
+    view.render();
+    assert.match(
+      view.text(),
+      locale === "en"
+        ? /A sign-in is saved on this device/
+        : /此设备保存了登录信息/,
+    );
+    assert.match(
+      view.text(),
+      locale === "en"
+        ? /Connect to verify your account and family access/
+        : /请联网核验账户与家庭访问权限/,
+    );
+    assert.doesNotMatch(
+      view.text(),
+      /Sign-in recognized|Signed in|Signed out|已识别登录信息|已登录|未登录|Fictional|Private inviter/,
+    );
+    const allowedLabels =
+      locale === "en"
+        ? ["Back", "Refresh", "Sign out"]
+        : ["返回", "刷新", "退出登录"];
+    assert.ok(
+      view
+        .nodes()
+        .filter((node) => node.type === "Button")
+        .every((node) => allowedLabels.includes(node.props.label)),
+    );
+    const refresh = locale === "en" ? "Refresh" : "刷新";
+    assert.equal(view.buttons(refresh)[0].props.disabled, false);
+    view.buttons(refresh)[0].props.onPress();
+    await tick();
+    const signOut = locale === "en" ? "Sign out" : "退出登录";
+    assert.equal(view.buttons(signOut)[0].props.disabled, false);
+    view.buttons(signOut)[0].props.onPress();
+    view.render();
+    assert.equal(view.buttons(signOut).at(-1).props.disabled, false);
+    view.buttons(signOut).at(-1).props.onPress();
+    await tick();
+    assert.deepEqual(
+      view.calls.map((call) => call.name),
+      ["refresh", "signOut"],
+    );
+  }
+});
+
+test("recognized sign-in remains distinct from signed-out state when the family service fails", () => {
+  for (const locale of ["en", "zh-CN"]) {
+    for (const error of [
+      "network_unavailable",
+      "service_unavailable",
+      "identity_unavailable",
+    ]) {
+      const view = fixture(
+        {
+          user: null,
+          authStatus: "token_confirmed",
+          tokenRecognized: true,
+          error,
+          inbox: [{ id: "invite", ownerDisplayName: "Private inviter" }],
+        },
+        locale,
+      );
+      view.render();
+      assert.match(
+        view.text(),
+        locale === "en" ? /Sign-in recognized/ : /已识别登录信息/,
+      );
+      assert.match(
+        view.text(),
+        locale === "en"
+          ? /Family service is temporarily unavailable/
+          : /家庭服务暂时不可用/,
+      );
+      assert.doesNotMatch(
+        view.text(),
+        /Signed out|Session expired|未登录|登录已过期|Private inviter/,
+      );
+      assert.doesNotMatch(
+        view.text(),
+        /Creating a family shares|首次创建将共享/,
+      );
+      const allowedLabels =
+        locale === "en"
+          ? ["Back", "Refresh", "Sign out"]
+          : ["返回", "刷新", "退出登录"];
+      assert.ok(
+        view
+          .nodes()
+          .filter((node) => node.type === "Button")
+          .every((node) => allowedLabels.includes(node.props.label)),
+      );
+      assert.equal(
+        view.buttons(locale === "en" ? "Refresh" : "刷新")[0].props.disabled,
+        false,
+      );
+      assert.equal(
+        view.buttons(locale === "en" ? "Sign out" : "退出登录")[0].props
+          .disabled,
+        false,
+      );
+    }
+  }
+});
+
+test("pending-access refresh does not block sign-out while waiting for the service", async () => {
+  let finishRefresh;
+  const refreshing = new Promise((resolve) => {
+    finishRefresh = resolve;
+  });
+  const view = fixture({
+    user: null,
+    authStatus: "token_confirmed",
+    tokenRecognized: true,
+    error: "service_unavailable",
+    refresh: async () => {
+      view.calls.push({ name: "refresh" });
+      view.controller.syncing = true;
+      await refreshing;
+    },
+  });
+  view.render();
+  view.buttons("Refresh")[0].props.onPress();
+  view.render();
+  assert.equal(view.buttons("Refreshing…")[0].props.disabled, true);
+  assert.equal(view.buttons("Sign out")[0].props.disabled, false);
+  view.buttons("Sign out")[0].props.onPress();
+  view.render();
+  assert.equal(view.buttons("Sign out").at(-1).props.disabled, false);
+  view.buttons("Sign out").at(-1).props.onPress();
+  await tick();
+  assert.deepEqual(
+    view.calls.map((call) => call.name),
+    ["refresh", "signOut"],
+  );
+  finishRefresh();
+  await tick();
 });
 
 test("connection failures describe connectivity while other verification failures and expiry keep their own statuses", () => {

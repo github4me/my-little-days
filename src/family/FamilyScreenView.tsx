@@ -502,6 +502,15 @@ export default function FamilyScreenView({
   const mounted = useRef(true);
   const busy = acting || pilot.busy;
   const authenticated = pilot.authStatus === "authenticated";
+  const tokenConfirmed = pilot.authStatus === "token_confirmed";
+  const savedSessionPending =
+    !pilot.user &&
+    pilot.sessionAvailable &&
+    pilot.authStatus !== "signed_out" &&
+    pilot.authStatus !== "reauth_required";
+  const accountAccessPending = tokenConfirmed || savedSessionPending;
+  const accessCheckUnavailable =
+    accountAccessPending && !pilot.syncing && !!pilot.error;
   const needsSignIn = pilot.authStatus === "reauth_required";
   const showAccount =
     section !== "family" ||
@@ -525,6 +534,7 @@ export default function FamilyScreenView({
       : ({
           signed_out: "accountSignedOut",
           checking: "accountChecking",
+          token_confirmed: "accountTokenRecognized",
           authenticated: "accountSignedIn",
           reauth_required: "accountExpired",
           unverified: "accountUnverified",
@@ -813,7 +823,7 @@ export default function FamilyScreenView({
               />
             ) : null}
           </View>
-          {demo || (!snapshot && !pilot.sharedMode) ? (
+          {demo || (!accountAccessPending && !snapshot && !pilot.sharedMode) ? (
             <View style={[styles.notice, { backgroundColor: c.soft }]}>
               <T raw style={{ fontSize: 13, lineHeight: 20 }}>
                 {m(demo ? "demoNotice" : "pilotNotice")}
@@ -929,7 +939,8 @@ export default function FamilyScreenView({
               disabled={busy}
               onPress={() =>
                 void run(async () => {
-                  if (pilot.user) await pilot.signOut();
+                  if (pilot.user || pilot.sessionAvailable)
+                    await pilot.signOut();
                   await pilot.dismissDeletionStatus();
                 })
               }
@@ -942,7 +953,7 @@ export default function FamilyScreenView({
               onPress={() => void run(pilot.refresh)}
             />
           ) : null}
-          {pilot.user ? (
+          {pilot.user || pilot.sessionAvailable ? (
             <Button
               label={m("signOut")}
               secondary
@@ -985,6 +996,69 @@ export default function FamilyScreenView({
                 : "nativeOnlyDescription",
             )}
           </T>
+        </Card>
+      ) : accountAccessPending ? (
+        <Card style={styles.card}>
+          <T raw accessibilityRole="header" style={styles.sectionTitle}>
+            {m("account")}
+          </T>
+          <T raw style={{ fontWeight: "600" }}>
+            {m(tokenConfirmed ? "accountTokenRecognized" : accountStatusKey)}
+          </T>
+          <T raw style={styles.muted(c.muted)}>
+            {m(
+              accessCheckUnavailable
+                ? "familyServiceUnavailable"
+                : "familyServiceConnecting",
+            )}
+          </T>
+          <T raw style={styles.muted(c.muted)}>
+            {m(
+              tokenConfirmed
+                ? "accountAccessPendingDetails"
+                : "accountSavedSignInDetails",
+            )}
+          </T>
+          {pilot.user ? (
+            <>
+              <T raw style={{ fontWeight: "600" }}>
+                {pilot.user.displayName}
+              </T>
+              <T raw selectable style={styles.muted(c.muted)}>
+                {pilot.user.email}
+              </T>
+              <T raw style={styles.muted(c.muted)}>
+                {m("accountRecognizedCachedDetails")}
+              </T>
+            </>
+          ) : null}
+          <Button
+            label={m(pilot.syncing ? "refreshing" : "refresh")}
+            secondary
+            disabled={busy || pilot.syncing}
+            // Refresh publishes its own errors. Do not lock sign-out while the
+            // account/family access check waits for the service.
+            onPress={() => void pilot.refresh().catch(() => {})}
+          />
+          <Button
+            label={m("signOut")}
+            secondary
+            disabled={busy || pilot.activationPending}
+            onPress={() =>
+              confirm(
+                "signOutTitle",
+                m(
+                  pilot.transitionPending
+                    ? "signOutDuringTransition"
+                    : pilot.hasPrivateWork
+                      ? "signOutWithWork"
+                      : "signOutDescription",
+                ),
+                "signOut",
+                pilot.signOut,
+              )
+            }
+          />
         </Card>
       ) : !pilot.user ? (
         <Card style={styles.card}>

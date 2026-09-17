@@ -40,6 +40,8 @@ Public admission uses `Admission__Mode=Directory`; there is **no manual customer
 
 `Admission__EmailOtpOnly=true` records the actual flow configuration; it does not configure Entra or prove a login used OTP. Verify the linked flow and real sign-in events. A deleted/recreated account has a new object ID and cannot inherit membership solely through the same email. `Admission:Mode=Static` is only for isolated compatibility tests.
 
+The sole token-recognition exception is `GET /v1/session`: it validates the same JWT but does not perform directory admission or SQL access. Its explicit pending account/family statuses grant no access and must not be substituted for `/v1/me`. The mobile client uses this response only to separate successful Microsoft sign-in from family loading. Removed/deleted/disabled accounts may still hold unexpired tokens; authoritative account/family operations remain guarded.
+
 ## 3. Reuse hosting through the guarded workflow
 
 Follow [GitHub infrastructure setup](AZURE-GITHUB-INFRA.md) for protections and [the Bicep guide](AZURE-BICEP-DEPLOYMENT.md) for local deployment mechanics. This document supersedes older application-scope notes in those guides.
@@ -80,16 +82,18 @@ In restricted App Service **Environment variables → App settings**, double und
 | `Admission__Mode` | `Directory` |
 | `Admission__LocalAccountIssuer` | Customer default `<tenant>.onmicrosoft.com` |
 | `Admission__EmailOtpOnly` | `true` after configuring/verifying the OTP-only flow |
-| `Admission__UseAccountDeletionCredentials` | `false` for separate admission credentials |
-| `Admission__GraphClientId`, `Admission__GraphClientSecret` | Customer-tenant confidential admission credentials |
+| `Admission__UseAccountDeletionCredentials` | `true` to reuse the existing directory application; `false` only for optional separate admission credentials |
+| `Admission__GraphClientId`, `Admission__GraphClientSecret` | Omit both when reuse is `true`; otherwise the separate customer-tenant admission credentials |
 | `AccountDeletion__GraphClientId`, `AccountDeletion__GraphClientSecret` | Customer-tenant confidential deletion credentials |
 | `AccountDeletion__WorkerEnabled` | `true` |
 | `AccountDeletion__PollIntervalMinutes` | `120` default; validated range `120`–`1440` |
 | `ConnectionStrings__FamilyDatabase` | `Server=tcp:<server>.database.windows.net,1433;Database=<database>;Authentication=Active Directory Managed Identity;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;` |
 
-Create confidential Graph applications in the **customer tenant**. Grant administrator consent for admission's application `User.Read.All`; deletion requires `User.ReadWrite.All` for active users and `User.DeleteRestore.All` for permanent deleted-user removal. Do not assign privileged administrator roles to these apps. [Read users](https://learn.microsoft.com/en-us/graph/api/user-get?view=graph-rest-1.0), [delete users](https://learn.microsoft.com/en-us/graph/api/user-delete?view=graph-rest-1.0), [permanent deletion](https://learn.microsoft.com/en-us/graph/api/directory-deleteditems-delete?view=graph-rest-1.0).
+Use confidential Graph applications in the **customer tenant**. The existing shared directory application has `User.ReadWrite.All` for reads and active-user deletion and `User.DeleteRestore.All` for permanent deleted-user removal. No new registration, consent or secret is required for the approved token-cache rollout. For an optional future separate admission application, use only application `User.Read.All`. Do not assign privileged administrator roles to these apps. [Read users](https://learn.microsoft.com/en-us/graph/api/user-get?view=graph-rest-1.0), [delete users](https://learn.microsoft.com/en-us/graph/api/user-delete?view=graph-rest-1.0), [permanent deletion](https://learn.microsoft.com/en-us/graph/api/directory-deleteditems-delete?view=graph-rest-1.0).
 
 For explicit credential reuse, set `Admission__UseAccountDeletionCredentials=true` and omit both admission client ID/secret settings. The deletion application's consent must cover reads and deletion. Directory release mode fails startup if required credentials or issuer/OTP settings are missing; static fallback is not automatic.
+
+**Graph application-token cache:** directory admission uses MSAL's process-local cache with either shared or separate credentials. The approved rollout keeps the existing Entra application and `Admission__UseAccountDeletionCredentials=true`; credential resolution and validation are unchanged. Only the service token is cached, never directory-user or family authorization results. The shared token retains the application's existing delete permissions; caching neither removes nor adds those privileges. Protect API process/configuration access, logs and memory dumps accordingly. Follow [runbook section 23](AZURE-MANUAL-SETUP-RUNBOOK.md#23-graph-application-token-cache-and-sql-independent-sign-in-recognition) for release and phone checks. A separate least-privileged read application remains optional future hardening, not an activation requirement.
 
 Enter real secrets directly in restricted server-side App Service settings. **No Key Vault resource or role is required.** Keep secrets out of Git, template/parameter copies, GitHub variables/artifacts, mobile/EAS settings, screenshots and logs; do not dump App Service settings. Restrict configuration/deployment access, record expiry and rotate before expiry, then verify admission/deletion again. Hosting managed identity handles SQL, not cross-tenant Graph.
 

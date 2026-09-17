@@ -134,6 +134,7 @@ test("family snapshots and avatar uploads retain a bounded two-minute transfer w
       15000,
     ],
     ["/v1/me", undefined, 30000],
+    ["/v1/session", undefined, 15000],
     ["/v2/capabilities", undefined, 15000],
     ["/v2/families/family-a/profile", { profile: {} }, 15000],
   ];
@@ -390,9 +391,64 @@ test("normal 403 and other API errors preserve semantic codes and status", async
     [403, "membership_revoked"],
     [409, "record_changed"],
     [503, "service_unavailable"],
+    [503, "identity_unavailable"],
   ] as const) {
     const client = clientBoundary();
     client.response(status, { code });
     await assert.rejects(client.api.familyRequest("/v1/me"), { code, status });
   }
+});
+
+test("session recognition is a bounded authenticated first-party read with private diagnostics", async () => {
+  const client = clientBoundary();
+  const response = {
+    status: "token_valid",
+    userId: "11111111-1111-4111-8111-111111111111",
+    accountAccess: "pending",
+    familyAccess: "pending",
+  };
+  client.response(200, response);
+  assert.equal(await client.api.familyRequest("/v1/session"), response);
+  assert.equal(
+    client.request()?.url,
+    "https://family.example.invalid/v1/session",
+  );
+  assert.deepEqual(client.delays, [20000, 15000]);
+  assert.equal(client.requestCount(), 1);
+  assert.ok(
+    JSON.stringify(client.diagnostics).includes('"operation":"session"'),
+  );
+  assert.ok(!JSON.stringify(client.diagnostics).includes(response.userId));
+});
+
+test("session HTTP denials and older-route 404 remain distinguishable from outages", async () => {
+  for (const [status, code] of [
+    [401, "sign_in_required"],
+    [403, "forbidden"],
+    [404, "request_failed"],
+  ] as const) {
+    const client = clientBoundary();
+    client.response(status);
+    client.failJson();
+    await assert.rejects(client.api.familyRequest("/v1/session"), {
+      code,
+      status,
+    });
+  }
+});
+
+test("logout aborts session recognition before its HTTP deadline", async () => {
+  const client = clientBoundary();
+  client.delay();
+  const session = new AbortController();
+  const pending = client.api.familyRequest(
+    "/v1/session",
+    undefined,
+    session.signal,
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  session.abort();
+  await assert.rejects(pending, /network_unavailable/);
+  assert.equal(client.request()?.signal.aborted, true);
+  assert.deepEqual(client.cancelled, [1, 2]);
 });

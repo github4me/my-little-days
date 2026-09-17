@@ -31,7 +31,7 @@ builder.Services.AddSingleton(config);
 builder.Services.AddSingleton<RecoveryGate>();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<FamilyService>();
-builder.Services.AddPublicIdentityAdmission(builder.Configuration, config);
+builder.Services.AddPublicIdentityAdmission(config);
 builder.Services.AddAccountIdentityDeletion(builder.Configuration, config);
 builder.Services.AddScoped<DeletionProcessor>();
 if (builder.Configuration.GetValue("AccountDeletion:WorkerEnabled", true)) builder.Services.AddHostedService<DeletionWorker>();
@@ -146,6 +146,13 @@ app.MapGet("/health/live", () => Results.Json(new { status = "ok" })).DisableRat
 app.MapGet("/health/ready", (RecoveryGate gate) => gate.Blocked
     ? Results.Json(new { code = "recovery_blocked" }, statusCode: 503)
     : Results.Json(new { status = "ready" })).DisableRateLimiting();
+// Keep outside the directory-admitted groups: recognize the validated token without
+// waking SQL or contacting Graph. An unexpired token can belong to a disabled/deleted
+// account; only /me and the guarded family endpoints can establish current access.
+// Global JWT checks, rate limits, no-store headers and the recovery gate still apply.
+app.MapGet("/v1/session", (HttpContext context) =>
+    new TokenSession(PublicIdentityAdmission.ObjectId(context.User, config.Entra.TenantId)))
+    .RequireAuthorization();
 app.MapPost("/v1/account-deletion-status", (DeletionStatusRequest request, FamilyService service, CancellationToken ct) => service.DeletionStatus(request, ct));
 var api = app.MapGroup("/v1").RequireAuthorization();
 api.AddEndpointFilter(async (context, next) =>

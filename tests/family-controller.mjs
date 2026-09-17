@@ -147,7 +147,11 @@ function makeWorld({ offline = true, queued = false } = {}) {
     beforeAuthSignOut: async () => {},
     beforeAuthSignIn: async () => {},
     beforeSessionRead: async () => {},
+    beforeIdentityLoad: async () => {},
     beforeIdentify: async () => {},
+    beforeRecognize: async () => {},
+    tokenSession: null,
+    tokenSessionError: null,
     beforeSnapshot: async () => {},
     beforeMutation: async () => {},
     mutationReceipts: new Map(),
@@ -175,6 +179,10 @@ function makeWorld({ offline = true, queued = false } = {}) {
   let timerClock = 0;
   let timerSequence = 0;
   world.timers = new Map();
+  world.intervals = new Map();
+  world.runIntervals = () => {
+    for (const callback of world.intervals.values()) callback();
+  };
   world.advanceTimers = (milliseconds) => {
     timerClock += milliseconds;
     for (const [id, timer] of world.timers) {
@@ -334,7 +342,11 @@ function makeWorld({ offline = true, queued = false } = {}) {
         await world.beforeSessionRead();
         return world.session;
       },
-      loadIdentity: async () => structuredClone(world.cachedIdentity),
+      loadIdentity: async () => {
+        const cached = structuredClone(world.cachedIdentity);
+        await world.beforeIdentityLoad();
+        return cached;
+      },
       loadCacheGuard: async () => structuredClone(world.cacheGuard),
       markReauthenticationRequired: async (userId) => {
         world.cacheGuard = {
@@ -387,6 +399,17 @@ function makeWorld({ offline = true, queued = false } = {}) {
       familyRequest: async (url, operation, signal) => {
         world.http.push({ url, operation });
         if (world.offline) throw new PilotApiError("network_unavailable");
+        if (url === "/v1/session") {
+          await world.beforeRecognize(signal);
+          if (world.tokenSessionError)
+            throw new PilotApiError(
+              world.tokenSessionError.code,
+              world.tokenSessionError.status,
+            );
+          if (!world.tokenSession)
+            throw new PilotApiError("request_failed", 404);
+          return structuredClone(world.tokenSession);
+        }
         if (url === "/v1/me") {
           await world.beforeIdentify(signal);
           if (world.identityError)
@@ -648,8 +671,12 @@ function makeWorld({ offline = true, queued = false } = {}) {
             }),
           };
         },
-        setInterval: () => 1,
-        clearInterval() {},
+        setInterval: (callback) => {
+          const id = ++timerSequence;
+          world.intervals.set(id, callback);
+          return id;
+        },
+        clearInterval: (id) => world.intervals.delete(id),
       },
       { filename },
     );
@@ -739,6 +766,678 @@ async function boot(world) {
   );
   return controller;
 }
+
+const recognizedUserId = "11111111-1111-4111-8111-111111111111";
+const otherRecognizedUserId = "22222222-2222-4222-8222-222222222222";
+function recognitionWorld() {
+  const world = ownerWorld();
+  world.identity.user.id = recognizedUserId;
+  world.identity.pendingInvitations = [];
+  world.cachedIdentity = null;
+  world.session = false;
+  world.tokenSession = {
+    status: "token_valid",
+    userId: recognizedUserId,
+    accountAccess: "pending",
+    familyAccess: "pending",
+  };
+  return world;
+}
+async function signedOutController(world) {
+  const controller = world.mount();
+  await until(() => !controller.result().booting, "signed-out initialization");
+  return controller;
+}
+
+test("fresh sign-in recognizes its token promptly while SQL-backed identity remains pending", async () => {
+  const world = recognitionWorld();
+  const controller = await signedOutController(world);
+  const me = deferred();
+  world.beforeIdentify = () => me.promise;
+  try {
+    await controller.result().signIn();
+    assert.equal(controller.result().authStatus, "token_confirmed");
+    assert.equal(controller.result().tokenRecognized, true);
+    assert.equal(controller.result().busy, false);
+    assert.equal(controller.result().syncing, true);
+    assert.equal(controller.result().user, null);
+    assert.equal(controller.result().ready, false);
+    assert.equal(controller.result().sharedState, null);
+    assert.equal(controller.result().sharedMode, true);
+    assert.equal(world.cachedIdentity, null);
+    await assert.rejects(
+      controller.result().createFamily("New baby"),
+      /refresh_required/,
+    );
+    assert.equal(
+      world.http.some((request) => request.operation),
+      false,
+    );
+    me.resolve();
+    await until(
+      () => !controller.result().syncing,
+      "authoritative account completion",
+    );
+    assert.equal(controller.result().authStatus, "authenticated");
+    assert.equal(controller.result().user.id, recognizedUserId);
+    assert.equal(world.cachedIdentity.user.id, recognizedUserId);
+    const probes = world.http.filter(
+      (request) => request.url === "/v1/session",
+    ).length;
+    await controller.result().refresh();
+    assert.equal(
+      world.http.filter((request) => request.url === "/v1/session").length,
+      probes,
+    );
+  } finally {
+    me.resolve();
+    controller.unmount();
+  }
+});
+
+for (const code of [
+  "identity_unavailable",
+  "service_unavailable",
+  "network_unavailable",
+])
+  test(`recognized sign-in survives ${code} and retains bounded background retry`, async () => {
+    const world = recognitionWorld();
+    const controller = await signedOutController(world);
+    let attempts = 0;
+    world.beforeIdentify = async () => {
+      attempts++;
+    };
+    world.identityError = {
+      code,
+      status: code === "network_unavailable" ? 0 : 503,
+    };
+    try {
+      await controller.result().signIn();
+      await until(() => !controller.result().syncing, "failed account check");
+      assert.equal(attempts, 2);
+      assert.equal(controller.result().authStatus, "token_confirmed");
+      assert.equal(controller.result().tokenRecognized, true);
+      assert.equal(controller.result().error, code);
+      assert.equal(controller.result().user, null);
+      assert.equal(controller.result().ready, false);
+      assert.equal(world.authSignOutCalls, 0);
+      world.identityError = null;
+      await controller.result().refresh();
+      assert.equal(controller.result().authStatus, "authenticated");
+    } finally {
+      controller.unmount();
+    }
+  });
+
+for (const field of ["status", "userId", "accountAccess", "familyAccess"])
+  test(`malformed session ${field} cannot create an authoritative identity`, async () => {
+    const world = recognitionWorld();
+    world.tokenSession[field] = "forged";
+    const controller = await signedOutController(world);
+    try {
+      await assert.rejects(controller.result().signIn(), /invalid_response/);
+      assert.equal(controller.result().tokenRecognized, false);
+      assert.equal(controller.result().user, null);
+      assert.equal(controller.result().ready, false);
+      assert.equal(world.cachedIdentity, null);
+      assert.equal(
+        world.http.some((request) => request.url === "/v1/me"),
+        false,
+      );
+    } finally {
+      controller.unmount();
+    }
+  });
+
+test("authoritative identity must match the recognized token subject", async () => {
+  const world = recognitionWorld();
+  const controller = await signedOutController(world);
+  world.identity.user.id = otherRecognizedUserId;
+  try {
+    await controller.result().signIn();
+    await until(() => !world.session, "wrong-subject logout");
+    assert.equal(controller.result().authStatus, "signed_out");
+    assert.equal(controller.result().tokenRecognized, false);
+    assert.equal(controller.result().user, null);
+    assert.equal(controller.result().ready, false);
+    assert.equal(controller.result().error, "account_mismatch");
+    assert.equal(world.cachedIdentity, null);
+  } finally {
+    controller.unmount();
+  }
+});
+
+test("a different recognized account cannot expose or overwrite the previous account's private work", async () => {
+  const world = makeWorld({ queued: true });
+  const controller = await boot(world);
+  const original = world.disk.get(world.account);
+  world.offline = false;
+  world.tokenSession = recognitionWorld().tokenSession;
+  try {
+    await assert.rejects(controller.result().signIn(), /account_mismatch/);
+    assert.equal(controller.result().user, null);
+    assert.equal(controller.result().sharedState, null);
+    assert.equal(controller.result().tokenRecognized, false);
+    assert.equal(world.disk.get(world.account), original);
+    assert.equal(world.feedsSent.length, 0);
+  } finally {
+    controller.unmount();
+  }
+});
+
+test("logout cancels pending authoritative identity without losing recognized-state controls", async () => {
+  const world = recognitionWorld();
+  const controller = await signedOutController(world);
+  let signal;
+  world.beforeIdentify = (value) => {
+    signal = value;
+    return new Promise((_, reject) =>
+      value.addEventListener(
+        "abort",
+        () => reject(new Error("network_unavailable")),
+        { once: true },
+      ),
+    );
+  };
+  try {
+    await controller.result().signIn();
+    await until(() => signal, "pending account request");
+    await controller.result().signOut();
+    assert.equal(signal.aborted, true);
+    assert.equal(controller.result().authStatus, "signed_out");
+    assert.equal(controller.result().tokenRecognized, false);
+    assert.equal(controller.result().user, null);
+    assert.equal(controller.result().ready, false);
+    assert.equal(world.session, false);
+  } finally {
+    controller.unmount();
+  }
+});
+
+test("replacement sign-in and duplicate taps cannot wait for or invalidate a SQL request", async () => {
+  const world = recognitionWorld();
+  world.session = true;
+  const oldMe = deferred();
+  let attempts = 0;
+  world.beforeIdentify = () =>
+    ++attempts === 1 ? oldMe.promise : Promise.resolve();
+  const controller = world.mount();
+  const browser = deferred();
+  world.beforeAuthSignIn = () => browser.promise;
+  try {
+    await until(() => attempts === 1, "stalled startup identity");
+    const login = controller.result().signIn();
+    await until(
+      () => world.authSignInCalls === 1,
+      "browser launched without waiting for SQL",
+    );
+    await assert.rejects(controller.result().signIn(), /action_busy/);
+    browser.resolve();
+    await login;
+    await until(
+      () => controller.result().authStatus === "authenticated",
+      "accepted login completes",
+    );
+    oldMe.resolve();
+    await tick();
+    assert.equal(world.authSignInCalls, 1);
+    assert.equal(controller.result().user.id, recognizedUserId);
+  } finally {
+    browser.resolve();
+    oldMe.resolve();
+    controller.unmount();
+  }
+});
+
+test("cancelled browser login never calls token recognition or erases cached private work", async () => {
+  const world = makeWorld({ queued: true });
+  const controller = await boot(world);
+  const original = world.disk.get(world.account);
+  const requests = world.http.length;
+  world.beforeAuthSignIn = async () => {
+    throw new Error("sign_in_cancelled");
+  };
+  try {
+    await assert.rejects(controller.result().signIn(), /sign_in_cancelled/);
+    assert.equal(world.http.length, requests);
+    assert.equal(world.disk.get(world.account), original);
+    assert.equal(controller.result().user.id, "user-a");
+    assert.equal(controller.result().notice, "sign_in_cancelled");
+  } finally {
+    controller.unmount();
+  }
+});
+
+test("an older API without session recognition safely waits for authoritative sign-in", async () => {
+  const world = recognitionWorld();
+  world.tokenSession = null;
+  const controller = await signedOutController(world);
+  const me = deferred();
+  world.beforeIdentify = () => me.promise;
+  try {
+    const login = controller.result().signIn();
+    await until(
+      () => world.http.some((request) => request.url === "/v1/me"),
+      "legacy API identity",
+    );
+    assert.equal(controller.result().tokenRecognized, false);
+    assert.equal(controller.result().ready, false);
+    assert.equal(controller.result().user, null);
+    me.resolve();
+    await login;
+    assert.equal(controller.result().authStatus, "authenticated");
+  } finally {
+    me.resolve();
+    controller.unmount();
+  }
+});
+
+test("authoritative account deletion outranks a delayed token-only response", async () => {
+  const world = recognitionWorld();
+  world.session = true;
+  world.identity.accountDeletion = {
+    deletionId: "delete-a",
+    status: "pending",
+    requestedAt: "2026-09-01T00:00:00Z",
+  };
+  const recognition = deferred();
+  world.beforeRecognize = () => recognition.promise;
+  const controller = world.mount();
+  try {
+    await until(
+      () =>
+        controller.result().authStatus === "authenticated" &&
+        !controller.result().syncing,
+      "authoritative deletion",
+    );
+    recognition.resolve();
+    await tick();
+    assert.equal(controller.result().authStatus, "authenticated");
+    assert.equal(controller.result().accountDeletion.status, "pending");
+    assert.equal(controller.result().sharedState, null);
+  } finally {
+    recognition.resolve();
+    controller.unmount();
+  }
+});
+
+test("healthy foreground recognition preserves verified account controls while the authoritative refresh runs", async () => {
+  const world = recognitionWorld();
+  const controller = await signedOutController(world);
+  const me = deferred();
+  try {
+    await controller.result().signIn();
+    await until(
+      () => !controller.result().syncing,
+      "initial authoritative verification",
+    );
+    world.beforeIdentify = () => me.promise;
+    const probes = world.http.filter(
+      (request) => request.url === "/v1/session",
+    ).length;
+    world.changeAppState("background");
+    world.changeAppState("active");
+    await until(
+      () =>
+        world.http.filter((request) => request.url === "/v1/session").length ===
+        probes + 1,
+      "foreground token check",
+    );
+    await tick();
+    assert.equal(controller.result().authStatus, "authenticated");
+    assert.equal(controller.result().user.id, recognizedUserId);
+    assert.equal(controller.result().ready, true);
+    me.resolve();
+    await until(
+      () => !controller.result().syncing,
+      "foreground authority complete",
+    );
+    assert.equal(controller.result().authStatus, "authenticated");
+  } finally {
+    me.resolve();
+    controller.unmount();
+  }
+});
+
+test("saved credentials remain recoverable when session recognition and account services are temporarily unavailable", async () => {
+  const world = recognitionWorld();
+  const controller = await signedOutController(world);
+  world.tokenSessionError = { code: "service_unavailable", status: 503 };
+  world.identityError = { code: "identity_unavailable", status: 503 };
+  try {
+    await controller.result().signIn();
+    await until(
+      () => !controller.result().syncing,
+      "unavailable initial verification",
+    );
+    assert.equal(controller.result().sessionAvailable, true);
+    assert.equal(controller.result().tokenRecognized, false);
+    assert.equal(controller.result().authStatus, "unverified");
+    assert.equal(controller.result().user, null);
+    assert.equal(controller.result().ready, false);
+    world.tokenSessionError = null;
+    world.identityError = null;
+    world.changeAppState("background");
+    world.changeAppState("active");
+    await until(
+      () => controller.result().authStatus === "authenticated",
+      "automatic recovery without another browser login",
+    );
+    assert.equal(world.authSignInCalls, 1);
+    assert.equal(controller.result().user.id, recognizedUserId);
+  } finally {
+    controller.unmount();
+  }
+});
+
+test("successful browser reauthentication resumes account verification after a transient session probe failure", async () => {
+  const world = makeWorld({ queued: true });
+  const controller = await boot(world);
+  const me = deferred();
+  try {
+    world.offline = false;
+    world.identityError = { code: "sign_in_required", status: 401 };
+    await controller.result().refresh();
+    assert.equal(controller.result().authStatus, "reauth_required");
+    world.identityError = null;
+    world.tokenSessionError = { code: "service_unavailable", status: 503 };
+    const requests = world.http.filter(
+      (request) => request.url === "/v1/me",
+    ).length;
+    world.beforeIdentify = () => me.promise;
+    await controller.result().signIn();
+    await until(
+      () =>
+        world.http.filter((request) => request.url === "/v1/me").length >
+        requests,
+      "fresh account verification after browser reauth",
+    );
+    assert.equal(controller.result().authStatus, "unverified");
+    assert.equal(controller.result().sessionAvailable, true);
+    assert.equal(controller.result().tokenRecognized, false);
+    assert.equal(controller.result().ready, false);
+    assert.equal(controller.result().sharedState, null);
+    assert.equal(world.feedsSent.length, 0);
+    world.identityError = { code: "sign_in_required", status: 401 };
+    me.resolve();
+    await until(() => !controller.result().syncing, "fresh account denial");
+    assert.equal(controller.result().authStatus, "reauth_required");
+    assert.equal(controller.result().ready, false);
+    const deniedRequests = world.http.length;
+    world.changeAppState("background");
+    world.changeAppState("active");
+    world.runIntervals();
+    await tick();
+    assert.equal(
+      world.http.length,
+      deniedRequests,
+      "a new 401 reinstates the retry barrier",
+    );
+  } finally {
+    me.resolve();
+    controller.unmount();
+  }
+});
+
+test("a repeated explicit sign-in preserves the original account binding after the first probe is denied", async () => {
+  const world = makeWorld({ queued: true });
+  const controller = await boot(world);
+  const original = world.disk.get(world.account);
+  try {
+    world.offline = false;
+    world.tokenSessionError = { code: "sign_in_required", status: 401 };
+    await assert.rejects(controller.result().signIn(), /sign_in_required/);
+    assert.equal(controller.result().user, null);
+    assert.equal(controller.result().authStatus, "reauth_required");
+    world.tokenSessionError = null;
+    world.tokenSession = {
+      ...recognitionWorld().tokenSession,
+      userId: otherRecognizedUserId,
+    };
+    await assert.rejects(controller.result().signIn(), /account_mismatch/);
+    assert.equal(controller.result().authStatus, "signed_out");
+    assert.equal(controller.result().user, null);
+    assert.equal(controller.result().ready, false);
+    assert.equal(world.disk.get(world.account), original);
+    assert.equal(world.feedsSent.length, 0);
+  } finally {
+    controller.unmount();
+  }
+});
+
+for (const blockedRead of ["identity", "workspace"])
+  test(`foreground and timer checks wait for the initial local ${blockedRead} restore before checking authority`, async () => {
+    const world = makeWorld({ offline: false, queued: true });
+    const local = deferred();
+    let entered = false;
+    const block = async () => {
+      entered = true;
+      await local.promise;
+    };
+    if (blockedRead === "identity") world.beforeIdentityLoad = block;
+    else world.beforeRead = block;
+    world.identity.families = [];
+    const controller = world.mount();
+    try {
+      await until(() => entered, "blocked local bootstrap");
+      world.changeAppState("background");
+      world.changeAppState("active");
+      world.runIntervals();
+      await tick();
+      assert.equal(
+        world.http.length,
+        0,
+        "authority requests cannot race an unfinished cache restore",
+      );
+      assert.equal(controller.result().ready, false);
+      local.resolve();
+      await until(
+        () =>
+          controller.result().authStatus === "authenticated" &&
+          !controller.result().syncing,
+        "authoritative revocation after local restore",
+      );
+      assert.equal(controller.result().user.id, "user-a");
+      assert.equal(controller.result().snapshot, null);
+      assert.equal(controller.result().sharedState, null);
+      assert.equal(controller.result().pending.length, 0);
+      assert.equal(world.feedsSent.length, 0);
+      world.runIntervals();
+      await tick();
+      assert.equal(
+        controller.result().snapshot,
+        null,
+        "the old local grant cannot overwrite revocation later",
+      );
+    } finally {
+      local.resolve();
+      controller.unmount();
+    }
+  });
+
+test("foreground recognition after a transient probe failure cannot replace the bound previous account", async () => {
+  const world = makeWorld({ queued: true });
+  const controller = await boot(world);
+  const original = world.disk.get(world.account);
+  world.offline = false;
+  world.tokenSessionError = { code: "service_unavailable", status: 503 };
+  world.beforeIdentify = (signal) =>
+    new Promise((_, reject) =>
+      signal.addEventListener(
+        "abort",
+        () => reject(new Error("network_unavailable")),
+        { once: true },
+      ),
+    );
+  try {
+    await controller.result().signIn();
+    assert.equal(controller.result().user, null);
+    assert.equal(controller.result().tokenRecognized, false);
+    world.tokenSessionError = null;
+    world.tokenSession = {
+      ...recognitionWorld().tokenSession,
+      userId: otherRecognizedUserId,
+    };
+    world.identity.user.id = otherRecognizedUserId;
+    world.changeAppState("background");
+    world.changeAppState("active");
+    await until(() => !world.session, "foreground subject mismatch logout");
+    assert.equal(controller.result().authStatus, "signed_out");
+    assert.equal(controller.result().tokenRecognized, false);
+    assert.equal(controller.result().user, null);
+    assert.equal(controller.result().sharedState, null);
+    assert.equal(controller.result().error, "account_mismatch");
+    assert.equal(world.disk.get(world.account), original);
+    assert.equal(world.feedsSent.length, 0);
+  } finally {
+    controller.unmount();
+  }
+});
+
+test("session forbidden persists the cached-access guard before a stalled authoritative request can finish", async () => {
+  const world = makeWorld({ offline: false, queued: true });
+  world.tokenSessionError = { code: "forbidden", status: 403 };
+  const me = deferred();
+  world.beforeIdentify = () => me.promise;
+  const controller = world.mount();
+  let reopened;
+  try {
+    await until(
+      () =>
+        controller.result().error === "forbidden" &&
+        world.cacheGuard?.reauthRequired,
+      "durable session denial guard",
+    );
+    assert.equal(controller.result().sharedState, null);
+    controller.unmount();
+    world.tokenSessionError = null;
+    reopened = world.mount();
+    await until(() => !reopened.result().booting, "guarded restart");
+    assert.equal(reopened.result().ready, false);
+    assert.equal(reopened.result().sharedState, null);
+    assert.equal(world.read().queue.length, 1);
+  } finally {
+    reopened?.unmount();
+    controller.unmount();
+    me.resolve();
+  }
+});
+
+for (const recognized of [true, false])
+  test(`logout during ${recognized ? "recognized" : "unverified"} reauthentication durably discards the bound old workspace`, async () => {
+    const world = makeWorld({ queued: true });
+    const replaceSubject = (value) =>
+      JSON.parse(JSON.stringify(value).replaceAll("user-a", recognizedUserId));
+    const previousAccount = world.account;
+    world.account = previousAccount.replace("user-a", recognizedUserId);
+    world.identity = replaceSubject(world.identity);
+    world.cachedIdentity = replaceSubject(world.cachedIdentity);
+    world.server = replaceSubject(world.server);
+    world.disk.set(
+      world.account,
+      JSON.stringify(replaceSubject(world.data.state)),
+    );
+    world.disk.delete(previousAccount);
+    const controller = world.mount();
+    try {
+      await until(
+        () =>
+          controller.result().user?.id === recognizedUserId &&
+          !controller.result().syncing,
+        "bound cached workspace",
+      );
+      world.offline = false;
+      world.tokenSession = recognitionWorld().tokenSession;
+      if (!recognized)
+        world.tokenSessionError = { code: "service_unavailable", status: 503 };
+      world.beforeIdentify = (signal) =>
+        new Promise((_, reject) =>
+          signal.addEventListener(
+            "abort",
+            () => reject(new Error("network_unavailable")),
+            { once: true },
+          ),
+        );
+      await controller.result().signIn();
+      assert.equal(controller.result().user, null);
+      assert.equal(controller.result().tokenRecognized, recognized);
+      assert.equal(
+        JSON.parse(world.disk.get(world.account)).queue.length,
+        1,
+        "reauthentication alone retains private work",
+      );
+      await controller.result().signOut();
+      assert.equal(controller.result().sessionAvailable, false);
+      assert.equal(world.disk.has(world.account), false);
+      world.beforeIdentify = async () => {};
+      world.tokenSessionError = null;
+      world.identity.families = [];
+      await controller.result().signIn();
+      await until(
+        () => !controller.result().syncing,
+        "new login after explicit discard",
+      );
+      assert.equal(controller.result().pending.length, 0);
+      assert.equal(controller.result().draft, null);
+      assert.equal(world.feedsSent.length, 0);
+    } finally {
+      controller.unmount();
+    }
+  });
+
+test("sign-in requested during an accepted lifecycle command does not abort that command", async () => {
+  const world = ownerWorld();
+  const controller = await boot(world);
+  const mutation = deferred();
+  world.beforeMutation = () => mutation.promise;
+  try {
+    const deleting = controller.result().deleteAccount();
+    await until(
+      () => world.http.some((request) => request.url === "/v1/account/delete"),
+      "accepted deletion command",
+    );
+    await assert.rejects(controller.result().signIn(), /action_busy/);
+    assert.equal(world.authSignInCalls, 0);
+    mutation.resolve();
+    await deleting;
+    assert.ok(controller.result().accountDeletion);
+    assert.equal(controller.result().transitionPending, false);
+  } finally {
+    mutation.resolve();
+    controller.unmount();
+  }
+});
+
+for (const status of [401, 403])
+  test(`session ${status} cannot be hidden by a later in-flight identity success`, async () => {
+    const world = recognitionWorld();
+    world.session = true;
+    world.tokenSessionError = {
+      code: status === 401 ? "sign_in_required" : "forbidden",
+      status,
+    };
+    const me = deferred();
+    world.beforeIdentify = () => me.promise;
+    const controller = world.mount();
+    try {
+      await until(() => controller.result().error, "visible token denial");
+      me.resolve();
+      await until(
+        () => !controller.result().syncing,
+        "stale successful account response",
+      );
+      assert.equal(controller.result().tokenRecognized, false);
+      assert.equal(controller.result().ready, false);
+      assert.equal(controller.result().user, null);
+      assert.equal(
+        controller.result().error,
+        status === 401 ? "sign_in_required" : "forbidden",
+      );
+    } finally {
+      me.resolve();
+      controller.unmount();
+    }
+  });
 
 test("idle refresh downloads one snapshot and coalesces repeated refresh taps", async () => {
   const world = makeWorld({ offline: false });
@@ -951,7 +1650,8 @@ test("quiet resume reports a continuing outage after its one fresh identity retr
     for (let i = 0; i < 5; i++) await tick();
     assert.equal(attempts, 2, "persistent outage must not create a retry loop");
     assert.equal(controller.result().error, "network_unavailable");
-    assert.equal(controller.result().authStatus, "unverified");
+    assert.equal(controller.result().authStatus, "token_confirmed");
+    assert.equal(controller.result().tokenRecognized, true);
     assert.equal(controller.result().ready, true);
     assert.equal(controller.result().sharedState.profile.name, "Baby");
     assert.equal(world.authSignOutCalls, 0);
@@ -1027,7 +1727,8 @@ test("quiet resume defers a background failure only until one fresh foreground a
       "the background failure already used the grace attempt",
     );
     assert.equal(controller.result().error, "network_unavailable");
-    assert.equal(controller.result().authStatus, "unverified");
+    assert.equal(controller.result().authStatus, "token_confirmed");
+    assert.equal(controller.result().tokenRecognized, true);
     assert.equal(controller.result().sharedState.profile.name, "Baby");
   } finally {
     interrupted.resolve();
@@ -2075,7 +2776,7 @@ test("expired session survives cancelled reauthentication without changing cache
   }
 });
 
-test("failed reauthentication cannot replace the expired-session state", async () => {
+test("failed browser reauthentication preserves expiry while fresh credentials with an unavailable old API remain unverified", async () => {
   const world = ownerWorld();
   const controller = await boot(world);
   try {
@@ -2092,7 +2793,8 @@ test("failed reauthentication cannot replace the expired-session state", async (
     world.beforeAuthSignIn = async () => {};
     world.identityError = { code: "network_unavailable", status: 0 };
     await assert.rejects(controller.result().signIn(), /network_unavailable/);
-    assert.equal(controller.result().authStatus, "reauth_required");
+    assert.equal(controller.result().authStatus, "unverified");
+    assert.equal(controller.result().ready, false);
   } finally {
     controller.unmount();
   }

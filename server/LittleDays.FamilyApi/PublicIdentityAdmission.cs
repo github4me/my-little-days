@@ -57,10 +57,30 @@ public static class PublicIdentityAdmission
         ?? throw new ApiException(401, "unauthorized");
 
     public static IServiceCollection AddPublicIdentityAdmission(this IServiceCollection services,
-        IConfiguration configuration, PilotConfiguration config)
+        PilotConfiguration config)
     {
         if (config.Admission.Mode == "Static")
             return services.AddSingleton<IPublicIdentityAdmission, StaticPublicIdentityAdmission>();
+        services.AddHttpClient("GraphAdmissionToken", client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(15);
+            client.MaxResponseContentBufferSize = 64 * 1024;
+        }).ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+        {
+            AllowAutoRedirect = false,
+            UseCookies = false,
+            PooledConnectionLifetime = TimeSpan.FromMinutes(5)
+        }).SetHandlerLifetime(Timeout.InfiniteTimeSpan).RemoveAllLoggers();
+        // Cache the resolved application credential for either explicit admission
+        // credentials or approved reuse of the existing directory/deletion app.
+        // /.default retains that app's full Graph permissions: this is NOT a
+        // read-only token or a cache of user/family authorization results.
+        services.AddSingleton<IGraphAdmissionTokenProvider>(provider =>
+        {
+            var tokenHttp = provider.GetRequiredService<IHttpClientFactory>().CreateClient("GraphAdmissionToken");
+            return new CachedGraphAdmissionTokens(new MsalGraphApplicationTokenSource(config, tokenHttp),
+                provider.GetService<TimeProvider>() ?? TimeProvider.System);
+        });
         services.AddHttpClient<IPublicIdentityAdmission, GraphPublicIdentityAdmission>(client =>
         {
             client.Timeout = TimeSpan.FromSeconds(15);
@@ -92,8 +112,10 @@ public sealed class StaticPublicIdentityAdmission(PilotConfiguration config) : I
     }
 }
 
-public sealed class GraphPublicIdentityAdmission(HttpClient http, PilotConfiguration config) : IPublicIdentityAdmission
+public sealed class GraphPublicIdentityAdmission(HttpClient http, PilotConfiguration config,
+    IGraphAdmissionTokenProvider? tokenProvider = null) : IPublicIdentityAdmission
 {
+    private readonly IGraphAdmissionTokenProvider tokens = tokenProvider ?? new UncachedGraphAdmissionTokens(http, config);
     public async Task<PilotIdentity> AdmitAsync(ClaimsPrincipal principal, CancellationToken ct)
     {
         var objectId = PublicIdentityAdmission.ObjectId(principal, config.Entra.TenantId);
@@ -101,20 +123,33 @@ public sealed class GraphPublicIdentityAdmission(HttpClient http, PilotConfigura
             throw new ApiException(503, "identity_unavailable");
         try
         {
-            var token = await Token(ct);
-            using var user = await Get($"users/{objectId:D}?$select=id,accountEnabled,creationType,displayName,identities", token, ct);
-            var identity = ParseLocalAccount(user.RootElement, objectId, config.Admission.LocalAccountIssuer, out var identityIssuer);
-            // OTP identities use the special "mail" issuer, not the tenant domain. Graph
-            // ignores issuer for emailAddress filters; both formats need exact revalidation.
-            var filter = $"identities/any(i:i/issuerAssignedId eq '{identity.Email.Replace("'", "''")}' and i/issuer eq '{identityIssuer}')";
-            using var matches = await Get($"users?$select=id,accountEnabled,creationType,displayName,identities&$top=2&$filter={Uri.EscapeDataString(filter)}", token, ct);
-            if (matches.RootElement.TryGetProperty("@odata.nextLink", out _) ||
-                !matches.RootElement.TryGetProperty("value", out var users) || users.ValueKind != JsonValueKind.Array || users.GetArrayLength() != 1)
-                throw new ApiException(403, "identity_not_supported");
-            var verified = ParseLocalAccount(users[0], objectId, config.Admission.LocalAccountIssuer, out var verifiedIssuer);
-            if (verified.Email != identity.Email || verifiedIssuer != identityIssuer)
-                throw new ApiException(403, "identity_not_supported");
-            return identity;
+            for (var attempt = 0; ; attempt++)
+            {
+                var token = await tokens.GetAsync(ct);
+                try
+                {
+                    using var user = await Get($"users/{objectId:D}?$select=id,accountEnabled,creationType,displayName,identities", token, ct);
+                    var identity = ParseLocalAccount(user.RootElement, objectId, config.Admission.LocalAccountIssuer, out var identityIssuer);
+                    // Directory results remain fresh on EVERY admission, even when
+                    // the application's credential came from MSAL's memory cache.
+                    var filter = $"identities/any(i:i/issuerAssignedId eq '{identity.Email.Replace("'", "''")}' and i/issuer eq '{identityIssuer}')";
+                    using var matches = await Get($"users?$select=id,accountEnabled,creationType,displayName,identities&$top=2&$filter={Uri.EscapeDataString(filter)}", token, ct);
+                    if (matches.RootElement.TryGetProperty("@odata.nextLink", out _) ||
+                        !matches.RootElement.TryGetProperty("value", out var users) || users.ValueKind != JsonValueKind.Array || users.GetArrayLength() != 1)
+                        throw new ApiException(403, "identity_not_supported");
+                    var verified = ParseLocalAccount(users[0], objectId, config.Admission.LocalAccountIssuer, out var verifiedIssuer);
+                    if (verified.Email != identity.Email || verifiedIssuer != identityIssuer)
+                        throw new ApiException(403, "identity_not_supported");
+                    return identity;
+                }
+                catch (GraphTokenRejectedException)
+                {
+                    tokens.Reject(token);
+                    if (attempt != 0) throw new ApiException(503, "identity_unavailable");
+                    // Only one token refresh per admission flow. Restart BOTH
+                    // user checks; do not reuse partially verified identity data.
+                }
+            }
         }
         catch (ApiException) { throw; }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
@@ -181,35 +216,15 @@ public sealed class GraphPublicIdentityAdmission(HttpClient http, PilotConfigura
         return clean.Length == 0 ? "Family member" : clean;
     }
 
-    private async Task<string> Token(CancellationToken ct)
-    {
-        using var request = new HttpRequestMessage(HttpMethod.Post,
-            $"https://login.microsoftonline.com/{config.Entra.TenantId:D}/oauth2/v2.0/token")
-        {
-            Content = new FormUrlEncodedContent(new Dictionary<string, string>
-            {
-                ["client_id"] = config.Admission.GraphClientId.ToString("D"),
-                ["client_secret"] = config.Admission.GraphClientSecret,
-                ["grant_type"] = "client_credentials",
-                ["scope"] = "https://graph.microsoft.com/.default"
-            })
-        };
-        using var response = await http.SendAsync(request, ct);
-        if (response.StatusCode != HttpStatusCode.OK) throw new ApiException(503, "identity_unavailable");
-        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
-        if (!string.Equals(String(json.RootElement, "token_type"), "Bearer", StringComparison.OrdinalIgnoreCase) ||
-            String(json.RootElement, "access_token") is not { Length: > 0 and <= 16384 } token)
-            throw new ApiException(503, "identity_unavailable");
-        return token;
-    }
-
     private async Task<JsonDocument> Get(string relative, string token, CancellationToken ct)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, $"https://graph.microsoft.com/v1.0/{relative}");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         using var response = await http.SendAsync(request, ct);
+        if (response.StatusCode == HttpStatusCode.Unauthorized) throw new GraphTokenRejectedException();
         if (response.StatusCode == HttpStatusCode.NotFound) throw new ApiException(403, "identity_not_supported");
         if (response.StatusCode != HttpStatusCode.OK) throw new ApiException(503, "identity_unavailable");
         return JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
     }
+    private sealed class GraphTokenRejectedException : Exception;
 }

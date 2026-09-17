@@ -3,6 +3,14 @@ using System.Text.Json.Serialization;
 
 namespace LittleDays.FamilyApi;
 
+// Authentication acknowledgment only. This is never an account/family authorization result.
+public sealed record TokenSession(Guid UserId)
+{
+    public string Status => "token_valid";
+    public string AccountAccess => "pending";
+    public string FamilyAccess => "pending";
+}
+
 public sealed record FamilyUser(Guid Id, string DisplayName, string Email);
 public sealed record FamilySummary(Guid Id, string BabyName, string Role, Guid MembershipId, string? BabyBirthDate, string ProfileVersion);
 public sealed record FamilyMember(Guid Id, string DisplayName, string? Email, string Role, Guid MembershipId, string Status, DateTimeOffset? EndedAt);

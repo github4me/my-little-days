@@ -145,6 +145,10 @@ public sealed class HttpTests(SqlFixture sql) : IClassFixture<SqlFixture>
         Assert.Equal(HttpStatusCode.NotModified, (await caregiver.GetAsync($"/v1/families/{family.Id}/snapshot")).StatusCode);
         var removed = await owner.PostAsJsonAsync($"/v1/families/{family.Id}/members/{s.Caregiver.ObjectId}/remove", s.Context(family, target: grant.MembershipId));
         removed.EnsureSuccessStatusCode();
+        // A still-valid token does not restore revoked family access.
+        var session = await caregiver.GetFromJsonAsync<TokenSession>("/v1/session");
+        Assert.Equal(s.Caregiver.ObjectId, session!.UserId);
+        Assert.Equal("pending", session.FamilyAccess);
         var revoked = await caregiver.GetAsync($"/v1/families/{family.Id}/snapshot");
         Assert.Equal(HttpStatusCode.Forbidden, revoked.StatusCode);
         Assert.Equal("membership_revoked", (await revoked.Content.ReadFromJsonAsync<ErrorBody>())!.Code);
@@ -171,6 +175,12 @@ public sealed class HttpTests(SqlFixture sql) : IClassFixture<SqlFixture>
         var deletion = (await response.Content.ReadFromJsonAsync<AccountDeletion>())!;
         Assert.Equal(request.OperationId, deletion.DeletionId);
         Assert.Equal("pending", deletion.Status);
+        // Token acknowledgment must not pretend the deleted app account is active.
+        var session = await authenticated.GetFromJsonAsync<TokenSession>("/v1/session");
+        Assert.Equal(s.Owner.ObjectId, session!.UserId);
+        Assert.Equal("pending", session.AccountAccess);
+        var deletedMe = await authenticated.GetFromJsonAsync<MeResult>("/v1/me");
+        Assert.Equal(deletion.DeletionId, deletedMe!.AccountDeletion!.DeletionId);
         using var anonymous = host.CreateClient();
         var receipt = await anonymous.PostAsJsonAsync("/v1/account-deletion-status", new DeletionStatusRequest(deletion.DeletionId, secret));
         receipt.EnsureSuccessStatusCode();

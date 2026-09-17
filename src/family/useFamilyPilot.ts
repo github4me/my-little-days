@@ -51,7 +51,7 @@ import {
   requireExtraCapabilities,
   validateFullSnapshot,
 } from "./fullState";
-import type { PilotIdentity } from "./identity";
+import type { PilotIdentity, TokenSession } from "./identity";
 import { familyConfig } from "./config";
 import * as auth from "./auth";
 import { familyRequest, PilotApiError } from "./api";
@@ -99,6 +99,7 @@ const connectionFailure = (cause: unknown) =>
     "network_error",
     "offline",
     "service_unavailable",
+    "identity_unavailable",
   ].includes(errorCode(cause)) &&
   (!(cause instanceof PilotApiError) ||
     cause.status === 0 ||
@@ -109,6 +110,7 @@ export type FamilyAuthStatus =
   | "signed_out"
   | "checking"
   | "authenticated"
+  | "token_confirmed"
   | "reauth_required"
   | "unverified";
 
@@ -116,6 +118,15 @@ export function useFamilyPilot() {
   const configured = !!familyConfig,
     webUnsupported = Platform.OS === "web";
   const [identity, setIdentity] = useState<PilotIdentity | null>(null);
+  const [tokenRecognized, setTokenRecognized] = useState(false);
+  const [sessionAvailable, setSessionAvailableValue] = useState(false);
+  const availableSession = useRef(false);
+  const pendingSignInAccount = useRef<string | null>(null);
+  const recognizedAccount = useRef<string | null>(null);
+  const recognitionGeneration = useRef(0);
+  const sessionDenialGeneration = useRef(0);
+  const sessionDenialStatus = useRef(401);
+  const sessionEndpointUnavailable = useRef(false);
   const [sessionUnresolved, setSessionUnresolved] = useState(
     configured && !webUnsupported,
   );
@@ -240,6 +251,7 @@ export function useFamilyPilot() {
   }
   function pauseAuthentication() {
     if (signedOut.current) return;
+    clearRecognition();
     const alreadyPaused = authPaused.current;
     authPaused.current = true;
     setAuthStatus("reauth_required");
@@ -256,6 +268,134 @@ export function useFamilyPilot() {
   function showIdentity(value: PilotIdentity | null) {
     who.current = value;
     if (mounted.current) setIdentity(value);
+  }
+  function clearRecognition() {
+    recognitionGeneration.current++;
+    recognizedAccount.current = null;
+    if (mounted.current) setTokenRecognized(false);
+  }
+  function setSessionAvailable(value: boolean) {
+    availableSession.current = value;
+    if (mounted.current) setSessionAvailableValue(value);
+  }
+  async function rejectAccountMismatch(e: number): Promise<never> {
+    check(e);
+    // Invalidate both session recognition and authoritative responses before
+    // asynchronous credential cleanup. Preserve the original account's disk rows.
+    clearRecognition();
+    epoch.current++;
+    const nextEpoch = epoch.current;
+    signedOut.current = true;
+    setSessionAvailable(false);
+    pendingSignInAccount.current = null;
+    authPaused.current = false;
+    requests.current.abort();
+    requests.current = new AbortController();
+    syncLock.current = null;
+    cacheRestored.current = false;
+    markReady(false);
+    showIdentity(null);
+    showState(emptyPilotState(), true);
+    setSessionUnresolved(false);
+    setAuthStatus("signed_out");
+    setSyncing(false);
+    setBooting(false);
+    setError("account_mismatch");
+    await stopNotificationDelivery(true).catch(() => {});
+    if (isCurrent(nextEpoch)) await auth.signOut();
+    throw new Error("account_mismatch");
+  }
+  async function recognizeSession(e: number, expectedAccountId?: string) {
+    if (sessionEndpointUnavailable.current) return false;
+    const expected =
+      pendingSignInAccount.current ??
+      expectedAccountId ??
+      recognizedAccount.current ??
+      who.current?.user.id;
+    const generation = ++recognitionGeneration.current;
+    try {
+      const session = await familyRequest<TokenSession>(
+        "/v1/session",
+        undefined,
+        requests.current.signal,
+      );
+      check(e);
+      if (generation !== recognitionGeneration.current) return false;
+      if (
+        session?.status !== "token_valid" ||
+        session.accountAccess !== "pending" ||
+        session.familyAccess !== "pending" ||
+        typeof session.userId !== "string" ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+          session.userId,
+        ) ||
+        session.userId === "00000000-0000-0000-0000-000000000000"
+      )
+        throw new Error("invalid_response");
+      if (expected && session.userId !== expected)
+        return await rejectAccountMismatch(e);
+      recognizedAccount.current = session.userId;
+      authPaused.current = false;
+      setTokenRecognized(true);
+      setAuthStatus((previous) =>
+        previous === "authenticated" ? previous : "token_confirmed",
+      );
+      setError((previous) =>
+        previous === "sign_in_required" || previous === "unauthorized"
+          ? null
+          : previous,
+      );
+      // Do not save an identity, restore a cache, enable notifications or mark
+      // the family ready from this response.
+      return true;
+    } catch (cause) {
+      if (!isCurrent(e) && errorCode(cause) === "account_mismatch") throw cause;
+      check(e);
+      if (generation !== recognitionGeneration.current) return false;
+      if (cause instanceof PilotApiError && cause.status === 404) {
+        sessionEndpointUnavailable.current = true;
+        return false;
+      }
+      if (authenticationRequired(cause)) {
+        sessionDenialGeneration.current++;
+        sessionDenialStatus.current = 401;
+        pauseAuthentication();
+        setError("sign_in_required");
+      } else if (cause instanceof PilotApiError && cause.status === 403) {
+        const deniedAccount =
+          who.current?.user.id ??
+          recognizedAccount.current ??
+          pendingSignInAccount.current;
+        sessionDenialGeneration.current++;
+        sessionDenialStatus.current = 403;
+        clearRecognition();
+        markReady(false);
+        identityUnavailable.current = true;
+        if (deniedAccount)
+          void auth.markReauthenticationRequired(deniedAccount).catch(() => {});
+        setAuthStatus("unverified");
+        setError(errorCode(cause));
+      } else if (!connectionFailure(cause)) {
+        clearRecognition();
+        markReady(false);
+        setAuthStatus("unverified");
+        setError(errorCode(cause));
+      } else if (
+        !authPaused.current &&
+        !who.current &&
+        !recognizedAccount.current
+      ) {
+        setAuthStatus("unverified");
+      }
+      throw cause;
+    }
+  }
+  function recognizeInBackground(e: number, expectedAccountId?: string) {
+    if (authPaused.current || signedOut.current) return;
+    void recognizeSession(e, expectedAccountId).catch(() => {
+      // The authoritative refresh owns connectivity errors/backoff. Recognition
+      // handles authentication failures itself and never overrides /v1/me.
+    });
   }
   function showState(value: PilotState, committed = false) {
     if (committed) durable.current = value;
@@ -321,6 +461,12 @@ export function useFamilyPilot() {
     expectedAccountId?: string,
     deferConnectionError: () => boolean = () => false,
   ) {
+    const expected =
+      expectedAccountId ??
+      pendingSignInAccount.current ??
+      recognizedAccount.current ??
+      undefined;
+    const denialGeneration = sessionDenialGeneration.current;
     let result: PilotIdentity;
     try {
       result = await familyRequest<PilotIdentity>(
@@ -328,13 +474,26 @@ export function useFamilyPilot() {
         undefined,
         requests.current.signal,
       );
+      if (denialGeneration !== sessionDenialGeneration.current)
+        throw new PilotApiError(
+          sessionDenialStatus.current === 401
+            ? "sign_in_required"
+            : "forbidden",
+          sessionDenialStatus.current,
+        );
     } catch (cause) {
       check(e);
       if (authenticationRequired(cause)) pauseAuthentication();
       else if (!authPaused.current) {
         identityUnavailable.current = true;
+        if (cause instanceof PilotApiError && cause.status === 403)
+          clearRecognition();
         if (!connectionFailure(cause) || !deferConnectionError())
-          setAuthStatus("unverified");
+          setAuthStatus(
+            connectionFailure(cause) && recognizedAccount.current
+              ? "token_confirmed"
+              : "unverified",
+          );
         void stopNotificationDelivery().catch(() => {});
       }
       throw cause;
@@ -345,22 +504,17 @@ export function useFamilyPilot() {
       void stopNotificationDelivery().catch(() => {});
       throw new Error("invalid_response");
     }
-    if (expectedAccountId && result.user.id !== expectedAccountId) {
-      await stopNotificationDelivery(true).catch(() => {});
-      check(e);
-      await auth.signOut();
-      check(e);
-      signedOut.current = true;
-      setSessionUnresolved(false);
-      authPaused.current = false;
-      setAuthStatus("signed_out");
-      throw new Error("account_mismatch");
-    }
+    const confirmedAccount = expected ?? recognizedAccount.current;
+    if (confirmedAccount && result.user.id !== confirmedAccount)
+      return await rejectAccountMismatch(e);
     if (who.current && who.current.user.id !== result.user.id) {
       pauseAuthentication();
       throw new Error("account_mismatch");
     }
     authPaused.current = false;
+    recognitionGeneration.current++;
+    recognizedAccount.current = result.user.id;
+    setTokenRecognized(true);
     identityUnavailable.current = false;
     setAuthStatus("authenticated");
     if (!who.current || !cacheRestored.current) {
@@ -370,6 +524,7 @@ export function useFamilyPilot() {
       cacheRestored.current = true;
     }
     showIdentity(result);
+    pendingSignInAccount.current = null;
     setSessionUnresolved(false);
     const cached = current.current.snapshot;
     if (
@@ -967,6 +1122,11 @@ export function useFamilyPilot() {
       setError(null);
     } catch (cause) {
       if (!isCurrent(e)) return;
+      if (cause instanceof PilotApiError && cause.status === 403) {
+        clearRecognition();
+        markReady(false);
+        setAuthStatus("unverified");
+      }
       if (connectionFailure(cause) && deferConnectionError()) {
         nextRefresh.current = 0;
         return "reconnect";
@@ -1079,6 +1239,11 @@ export function useFamilyPilot() {
         if (code === "sign_in_cancelled") setNotice(code);
         else {
           if (authenticationRequired(cause)) pauseAuthentication();
+          else if (cause instanceof PilotApiError && cause.status === 403) {
+            clearRecognition();
+            markReady(false);
+            setAuthStatus("unverified");
+          }
           setError(
             authPaused.current &&
               !["local_save_failed", "sign_out_failed"].includes(code)
@@ -1097,6 +1262,7 @@ export function useFamilyPilot() {
     if (!configured || webUnsupported) return;
     const e = epoch.current;
     let cached: PilotIdentity | null = null;
+    let hasSession = false;
     try {
       const deletion = await loadDeletionReceipt();
       check(e);
@@ -1106,9 +1272,10 @@ export function useFamilyPilot() {
           status: deletion.status,
           requestedAt: deletion.requestedAt,
         });
-      const hasSession = await auth.hasSession();
+      hasSession = await auth.hasSession();
       check(e);
       if (!hasSession) {
+        setSessionAvailable(false);
         await stopNotificationDelivery(true);
         check(e);
         signedOut.current = true;
@@ -1199,7 +1366,11 @@ export function useFamilyPilot() {
       }
       // Only local restoration gates startup. The existing sync lock continues
       // identity checks, downloads and queued uploads after the app can render.
+      // Do not let foreground/timer checks race a still-pending cache restore:
+      // that old local result could otherwise replace a fresh server revocation.
+      setSessionAvailable(true);
       setBooting(false);
+      recognizeInBackground(e, cached?.user.id);
       await sync();
     } catch (cause) {
       if (isCurrent(e)) {
@@ -1214,7 +1385,10 @@ export function useFamilyPilot() {
         );
       }
     } finally {
-      if (isCurrent(e)) setBooting(false);
+      if (isCurrent(e)) {
+        setSessionAvailable(hasSession);
+        setBooting(false);
+      }
     }
   }, []);
   useEffect(() => {
@@ -1224,7 +1398,7 @@ export function useFamilyPilot() {
       const wasForeground = foreground.current;
       foreground.current = value === "active";
       if (wasForeground && !foreground.current) backgroundGeneration.current++;
-      if (!wasForeground && foreground.current && who.current) {
+      if (!wasForeground && foreground.current && availableSession.current) {
         // If the interrupted attempt already failed in the background, this
         // foreground check IS its fresh retry, not a new two-attempt budget.
         reconnectRetry.current = !backgroundRetryPending.current;
@@ -1239,12 +1413,16 @@ export function useFamilyPilot() {
             previous === "unverified" ? "checking" : previous,
           );
         }
+        recognizeInBackground(
+          epoch.current,
+          who.current?.user.id ?? recognizedAccount.current ?? undefined,
+        );
         void sync();
       }
     });
     const timer = setInterval(() => {
       if (
-        who.current &&
+        availableSession.current &&
         foreground.current &&
         Date.now() >= nextRefresh.current
       )
@@ -1271,6 +1449,8 @@ export function useFamilyPilot() {
   ) {
     lifecycleActive.current = true;
     try {
+      requireAuthentication();
+      if (!who.current) throw new Error("refresh_required");
       await syncLock.current;
       check(e);
       requireAuthentication();
@@ -1375,6 +1555,7 @@ export function useFamilyPilot() {
     state.transition,
     booting,
     authStatus,
+    tokenRecognized,
   ]);
 
   return {
@@ -1411,6 +1592,8 @@ export function useFamilyPilot() {
       !!state.transition && ["create", "join"].includes(state.transition.kind),
     booting,
     authStatus,
+    tokenRecognized,
+    sessionAvailable,
     ready,
     sharedMode:
       sessionUnresolved ||
@@ -1696,37 +1879,79 @@ export function useFamilyPilot() {
       !!state.draft ||
       state.queue.some((q) => q.status !== "accepted") ||
       !!state.records?.some((q) => q.status !== "accepted"),
-    signIn: () =>
-      action(
+    signIn: () => {
+      if (commands.current) return Promise.reject(new Error("action_busy"));
+      const unavailable = cleanupPending.current
+        ? "sign_out_failed"
+        : !configured
+          ? "not_configured"
+          : webUnsupported
+            ? "native_required"
+            : null;
+      if (unavailable) {
+        setError(unavailable);
+        return Promise.reject(new Error(unavailable));
+      }
+      // Browser sign-in must not queue behind a stalled SQL-backed refresh.
+      // Keep the prior workspace until the browser succeeds (cancellation is
+      // reversible), but invalidate every pending response from that attempt.
+      epoch.current++;
+      recognitionGeneration.current++;
+      requests.current.abort();
+      requests.current = new AbortController();
+      syncLock.current = null;
+      setSyncing(false);
+      return action(
         async (e) => {
           if (cleanupPending.current) throw new Error("sign_out_failed");
           if (!configured) throw new Error("not_configured");
           if (webUnsupported) throw new Error("native_required");
           authenticating.current = true;
           const previous = who.current;
+          let recognized = false;
+          let backgroundVerification = false;
           try {
-            await syncLock.current;
             await writes.current;
             check(e);
             await auth.signIn(previous?.user.email);
             check(e);
             signedOut.current = false;
-            if (!authPaused.current) setAuthStatus("checking");
+            setSessionAvailable(true);
+            pendingSignInAccount.current =
+              previous?.user.id ?? pendingSignInAccount.current;
+            // A successful explicit browser login replaces the old expired-token
+            // pause. It grants no access; any new probe denial pauses us again.
+            authPaused.current = false;
+            clearRecognition();
+            sessionEndpointUnavailable.current = false;
+            setAuthStatus("checking");
             // Preserve previous work on disk, but don't show it under a new identity.
             showIdentity(null);
             cacheRestored.current = false;
             setSessionUnresolved(true);
             markReady(false);
             showState(emptyPilotState(), true);
-            await identify(e, previous?.user.id);
+            try {
+              recognized = await recognizeSession(e, previous?.user.id);
+            } catch (cause) {
+              if (!connectionFailure(cause)) throw cause;
+              backgroundVerification = true;
+              setError(errorCode(cause));
+            }
+            if (!recognized && !backgroundVerification)
+              await identify(e, previous?.user.id);
           } finally {
             authenticating.current = false;
           }
-          await refreshNow();
+          if (recognized || backgroundVerification) {
+            reconnectRetry.current = true;
+            void refreshNow();
+          } else await refreshNow();
         },
         true,
         true,
-      ),
+      );
+    },
     signOut: () =>
       action(async (beforeLogoutEpoch) => {
         if (
@@ -1748,6 +1973,11 @@ export function useFamilyPilot() {
           // Commit the discard before deleting credentials. If the process dies
           // during final row cleanup, a later explicit login loads an EMPTY
           // workspace rather than resurrecting work the user discarded.
+          const departingAccount =
+            who.current?.user.id ??
+            recognizedAccount.current ??
+            pendingSignInAccount.current ??
+            logoutAccount.current;
           if (who.current)
             await persist(
               () => emptyPilotState(),
@@ -1755,11 +1985,22 @@ export function useFamilyPilot() {
               true,
               true,
             );
+          else if (departingAccount) {
+            await writes.current;
+            check(beforeLogoutEpoch);
+            await savePilot(accountKey(departingAccount), emptyPilotState(), {
+              discardOwnerSetup: true,
+            });
+            check(beforeLogoutEpoch);
+          }
           cleanupPending.current = true;
-          logoutAccount.current = who.current?.user.id ?? logoutAccount.current;
+          logoutAccount.current = departingAccount;
           epoch.current++;
           const e = epoch.current;
           signedOut.current = true;
+          setSessionAvailable(false);
+          pendingSignInAccount.current = null;
+          clearRecognition();
           setSessionUnresolved(false);
           authPaused.current = false;
           setAuthStatus("signed_out");

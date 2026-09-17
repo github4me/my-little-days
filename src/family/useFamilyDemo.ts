@@ -80,6 +80,8 @@ export function useFamilyDemo(scenario: FamilyDemoScenario): ReturnType<
     webUnsupported: false,
     user: state.user,
     authStatus: state.user ? "authenticated" : "signed_out",
+    tokenRecognized: !!state.user,
+    sessionAvailable: !!state.user,
     snapshot: state.snapshot,
     feeds: state.snapshot?.feeds ?? [],
     draft: state.draft,

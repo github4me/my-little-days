@@ -308,7 +308,7 @@ Entra sends sign-in verification codes. Family invitations themselves are still 
 
 ## 9. Server-only customer directory credentials
 
-For a smaller setup, this runbook uses the already-supported shared credential option: one confidential customer registration handles both account lookup and deletion.
+The setup below uses shared credentials for account lookup and deletion. The user explicitly approved reusing this existing Entra registration for the token-cache update. Keep the existing registration, consent, secret and `Admission__UseAccountDeletionCredentials=true`; no separate registration is required. The cached application token retains the existing delete permissions, so protect API process access, logs and memory dumps as described in section 23. The numbered steps below are the original provisioning instructions, not changes required for this rollout.
 
 1. In the **customer** tenant open **App registrations → New registration**.
 2. Name it `my-little-days-directory`, select this organization only, leave redirect empty and register. If it already exists, inspect/reuse it.
@@ -328,6 +328,8 @@ References: [read user permissions](https://learn.microsoft.com/en-us/graph/api/
 ## 10. Configure the API in App Service
 
 Coordinate this step with the running release: saving settings can restart the service. No settings are changed by writing this runbook.
+
+The table below records the shared-credential configuration retained for the token-cache rollout. No App Service setting change is required to enable caching after the updated API is deployed. Keep the existing directory credentials and tenant/history/database settings unchanged; section 23 describes verification and release. Do not reapply settings merely to enable this cache.
 
 1. Switch Azure Portal back to the **hosting** directory.
 2. Open **App Services → little-days-api-522fpstfbtds2 → Settings → Environment variables → App settings**.
@@ -957,3 +959,57 @@ Follow [the detailed migration and deployment checklist](DATABASE-SCALING-2026-0
 Migration 0005 applied at 02:05:34.7639415 UTC / 12:05:34 Sydney. Independent checks verified all five journal hashes, all 31 enabled indexes, the expected trigger and SELECT-only runtime counter access. At the checkpoint all 68 receipts matched their counters; no family count differed. Firewall rules exactly matched preflight, including retained operator access and no leftover runner rule. Azure reports deployment `77d06c49-6e13-4da1-8afa-955e28e12266` active/complete. Independent liveness/readiness checks returned 200, and unauthenticated capabilities returned 401. Full evidence and migration checksum are in the linked guide.
 
 **Remaining manual step:** refresh the existing signed-in iPhone, then verify the next intended record save syncs normally and appears on the other phone if available. No reinstall, Expo release or TestFlight build is needed for these backend changes. Record device acceptance separately; health and SQL checks alone do not establish it. No infrastructure, permanent firewall, identity or approval setting was changed for this release.
+
+## 23. Graph application-token cache and SQL-independent sign-in recognition
+
+**Implementation and rollout are separate.** The update adds token-only `GET /v1/session`, a separate mobile sign-in-recognized state, and an in-memory MSAL cache for directory admission's Graph application token. The user approved reusing the existing Entra registration, including when `Admission__UseAccountDeletionCredentials=true`. No new registration, consent, secret or App Service setting is required. It does not deploy itself or create Redis, a queue, or a database migration. Existing clients retain authoritative `/v1/me` behavior. This documentation update did not change Azure or deploy the API/mobile app.
+
+### 23.1 Customer Entra tenant: retain the existing directory identity
+
+1. Switch to customer tenant **My Little Days Customers**, directory ID `deab2578-7cd3-4152-b5db-f430d6b638f8`. Do not use the hosting tenant or a GitHub deployment identity.
+2. Locate the existing **`my-little-days-directory`** registration, Application (client) ID **`538d93ee-1d58-43cb-adcd-68e094200621`**. Do not create a replacement registration for this rollout.
+3. Retain its existing consent and secret. `User.ReadWrite.All` covers directory reads and active-user deletion; `User.DeleteRestore.All` covers permanent deleted-user removal. Do not add permissions or rotate a working secret merely to enable caching. Keep the existing expiry/rotation procedure.
+4. Review the existing application grants without exposing secrets. The Graph `.default` scope includes granted application permissions, so the cached shared token includes existing deletion authority even though admission only issues read requests. Caching does not attenuate that token's privileges or grant new permissions.
+5. Keep secrets and tokens out of chat, Git, GitHub/Expo variables, screenshots and logs. Restrict API deployment/configuration, debugging and memory-dump access. Do not assign privileged directory-administrator roles to this app.
+6. Optional future hardening: use a separate admission registration with only application `User.Read.All`, after its own review and consent. A second secret for the same app does not separate permissions. Separate tokens limit a leaked read-token's privileges, but both applications' credentials would still be accessible to a compromise of the API process. This is not a prerequisite for the approved rollout.
+
+Reference: [Microsoft Graph read-user permissions](https://learn.microsoft.com/en-us/graph/api/user-get?view=graph-rest-1.0).
+
+### 23.2 Hosting tenant: retain shared-credential settings
+
+1. Switch to hosting tenant `7b7e6e31-a778-4334-aee2-e969fa27fd0e`. Open **App Services → little-days-api-522fpstfbtds2 → Settings → Environment variables → App settings**.
+2. Confirm the retained configuration without exporting secret values:
+
+   | Setting | Retained value |
+   | --- | --- |
+   | `Admission__UseAccountDeletionCredentials` | `true` |
+   | `Admission__GraphClientId`, `Admission__GraphClientSecret` | Both omitted, as required by credential reuse |
+   | `AccountDeletion__GraphClientId` | `538d93ee-1d58-43cb-adcd-68e094200621` |
+   | `AccountDeletion__GraphClientSecret` | Existing server-only secret, unchanged |
+
+3. Keep `Admission__Mode=Directory`, issuer/OTP settings, both `AccountDeletion__Graph*` settings, Entra mobile/API IDs, `Family__HistoryId`, SQL connection string, auto-pause and firewall unchanged. No new GitHub variable/secret, mobile environment value, API scope or redirect URI is needed.
+4. No **Apply** or settings restart is needed for this change. The existing configuration works with the previous API; caching begins when the updated API is deployed. If the observed configuration differs, reconcile it before making changes rather than copying credentials into extra settings.
+5. There is no separate/shared-client-ID cache gate. Directory admission uses the configured application's MSAL cache in either credential mode; existing credential-resolution and startup validation rules remain in force. Static test admission does not acquire Graph tokens.
+6. After an authorized release, verify an existing user's sign-in and family read. A permission/configuration failure remains an error; do not switch to static admission or add permissions as a shortcut. Inspect sanitized failure codes without dumping settings, tokens or customer records.
+7. If a code regression requires rollback, follow the reviewed API release procedure to restore the preceding compatible API revision, keeping the existing settings and SQL schema intact. This rollout does not need a credential-mode switch for rollback; any rollback is a separate authorized deployment.
+
+### 23.3 Release and phone validation
+
+1. Review source and automated tests, then use **GitHub Actions → Deploy family API and database → Run workflow** on the reviewed branch. Follow section 11's protections; do not alter branch/OIDC settings or enable EF adoption. DbUp verifies the existing schema; no new migration is introduced.
+2. Confirm health and anonymous `GET /v1/session` rejection (`401`). An authenticated session returns only `status=token_valid`, the validated user's own object ID, `accountAccess=pending`, and `familyAccess=pending`, with `Cache-Control: no-store`. Use the app for authenticated acceptance; never put a bearer token in shell history, a shared HTTP client, screenshots or this document.
+3. Build the compatible mobile app through the normal Expo preview/review path, then verify on iPhone before production rollout. No native dependency is added, but the current `updates.enabled=false` policy means an EAS OTA publication alone will not reach these installed builds; deliver a new native build without changing that policy. For TestFlight follow section 19, preserving existing public values and `EXPO_PUBLIC_FAMILY_UI_DEMO=0`.
+4. New mobile clients fall back to the old authoritative account check if an older API returns `404` for `/v1/session`. They must not fabricate a family list or interpret pending access as revocation.
+5. After natural SQL idleness, sign in: token recognition should finish before SQL, family/account access should remain visibly pending, and loading should finish without another Microsoft login. Do not pause production SQL, change free-limit behavior or schedule keep-alives just to run this check.
+6. Test both languages, refresh, logout during a delayed request, switching accounts, rejected/expired tokens and offline retries. New family management remains unavailable until authoritative checks finish. A session result must never overwrite deletion/removal results. Use dedicated test families for destructive tests, not real family history.
+7. Record API revision/workflow, mobile update/build and actual phone results. Local tests do not establish deployment or native-device acceptance. API and phone publication remain separate steps.
+
+### 23.4 Security and operational limits
+
+- Token validity does not prove an enabled directory account, an undeleted app account or active family membership. Those checks remain fresh on authoritative operations; no positive user-permission cache is added.
+- The application-token cache is process-only and expires according to the issuer. Restart loses the cache without extending token validity. Graph rejection stays authoritative; recovery is bounded. Protect memory dumps as well as logs because bearer tokens are sensitive.
+- With the approved shared registration, a leaked cached Graph token carries the application's existing delete permissions. Only the admission service token is cached; user identities/authorization and deletion-operation results are not. Restrict API process, deployment, configuration and diagnostic access; never capture bearer tokens or secrets in logs, dumps or support artifacts. A dedicated least-privileged read identity remains optional future hardening.
+- The session request avoids SQL and Graph; signing-key discovery may still require an Entra call. The existing deletion worker can independently contact SQL at startup/on its schedule. This endpoint is not a database readiness probe.
+- This removes SQL wake-up from the initial recognition step, not database reads/writes. It does not remove free-tier quota exhaustion or guarantee zero latency.
+- Cache eviction or secret rotation does not guarantee immediate invalidation of an issued token. Follow the identity incident procedure after a suspected leak; restarting alone is not sufficient.
+
+See [the implementation/security review](AUTHENTICATION-CACHE-REVIEW-2026-09-17.md) and [Microsoft's application-token cache guidance](https://learn.microsoft.com/en-us/entra/msal/dotnet/acquiring-tokens/web-apps-apis/client-credential-flows).

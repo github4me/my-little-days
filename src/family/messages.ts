@@ -34,6 +34,27 @@ const messages = {
   account: ["我的账户", "My account"],
   accountSignedOut: ["未登录", "Signed out"],
   accountChecking: ["正在验证登录状态…", "Checking sign-in…"],
+  accountTokenRecognized: ["已识别登录信息", "Sign-in recognized"],
+  familyServiceConnecting: [
+    "正在连接家庭服务…",
+    "Connecting to family service…",
+  ],
+  familyServiceUnavailable: [
+    "家庭服务暂时不可用，请稍后刷新重试。",
+    "Family service is temporarily unavailable. Refresh to try again.",
+  ],
+  accountAccessPendingDetails: [
+    "账户与家庭访问权限仍待核验。核验完成前，家庭功能暂不可用。",
+    "Account and family access checks are still pending. Family actions remain unavailable until those checks succeed.",
+  ],
+  accountSavedSignInDetails: [
+    "此设备保存了登录信息。请联网核验账户与家庭访问权限；核验完成前，家庭功能暂不可用。",
+    "A sign-in is saved on this device. Connect to verify your account and family access. Family actions remain unavailable until those checks succeed.",
+  ],
+  accountRecognizedCachedDetails: [
+    "以上为此设备保存的账户资料，不代表当前账户或家庭访问权限已获确认。",
+    "These account details are saved on this device. They do not confirm current account or family access.",
+  ],
   accountConnecting: ["正在连接…", "Connecting…"],
   accountConnectionUnavailable: ["暂时无法连接", "Connection unavailable"],
   accountConnectingDetails: [

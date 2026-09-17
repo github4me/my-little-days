@@ -12,7 +12,7 @@ export class PilotApiError extends Error {
 // Local timing diagnostics contain only fixed phases/outcomes and elapsed time.
 // Never include URLs, request/response data, identities, tokens or error text.
 function reportPhase(
-  operation: "identity" | "read" | "write",
+  operation: "session" | "identity" | "read" | "write",
   phase: "token" | "api",
   startedAt: number,
   outcome: "ok" | "cancelled" | "timeout" | "authentication" | "failed",
@@ -40,11 +40,13 @@ export async function familyRequest<T>(
   if (!/^\/v[12]\//.test(path) || path.includes("://"))
     throw new PilotApiError("invalid_request");
   const diagnosticOperation =
-    path === "/v1/me" && body === undefined
-      ? "identity"
-      : body === undefined
-        ? "read"
-        : "write";
+    path === "/v1/session" && body === undefined
+      ? "session"
+      : path === "/v1/me" && body === undefined
+        ? "identity"
+        : body === undefined
+          ? "read"
+          : "write";
   const timeout = new AbortController();
   const abort = () => timeout.abort();
   signal?.addEventListener("abort", abort, { once: true });
