@@ -186,16 +186,17 @@ inspection. The operator address is intentionally not committed to this public
 document. Recheck live rules before deployment; this is not approval of an
 unexplained rule or proof of database-level firewall/RBAC settings.
 
-The latest successful GitHub API/database release found was
+At the initial preflight, the latest successful GitHub API/database release was
 [35066678308](https://github.com/github4me/my-little-days/actions/runs/35066678308),
 commit `7cf0dab71ad3ed3a8668d26c573d893e5ec0d73b`, before the security release.
-No new deployment or cloud change was performed during this preflight. Next:
-publish/use the updated workflow without the IP-list requirement, review
-aggregate history sizes and migration 0004, then start the reviewed workflow.
+No new deployment or cloud change was performed during that preflight. The
+remaining steps were to publish/use the updated workflow without the IP-list
+requirement, review aggregate history sizes and migration 0004, then start the
+reviewed workflow. The completed rollout is recorded below.
 Do not rerun Bicep, rotate `Family__HistoryId`, or enable `Recovery__Blocked` for
 this ordinary in-place upgrade. SEC-03 remains open for any future restore.
 
-## Release evidence — 17 September 2026 (Sydney)
+## Earlier mobile release evidence — 17 September 2026 (Sydney)
 
 - Code committed/pushed with the GitHub plugin on `feature/family-invitations`:
   [`9c2fef26266bb332e8f8d7741f25e3f4a46ea34d`](https://github.com/github4me/my-little-days/commit/9c2fef26266bb332e8f8d7741f25e3f4a46ea34d).
@@ -216,9 +217,68 @@ this ordinary in-place upgrade. SEC-03 remains open for any future restore.
 - Expo Doctor reported non-blocking existing splash-schema and available SDK
   patch-version warnings. They did not fail the native build and were not
   suppressed; they remain a separate maintenance follow-up.
-- No OTA was published, no TestFlight submission was made, and no production
+- At that mobile-build step, no OTA was published, no TestFlight submission was made, and no production
   API/SQL migration or Azure settings change was performed. This is a successful
   signed build, **not** physical-device backup/notification/orientation acceptance
   or proof that SEC-03 is closed. Follow the manual prerequisites above before
   releasing the backend, and keep restored service traffic closed without
   independent reconciliation evidence.
+
+## Backend release evidence — 17 September 2026 (Sydney)
+
+- [Manual release 35167068255](https://github.com/github4me/my-little-days/actions/runs/35167068255)
+  completed successfully at **00:40:48 UTC / 10:40:48 Sydney**. The deployed source
+  is `d41b7a132700bd8e96ca377fdbb918e3e52edbfe` on
+  `feature/family-invitations`; bootstrap confirmation was true and legacy EF
+  adoption was false. The GitHub plugin published this revision. Its skip-CI
+  marker prevented an unrelated automatic Bicep apply; the explicit release ran
+  the complete reusable CI before any production migration.
+- All five jobs succeeded: revision validation, API/SQL integration,
+  TypeScript/browser checks, database migration and API deployment. CI included
+  **183 API tests and 11 DbUp tests, zero skipped**, 36 mocked firewall cases plus
+  two cleanup-recovery checks, workflow/action-pin tests, and both browser suites.
+  GitHub reported non-blocking Node 20 action-metadata deprecation warnings while
+  running those actions on Node 24; no insecure runtime override was enabled.
+- Read-only SQL preflight inspected aggregate counts and conservative byte-size
+  estimates only. Existing active histories were below the new record, storage,
+  snapshot and membership-history limits; no child payloads were exported.
+  This is a compatibility check, not a load test or exact serialized-response test.
+- Live SQL verification confirmed `0004_FamilyAvailabilityBounds.sql` applied
+  exactly once at **00:37:57 UTC**. Its normalized checksum is
+  `C95C6B8FE1EA5F2BA1BFD6DE8AC65AB362126537C23AE8AF3118FE8355186258`, matching
+  the reviewed script. Both nullable `datetimeoffset(7)` columns and all three
+  enabled indexes have the expected definitions. An initial read-only `--check`
+  attempt failed, then the bounded retry passed before the single successful
+  `--apply`; the generic error log does not establish the initial failure's cause.
+- The migration removed its own temporary runner rule. Independent post-checks
+  found **33 existing rules**, no broad/non-public rules, duplicate names or
+  `github-db-*` leftovers, and the operator's requested exact-IP access retained.
+  No Bicep deployment, permanent firewall-rule change, database restore, family
+  history-ID rotation or restore-maintenance setting change was performed.
+- API artifact `family-api-35167068255` (ID `10475258287`) had verified digest
+  `830c6d8fbfbd5f41e96d3937846f17bda82fc046701b3ef884e6f597131869f4`.
+  Both the release log and Azure identify deployment
+  `3151456b-5425-4757-bb43-804f323715d4`; Azure startup logs confirm that deployment
+  became the running site. `/health/live` returned **200** with `status=ok`,
+  `/health/ready` returned **200** with `status=ready`, and an unauthenticated
+  `/v2/capabilities` request returned **401** with `code=unauthorized`.
+- During the container transition, health probes temporarily returned 500 and
+  the new readiness route returned 404. Startup logs recorded
+  `BadImageFormatException: Bad IL range` before the new container became ready;
+  the old container was subsequently stopped. The service recovered within the
+  release's health-retry window without a manual restart or rollback. The timing
+  is consistent with an old/new deployment overlap, but this observation alone
+  does not prove the root cause. Deployment availability remains a follow-up.
+- **Approval-control gap remains:** live GitHub inspection found both
+  `family-database` and `family-pilot` limited to the trusted branch, but with
+  Required reviewers unchecked and administrator bypass enabled. This was a
+  user-requested, supervised manual release, not an independently approved
+  deployment. No approval setting was changed or bypassed. Follow the
+  [documented reviewer setup](AZURE-DATABASE-DEPLOYMENT.md#4-github-protect-and-configure-the-database-environment)
+  in a separately authorized configuration change; action pins alone do not
+  close this operational part of SEC-07.
+- **Still required:** a signed-in, non-destructive phone refresh/read/sync and
+  disposable two-account isolation checks. Health endpoints do not prove SQL or
+  Graph operation through the API. SEC-03 restore evidence/drill and native
+  backup, notification and avatar acceptance remain open. No new Expo build,
+  OTA or TestFlight submission was part of this backend release.

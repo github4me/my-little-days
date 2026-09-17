@@ -47,13 +47,40 @@ These are Azure management permissions, not database login permissions. Complete
 
    Verify the runtime principal resolves to object ID `fbb9ee76-3e03-4089-a94c-3548f74ad35a`. The migration identity must resolve to the **Enterprise application/service principal**, not its app-registration object. Names must resolve uniquely in the hosting tenant. If directory resolution fails, stop and resolve the SQL/Entra lookup permission with the administrator; do not give Graph rights to the API runtime or substitute a SQL password.
 4. Review and run the script. It creates the contained users and `family_pilot_runtime` role. The migration user receives `CONNECT`, `CREATE TABLE` and `CONTROL` on the dedicated database's `dbo` schema. This allows schema/data changes and per-table grants, but does not grant `db_owner` or Azure deployment rights. Treat it as a privileged identity. Runtime receives only membership in the runtime role; DbUp assigns its table permissions after creating the tables.
-5. Remove your temporary operator firewall rule. Do **not** execute the old API `--migrate` command or manually run the normal runtime-grants script. They have been replaced by DbUp.
+5. Remove a setup-only operator firewall rule when it is no longer needed. For this deployment the operator explicitly chose to retain their existing exact-IP administration rule; do not remove it automatically. Do **not** execute the old API `--migrate` command or manually run the normal runtime-grants script. They have been replaced by DbUp.
 
 If an older migration group already exists with broader roles, review its membership/permissions separately. This bootstrap does not silently revoke someone else's access.
 
 ## 4. GitHub: protect and configure the database environment
 
 In repository **Settings → Environments**, create **family-database**. Configure required reviewers and allow only the trusted release branch (currently `feature/family-invitations`). Environment names alone do not create approval protection. Keep migrations disabled until these controls are configured; if the repository plan does not support them, do not enable unattended privileged deployment.
+
+**Observed configuration, 17 September 2026:** both `family-database` and
+`family-pilot` restrict deployments to `feature/family-invitations`, but
+**Required reviewers is unchecked** and administrator bypass is enabled.
+A manually started run therefore proceeds from passing CI to migration and API
+deployment without separate approval prompts. The supervised security release
+does not establish an independent approval control; the existing settings were
+not changed. Do not describe these environments as reviewer-protected.
+
+To add approval gates in a separately authorized configuration change:
+
+1. Open **Settings → Environments → family-database**.
+2. Under **Deployment protection rules**, select **Required reviewers** and
+   choose the designated release reviewer (for the current sole operator,
+   `github4me`). Ensure that reviewer can actually approve the release.
+3. Enable **Prevent self-review** only when a different eligible reviewer is
+   available; otherwise the sole operator cannot approve their own dispatch.
+4. Review the administrator-bypass setting with the release owner. Do not use
+   bypass as a routine substitute for approval.
+5. Click **Save protection rules**, then confirm the reviewer is still displayed
+   after reloading. Keep the selected release branch unchanged.
+6. Repeat for **family-pilot**. Do not rename either environment: their OIDC
+   credentials are bound to the existing names.
+7. On the next release, expect **Review deployments** after CI, approve the
+   database only after migration review, then approve the API after successful
+   migration and temporary-rule cleanup. A checkbox in **Run workflow** is not
+   the same as an enforced environment review.
 
 Add these **environment variables**, not secrets:
 

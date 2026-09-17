@@ -6,23 +6,25 @@ This is the operator's step-by-step reference for infrastructure, SQL bootstrap,
 
 **Security release prerequisite (17 September):** follow the [security remediation and release checklist](SECURITY-REMEDIATION-2026-09-17.md) before the next database/API deployment. It documents automatic exact-IP firewall checks, additive DbUp migration 0004, the restore maintenance gate and the new native-only preview runtime. A manually maintained GitHub IP list is no longer required. No live firewall/settings changes or production restore were performed by that code remediation. Independent recovery evidence remains required; a maintenance flag is not a recovery ledger.
 
+**Backend update (17 September, 10:40 Sydney):** [release 35167068255](https://github.com/github4me/my-little-days/actions/runs/35167068255) successfully deployed `d41b7a1`, including migration 0004. SQL journal/schema, temporary firewall cleanup, retained operator access, API liveness/readiness and unauthenticated rejection were checked. A signed-in phone refresh/read/sync is still required. Both deployment environments have branch restrictions but no required reviewers; see the [reviewer setup steps](AZURE-DATABASE-DEPLOYMENT.md#4-github-protect-and-configure-the-database-environment). Do not assume a separate approval prompt will appear with the current settings.
+
 ## 1. Current status and where to resume
 
-Status below comes from the setup conversation and supplied deployment output, except API liveness, which was checked directly on 16 September 2026. This is not a full audit of Azure/GitHub.
+Status below combines the historical setup conversation with the explicitly dated live verification on 16–17 September 2026. The latest SQL migration/schema, deployment result, firewall cleanup and HTTP health/rejection checks were verified directly on 17 September. Unverified or historical rows are marked separately; this is not a full audit of Azure/GitHub.
 
 | Area | Recorded status | Next action |
 | --- | --- | --- |
 | Bicep infrastructure | Successful deployment output supplied | Reuse existing resources |
 | SQL identity bootstrap | User confirmed rows created | Do not recreate the database |
-| DbUp | A previous migration job succeeded | Future changes use the same workflow/journal |
+| DbUp | Migrations 0001–0004 applied; 0004 journal checksum, columns and indexes independently verified on 17 September | Future scripts start with 0005 and use the same workflow/journal |
 | API deployment identity and GitHub setup | User reported completed | Its client ID still needs recording in the private operator inventory |
 | Customer mobile/API registrations | IDs supplied and recorded below | Verify redirect, scope, consent and token version |
 | Customer default domain, OTP flow, Graph credentials | Completion not confirmed | Complete sections 8–9 |
 | Directory credential diagnostic | Rechecked App Service: corrected client `538d93ee-1d58-43cb-adcd-68e094200621` is active; token acquisition and reading the signed-in user succeed | Earlier client-ID blocker resolved by operator; no further credential rotation indicated |
 | Customer admission compatibility | Strict support for the observed `creationType=null`, `federated`/`mail` OTP account format deployed in `2fec7dcbfff90f72631600cd1c4a5d68ff07102f` | Release 35043608849 passed all CI, migration, deployment and liveness checks. Live Graph lookup returns exactly the same enabled account. Native sign-in still needs the user's device retry; do not recreate the account |
 | App Service runtime settings | API starts; exact deployed settings and customer authentication not audited | Verify section 10; do not recreate valid settings |
-| API liveness | Direct GET returned `{"status":"ok"}` on 16 September 2026 | Proceed to authenticated/native checks; this does not verify SQL or Graph |
-| Latest API/database workflow | Previously reported running; user now reports API live | Check the run's final jobs and firewall-cleanup result separately |
+| API liveness | Direct liveness/readiness GETs returned 200 on 17 September; unauthenticated capabilities returned 401 | Proceed to authenticated/native checks; this does not verify SQL or Graph |
+| Latest API/database workflow | Release 35167068255 succeeded for `d41b7a1`; migration and temporary firewall cleanup independently verified | Test signed-in refresh/read/sync on the phone; do not rerun Bicep or initialization |
 | Native sign-in and two-device acceptance | Not verified | Complete sections 12–13 |
 | Expo preview variables | Read back through EAS CLI: all four public values match, with `EXPO_PUBLIC_FAMILY_UI_DEMO=0` | Verify actual build environment selection and device provisioning before building |
 | Expo account/project and devices | CLI confirmed `expo4chao/little-days`, expected project ID and two iPhones on Apple team `A9974KXQ4G`; user confirmed the same phones will be used | Verify both are included in signing; no cloud build started by these checks |
@@ -51,7 +53,7 @@ Status below comes from the setup conversation and supplied deployment output, e
 | Existing Linux B1 plan | `ProdRG/reticelASP`, Australia Southeast |
 | Web App | `little-days-api-522fpstfbtds2` |
 | API origin | `https://little-days-api-522fpstfbtds2.azurewebsites.net` |
-| Stable family history ID | `64136b6e-01e2-4c48-890f-bef208eac9e3` (user supplied; App Service value not independently verified) |
+| Stable family history ID | `64136b6e-01e2-4c48-890f-bef208eac9e3` (App Service value independently verified unchanged on 17 September 2026) |
 | SQL server | `little-days-sql-522fpstfbtds2` |
 | SQL hostname | `little-days-sql-522fpstfbtds2.database.windows.net` |
 | Database | `little-days-family` |
