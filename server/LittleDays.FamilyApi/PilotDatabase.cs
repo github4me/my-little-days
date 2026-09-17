@@ -10,6 +10,7 @@ public sealed class PilotDatabase(DbContextOptions<PilotDatabase> options) : DbC
     public DbSet<FeedRow> Feeds => Set<FeedRow>();
     public DbSet<FamilyRecordRow> FamilyRecords => Set<FamilyRecordRow>();
     public DbSet<OperationRow> Operations => Set<OperationRow>();
+    public DbSet<FamilyOperationCountRow> FamilyOperationCounts => Set<FamilyOperationCountRow>();
     public DbSet<OwnershipTransferRow> OwnershipTransfers => Set<OwnershipTransferRow>();
     public DbSet<AccountDeletionRow> AccountDeletions => Set<AccountDeletionRow>();
 
@@ -23,7 +24,9 @@ public sealed class PilotDatabase(DbContextOptions<PilotDatabase> options) : DbC
             entity.Property(x => x.BabySex).HasMaxLength(11).HasDefaultValue("unspecified");
             entity.Property(x => x.SchemaVersion).HasDefaultValue(1);
             entity.Property(x => x.ProfileVersion).IsRowVersion();
-            entity.HasIndex(x => x.DeletedAt).HasFilter("[DeletedAt] IS NOT NULL AND [PurgedAt] IS NULL");
+            entity.HasIndex(x => x.DeletedAt).HasFilter("[DeletedAt] IS NOT NULL AND [PurgedAt] IS NULL")
+                .IncludeProperties(x => x.PurgedAt);
+            entity.HasIndex(x => new { x.DeletedBy, x.DeletedAt });
         });
         model.Entity<MembershipRow>(entity =>
         {
@@ -34,6 +37,7 @@ public sealed class PilotDatabase(DbContextOptions<PilotDatabase> options) : DbC
             entity.Property(x => x.Status).HasMaxLength(10);
             entity.HasIndex(x => x.UserId).IsUnique().HasFilter("[Active] = 1");
             entity.HasIndex(x => new { x.FamilyId, x.UserId, x.Active });
+            entity.HasIndex(x => new { x.UserId, x.FamilyId });
             entity.HasOne<FamilyRow>().WithMany().HasForeignKey(x => x.FamilyId).OnDelete(DeleteBehavior.Restrict);
         });
         model.Entity<InvitationRow>(entity =>
@@ -42,6 +46,9 @@ public sealed class PilotDatabase(DbContextOptions<PilotDatabase> options) : DbC
             entity.Property(x => x.Email).HasMaxLength(254);
             entity.Property(x => x.Status).HasMaxLength(10);
             entity.HasIndex(x => new { x.FamilyId, x.Email }).IsUnique().HasFilter("[Status] = N'pending'");
+            entity.HasIndex(x => new { x.Email, x.Status, x.ExpiresAt }).IncludeProperties(x => new { x.FamilyId, x.CreatedAt });
+            entity.HasIndex(x => new { x.FamilyId, x.CreatedAt }).IsDescending(false, true);
+            entity.HasIndex(x => x.RecipientUserId).IncludeProperties(x => x.FamilyId);
             entity.HasOne<FamilyRow>().WithMany().HasForeignKey(x => x.FamilyId).OnDelete(DeleteBehavior.Restrict);
         });
         model.Entity<OwnershipTransferRow>(entity =>
@@ -49,6 +56,9 @@ public sealed class PilotDatabase(DbContextOptions<PilotDatabase> options) : DbC
             entity.HasKey(x => x.Id);
             entity.Property(x => x.Status).HasMaxLength(10);
             entity.HasIndex(x => x.FamilyId).IsUnique().HasFilter("[Status] = N'pending'");
+            entity.HasIndex(x => x.FamilyId, "IX_OwnershipTransfers_FamilyId_All");
+            entity.HasIndex(x => x.FromUserId).IncludeProperties(x => x.FamilyId);
+            entity.HasIndex(x => x.ToUserId).IncludeProperties(x => x.FamilyId);
             entity.HasOne<FamilyRow>().WithMany().HasForeignKey(x => x.FamilyId).OnDelete(DeleteBehavior.Restrict);
         });
         model.Entity<AccountDeletionRow>(entity =>
@@ -58,6 +68,8 @@ public sealed class PilotDatabase(DbContextOptions<PilotDatabase> options) : DbC
             entity.Property(x => x.ReceiptHash).HasMaxLength(64).IsUnicode(false);
             entity.Property(x => x.PendingEmail).HasMaxLength(254);
             entity.HasIndex(x => x.OperationId).IsUnique();
+            entity.HasIndex(x => new { x.Status, x.LastIdentityAttemptAt, x.RequestedAt })
+                .HasDatabaseName("IX_AccountDeletions_Status_RequestedAt");
         });
         model.Entity<FeedRow>(entity =>
         {
@@ -65,6 +77,8 @@ public sealed class PilotDatabase(DbContextOptions<PilotDatabase> options) : DbC
             entity.Property(x => x.Note).HasMaxLength(500);
             entity.Property(x => x.Amount).HasPrecision(7, 2);
             entity.Property(x => x.Version).IsRowVersion();
+            entity.HasIndex(x => x.RecordedBy);
+            entity.HasIndex(x => x.LastEditedBy);
             entity.HasOne<FamilyRow>().WithMany().HasForeignKey(x => x.FamilyId).OnDelete(DeleteBehavior.Restrict);
             entity.ToTable(t => t.HasCheckConstraint("CK_Feeds_Amount", "[Amount] >= 0 AND [Amount] <= 2000"));
             entity.ToTable(t => t.HasCheckConstraint("CK_Feeds_Interval", "[End] >= [Start]"));
@@ -77,6 +91,17 @@ public sealed class PilotDatabase(DbContextOptions<PilotDatabase> options) : DbC
             entity.Property(x => x.ResultJson).HasMaxLength(2048);
             entity.HasIndex(x => x.FamilyId);
             entity.HasOne<FamilyRow>().WithMany().HasForeignKey(x => x.FamilyId).OnDelete(DeleteBehavior.Restrict);
+            entity.ToTable(t =>
+            {
+                t.HasTrigger("TR_Operations_MaintainFamilyOperationCounts");
+                t.UseSqlOutputClause(false);
+            });
+        });
+        model.Entity<FamilyOperationCountRow>(entity =>
+        {
+            entity.HasKey(x => x.FamilyId);
+            entity.HasOne<FamilyRow>().WithMany().HasForeignKey(x => x.FamilyId).OnDelete(DeleteBehavior.Restrict);
+            entity.ToTable(t => t.HasCheckConstraint("CK_FamilyOperationCounts_ReceiptCount", "[ReceiptCount] >= 0"));
         });
         model.Entity<FamilyRecordRow>(entity =>
         {
@@ -88,6 +113,8 @@ public sealed class PilotDatabase(DbContextOptions<PilotDatabase> options) : DbC
             entity.Property(x => x.Id).HasMaxLength(128).IsRequired();
             entity.Property(x => x.RecordJson).HasColumnType("nvarchar(max)");
             entity.Property(x => x.Version).IsRowVersion();
+            entity.HasIndex(x => x.RecordedBy);
+            entity.HasIndex(x => x.LastEditedBy);
             entity.HasOne<FamilyRow>().WithMany().HasForeignKey(x => x.FamilyId).OnDelete(DeleteBehavior.Restrict);
             entity.ToTable(t => t.HasCheckConstraint("CK_FamilyRecords_Collection", "[Collection] IN ('entry', 'care', 'extra')"));
             entity.ToTable(t => t.HasCheckConstraint("CK_FamilyRecords_Json", "ISJSON([RecordJson]) = 1 AND (DATALENGTH([RecordJson]) <= 131072 OR ([Collection] = 'extra' AND [Id] = 'avatar' AND COALESCE(JSON_VALUE([RecordJson], '$.kind'), '') = 'avatar' AND DATALENGTH([RecordJson]) <= 35651584))"));
@@ -182,6 +209,13 @@ public sealed class OperationRow
     public string Fingerprint { get; set; } = "";
     public string ResultJson { get; set; } = "";
     public DateTimeOffset CreatedAt { get; set; }
+}
+
+// Derived bookkeeping is maintained by SQL for both EF and set-based deletes.
+public sealed class FamilyOperationCountRow
+{
+    public Guid FamilyId { get; set; }
+    public long ReceiptCount { get; set; }
 }
 
 public sealed class FamilyRecordRow

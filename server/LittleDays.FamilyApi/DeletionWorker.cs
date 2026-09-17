@@ -29,6 +29,15 @@ public sealed class DeletionProcessor(PilotDatabase db, PilotConfiguration confi
         foreach (var familyId in closed)
         {
             if (recovery?.Blocked == true) return false;
+            if (!await DrainOperationReceipts(() => service.FamilyTransaction(familyId, async () =>
+            {
+                // Recheck the durable closure in every transaction. Receipt expiry
+                // on a live family would weaken its idempotency/replay protection.
+                if (!await db.Families.AnyAsync(x => x.Id == familyId && x.DeletedAt != null && x.PurgedAt == null, ct)) return 0;
+                return await db.Database.ExecuteSqlInterpolatedAsync($"""
+                    DELETE TOP ({FamilyAvailability.OperationCleanupBatchSize}) FROM dbo.Operations WHERE FamilyId = {familyId};
+                    """, ct);
+            }, ct), ct)) return false;
             await service.FamilyTransaction(familyId, async () =>
             {
                 var family = await db.Families.SingleAsync(x => x.Id == familyId, ct);
@@ -37,7 +46,10 @@ public sealed class DeletionProcessor(PilotDatabase db, PilotConfiguration confi
                 await db.FamilyRecords.Where(x => x.FamilyId == family.Id).ExecuteDeleteAsync(ct);
                 await db.Invitations.Where(x => x.FamilyId == family.Id).ExecuteDeleteAsync(ct);
                 await db.OwnershipTransfers.Where(x => x.FamilyId == family.Id).ExecuteDeleteAsync(ct);
-                await db.Operations.Where(x => x.FamilyId == family.Id).ExecuteDeleteAsync(ct);
+                // The closed family cannot create new receipts between batches.
+                // Refuse to mark cleanup complete if unexpected receipts remain.
+                if (await db.Operations.AnyAsync(x => x.FamilyId == family.Id, ct))
+                    throw new InvalidOperationException("Closed-family receipt cleanup is incomplete.");
                 await db.Memberships.Where(x => x.FamilyId == family.Id).ExecuteDeleteAsync(ct);
                 family.BabyName = ""; family.BabyBirthDate = null; family.BabySex = "unspecified";
                 family.PurgedAt = clock.GetUtcNow();
@@ -50,6 +62,16 @@ public sealed class DeletionProcessor(PilotDatabase db, PilotConfiguration confi
         foreach (var userId in jobs)
         {
             if (recovery?.Blocked == true) return false;
+            if (!await DrainOperationReceipts(() => service.Transaction(async () =>
+            {
+                // Account access was revoked when this durable job was created.
+                // Each committed batch releases the global lifecycle lock so an
+                // unrelated family does not wait for this user's entire history.
+                if (!await db.AccountDeletions.AnyAsync(x => x.UserId == userId && x.Status == "pending", ct)) return 0;
+                return await db.Database.ExecuteSqlInterpolatedAsync($"""
+                    DELETE TOP ({FamilyAvailability.OperationCleanupBatchSize}) FROM dbo.Operations WHERE UserId = {userId};
+                    """, ct);
+            }, ct), ct)) return false;
             // An account can have authored records in several families. Preserve
             // the global lifecycle barrier, but release it between bounded jobs.
             await service.Transaction(async () =>
@@ -71,7 +93,8 @@ public sealed class DeletionProcessor(PilotDatabase db, PilotConfiguration confi
                 await db.FamilyRecords.Where(x => x.RecordedBy == job.UserId || x.LastEditedBy == job.UserId).ExecuteDeleteAsync(ct);
                 await db.Invitations.Where(x => x.RecipientUserId == job.UserId || emails.Contains(x.Email)).ExecuteDeleteAsync(ct);
                 await db.OwnershipTransfers.Where(x => x.FromUserId == job.UserId || x.ToUserId == job.UserId).ExecuteDeleteAsync(ct);
-                await db.Operations.Where(x => x.UserId == job.UserId).ExecuteDeleteAsync(ct);
+                if (await db.Operations.AnyAsync(x => x.UserId == job.UserId, ct))
+                    throw new InvalidOperationException("Deleted-account receipt cleanup is incomplete.");
                 await db.Memberships.Where(x => x.UserId == job.UserId).ExecuteDeleteAsync(ct);
                 foreach (var family in await db.Families.Where(x => familyIds.Contains(x.Id) && x.DeletedAt == null).ToArrayAsync(ct)) family.Revision++;
                 job.Status = "awaiting_identity_deletion";
@@ -114,6 +137,21 @@ public sealed class DeletionProcessor(PilotDatabase db, PilotConfiguration confi
         return complete &&
             !await db.Families.AnyAsync(x => x.DeletedAt != null && x.PurgedAt == null, ct) &&
             !await db.AccountDeletions.AnyAsync(x => x.Status != "completed", ct);
+    }
+
+    private async Task<bool> DrainOperationReceipts(Func<Task<int>> deleteBatch, CancellationToken ct)
+    {
+        while (true)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (recovery?.Blocked == true) return false;
+            var deleted = await deleteBatch();
+            db.ChangeTracker.Clear();
+            if (deleted < FamilyAvailability.OperationCleanupBatchSize) return true;
+            // The previous transaction has committed. Cancellation/restart now
+            // leaves its durable closure/job pending and resumes the next batch.
+            await Task.Yield();
+        }
     }
 }
 

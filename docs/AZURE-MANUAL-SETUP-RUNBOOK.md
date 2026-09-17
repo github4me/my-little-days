@@ -947,3 +947,11 @@ Read-only check on 16 September 2026: `https://mylittledayscustomers.ciamlogin.c
 ### Optional later: a branded domain
 
 A hostname such as `login.reticle.com.au` is an example, not configured or selected. Microsoft's documented custom URL domain setup requires domain verification in the customer tenant, custom URL domain association, Azure Front Door, DNS/TLS configuration, and application endpoint testing. Front Door incurs additional charges. Obtain the domain choice and cost approval before provisioning anything; this is not required for the named-tenant improvement above. Follow [Microsoft's custom URL domain setup](https://learn.microsoft.com/en-us/entra/external-id/customers/how-to-custom-url-domain) and [limitations/cost considerations](https://learn.microsoft.com/en-us/entra/external-id/customers/concept-custom-url-domain). See [Expo's browser authentication API](https://docs.expo.dev/versions/latest/sdk/webbrowser/) for the system-session boundary.
+
+## 22. Database indexes and large operation histories
+
+Implemented locally on 17 September 2026; **not deployed by this task**. Migration `0005_QueryIndexesAndOperationCounts.sql` adds the reviewed access paths and transactionally maintained receipt counts. The matching API removes per-write receipt counts and purges deleted-account/closed-family receipts in committed 1,000-row batches. Active-family receipts are not expired, and existing operation limits and idempotency rules remain unchanged.
+
+Follow [the detailed migration and deployment checklist](DATABASE-SCALING-2026-09-17.md#step-by-step-deployment-when-approved). Use the existing **Deploy family API and database** workflow after source review; leave EF adoption disabled. The one-time counter backfill locks receipt writes until its migration transaction commits, so select a quiet window. No new Azure/GitHub variable, identity, secret, infrastructure deployment, Expo update or TestFlight build is required. The last observed environments had no required reviewers; confirm protection before dispatch rather than expecting an approval pause.
+
+Record the actual source SHA, workflow run, migration/catalog-check result and signed-in phone verification here after an authorized release. Local tests and implementation do not establish live deployment.

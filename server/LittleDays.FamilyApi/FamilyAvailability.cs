@@ -12,6 +12,9 @@ public static class FamilyAvailability
     public const int MaxRecords = 10000;
     public const int MaxMemberHistory = 1000;
     public const int CleanupBatchSize = 10;
+    // Receipts can outnumber baby records by orders of magnitude. Commit their
+    // explicit lifecycle purge in small batches instead of one long lock/log span.
+    public const int OperationCleanupBatchSize = 1000;
     public const int MaxClosuresPerDay = 3;
     public const long SnapshotMetadataReserve = 2L * 1024 * 1024;
     public const int RecordEnvelopeReserve = 256;

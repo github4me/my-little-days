@@ -59,8 +59,7 @@ public sealed partial class FamilyService
                 invitation.Status = "own_family";
                 invitation.RecipientUserId = user.ObjectId;
             }
-            foreach (var familyId in received.Select(x => x.FamilyId).Distinct())
-                (await Family(familyId, ct)).Revision++;
+            await AdvanceInvitationFamilyRevisions(received, ct);
             var family = new FamilyRow
             {
                 Id = Guid.NewGuid(),

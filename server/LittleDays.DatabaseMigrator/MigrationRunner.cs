@@ -56,8 +56,10 @@ public sealed class MigrationRunner
 internal sealed class ChecksumJournal(IConnectionManager manager, IReadOnlyList<SqlScript> scripts, string database, bool adoptEf) : IJournal
 {
     private static readonly string[] LegacyIds = ["20260913173137_InitialPilot", "20260914032522_InvitationLifecycleV2", "20260915091021_FullDomainFamiliesV2"];
+    private readonly HashSet<string> verifiedScripts = new(StringComparer.Ordinal);
     public string[] GetExecutedScripts() => manager.ExecuteCommandsWithManagedConnection(factory =>
     {
+        verifiedScripts.Clear();
         using var check = factory();
         check.CommandText = """
             IF DB_NAME() <> @database THROW 51000, 'Unexpected migration target.', 1;
@@ -75,16 +77,21 @@ internal sealed class ChecksumJournal(IConnectionManager manager, IReadOnlyList<
         }
         using var command = factory();
         command.CommandText = "SELECT ScriptName, Sha256 FROM dbo.DatabaseMigrations ORDER BY ScriptName COLLATE Latin1_General_100_BIN2;";
-        using var rows = command.ExecuteReader();
         var executed = new List<string>();
-        while (rows.Read())
+        using (var rows = command.ExecuteReader())
         {
-            var index = executed.Count;
-            if (index >= scripts.Count || rows.GetString(0) != scripts[index].Name || rows.GetString(1) != MigrationRunner.Hash(scripts[index].Contents))
-                throw new InvalidOperationException("Applied scripts are missing, reordered or changed. Add a new migration instead.");
-            executed.Add(rows.GetString(0));
+            while (rows.Read())
+            {
+                var index = executed.Count;
+                if (index >= scripts.Count || rows.GetString(0) != scripts[index].Name || rows.GetString(1) != MigrationRunner.Hash(scripts[index].Contents))
+                    throw new InvalidOperationException("Applied scripts are missing, reordered or changed. Add a new migration instead.");
+                executed.Add(rows.GetString(0));
+            }
         }
         if (executed.Count == 0) throw new InvalidOperationException("An empty existing migration journal requires operator review.");
+        SchemaVerifier.Verify(factory, SchemaVerifier.Version(executed));
+        verifiedScripts.Clear();
+        verifiedScripts.UnionWith(executed);
         return executed.ToArray();
     });
 
@@ -110,10 +117,11 @@ internal sealed class ChecksumJournal(IConnectionManager manager, IReadOnlyList<
         if (count >= 2) expected.UnionWith(["dbo.AccountDeletions", "dbo.OwnershipTransfers"]);
         if (count == 3) expected.Add("dbo.FamilyRecords");
         tables.CommandText = "SELECT SCHEMA_NAME(schema_id)+'.'+name FROM sys.tables WHERE is_ms_shipped=0;";
-        using var names = tables.ExecuteReader();
         var actual = new HashSet<string>(StringComparer.Ordinal);
-        while (names.Read()) actual.Add(names.GetString(0));
+        using (var names = tables.ExecuteReader())
+            while (names.Read()) actual.Add(names.GetString(0));
         if (!expected.SetEquals(actual)) throw new InvalidOperationException("Legacy tables do not match the recorded migration stage.");
+        SchemaVerifier.Verify(factory, 0, journal: false, legacyStage: count);
     }
 
     public void EnsureTableExistsAndIsLatestVersion(Func<IDbCommand> factory)
@@ -131,11 +139,15 @@ internal sealed class ChecksumJournal(IConnectionManager manager, IReadOnlyList<
 
     public void StoreExecutedScript(SqlScript script, Func<IDbCommand> factory)
     {
+        // Validate before journaling while still inside DbUp's migration transaction.
+        // Unknown future scripts retain all invariants of the last approved stage.
+        SchemaVerifier.Verify(factory, SchemaVerifier.Version(verifiedScripts.Append(script.Name)));
         using var command = factory();
         command.CommandText = "INSERT dbo.DatabaseMigrations(ScriptName,Sha256) VALUES (@name,@hash);";
         Add(command, "@name", script.Name);
         Add(command, "@hash", MigrationRunner.Hash(script.Contents));
         command.ExecuteNonQuery();
+        verifiedScripts.Add(script.Name);
     }
 
     private static void Add(IDbCommand command, string name, string value)

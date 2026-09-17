@@ -17,6 +17,15 @@ public sealed class SqlFactAttribute : FactAttribute
     }
 }
 
+public sealed class SqlTheoryAttribute : TheoryAttribute
+{
+    public SqlTheoryAttribute()
+    {
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("FAMILY_TEST_SQL_CONNECTION")))
+            Skip = "Set FAMILY_TEST_SQL_CONNECTION to a disposable SQL Server/master connection.";
+    }
+}
+
 public sealed class MigrationTests
 {
     [Fact]
@@ -62,13 +71,13 @@ public sealed class MigrationTests
     public async Task FreshCheckDoesNotWriteAndApplyIsRepeatable()
     {
         await using var db = await TestDatabase.Create();
-        Assert.Equal(4, db.Runner().Pending().Count);
+        Assert.Equal(5, db.Runner().Pending().Count);
         Assert.Equal(0, await db.Count("SELECT COUNT(*) FROM sys.tables WHERE is_ms_shipped=0"));
         db.Runner().Apply();
-        Assert.Equal(4, await db.Count("SELECT COUNT(*) FROM dbo.DatabaseMigrations"));
+        Assert.Equal(5, await db.Count("SELECT COUNT(*) FROM dbo.DatabaseMigrations"));
         Assert.Empty(db.Runner().Pending());
         db.Runner().Apply();
-        Assert.Equal(4, await db.Count("SELECT COUNT(*) FROM dbo.DatabaseMigrations"));
+        Assert.Equal(5, await db.Count("SELECT COUNT(*) FROM dbo.DatabaseMigrations"));
         Assert.Equal(3, await db.Count("SELECT COUNT(*) FROM dbo.__EFMigrationsHistory"));
     }
 
@@ -81,21 +90,23 @@ public sealed class MigrationTests
         Assert.ThrowsAny<Exception>(() => db.Runner(scripts: [new(scripts[0].Name, scripts[0].Contents + "\n-- changed"), scripts[1]]).Pending());
         Assert.ThrowsAny<Exception>(() => db.Runner(scripts: [scripts[1]]).Pending());
         Assert.ThrowsAny<Exception>(() => db.Runner(scripts: [new("0000_Earlier.sql", "SELECT 1"), .. scripts]).Pending());
-        db.Runner(scripts: [.. scripts, new("0005_AddExample.sql", "CREATE TABLE dbo.Example(Id int NOT NULL);")]).Apply();
-        Assert.Equal(5, await db.Count("SELECT COUNT(*) FROM dbo.DatabaseMigrations"));
+        var extended = scripts.Append(new SqlScript("0006_AddExample.sql", "CREATE TABLE dbo.Example(Id int NOT NULL);")).ToArray();
+        db.Runner(scripts: extended).Apply();
+        Assert.Equal(6, await db.Count("SELECT COUNT(*) FROM dbo.DatabaseMigrations"));
+        Assert.Empty(db.Runner(scripts: extended).Pending());
     }
 
     [SqlFact]
     public async Task FailureRollsBackSchemaDataAndJournalAndCanRetry()
     {
         await using var db = await TestDatabase.Create();
-        var fail = new SqlScript("0005_Failure.sql", "CREATE TABLE dbo.Example(Id int); INSERT dbo.Example VALUES (1); THROW 51000, 'Synthetic failure', 1;");
+        var fail = new SqlScript("0006_Failure.sql", "CREATE TABLE dbo.Example(Id int); INSERT dbo.Example VALUES (1); THROW 51000, 'Synthetic failure', 1;");
         Assert.ThrowsAny<Exception>(() => db.Runner(scripts: [.. MigrationRunner.Scripts(), fail]).Apply());
         Assert.Equal(0, await db.Count("SELECT COUNT(*) FROM sys.tables WHERE is_ms_shipped=0"));
         db.Runner().Apply();
         Assert.ThrowsAny<Exception>(() => db.Runner(scripts: [.. MigrationRunner.Scripts(), fail]).Apply());
         Assert.Equal(0, await db.Count("SELECT COUNT(*) FROM sys.tables WHERE name='Example'"));
-        Assert.Equal(4, await db.Count("SELECT COUNT(*) FROM dbo.DatabaseMigrations"));
+        Assert.Equal(5, await db.Count("SELECT COUNT(*) FROM dbo.DatabaseMigrations"));
     }
 
     [SqlFact]
@@ -128,7 +139,7 @@ public sealed class MigrationTests
             Assert.Equal(1, await db.Count("SELECT COUNT(*) FROM dbo.Families WHERE BabyName=N'Synthetic baby'"));
             Assert.Equal(1, await db.Count("SELECT COUNT(*) FROM dbo.Feeds WHERE Amount=36.80 AND Note=N'Synthetic feed'"));
             Assert.Equal(version, await db.Count("SELECT CHECKSUM(Version) FROM dbo.Feeds"));
-            Assert.Equal(4, await db.Count("SELECT COUNT(*) FROM dbo.DatabaseMigrations"));
+            Assert.Equal(5, await db.Count("SELECT COUNT(*) FROM dbo.DatabaseMigrations"));
             Assert.Empty(db.Runner().Pending());
         }
     }
@@ -189,7 +200,107 @@ public sealed class MigrationTests
             return connection;
         }
         new MigrationRunner(Limited, db.Name).Apply();
-        Assert.Equal(4, await db.Count("SELECT COUNT(*) FROM dbo.DatabaseMigrations"));
+        Assert.Equal(5, await db.Count("SELECT COUNT(*) FROM dbo.DatabaseMigrations"));
+    }
+
+    [Theory]
+    [InlineData("[Active]=(1)", "active = 1")]
+    [InlineData("([Collection]='care' OR [Collection]='entry')", "Collection IN ('entry', 'care')")]
+    [InlineData("(([Amount]>=(0)) AND ([Amount]<=(2000)))", "Amount >= 0 AND Amount <= 2000")]
+    [InlineData("(PurgedAt IS NULL AND DeletedAt IS NOT NULL)", "DeletedAt IS NOT NULL AND PurgedAt IS NULL")]
+    public void CatalogExpressionsNormalizeOnlyEquivalentSyntax(string actual, string expected) =>
+        Assert.Equal(SchemaVerifier.NormalizeExpression(expected), SchemaVerifier.NormalizeExpression(actual));
+
+    [Theory]
+    [InlineData("A = 1 AND (B = 2 OR C = 3)", "(A = 1 AND B = 2) OR C = 3")]
+    [InlineData("Status = N'pending'", "Status = N'PENDING'")]
+    [InlineData("Id = 'a b'", "Id = 'ab'")]
+    [InlineData("JSON_VALUE(RecordJson, '$.kind') = 'avatar'", "JSON_VALUE(RecordJson, '$.Kind') = 'avatar'")]
+    public void CatalogExpressionsPreserveGroupingAndLiteralContents(string first, string second) =>
+        Assert.NotEqual(SchemaVerifier.NormalizeExpression(first), SchemaVerifier.NormalizeExpression(second));
+
+    [SqlTheory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    public async Task CatalogChecksAllowEveryApprovedPendingUpgrade(int applied)
+    {
+        await using var db = await TestDatabase.Create();
+        var prior = db.Runner(scripts: MigrationRunner.Scripts().Take(applied).ToArray());
+        prior.Apply();
+        Assert.Empty(prior.Pending());
+        Assert.Equal(5 - applied, db.Runner().Pending().Count);
+        Assert.Equal(applied, await db.Count("SELECT COUNT(*) FROM dbo.DatabaseMigrations"));
+        db.Runner().Apply();
+        Assert.Empty(db.Runner().Pending());
+        Assert.Equal(5, await db.Count("SELECT COUNT(*) FROM dbo.DatabaseMigrations"));
+    }
+
+    [SqlTheory]
+    [InlineData("DROP INDEX IX_Operations_FamilyId ON dbo.Operations")]
+    [InlineData("DROP INDEX IX_Memberships_FamilyId_UserId_Active ON dbo.Memberships; CREATE INDEX IX_Memberships_FamilyId_UserId_Active ON dbo.Memberships(UserId,FamilyId,Active)")]
+    [InlineData("DROP INDEX IX_Families_DeletedBy_DeletedAt ON dbo.Families; CREATE UNIQUE INDEX IX_Families_DeletedBy_DeletedAt ON dbo.Families(DeletedBy,DeletedAt)")]
+    [InlineData("ALTER TABLE dbo.FamilyRecords DROP CONSTRAINT PK_FamilyRecords; ALTER TABLE dbo.FamilyRecords ADD CONSTRAINT PK_FamilyRecords PRIMARY KEY NONCLUSTERED(FamilyId,Collection,IdHash)")]
+    [InlineData("ALTER TABLE dbo.FamilyRecords DROP CONSTRAINT PK_FamilyRecords; ALTER TABLE dbo.FamilyRecords ADD CONSTRAINT PK_FamilyRecords PRIMARY KEY(Collection,FamilyId,IdHash)")]
+    [InlineData("DROP INDEX IX_Invitations_FamilyId_CreatedAt ON dbo.Invitations; CREATE INDEX IX_Invitations_FamilyId_CreatedAt ON dbo.Invitations(FamilyId,CreatedAt)")]
+    [InlineData("DROP INDEX IX_Invitations_Email_Status_ExpiresAt ON dbo.Invitations; CREATE INDEX IX_Invitations_Email_Status_ExpiresAt ON dbo.Invitations(Email,Status,ExpiresAt) INCLUDE(FamilyId)")]
+    [InlineData("DROP INDEX IX_Memberships_UserId ON dbo.Memberships; CREATE UNIQUE INDEX IX_Memberships_UserId ON dbo.Memberships(UserId) WHERE Active=0")]
+    [InlineData("ALTER INDEX IX_Operations_FamilyId ON dbo.Operations DISABLE")]
+    [InlineData("ALTER TABLE dbo.Feeds NOCHECK CONSTRAINT FK_Feeds_Families_FamilyId; ALTER TABLE dbo.Feeds CHECK CONSTRAINT FK_Feeds_Families_FamilyId")]
+    [InlineData("ALTER TABLE dbo.Operations DROP CONSTRAINT FK_Operations_Families_FamilyId; ALTER TABLE dbo.Operations ADD CONSTRAINT FK_Operations_Families_FamilyId FOREIGN KEY(MembershipId) REFERENCES dbo.Families(Id)")]
+    [InlineData("ALTER TABLE dbo.Feeds DROP CONSTRAINT FK_Feeds_Families_FamilyId; ALTER TABLE dbo.Feeds ADD CONSTRAINT FK_Feeds_Families_FamilyId FOREIGN KEY(FamilyId) REFERENCES dbo.Families(Id) ON DELETE CASCADE")]
+    [InlineData("ALTER TABLE dbo.Feeds NOCHECK CONSTRAINT CK_Feeds_Amount; ALTER TABLE dbo.Feeds CHECK CONSTRAINT CK_Feeds_Amount")]
+    [InlineData("ALTER TABLE dbo.Feeds DROP CONSTRAINT CK_Feeds_Amount; ALTER TABLE dbo.Feeds ADD CONSTRAINT CK_Feeds_Amount CHECK(Amount>=0 AND Amount<=4000)")]
+    [InlineData("ALTER TABLE dbo.FamilyRecords DROP CONSTRAINT CK_FamilyRecords_Json; ALTER TABLE dbo.FamilyRecords ADD CONSTRAINT CK_FamilyRecords_Json CHECK(ISJSON(RecordJson)=1 AND DATALENGTH(RecordJson)<=131072 OR (Collection='extra' AND Id='avatar' AND COALESCE(JSON_VALUE(RecordJson,'$.kind'),'')='avatar' AND DATALENGTH(RecordJson)<=35651584))")]
+    [InlineData("CREATE INDEX IX_Operations_Unreviewed ON dbo.Operations(CreatedAt)")]
+    [InlineData("DROP TRIGGER dbo.TR_Operations_MaintainFamilyOperationCounts")]
+    [InlineData("DISABLE TRIGGER dbo.TR_Operations_MaintainFamilyOperationCounts ON dbo.Operations")]
+    [InlineData("ALTER TRIGGER dbo.TR_Operations_MaintainFamilyOperationCounts ON dbo.Operations AFTER INSERT,UPDATE,DELETE AS BEGIN SET NOCOUNT ON; END")]
+    [InlineData("ALTER TABLE dbo.Families DROP COLUMN ProfileVersion; ALTER TABLE dbo.Families ADD ProfileVersion binary(8) NOT NULL DEFAULT 0x0000000000000000")]
+    [InlineData("ALTER TABLE dbo.Feeds DROP COLUMN Version; ALTER TABLE dbo.Feeds ADD Version rowversion NULL")]
+    [InlineData("ALTER TABLE dbo.FamilyRecords DROP COLUMN Version; ALTER TABLE dbo.FamilyRecords ADD Version binary(8) NOT NULL DEFAULT 0x0000000000000000")]
+    [InlineData("ALTER TABLE dbo.Feeds DROP CONSTRAINT CK_Feeds_Amount; ALTER TABLE dbo.Feeds ALTER COLUMN Amount decimal(8,2) NOT NULL; ALTER TABLE dbo.Feeds ADD CONSTRAINT CK_Feeds_Amount CHECK(Amount>=0 AND Amount<=2000)")]
+    [InlineData("ALTER TABLE dbo.Feeds DROP CONSTRAINT CK_Feeds_Amount; ALTER TABLE dbo.Feeds ALTER COLUMN Amount decimal(7,3) NOT NULL; ALTER TABLE dbo.Feeds ADD CONSTRAINT CK_Feeds_Amount CHECK(Amount>=0 AND Amount<=2000)")]
+    [InlineData("ALTER TABLE dbo.FamilyOperationCounts ALTER COLUMN ReceiptCount bigint NULL")]
+    [InlineData("ALTER TABLE dbo.FamilyOperationCounts DROP CONSTRAINT CK_FamilyOperationCounts_ReceiptCount; ALTER TABLE dbo.FamilyOperationCounts ALTER COLUMN ReceiptCount int NOT NULL; ALTER TABLE dbo.FamilyOperationCounts ADD CONSTRAINT CK_FamilyOperationCounts_ReceiptCount CHECK(ReceiptCount>=0)")]
+    [InlineData("ALTER TABLE dbo.FamilyOperationCounts DROP CONSTRAINT FK_FamilyOperationCounts_Families_FamilyId; ALTER TABLE dbo.FamilyOperationCounts DROP CONSTRAINT PK_FamilyOperationCounts; ALTER TABLE dbo.FamilyOperationCounts ALTER COLUMN FamilyId uniqueidentifier NULL")]
+    public async Task NoOpCheckAndApplyRejectCatalogDriftWithoutChangingJournal(string drift)
+    {
+        await using var db = await TestDatabase.Create();
+        db.Runner().Apply();
+        await db.Execute(drift);
+        var checkError = Assert.ThrowsAny<Exception>(() => db.Runner().Pending());
+        Assert.Contains("Schema verification failed", checkError.ToString(), StringComparison.Ordinal);
+        var applyError = Assert.ThrowsAny<Exception>(() => db.Runner().Apply());
+        Assert.Contains("Schema verification failed", applyError.ToString(), StringComparison.Ordinal);
+        Assert.Equal(5, await db.Count("SELECT COUNT(*) FROM dbo.DatabaseMigrations"));
+    }
+
+    [SqlFact]
+    public async Task UnknownFutureScriptCannotBypassApprovedInvariantsAndRollsBack()
+    {
+        await using var db = await TestDatabase.Create();
+        db.Runner().Apply();
+        var scripts = MigrationRunner.Scripts().Append(new SqlScript("0006_Drift.sql",
+            "CREATE TABLE dbo.Example(Id int); DROP INDEX IX_Operations_FamilyId ON dbo.Operations;")).ToArray();
+        var error = Assert.ThrowsAny<Exception>(() => db.Runner(scripts: scripts).Apply());
+        Assert.Contains("Schema verification failed", error.ToString(), StringComparison.Ordinal);
+        Assert.Equal(0, await db.Count("SELECT COUNT(*) FROM sys.tables WHERE name='Example'"));
+        Assert.Equal(5, await db.Count("SELECT COUNT(*) FROM dbo.DatabaseMigrations"));
+        Assert.Empty(db.Runner().Pending());
+    }
+
+    [SqlFact]
+    public async Task PartialLegacyAdoptionRejectsDriftBeforeBaselineCanReplaceIt()
+    {
+        await using var db = await TestDatabase.Create();
+        await db.Legacy("20260913173137_InitialPilot");
+        await db.Execute("DROP INDEX IX_Invitations_FamilyId_RecipientUserId ON dbo.Invitations; CREATE UNIQUE INDEX IX_Invitations_FamilyId_RecipientUserId ON dbo.Invitations(RecipientUserId,FamilyId) WHERE Status=N'pending';");
+        Assert.ThrowsAny<Exception>(() => db.Runner(adopt: true).Pending());
+        Assert.ThrowsAny<Exception>(() => db.Runner(adopt: true).Apply());
+        Assert.Equal(1, await db.Count("SELECT COUNT(*) FROM dbo.__EFMigrationsHistory"));
+        Assert.Equal(0, await db.Count("SELECT COUNT(*) FROM sys.tables WHERE name='DatabaseMigrations'"));
     }
 }
 

@@ -50,6 +50,11 @@ public sealed partial class FamilyService(PilotDatabase db, PilotConfiguration c
         var memberships = await db.Memberships.Where(x => x.UserId == user.ObjectId && x.Active).ToArrayAsync(ct);
         var ids = memberships.Select(x => x.FamilyId).ToArray();
         var families = await db.Families.Where(x => ids.Contains(x.Id) && x.DeletedAt == null).ToArrayAsync(ct);
+        var summaries = families.Select(x => Summary(x, memberships.Single(m => m.FamilyId == x.Id))).ToArray();
+        // Active family members cannot accept another invitation. This identity
+        // check is frequent; do not fetch an inbox that the response must hide.
+        if (families.Length > 0)
+            return new MeResult(new(user.ObjectId, user.DisplayName, user.Email), summaries, [], null);
         var now = Now;
         var inbox = await (from invitation in db.Invitations
             join family in db.Families on invitation.FamilyId equals family.Id
@@ -59,7 +64,7 @@ public sealed partial class FamilyService(PilotDatabase db, PilotConfiguration c
             orderby invitation.CreatedAt descending
             select new PendingFamilyInvitation(invitation.Id, family.Id, owner.DisplayName, invitation.ExpiresAt)).ToArrayAsync(ct);
         return new MeResult(new(user.ObjectId, user.DisplayName, user.Email),
-            families.Select(x => Summary(x, memberships.Single(m => m.FamilyId == x.Id))).ToArray(), families.Length == 0 ? inbox : [], null);
+            summaries, inbox, null);
     }, ct);
 
     public Task<FamilySummary> CreateFamily(PilotIdentity user, CreateFamilyRequest request, CancellationToken ct) => Transaction(async () =>
@@ -387,8 +392,7 @@ public sealed partial class FamilyService(PilotDatabase db, PilotConfiguration c
             other.Status = "joined_alt";
             other.RecipientUserId = user.ObjectId;
         }
-        foreach (var sourceFamilyId in others.Select(x => x.FamilyId).Distinct())
-            (await Family(sourceFamilyId, ct)).Revision++;
+        await AdvanceInvitationFamilyRevisions(others, ct);
         var grant = NewGrant(user, family.Id, "caregiver");
         invitation.RecipientUserId = user.ObjectId;
         invitation.Status = "accepted";
@@ -551,6 +555,21 @@ public sealed partial class FamilyService(PilotDatabase db, PilotConfiguration c
         join family in db.Families on invitation.FamilyId equals family.Id
         where invitation.Email == user.Email && invitation.Status == "pending" && invitation.ExpiresAt > now && family.DeletedAt == null
         select invitation;
+    private async Task AdvanceInvitationFamilyRevisions(IEnumerable<InvitationRow> invitations, CancellationToken ct)
+    {
+        var ids = invitations.Select(x => x.FamilyId).Distinct().ToArray();
+        if (ids.Length == 0) return;
+        // Called within the global lifecycle transaction: consent, declines and
+        // affected family revisions still commit together, without one SELECT
+        // round trip per incoming invitation's family. Each query returns a
+        // bounded group even for a large cross-family inbox.
+        foreach (var batch in ids.Chunk(256))
+        {
+            var families = await db.Families.Where(x => batch.Contains(x.Id) && x.DeletedAt == null).ToArrayAsync(ct);
+            if (families.Length != batch.Length) throw new ApiException(403, "membership_revoked");
+            foreach (var family in families) family.Revision++;
+        }
+    }
     private async Task RequireAccount(PilotIdentity user, CancellationToken ct)
     {
         if (await db.AccountDeletions.AnyAsync(x => x.UserId == user.ObjectId, ct)) throw new ApiException(410, "account_deleted");
@@ -581,7 +600,12 @@ public sealed partial class FamilyService(PilotDatabase db, PilotConfiguration c
     }
     private async Task CheckCapacity(Guid familyId, CancellationToken ct)
     {
-        if (await db.Operations.CountAsync(x => x.FamilyId == familyId, ct) >= config.Pilot.MaxOperationsPerFamily) Invalid();
+        // SQL maintains this scalar atomically with receipt inserts/deletes,
+        // including older API instances and cleanup. Do not rescan the entire
+        // durable idempotency journal on every record/invitation write.
+        var receipts = await db.FamilyOperationCounts.Where(x => x.FamilyId == familyId)
+            .Select(x => x.ReceiptCount).SingleOrDefaultAsync(ct);
+        if (receipts >= config.Pilot.MaxOperationsPerFamily) Invalid();
     }
     private async Task CheckCreationCapacity(PilotIdentity user, CancellationToken ct)
     {
