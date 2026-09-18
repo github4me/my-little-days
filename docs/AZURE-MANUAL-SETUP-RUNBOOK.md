@@ -1846,3 +1846,46 @@ If EAS cannot configure the new capabilities/profile unattended:
   build as these fixes. Then build, inspect all three signed targets, submit the
   exact new build ID and verify Apple processing/tester availability. Physical
   Watch layout, Dynamic Type, offline recording/reconnection remain outstanding.
+
+### Watch and Widget TestFlight 34 — 19 September 2026 (Sydney)
+
+- The user completed Apple App Group/profile setup. Frozen-credential EAS readback
+  found all three App Store targets ready in team **A9974KXQ4G**: phone profile
+  **Z6BA8UVQM6**, Watch **8MHYYTJZ6Q**, new Widget **93D24AQDY7**. The existing
+  distribution certificate was reused; no Watch capability changes were needed.
+- Rechecked the resolved **production** project environment, no account overrides,
+  expected HTTPS API/customer tenant/mobile client/API scope and demo `0`.
+  Distribution is **STORE**, runtime/app version **0.2.1**, OTA disabled.
+- The isolated 183-file source stage was byte-compared with the reviewed
+  `43c932c` implementation (repository HEAD `3a96fc4` adds documentation only).
+  EAS incremented the staged build number from 33 to **34**; repository app.json
+  is aligned to 34. Unrelated working-tree files were excluded from the upload.
+- [EAS build 6c33cee6-fc08-4598-a088-0e56f9c0abbe](https://expo.dev/accounts/expo4chao/projects/little-days/builds/6c33cee6-fc08-4598-a088-0e56f9c0abbe)
+  completed successfully at **18 September 2026, 22:05 UTC**. Cloud macOS tests:
+  **20 Watch protocol/summary tests and 5 Widget snapshot tests passed**; all three
+  native targets compiled and archived.
+- Downloaded IPA inspection passed: phone, Watch and Widget all identify as
+  **0.2.1 (34)** with the expected bundle IDs and App Store provisioning profiles.
+  Embedded code-signature entitlement blobs (including both Watch architectures)
+  and profiles match the team/application IDs and disable debug access. Both phone
+  and Widget contain exactly `group.com.littledays.babylog.widgets`; Widget has
+  extension point `com.apple.widgetkit-extension`; Expo.plist keeps OTA disabled.
+  This is artifact inspection, not independent cryptographic signature validation
+  or physical-device acceptance.
+- Submitted the exact build using the production profile and
+  `--no-auto-testflight-setup`.
+  [Submission 864a97ac-3564-420e-a22c-00a1fbaa4fdb](https://expo.dev/accounts/expo4chao/projects/little-days/submissions/864a97ac-3564-420e-a22c-00a1fbaa4fdb)
+  uploaded to existing App Store Connect app **6809826484**. Apple readback shows
+  build 34 **VALID**, internal **IN_BETA_TESTING**, external
+  **READY_FOR_BETA_SUBMISSION**. External Beta review/distribution has not been
+  submitted by this operation; do not describe it as available to external testers.
+- Internal testers can update the existing installation via TestFlight, without
+  uninstalling. Open the phone app once, then check the updated Watch app and add
+  the Today widget using the device steps above. Physical Watch immediate totals,
+  offline/reconnection reconciliation, notification navigation, stable timestamps,
+  and Widget visual/accessibility checks remain outstanding.
+- For external testing, use App Store Connect → My Little Days → TestFlight →
+  the intended existing external group → add **0.2.1 (34)**, supply accurate test
+  notes/review information if requested, and submit for Beta App Review. Preserve
+  the existing tester audience and wait for Apple's approval before claiming
+  external availability. No Azure, SQL, Entra or notification settings were changed.
