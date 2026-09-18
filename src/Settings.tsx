@@ -84,6 +84,7 @@ export default function Settings({
   sharedOwner = false,
   sharedAvatarEditable = false,
   sharedReminders,
+  familyPushPanel,
   profileVersion,
   initialProfileExpanded = false,
   state,
@@ -107,6 +108,7 @@ export default function Settings({
   sharedOwner?: boolean;
   sharedAvatarEditable?: boolean;
   sharedReminders?: React.ReactNode;
+  familyPushPanel?: React.ReactNode;
   profileVersion?: string;
   initialProfileExpanded?: boolean;
   state: State;
@@ -1058,6 +1060,14 @@ export default function Settings({
           </>
         )}
       </SettingsSection>
+      {familyPushPanel ? (
+        <SettingsSection
+          title={copy("家人记录通知", "Family entry notifications")}
+          busy={busy}
+        >
+          {familyPushPanel}
+        </SettingsSection>
+      ) : null}
       <SettingsSection title="备份与恢复" busy={busy}>
         {sharedMode ? (
           <T raw style={{ color: c.muted, fontSize: 13 }}>

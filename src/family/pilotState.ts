@@ -8,6 +8,7 @@ import type {
 import type { QueuedRecord } from "./fullState";
 import { finishLiveSleep } from "../sleepTimer";
 import { finishFeed } from "../feedFinish";
+import { validateWatchLedger, type WatchLedger } from "../watchProtocol";
 
 export type FeedDraft = {
   recordId: string;
@@ -64,6 +65,8 @@ export type PilotState = {
   acknowledgedRevision: string | null;
   transition: PilotTransition | null;
   records?: QueuedRecord[];
+  watchLedger?: WatchLedger;
+  watchVerifiedAt?: string;
 };
 export const emptyPilotState = (): PilotState => ({
   schema: 2,
@@ -308,6 +311,8 @@ export function applySnapshot(
         ? state.draft
         : null,
     acknowledgedRevision: sameGrant ? state.acknowledgedRevision : null,
+    watchLedger: sameGrant ? state.watchLedger : undefined,
+    watchVerifiedAt: sameGrant ? state.watchVerifiedAt : undefined,
   };
 }
 export function projectedFeeds(state: PilotState, author: string): PilotFeed[] {
@@ -366,6 +371,7 @@ export function parseStoredPilot(raw: string | null): PilotState {
     return migrated;
   }
   const state = parsed as PilotState;
+  validateWatchLedger(state.watchLedger);
   if (
     state.schema !== 2 ||
     !Array.isArray(state.queue) ||

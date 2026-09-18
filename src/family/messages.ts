@@ -1,6 +1,10 @@
 import type { AppLocale } from "../i18n";
 
 const messages = {
+  errorWatchPending: [
+    "仍有手表记录等待写入手机。请保持小日子打开，待手表同步完成后再创建或加入家庭。",
+    "Watch records are waiting to be saved on this phone. Keep Little Days open and finish Watch sync before creating or joining a family.",
+  ],
   errorReminderCleanup: [
     "部分家庭提醒尚未清理完成，新的提醒已暂停。请重试；如旧提醒仍出现，可暂时在手机设置中关闭本应用通知。不要清空本机资料。",
     "Some family reminders could not be cleared; new reminders are paused. Retry. If old reminders still appear, temporarily turn off this app’s notifications in phone settings. Do not clear local data.",
@@ -832,6 +836,7 @@ const errorMessages: Record<string, FamilyMessageKey> = {
   family_unavailable: "errorFamilyUnavailable",
   draft_changed: "errorDraftChanged",
   queue_full: "errorQueueFull",
+  watch_pending: "errorWatchPending",
 };
 
 export function familyErrorMessage(locale: AppLocale, code: string): string {

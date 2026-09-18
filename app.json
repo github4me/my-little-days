@@ -32,7 +32,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.littledays.babylog",
-      "buildNumber": "30",
+      "buildNumber": "32",
       "runtimeVersion": {
         "policy": "appVersion"
       },
@@ -63,7 +63,8 @@
       ],
       "expo-localization",
       "expo-web-browser",
-      "expo-secure-store"
+      "expo-secure-store",
+      "./plugins/with-watch-companion"
     ],
     "web": {
       "bundler": "metro"

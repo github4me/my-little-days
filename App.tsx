@@ -46,6 +46,8 @@ import {
   loadRecordView,
   saveRecordView,
   setPersonalStorageBlocked,
+  loadWatchWorkspace,
+  savePersonalWatchCommand,
 } from "./src/storage";
 import { importBackup } from "./src/backup";
 import EntryEditor, { newEntry } from "./src/EntryEditor";
@@ -59,6 +61,11 @@ import FamilyScreen from "./src/family/FamilyScreen";
 import FamilyScreenView from "./src/family/FamilyScreenView";
 import { FamilySyncBanner } from "./src/family/FamilySyncStatus";
 import { useFamilyPilot } from "./src/family/useFamilyPilot";
+import { useFamilyPush } from "./src/family/useFamilyPush";
+import FamilyPushSettings from "./src/family/FamilyPushSettings";
+import { useWatchCompanion } from "./src/useWatchCompanion";
+import { watchBridgeAvailable } from "./src/watchBridge";
+import type { WatchContext } from "./src/watchProtocol";
 import { familyErrorMessage } from "./src/family/messages";
 import SharedReminders from "./src/family/SharedReminders";
 import type { FamilyExtraRecord } from "./src/family/extras";
@@ -203,6 +210,7 @@ function BabyApp({
     lock = useRef(false);
   const privateDataGeneration = useRef(0);
   const family = useFamilyPilot();
+  const familyPush = useFamilyPush(family, () => setTab("records"));
   const sharingRef = useRef(family.sharedMode || family.booting);
   sharingRef.current = family.sharedMode || family.booting;
   setPersonalStorageBlocked(family.booting || family.sharedMode);
@@ -513,6 +521,126 @@ function BabyApp({
         "本次睡眠不足 1 分钟，已按误触取消，不计入记录。如需保留，请补录睡眠。",
       );
   }
+  useWatchCompanion({
+    changeToken: JSON.stringify([
+      family.booting,
+      family.busy,
+      family.sharedMode,
+      family.ready,
+      family.watchWorkspaceKey,
+      family.watchRecordingEnabled,
+      family.watchExpiresAt,
+      language,
+      localDay(new Date(now)),
+      state?.profile,
+      state?.entries.filter(
+        (entry) => entry.feedRunning || (entry.type === "sleep" && !entry.end),
+      ),
+      state?.entries.length,
+      family.watchReceipts,
+    ]),
+    context: async () => {
+      if (!watchBridgeAvailable || family.booting) return null;
+      const shared = sharingRef.current;
+      const familyState = family.getWatchState();
+      const current = familyState.admissionBlocked
+        ? null
+        : shared
+          ? familyState.state
+          : stateRef.current;
+      const workspaceKey = shared
+        ? familyState.workspaceKey
+        : await loadWatchWorkspace();
+      // Unknown identity is a recovery state, never permission to publish the
+      // private workspace or another account's cached records.
+      if (!workspaceKey) return null;
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const tomorrow = new Date(today);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      const totals = summarize(current?.entries ?? [], today, tomorrow);
+      const context: WatchContext = {
+        schemaVersion: 1,
+        workspaceKey,
+        mode: shared ? "family" : "personal",
+        status: current ? "ready" : "unavailable",
+        expiresAt: shared
+          ? familyState.expiresAt
+          : new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+        language: resolveLocale(language).startsWith("zh") ? "zh" : "en",
+        profile: current
+          ? { name: current.profile.name, birthDate: current.profile.birthDate }
+          : { name: "", birthDate: "" },
+        entries: (current?.entries ?? [])
+          .filter(
+            (entry) =>
+              entry.feedRunning || (entry.type === "sleep" && !entry.end),
+          )
+          .map((entry) => {
+            const server = familyState.snapshot?.entries.find(
+              (record) => record.entry.id === entry.id,
+            );
+            const pending = familyState.pending.find(
+              (record) =>
+                record.operation.recordId === entry.id &&
+                record.status !== "failed",
+            );
+            return {
+              ...entry,
+              note: "",
+              canControl:
+                !shared ||
+                (!pending &&
+                  !!server &&
+                  (familyState.snapshot?.family.role === "owner" ||
+                    server.recordedBy === family.user?.id)) ||
+                (!!pending &&
+                  familyState.receipts.some(
+                    (receipt) =>
+                      receipt.commandId === pending.operation.operationId,
+                  )),
+              ...(shared && server && !pending
+                ? { version: server.version }
+                : {}),
+              ...(shared && pending
+                ? { pendingOperationId: pending.operation.operationId }
+                : {}),
+            };
+          }),
+        totals: {
+          feedMl: totals.feedMl,
+          feedCount: totals.feedCount,
+          diaperCount: totals.diaperCount,
+          sleepMinutes: totals.sleepMinutes,
+        },
+        totalsDate: localDay(today),
+      };
+      return context;
+    },
+    apply: async (command) => {
+      if (sharingRef.current) return family.applyWatchCommand(command);
+      if (lock.current) throw new Error("action_busy");
+      lock.current = true;
+      const generation = privateDataGeneration.current;
+      try {
+        const result = await savePersonalWatchCommand(command);
+        if (
+          !sharingRef.current &&
+          generation === privateDataGeneration.current
+        ) {
+          stateRef.current = result.state;
+          setState(result.state);
+          void rescheduleAutoFeedReminders(result.state.entries).catch(
+            () => {},
+          );
+        }
+        return result.receipt;
+      } finally {
+        lock.current = false;
+      }
+    },
+    receipts: () => family.getWatchState().receipts,
+  });
   async function updateAvatar(uri: string | null) {
     if (family.sharedMode) {
       const dataUrl = uri ? await readSelectedAvatarDataUrl(uri) : null;
@@ -1502,6 +1630,11 @@ function BabyApp({
               ) : (
                 <Settings
                   key={familyContext}
+                  familyPushPanel={
+                    family.fullSnapshot && Platform.OS !== "web" ? (
+                      <FamilyPushSettings controller={familyPush} />
+                    ) : undefined
+                  }
                   sharedMode={family.sharedMode}
                   sharedOwner={family.fullSnapshot?.family.role === "owner"}
                   sharedAvatarEditable={

@@ -53,6 +53,14 @@ import {
 } from "./fullState";
 import type { PilotIdentity, TokenSession } from "./identity";
 import { familyConfig } from "./config";
+import {
+  enqueueFamilyWatchCommand,
+  familyWatchReceipts,
+  reconcileWatchReceipts,
+} from "../watchFamily";
+import type { WatchCommand } from "../watchProtocol";
+import { prepareFamilyPushLogout } from "./familyPush";
+import { invalidateWatchContext, suspendWatchContext } from "../watchBridge";
 import * as auth from "./auth";
 import { familyRequest, PilotApiError } from "./api";
 import { clearPilot, loadPilot, savePilot } from "./pilotStorage";
@@ -139,6 +147,7 @@ export function useFamilyPilot() {
   const [state, setState] = useState<PilotState>(emptyPilotState);
   const [ready, setReady] = useState(false);
   const verified = useRef(false);
+  const verifiedSnapshots = useRef(0);
   const [booting, setBooting] = useState(configured && !webUnsupported);
   const [activationSerial, setActivationSerial] = useState(0);
   const [notificationsEnabled, setNotificationsEnabledValue] = useState(false);
@@ -149,6 +158,7 @@ export function useFamilyPilot() {
   const notificationGeneration = useRef(0);
   const markReady = (value: boolean) => {
     verified.current = value;
+    if (!value) void suspendWatchContext().catch(() => {});
     if (!value) void stopNotificationDelivery().catch(() => {});
     if (mounted.current) setReady(value);
   };
@@ -218,6 +228,12 @@ export function useFamilyPilot() {
   };
   const accountKey = (id: string) =>
     `${familyConfig?.apiUrl}|${familyConfig?.tenantId}|${id}`;
+  const watchWorkspaceKey = (s: PilotState) => {
+    const snapshot = s.snapshot;
+    if (!snapshot) return null;
+    const origin = originForSnapshot(snapshot);
+    return `${accountKey(origin.userId)}|${origin.familyId}|${origin.membershipId}|${origin.historyId}`;
+  };
   function stopNotificationDelivery(clearPreference = false): Promise<void> {
     // Invalidate callbacks and the native foreground handler synchronously;
     // React effects can run later than a revoked grant or an expired token.
@@ -280,6 +296,7 @@ export function useFamilyPilot() {
   }
   async function rejectAccountMismatch(e: number): Promise<never> {
     check(e);
+    void invalidateWatchContext().catch(() => {});
     // Invalidate both session recognition and authoritative responses before
     // asynchronous credential cleanup. Preserve the original account's disk rows.
     clearRecognition();
@@ -432,7 +449,13 @@ export function useFamilyPilot() {
     const id = who.current?.user.id;
     if (!id) throw new Error("sign_in_required");
     const previous = current.current,
-      next = change(previous);
+      next = reconcileWatchReceipts(change(previous));
+    if (
+      previous.snapshot &&
+      (!next.snapshot ||
+        !matchesOrigin(originForSnapshot(previous.snapshot), next.snapshot))
+    )
+      void invalidateWatchContext().catch(() => {});
     showState(next);
     // Register the write immediately in the platform-wide ordered store. An
     // already accepted local Save may finish after navigation, for this account
@@ -546,6 +569,8 @@ export function useFamilyPilot() {
           f.id === cached.family.id &&
           f.membershipId === cached.family.membershipId,
       );
+    if (revoked || result.accountDeletion)
+      void invalidateWatchContext().catch(() => {});
     if (revoked) showState(revokeCache(current.current));
     if (revoked || result.accountDeletion) {
       // Clear before identity/cache writes: a stalled or failed disk write must
@@ -595,6 +620,7 @@ export function useFamilyPilot() {
     if (previous?.family.role === "owner" && checked.family.role !== "owner")
       markReady(false);
     if (previous && !matchesOrigin(originForSnapshot(previous), result)) {
+      void invalidateWatchContext().catch(() => {});
       markReady(false);
       await stopNotificationDelivery(true);
       check(e);
@@ -624,7 +650,15 @@ export function useFamilyPilot() {
     }
     await auth.saveCacheOrigin(originForSnapshot(checked));
     check(e);
-    await persist((s) => applyFullSnapshot(s, checked), e, false);
+    await persist(
+      (s) => ({
+        ...applyFullSnapshot(s, checked),
+        watchVerifiedAt: new Date().toISOString(),
+      }),
+      e,
+      false,
+    );
+    verifiedSnapshots.current++;
     markReady(true);
     if (
       previous &&
@@ -1316,6 +1350,8 @@ export function useFamilyPilot() {
         const originMatches =
           !guard?.origin ||
           (grantMatches && matchesOrigin(guard.origin, stored.snapshot));
+        if (!grantMatches || !originMatches || cached.accountDeletion)
+          void invalidateWatchContext().catch(() => {});
         const cachedState =
           grantMatches && cachedGrant && stored.snapshot
             ? applySnapshot(stored, {
@@ -1457,6 +1493,13 @@ export function useFamilyPilot() {
       if (current.current.transition) throw new Error("transition_pending");
       if (!who.current || who.current.accountDeletion)
         throw new Error("account_deleted");
+      if (["create", "join"].includes(kind)) {
+        const watch = await import("../watchBridge");
+        await watch.suspendWatchContext();
+        if ((await watch.pendingWatchCommands()).length)
+          throw new Error("watch_pending");
+        check(e);
+      }
       await stopNotificationDelivery();
       check(e);
       const intent: PilotTransition = {
@@ -1595,6 +1638,59 @@ export function useFamilyPilot() {
     tokenRecognized,
     sessionAvailable,
     ready,
+    watchWorkspaceKey: watchWorkspaceKey(state),
+    watchRecordingEnabled:
+      isFullSnapshot(state.snapshot) &&
+      state.snapshot.watchRecordingEnabled === true,
+    watchExpiresAt: new Date(
+      (Date.parse(state.watchVerifiedAt ?? "") || 0) + 24 * 60 * 60 * 1000,
+    ).toISOString(),
+    watchReceipts: familyWatchReceipts(state),
+    getWatchState: () => ({
+      admissionBlocked: lifecycleActive.current,
+      workspaceKey: watchWorkspaceKey(current.current),
+      expiresAt: new Date(
+        (Date.parse(current.current.watchVerifiedAt ?? "") || 0) +
+          24 * 60 * 60 * 1000,
+      ).toISOString(),
+      state:
+        verified.current &&
+        isFullSnapshot(current.current.snapshot) &&
+        current.current.snapshot.watchRecordingEnabled === true
+          ? projectedFullState(current.current)
+          : null,
+      snapshot:
+        verified.current && isFullSnapshot(current.current.snapshot)
+          ? current.current.snapshot
+          : null,
+      receipts: familyWatchReceipts(current.current),
+      pending: current.current.records ?? [],
+    }),
+    applyWatchCommand: (command: WatchCommand) =>
+      action(async (e) => {
+        if (
+          !verified.current ||
+          !current.current.watchVerifiedAt ||
+          Date.now() - Date.parse(current.current.watchVerifiedAt) >=
+            24 * 60 * 60 * 1000
+        )
+          throw new Error("refresh_required");
+        if (command.workspaceKey !== watchWorkspaceKey(current.current))
+          throw new Error("membership_changed");
+        if (
+          !isFullSnapshot(current.current.snapshot) ||
+          current.current.snapshot.watchRecordingEnabled !== true
+        )
+          throw new Error("watch_recording_unavailable");
+        family();
+        await persist((s) => enqueueFamilyWatchCommand(s, command), e);
+        const receipt = familyWatchReceipts(current.current).find(
+          (r) => r.commandId === command.commandId,
+        );
+        if (!receipt) throw new Error("local_save_failed");
+        void refreshNow();
+        return receipt;
+      }),
     hasFamilyMembership: !!identity?.families.length || !!state.snapshot,
     sharedMode:
       sessionUnresolved ||
@@ -1969,6 +2065,7 @@ export function useFamilyPilot() {
           // Final logout cleanup below still attempts credentials and cache if
           // the native notification service is temporarily unavailable.
           await stopNotificationDelivery().catch(() => {});
+          await prepareFamilyPushLogout().catch(() => {});
           await syncLock.current;
           check(beforeLogoutEpoch);
           // Commit the discard before deleting credentials. If the process dies
@@ -2039,6 +2136,26 @@ export function useFamilyPilot() {
         }
       }, true),
     refresh: () => refreshNow(),
+    refreshForNotification: async (): Promise<boolean> => {
+      const e = epoch.current;
+      const before = verifiedSnapshots.current;
+      const previous = current.current.snapshot;
+      if (!previous || !who.current || current.current.transition) return false;
+      const origin = originForSnapshot(previous);
+      await refreshNow();
+      // refresh() intentionally absorbs offline failures for the ordinary UI.
+      // A notification deep-link needs a new successful authoritative snapshot,
+      // not merely a still-readable cache or a fulfilled refresh promise.
+      return (
+        isCurrent(e) &&
+        verified.current &&
+        verifiedSnapshots.current > before &&
+        !current.current.transition &&
+        who.current?.user.id === origin.userId &&
+        !who.current.accountDeletion &&
+        matchesOrigin(origin, current.current.snapshot)
+      );
+    },
     createFamily: (babyName: string) =>
       action(async (e) => {
         if (!babyName.trim() || babyName.trim().length > 60)

@@ -34,6 +34,7 @@ export async function familyRequest<T>(
   path: string,
   body?: unknown,
   signal?: AbortSignal,
+  method?: "PUT",
 ): Promise<T> {
   if (!familyConfig) throw new PilotApiError("not_configured");
   const config = familyConfig;
@@ -107,7 +108,7 @@ export async function familyRequest<T>(
     timer = setTimeout(abort, apiTimeout);
     const send = async () => {
       const response = await fetch(`${config.apiUrl}${path}`, {
-        method: body === undefined ? "GET" : "POST",
+        method: method ?? (body === undefined ? "GET" : "POST"),
         headers: {
           Authorization: `Bearer ${token}`,
           Accept: "application/json",

@@ -13,3 +13,5 @@ dist-ui-demo/
 **/TestResults/
 .dotnet-tools/
 /artifacts/
+watch/.build/
+watch/.swiftpm/

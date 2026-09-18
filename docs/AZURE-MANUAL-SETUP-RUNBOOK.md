@@ -1473,3 +1473,16 @@ The submission ended **ERRORED at 11:09:01 UTC**. Both EAS CLI 24.6.0 and 24.7.0
 The exact submission page was opened in the in-app browser, but it redirects to Expo sign-in. Next: the account owner signs in there, then inspect the failed submission's error/logs. Do not share passwords or tokens in chat. Do not blindly resubmit, regenerate profiles, modify the Watch target or increment the build number before identifying the failure. If Expo identifies a transient service failure, retry the same submission; if Apple identifies a binary issue, fix and verify that specific issue before a new build.
 
 No tester groups, Apple app metadata, older builds, Azure configuration or production data were changed by this submission attempt. Physical-device installation and Watch behaviour remain unverified.
+
+## Watch icon rejection and replacement build 32 — 18 September 2026
+
+The user supplied the failed submission logs: Apple rejected the embedded Watch icon with **90396** and **90717** because it contained an alpha channel. Upload IDs were `1264d12f-0b69-4c98-9c92-e1e84b43ef3e` (build) and `4a63ef42-355f-47db-9b2e-30cbb15ffa7f` (IPA). The bytes uploaded successfully, but Apple validation failed. This was not a provisioning-profile or API/database failure.
+
+The Watch config plugin had copied `assets/icon.png` unchanged. That source is 1024px RGBA with transparent rounded corners. The fix uses the already locked Jimp encoder, now a declared build dependency, to composite onto the artwork's existing `#C9E6FA` background and encode PNG colour type **2 (RGB)**. Source artwork is unchanged. The regression failed on the previous output (colour type 6) and passes on the new output, checking all pixels opaque, original opaque pixels preserved, dimensions and deterministic regeneration. The real-CNG test also checks the generated icon's PNG colour type.
+
+- `npm run verify` passed; `npm ci --ignore-scripts --dry-run` confirmed package/lockfile agreement. Local Xcode compilation is unavailable on Windows; EAS supplies native compilation/signing.
+- A fresh 167-file stage at `work/watch-store-build32` was compared byte-for-byte with the inspected EAS archive. Before EAS's version bump, only the plugin, its two tests and package/lock metadata differ from the frozen build-31 source. No private work, generated exports, credentials, server code or IPA were uploaded.
+- Production public API/tenant/client/scope/demo values were read back; no account overrides exist. OTA remains disabled. Both existing signing profiles were reused without capability updates.
+- Replacement **0.2.1 (32)**: [EAS build `936725bc-5564-4181-bd42-db5aa490a276`](https://expo.dev/accounts/expo4chao/projects/little-days/builds/936725bc-5564-4181-bd42-db5aa490a276), production/STORE. EAS incremented 31 → 32; root app.json was aligned. Do not retry the rejected build 31.
+
+After this build finishes, inspect the compiled Watch PNGs for absence of alpha, then submit this exact build ID using the production submission profile and `--no-auto-testflight-setup`. Verify EAS completion and Apple VALID/internal availability separately. No additional Azure/SQL deployment, new profiles, tester-group changes or public App Store release is required. Recording-only device acceptance follows the build-31 checklist above using build **32**; notifications remain disabled.

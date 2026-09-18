@@ -260,6 +260,16 @@ function makeWorld({ offline = true, queued = false } = {}) {
     },
   };
   const overrides = {
+    "./familyPush": { prepareFamilyPushLogout: async () => {} },
+    "../watchBridge": {
+      suspendWatchContext: async () => {
+        world.watchSuspends = (world.watchSuspends ?? 0) + 1;
+      },
+      invalidateWatchContext: async () => {
+        world.watchInvalidations = (world.watchInvalidations ?? 0) + 1;
+      },
+      pendingWatchCommands: async () => world.watchInbox ?? [],
+    },
     "./storageProtection": { protectFamilyStorage: async () => {} },
     storage: {
       clearPersonalForFamilyActivation: async () => {
@@ -3328,6 +3338,233 @@ function ownerWorld() {
   ];
   return world;
 }
+
+test("Watch commands persist stable operation and receipt together, survive restart and reject other workspaces", async () => {
+  const world = makeWorld({ offline: false });
+  world.server.watchRecordingEnabled = true;
+  const controller = await boot(world);
+  const command = {
+    schemaVersion: 1,
+    commandId: "71111111-1111-4111-8111-111111111111",
+    recordId: "72222222-2222-4222-8222-222222222222",
+    workspaceKey: controller.result().watchWorkspaceKey,
+    generation: 1,
+    createdAt: new Date().toISOString(),
+    kind: "create",
+    entry: {
+      id: "72222222-2222-4222-8222-222222222222",
+      type: "diaper",
+      start: new Date().toISOString(),
+      diaperKind: "wet",
+      note: "",
+    },
+  };
+  try {
+    world.offline = true;
+    const receipt = await controller.result().applyWatchCommand(command);
+    assert.equal(receipt.status, "pending");
+    assert.equal(
+      world.read().records[0].operation.operationId,
+      command.commandId,
+    );
+    assert.equal(
+      world.read().watchLedger[command.commandId].receipt.status,
+      "pending",
+    );
+    const replay = await controller.result().applyWatchCommand(command);
+    assert.equal(replay.status, "pending");
+    assert.equal(world.read().records.length, 1);
+    await assert.rejects(
+      controller
+        .result()
+        .applyWatchCommand({ ...command, workspaceKey: "another-account" }),
+      /membership_changed/,
+    );
+  } finally {
+    controller.unmount();
+  }
+  const restarted = await boot(world);
+  try {
+    assert.equal(restarted.result().watchReceipts[0].status, "pending");
+    world.offline = false;
+    await restarted.result().refresh();
+    assert.equal(restarted.result().watchReceipts[0].status, "shared");
+    assert.equal(world.recordsSent[0].operation.operationId, command.commandId);
+    assert.equal(
+      world.read().watchLedger[command.commandId].receipt.status,
+      "shared",
+    );
+  } finally {
+    restarted.unmount();
+  }
+});
+
+test("Watch family ingestion failure commits neither record nor receipt", async () => {
+  const world = makeWorld({ offline: false });
+  world.server.watchRecordingEnabled = true;
+  const controller = await boot(world);
+  try {
+    world.beforeCommit = async () => {
+      throw new Error("disk_full");
+    };
+    const id = "73333333-3333-4333-8333-333333333333";
+    await assert.rejects(
+      controller.result().applyWatchCommand({
+        schemaVersion: 1,
+        commandId: id,
+        recordId: id,
+        workspaceKey: controller.result().watchWorkspaceKey,
+        generation: 1,
+        createdAt: new Date().toISOString(),
+        kind: "create",
+        entry: {
+          id,
+          type: "diaper",
+          start: new Date().toISOString(),
+          diaperKind: "wet",
+          note: "",
+        },
+      }),
+      /local_save_failed/,
+    );
+    assert.equal(world.read().records?.length ?? 0, 0);
+    assert.equal(world.read().watchLedger, undefined);
+    assert.equal(controller.result().sharedState.entries.length, 0);
+  } finally {
+    controller.unmount();
+  }
+});
+
+for (const flag of [undefined, false]) {
+  test(`family Watch admission stays disabled when snapshot flag is ${String(flag)}`, async () => {
+    const world = makeWorld({ offline: false });
+    if (flag !== undefined) world.server.watchRecordingEnabled = flag;
+    const controller = await boot(world);
+    try {
+      assert.equal(controller.result().watchRecordingEnabled, false);
+      assert.equal(controller.result().getWatchState().state, null);
+      assert.ok(
+        controller.result().sharedState,
+        "ordinary phone records remain available",
+      );
+      const id = "74444444-4444-4444-8444-444444444444";
+      await assert.rejects(
+        controller.result().applyWatchCommand({
+          schemaVersion: 1,
+          commandId: id,
+          recordId: id,
+          workspaceKey: controller.result().watchWorkspaceKey,
+          generation: 1,
+          createdAt: new Date().toISOString(),
+          kind: "create",
+          entry: {
+            id,
+            type: "diaper",
+            start: new Date().toISOString(),
+            diaperKind: "wet",
+            note: "",
+          },
+        }),
+        /watch_recording_unavailable/,
+      );
+      assert.equal(world.read().records?.length ?? 0, 0);
+    } finally {
+      controller.unmount();
+    }
+  });
+}
+
+test("disabling server Watch admission pauses durable Watch outbox until the timer guard returns", async () => {
+  const world = makeWorld({ offline: false });
+  world.server.watchRecordingEnabled = true;
+  const controller = await boot(world);
+  try {
+    assert.equal(controller.result().watchRecordingEnabled, true);
+    assert.ok(controller.result().getWatchState().state);
+    world.offline = true;
+    const id = "75555555-5555-4555-8555-555555555555";
+    await controller.result().applyWatchCommand({
+      schemaVersion: 1,
+      commandId: id,
+      recordId: id,
+      workspaceKey: controller.result().watchWorkspaceKey,
+      generation: 1,
+      createdAt: new Date().toISOString(),
+      kind: "create",
+      entry: {
+        id,
+        type: "diaper",
+        start: new Date().toISOString(),
+        diaperKind: "wet",
+        note: "",
+      },
+    });
+    world.offline = false;
+    world.server.watchRecordingEnabled = false;
+    await controller.result().refresh();
+    assert.equal(controller.result().getWatchState().state, null);
+    assert.equal(world.recordsSent.length, 0);
+    assert.equal(world.read().watchLedger[id].receipt.status, "pending");
+    assert.equal(world.read().records.length, 1);
+    world.server.watchRecordingEnabled = true;
+    await controller.result().refresh();
+    assert.equal(world.recordsSent.length, 1);
+    assert.equal(world.read().watchLedger[id].receipt.status, "shared");
+  } finally {
+    controller.unmount();
+  }
+});
+
+test("confirmed family revocation invalidates native Watch context before another snapshot exists", async () => {
+  const world = makeWorld({ offline: false });
+  const controller = await boot(world);
+  try {
+    const prior = world.watchInvalidations ?? 0;
+    world.identity.families = [];
+    await controller.result().refresh();
+    assert.ok(world.watchInvalidations > prior);
+    assert.equal(controller.result().watchWorkspaceKey, null);
+    assert.equal(controller.result().getWatchState().state, null);
+  } finally {
+    controller.unmount();
+  }
+});
+
+test("notification refresh distinguishes a readable offline cache from newly verified access", async () => {
+  const world = makeWorld({ offline: false });
+  const controller = await boot(world);
+  try {
+    world.offline = true;
+    assert.equal(await controller.result().refreshForNotification(), false);
+    assert.ok(
+      controller.result().sharedState,
+      "ordinary offline reading remains available",
+    );
+    world.offline = false;
+    assert.equal(await controller.result().refreshForNotification(), true);
+    world.identity.families = [];
+    assert.equal(await controller.result().refreshForNotification(), false);
+  } finally {
+    controller.unmount();
+  }
+});
+
+test("family creation fences a known undrained Watch inbox before committing a transition", async () => {
+  const world = ownerWorld();
+  const controller = await boot(world);
+  try {
+    world.watchInbox = ["pending-native-command"];
+    await assert.rejects(
+      controller.result().createFamilyFromSeed(ownerSeed(world)),
+      /watch_pending/,
+    );
+    assert.equal(world.read().transition, null);
+    assert.ok(world.watchSuspends > 0);
+    assert.equal(world.mutationReceipts.size, 0);
+  } finally {
+    controller.unmount();
+  }
+});
 function ownerSeed(world) {
   return {
     schemaVersion: 1,

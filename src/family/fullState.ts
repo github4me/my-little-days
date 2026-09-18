@@ -76,6 +76,11 @@ export function validateFullSnapshot(
   )
     throw new Error("full_sharing_unavailable");
   revision(value.revision);
+  if (
+    value.watchRecordingEnabled !== undefined &&
+    typeof value.watchRecordingEnabled !== "boolean"
+  )
+    throw new Error("invalid_response");
   const profile = validateState({
     schemaVersion: 1,
     profile: value.profile,
@@ -479,6 +484,15 @@ export function acceptRecordReceipt(
         ? { ...q, status: "accepted", receiptRevision: receipt.revision }
         : q,
     ),
+    watchLedger: state.watchLedger?.[id]
+      ? {
+          ...state.watchLedger,
+          [id]: {
+            ...state.watchLedger[id],
+            receipt: { ...state.watchLedger[id].receipt, status: "shared" },
+          },
+        }
+      : state.watchLedger,
   };
 }
 export function recordsForSend(durable: PilotState, visible: PilotState) {
@@ -489,9 +503,12 @@ export function recordsForSend(durable: PilotState, visible: PilotState) {
     !isFullSnapshot(durable.snapshot)
   )
     return [];
+  const watchRecordingEnabled = visible.snapshot.watchRecordingEnabled === true;
   return (durable.records ?? []).filter(
     (q) =>
       q.status === "pending" &&
+      (!durable.watchLedger?.[q.operation.operationId] ||
+        watchRecordingEnabled) &&
       matchesOrigin(q.origin, visible.snapshot) &&
       (visible.records ?? []).some(
         (v) =>

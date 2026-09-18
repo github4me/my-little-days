@@ -21,6 +21,7 @@ import {
   isFamilyReminderData,
 } from "./family/familyReminderPlan";
 import { shouldShowFamilyNotification } from "./family/familyReminders";
+import { shouldShowFamilyEntryPush } from "./family/familyPushPresentation";
 
 export type Reminder = {
   id: string;
@@ -33,9 +34,12 @@ const autoFeedMode = "after-feed";
 Notifications.setNotificationHandler({
   handleNotification: async (notification) => {
     const data = notification.request.content.data;
-    const allowed = isFamilyReminderData(data)
-      ? shouldShowFamilyNotification(data)
-      : !personalStorageIsBlocked();
+    const allowed =
+      data?.kind === "family-entry"
+        ? shouldShowFamilyEntryPush(data)
+        : isFamilyReminderData(data)
+          ? shouldShowFamilyNotification(data)
+          : !personalStorageIsBlocked();
     return {
       shouldShowBanner: allowed,
       shouldShowList: allowed,

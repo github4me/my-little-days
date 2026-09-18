@@ -18,3 +18,5 @@ artifacts/
 *.p12
 *private-key*.pem
 .DS_Store
+watch/.build/
+watch/.swiftpm/

@@ -1,4 +1,13 @@
 import { initialState, State, validateState } from "./domain";
+import type { WatchCommand } from "./watchProtocol";
+export async function loadWatchWorkspace(): Promise<string> {
+  throw new Error("native_required");
+}
+export async function savePersonalWatchCommand(
+  _command: WatchCommand,
+): Promise<never> {
+  throw new Error("native_required");
+}
 import { personalWrite, personalMaintenance } from "./personalWrites";
 export {
   setPersonalStorageBlocked,

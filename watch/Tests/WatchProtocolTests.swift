@@ -1,0 +1,90 @@
+import XCTest
+@testable import LittleDaysWatchProtocol
+
+final class WatchProtocolTests: XCTestCase {
+  private func context(_ generation: Int = 3, sequence: Int = 8, workspace: String = "family-a", entries: [WatchEntry] = []) -> WatchContext {
+    WatchContext(schemaVersion: 1, workspaceKey: workspace, bridgeId: "bridge-a", generation: generation, sequence: sequence,
+      status: "ready", mode: "family", expiresAt: "2026-09-19T12:00:00Z", publishedAt: "2026-09-18T12:00:00Z",
+      profile: .init(name: "Fixture", birthDate: "2026-01-01"), entries: entries, language: "en",
+      totals: .init(feedMl: 0, feedCount: 0, diaperCount: 0, sleepMinutes: 0))
+  }
+
+  func testContextExpiresAndOldSnapshotsCannotCrossInvalidation() {
+    let current = context()
+    XCTAssertTrue(current.isValid(at: WatchClock.date("2026-09-19T11:59:59Z")!))
+    XCTAssertFalse(current.isValid(at: WatchClock.date("2026-09-19T12:00:00Z")!))
+    XCTAssertFalse(current.isValid(at: WatchClock.date("2026-09-17T12:00:00Z")!))
+    XCTAssertFalse(context(2, sequence: 999).supersedes(current))
+    XCTAssertFalse(context(3, sequence: 9, workspace: "family-b").supersedes(current))
+    XCTAssertTrue(context(4, sequence: 9, workspace: "family-b").supersedes(current))
+  }
+
+  func testUnacknowledgedStopOverlaysOlderRunningSnapshot() {
+    let entry = WatchEntry(id: "record-1", type: "sleep", start: "2026-09-18T12:00:00Z")
+    let command = WatchCommand(schemaVersion: 1, commandId: UUID().uuidString, recordId: entry.id,
+      workspaceKey: "family-a", bridgeId: "bridge-a", generation: 3, snapshotSequence: 8, createdAt: "2026-09-18T12:05:00Z",
+      kind: "finish-sleep", stoppedAt: "2026-09-18T12:05:00Z", expectedEntry: entry)
+    var disk = WatchDisk(context: context(entries: [entry]), outbox: [.init(command: command)])
+    disk.acceptContext(context(sequence: 9, entries: [entry]))
+    XCTAssertTrue(disk.visibleEntries().isEmpty)
+  }
+
+  func testOldWorkspaceCommandIsNotProjectedIntoNewWorkspace() {
+    let entry = WatchEntry(id: "record-1", type: "sleep", start: "2026-09-18T12:00:00Z")
+    let command = WatchCommand(schemaVersion: 1, commandId: UUID().uuidString, recordId: entry.id,
+      workspaceKey: "family-a", bridgeId: "bridge-a", generation: 3, snapshotSequence: 8, createdAt: entry.start, kind: "create", entry: entry)
+    var disk = WatchDisk(context: context(), outbox: [.init(command: command)])
+    XCTAssertEqual(disk.visibleEntries().count, 1)
+    disk.acceptContext(context(4, sequence: 9, workspace: "family-b"))
+    XCTAssertTrue(disk.visibleEntries().isEmpty)
+    XCTAssertEqual(disk.outbox.count, 1, "Keep original-context intent, never silently replay into the new family")
+  }
+
+  func testTransportMetadataDoesNotBecomeRecordPayload() {
+    let entry = WatchEntry(id: "record", type: "feed", start: "2026-09-18T12:00:00Z", feedRunning: true,
+      feedKind: "formula", version: "base-version", canControl: true, pendingOperationId: "pending")
+    XCTAssertNil(entry.commandEntry.version)
+    XCTAssertNil(entry.commandEntry.canControl)
+    XCTAssertNil(entry.commandEntry.pendingOperationId)
+  }
+
+  func testReceiptArrivingAfterSnapshotDoesNotLeaveStaleLocalStartOverlay() {
+    let entry = WatchEntry(id: "record-1", type: "sleep", start: "2026-09-18T12:00:00Z")
+    let command = WatchCommand(schemaVersion: 1, commandId: UUID().uuidString, recordId: entry.id,
+      workspaceKey: "family-a", bridgeId: "bridge-a", generation: 3, snapshotSequence: 8,
+      createdAt: entry.start, kind: "create", entry: entry)
+    var disk = WatchDisk(context: context(sequence: 10, entries: [entry]), outbox: [.init(command: command)])
+    disk.outbox[0].receipt = WatchReceipt(schemaVersion: 1, commandId: command.id, recordId: entry.id,
+      workspaceKey: "family-a", bridgeId: "bridge-a", generation: 3, status: "shared", error: nil, contextSequence: 10)
+    disk.reconcileProjection()
+    XCTAssertTrue(disk.outbox[0].projectionReconciled)
+    disk.acceptContext(context(sequence: 11))
+    XCTAssertTrue(disk.visibleEntries().isEmpty, "A later phone stop must not be replaced by the local start")
+  }
+
+  func testRejectedIntentIsNotPrunedWithCompletedReceiptHistory() {
+    let entry = WatchEntry(id: "record-1", type: "sleep", start: "2026-09-18T12:00:00Z")
+    let command = WatchCommand(schemaVersion: 1, commandId: UUID().uuidString, recordId: entry.id,
+      workspaceKey: "family-a", bridgeId: "bridge-a", generation: 3, snapshotSequence: 8,
+      createdAt: entry.start, kind: "create", entry: entry)
+    let receipt = WatchReceipt(schemaVersion: 1, commandId: command.id, recordId: entry.id,
+      workspaceKey: "family-a", bridgeId: "bridge-a", generation: 3, status: "rejected", error: "invalid_record_time", contextSequence: 8)
+    var disk = WatchDisk(context: context(), outbox: Array(repeating: .init(command: command, receipt: receipt), count: 150))
+    disk.acceptContext(context(sequence: 9))
+    XCTAssertEqual(disk.outbox.count, 150)
+  }
+
+  func testSharedFixturesDecodeAndReencodeTheDomainNoteAndBottlePlaceholder() throws {
+    let fixtures = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("Fixtures")
+    for file in ["command-v1.json", "feed-start-v1.json"] {
+      let command = try JSONDecoder().decode(WatchCommand.self, from: Data(contentsOf: fixtures.appendingPathComponent(file)))
+      XCTAssertEqual(command.entry?.note, "")
+      let roundTrip = try JSONDecoder().decode(WatchCommand.self, from: Data(command.json().utf8))
+      XCTAssertEqual(roundTrip.entry, command.entry)
+      if command.entry?.type == "feed" {
+        XCTAssertEqual(command.entry?.amount, 0)
+        XCTAssertEqual(command.entry?.feedRunning, true)
+      }
+    }
+  }
+}

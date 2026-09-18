@@ -1,4 +1,11 @@
 import * as SQLite from "expo-sqlite";
+import { randomUUID } from "expo-crypto";
+import { protectFamilyStorage } from "./family/storageProtection";
+import {
+  applyPersonalWatchCommand,
+  validateWatchLedger,
+  type WatchCommand,
+} from "./watchProtocol";
 import {
   personalWrite,
   personalMaintenance,
@@ -69,6 +76,11 @@ export async function saveState(state: State, recovery = false): Promise<void> {
     const d = await db();
     await d.withExclusiveTransactionAsync(async (tx) => {
       if (recovery) {
+        await tx.runAsync(
+          "DELETE FROM app_data WHERE key IN (?,?)",
+          "watch-workspace",
+          "watch-ledger",
+        );
         const previous = await tx.getFirstAsync<{ value: string }>(
           "SELECT value FROM app_data WHERE key = ?",
           "state",
@@ -85,6 +97,69 @@ export async function saveState(state: State, recovery = false): Promise<void> {
         data,
       );
     });
+  });
+}
+
+// Personal commands and their deduplication receipt commit together. Never copy
+// this ledger into exports or a family seed; it belongs to this local workspace.
+export async function loadWatchWorkspace(): Promise<string> {
+  return personalWrite(async () => {
+    await protectFamilyStorage();
+    const d = await db();
+    let id = "";
+    await d.withExclusiveTransactionAsync(async (tx) => {
+      const row = await tx.getFirstAsync<{ value: string }>(
+        "SELECT value FROM app_data WHERE key = ?",
+        "watch-workspace",
+      );
+      id = row?.value ?? randomUUID();
+      if (!row)
+        await tx.runAsync(
+          "INSERT INTO app_data (key,value) VALUES (?,?)",
+          "watch-workspace",
+          id,
+        );
+    });
+    return `personal:${id}`;
+  });
+}
+export async function savePersonalWatchCommand(command: WatchCommand) {
+  return personalWrite(async () => {
+    await protectFamilyStorage();
+    const d = await db();
+    let result: ReturnType<typeof applyPersonalWatchCommand> | undefined;
+    await d.withExclusiveTransactionAsync(async (tx) => {
+      const workspace = await tx.getFirstAsync<{ value: string }>(
+        "SELECT value FROM app_data WHERE key = ?",
+        "watch-workspace",
+      );
+      if (!workspace || command.workspaceKey !== `personal:${workspace.value}`)
+        throw new Error("membership_changed");
+      const row = await tx.getFirstAsync<{ value: string }>(
+        "SELECT value FROM app_data WHERE key = ?",
+        "state",
+      );
+      const receiptRow = await tx.getFirstAsync<{ value: string }>(
+        "SELECT value FROM app_data WHERE key = ?",
+        "watch-ledger",
+      );
+      const current = row ? validateState(JSON.parse(row.value)) : initialState;
+      const ledger = receiptRow
+        ? validateWatchLedger(JSON.parse(receiptRow.value))
+        : {};
+      result = applyPersonalWatchCommand(current, ledger, command);
+      await tx.runAsync(
+        "INSERT OR REPLACE INTO app_data (key,value) VALUES (?,?)",
+        "state",
+        JSON.stringify(result.state),
+      );
+      await tx.runAsync(
+        "INSERT OR REPLACE INTO app_data (key,value) VALUES (?,?)",
+        "watch-ledger",
+        JSON.stringify(result.ledger),
+      );
+    });
+    return result!;
   });
 }
 export async function loadRecovery(): Promise<State | null> {
