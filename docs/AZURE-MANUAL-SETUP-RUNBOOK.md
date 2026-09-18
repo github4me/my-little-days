@@ -1253,3 +1253,40 @@ Physical iPhone/VoiceOver acceptance remains pending.
   Existing signing credentials/devices were reused; OTA remains disabled.
 - No Azure/API/SQL deployment or TestFlight submission is part of this release.
   Physical iPhone installation and accessibility/keyboard acceptance are pending.
+
+## 28. My account invitations and deletion preview (18 September 2026)
+
+This app-only release shows eligible users' received invitations directly below
+Signed in, even when My account is collapsed. Invitations follow authoritative
+accept/decline results; cancellation, failed requests and unconfirmed lifecycle
+work do not mark them handled. Delete account is the final, separated account
+item; its confirmation, consent and administrator restrictions are unchanged.
+
+### Publish and phone acceptance
+
+1. Push only the reviewed app/test/docs changes through the GitHub plugin on
+   `feature/family-invitations`, version **0.2.1**, iOS build **28**. Preserve
+   unrelated SQL/infrastructure work. Follow section 26's clean-source,
+   preview-environment, public-value/account-override and upload-archive checks.
+2. Build one native internal preview for the exact pushed SHA, reusing existing
+   signing credentials and registered devices. Demo mode stays `0` and OTA stays
+   disabled. No Azure/API/SQL deployment or TestFlight submission is required.
+3. After that build is **FINISHED**, open its Expo page on an already registered
+   iPhone and install over the current app without uninstalling or clearing data.
+4. With a verified, eligible account that has a genuine pending invitation, open
+   **More → My account**. **Received family invitations / 收到的家庭邀请** should
+   appear below Signed in even while account details are collapsed. Check inviter,
+   expiry and Accept/Decline controls. Opening a review and cancelling must keep
+   the invitation; accept or decline only an invitation you actually intend to
+   action. Joining still requires the existing local-data replacement consent.
+5. Expand My account. **Delete account / 删除账户** should be the separate final
+   item below Sign out. You can inspect and cancel its confirmation; do not submit
+   a deletion as a test. Existing family administrators remain blocked.
+6. Check Chinese/English, Light/Dark, large Dynamic Type and VoiceOver order.
+   During unresolved verification, family changes or deletion, the screen must
+   not grant new join/delete actions. Phone acceptance is separate from test success.
+
+Validation: TypeScript and 522 verification tests, full browser regression,
+Apple layout scenarios and isolated bilingual family flows passed. The focused
+family suite includes 55 tests. Source/build/CI evidence is recorded below after
+publication; native installation and acceptance remain pending.

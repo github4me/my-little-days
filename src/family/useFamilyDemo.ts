@@ -52,6 +52,7 @@ export function useFamilyDemo(scenario: FamilyDemoScenario): ReturnType<
     activationPending: false,
     booting: false,
     ready: true,
+    hasFamilyMembership: !!state.snapshot,
     sharedMode: !!state.snapshot,
     sharedState: null,
     sharedExtras: [],

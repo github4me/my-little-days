@@ -198,10 +198,13 @@ async function englishFlows(page) {
   await page
     .getByLabel("Amount actually drunk (mL)", { exact: true })
     .fill("135");
+  await expect(
+    page.getByLabel("Amount actually drunk (mL)", { exact: true }),
+  ).toHaveValue("135");
   await button(page, "Save and share").click();
   await expect(page.getByText("135 mL", { exact: true })).toBeVisible();
   await button(page, "Show My account").click();
-  await expect(button(page, "Request account deletion")).toBeDisabled();
+  await expect(button(page, "Delete pilot account")).toBeDisabled();
   await button(page, "Show Family members (2)").click();
   await button(page, "Remove").click();
   await confirm(page, "Remove");
@@ -305,7 +308,7 @@ async function englishFlows(page) {
 
   await button(page, "Member").click();
   await button(page, "Show My account").click();
-  await button(page, "Request account deletion").click();
+  await button(page, "Delete pilot account").click();
   await confirm(page, "Request account deletion", true);
   await expect(
     page.getByRole("heading", {
@@ -344,6 +347,114 @@ async function englishFlows(page) {
   ).toBeVisible();
   await button(page, "Invitations").click();
   await expect(button(page, "Accept invitation")).toHaveCount(2);
+}
+
+async function accountInvitationPlacementFlow(page, zh, dark, width) {
+  const label = (en, chinese) => (zh ? chinese : en);
+  await button(page, label("Invitations", "收到邀请")).click();
+  const showAccount = label("Show My account", "展开我的账户");
+  const hideAccount = label("Hide My account", "收起我的账户");
+  const accept = label("Accept invitation", "接受邀请");
+  const decline = label("Decline", "拒绝");
+  const receivedTitle = label(
+    "Received family invitations (2)",
+    "收到的家庭邀请（2）",
+  );
+  const signedIn = page.getByText(label("Signed in", "已登录"), {
+    exact: true,
+  });
+  const received = page.getByRole("heading", {
+    name: receivedTitle,
+    exact: true,
+  });
+  const accountHeader = button(page, showAccount);
+  await expect(accountHeader).toHaveAttribute("aria-expanded", "false");
+  await expect(received).toBeVisible();
+  await expect(button(page, accept)).toHaveCount(2);
+  await expect(button(page, decline)).toHaveCount(2);
+  await expect(button(page, label("Sign out", "退出登录"))).toHaveCount(0);
+  await expect(
+    button(page, label("Delete pilot account", "删除试点账户")),
+  ).toHaveCount(0);
+  // Invitation actions are siblings below the disclosure header, never nested
+  // interactive controls inside the account disclosure's button.
+  await expect(
+    accountHeader.getByRole("button", { name: accept, exact: true }),
+  ).toHaveCount(0);
+  const account = accountHeader.locator("..");
+  await expect(
+    account.getByRole("heading", { name: receivedTitle, exact: true }),
+  ).toHaveCount(1);
+  const statusBox = await signedIn.boundingBox();
+  const receivedBox = await received.boundingBox();
+  assert.ok(
+    statusBox && receivedBox && receivedBox.y >= statusBox.y + statusBox.height,
+  );
+  await noOverflow(page, `Account invitations/${zh ? "zh" : "en"}/${width}`);
+  await received.scrollIntoViewIfNeeded();
+  await page.screenshot({
+    path: path.join(
+      screenshots,
+      `account-invitations-${zh ? "zh" : "en"}-${dark ? "dark" : "light"}-${width}.png`,
+    ),
+    animations: "disabled",
+  });
+  await accountHeader.click();
+  await expect(button(page, hideAccount)).toHaveAttribute(
+    "aria-expanded",
+    "true",
+  );
+  await expect(received).toBeVisible();
+  const deleteAccount = button(
+    page,
+    label("Delete pilot account", "删除试点账户"),
+  );
+  const signOut = button(page, label("Sign out", "退出登录"));
+  await expect(deleteAccount).toBeVisible();
+  await expect(
+    page.getByText(/permanent deletion processing|永久删除流程/),
+  ).toHaveCount(0);
+  const deleteBox = await deleteAccount.boundingBox();
+  const signOutBox = await signOut.boundingBox();
+  assert.ok(deleteBox && signOutBox && deleteBox.y > signOutBox.y);
+  assert.ok(
+    await deleteAccount
+      .locator("..")
+      .evaluate(
+        (element) =>
+          Number.parseFloat(getComputedStyle(element).borderTopWidth) >= 1,
+      ),
+    "Destructive entry is visibly separated from ordinary account actions",
+  );
+  await deleteAccount.click();
+  await confirmationPainted(page, zh);
+  await expect(
+    page.getByText(/permanent deletion processing|永久删除流程/),
+  ).toBeVisible();
+  await expect(
+    button(page, label("Request account deletion", "申请删除账户")),
+  ).toBeDisabled();
+  await button(page, label("Cancel", "取消")).click();
+  await expect(received).toBeVisible();
+  await button(page, hideAccount).click();
+  await expect(received).toBeVisible();
+  await expect(button(page, accept)).toHaveCount(2);
+  await button(page, decline).first().click();
+  await confirmationPainted(page, zh);
+  await button(page, label("Cancel", "取消")).click();
+  await expect(button(page, accept)).toHaveCount(2);
+  await button(page, decline).first().click();
+  await confirm(page, decline, false, zh);
+  await expect(button(page, accept)).toHaveCount(1);
+  await expect(
+    page.getByRole("heading", {
+      name: label("Received family invitations (1)", "收到的家庭邀请（1）"),
+      exact: true,
+    }),
+  ).toBeVisible();
+  await button(page, label("Reset samples", "重置样例")).click();
+  await expect(received).toBeVisible();
+  await expect(button(page, accept)).toHaveCount(2);
 }
 
 async function receivedInvitationCreationFlow(page, zh) {
@@ -814,6 +925,7 @@ try {
       page.getByText(zh ? /^仅供界面预览/ : /^UI preview only/),
     ).toBeVisible();
     await firstInvitationFlow(page, zh, width);
+    await accountInvitationPlacementFlow(page, zh, dark, width);
     await receivedInvitationCreationFlow(page, zh);
     if (locale === "en" && width === 390) await englishFlows(page);
     await nestedInvitationHistoryFlow(page, zh, dark, width);
@@ -868,7 +980,7 @@ try {
     await context.close();
   }
   console.log(
-    "PASS: 9 family UI scenarios, first-invitation seed review/cancel/consent with multiple emails, nested collapsed invitation history with preserved drafts, invitation consent, roles, editing, removal, transfer, closure, deletion and reset; English/Chinese, light/dark at 390/320px; all original record types preserved, no family persistence or API/auth traffic.",
+    "PASS: 9 family UI scenarios, collapsed-account incoming invitations and cancellation/confirmed decline, separated deletion entry with consent, first-invitation seed review/cancel/consent with multiple emails, nested collapsed invitation history with preserved drafts, invitation consent, roles, editing, removal, transfer, closure, deletion and reset; English/Chinese, light/dark at 390/320px; all original record types preserved, no family persistence or API/auth traffic.",
   );
 } finally {
   await browser.close();

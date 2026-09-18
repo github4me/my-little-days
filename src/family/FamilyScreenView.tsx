@@ -50,12 +50,14 @@ function Disclosure({
   initiallyOpen = false,
   status,
   nested = false,
+  alwaysVisibleContent,
 }: {
   title: string;
   children: React.ReactNode;
   initiallyOpen?: boolean;
   status?: string;
   nested?: boolean;
+  alwaysVisibleContent?: React.ReactNode;
 }) {
   const c = useContext(Theme);
   const { locale } = useI18n();
@@ -120,6 +122,7 @@ function Disclosure({
               : "+"}
         </T>
       </Pressable>
+      {alwaysVisibleContent}
       {open ? <View style={styles.stack}>{children}</View> : null}
     </Container>
   );
@@ -561,6 +564,21 @@ export default function FamilyScreenView({
   const deletion = pilot.deletionStatus ?? pilot.accountDeletion;
   const workspaceBusy =
     busy || !authenticated || pilot.transitionPending || !!deletion;
+  // Shared mode also covers unresolved lifecycle work. Keep a no-family inbox
+  // visible (but disabled) while its action awaits confirmation; a hidden family
+  // snapshot must never make an existing member look eligible to join.
+  const incomingInvitations =
+    authenticated &&
+    pilot.user &&
+    !snapshot &&
+    !pilot.hasFamilyMembership &&
+    !deletion &&
+    (!pilot.sharedMode || pilot.transitionPending)
+      ? pilot.inbox.filter(
+          (invitation) => Date.parse(invitation.expiresAt) > Date.now(),
+        )
+      : [];
+  const showAccountInvitations = showAccount && incomingInvitations.length > 0;
 
   useEffect(() => {
     mounted.current = true;
@@ -633,6 +651,52 @@ export default function FamilyScreenView({
       allowDuringTransition: label === "signOut",
       requiresAuthentication,
     });
+  }
+
+  function renderIncomingInvitations() {
+    return incomingInvitations.map((invitation) => (
+      <View
+        key={invitation.id}
+        style={[styles.listItem, { borderColor: c.line }]}
+      >
+        <T raw style={{ fontWeight: "600" }}>
+          {m("invitedBy", { name: invitation.ownerDisplayName })}
+        </T>
+        <T raw style={styles.muted(c.muted)}>
+          {m("expiresAt", { time: displayDate(invitation.expiresAt, locale) })}
+        </T>
+        <View style={styles.actions}>
+          <Button
+            label={m("acceptInvite")}
+            disabled={workspaceBusy}
+            style={styles.flexButton}
+            onPress={() =>
+              confirm(
+                "acceptInviteTitle",
+                `${m("invitedBy", { name: invitation.ownerDisplayName })}\n\n${m("joinWarning")}\n\n${m("joinDeclineWarning")}`,
+                "acceptInvite",
+                () => pilot.acceptInvitation(invitation.id),
+                "joinConsent",
+              )
+            }
+          />
+          <Button
+            label={m("declineInvite")}
+            secondary
+            disabled={workspaceBusy}
+            style={styles.flexButton}
+            onPress={() =>
+              confirm(
+                "declineInviteTitle",
+                `${m("invitedBy", { name: invitation.ownerDisplayName })}\n\n${m("declineInviteDescription")}`,
+                "declineInvite",
+                () => pilot.declineInvitation(invitation.id),
+              )
+            }
+          />
+        </View>
+      </View>
+    ));
   }
 
   const memberName = (id: string) =>
@@ -1083,6 +1147,31 @@ export default function FamilyScreenView({
               title={m("account")}
               status={m(accountStatusKey)}
               initiallyOpen={!authenticated}
+              alwaysVisibleContent={
+                showAccountInvitations ? (
+                  <View style={styles.stack}>
+                    <T
+                      raw
+                      accessibilityRole="header"
+                      style={{ fontWeight: "600" }}
+                    >
+                      {m("receivedInvitations", {
+                        count: incomingInvitations.length,
+                      })}
+                    </T>
+                    {pilot.transitionPending ? (
+                      <T
+                        raw
+                        accessibilityLiveRegion="polite"
+                        style={styles.muted(c.muted)}
+                      >
+                        {m("transitionPending")}
+                      </T>
+                    ) : null}
+                    {renderIncomingInvitations()}
+                  </View>
+                ) : null
+              }
             >
               <T raw style={{ fontWeight: "600" }}>
                 {pilot.user.displayName}
@@ -1144,16 +1233,14 @@ export default function FamilyScreenView({
                 }
               />
               {!pilot.accountDeletion ? (
-                <>
-                  <T raw style={styles.muted(c.muted)}>
-                    {m(
-                      owner
-                        ? "deleteAccountBlocked"
-                        : "deleteAccountDescription",
-                    )}
-                  </T>
+                <View
+                  style={[
+                    styles.listItem,
+                    { borderColor: c.line, marginTop: 8 },
+                  ]}
+                >
                   <Button
-                    label={m("deleteAccount")}
+                    label={m("deletion")}
                     secondary
                     disabled={workspaceBusy || owner}
                     onPress={() =>
@@ -1166,7 +1253,12 @@ export default function FamilyScreenView({
                       )
                     }
                   />
-                </>
+                  {owner ? (
+                    <T raw style={styles.muted(c.muted)}>
+                      {m("deleteAccountBlocked")}
+                    </T>
+                  ) : null}
+                </View>
               ) : null}
             </Disclosure>
           ) : null}
@@ -1210,65 +1302,23 @@ export default function FamilyScreenView({
                   onPress={() => void run(pilot.refresh)}
                 />
               ) : null}
-              <Disclosure
-                title={m("joinSection")}
-                initiallyOpen={!ownerSetup || !!pilot.inbox.length}
-              >
-                <T raw style={styles.muted(c.muted)}>
-                  {m("joinDescription")}
-                </T>
-                {!pilot.inbox.length ? (
+              {!showAccountInvitations ? (
+                <Disclosure
+                  title={m("joinSection")}
+                  initiallyOpen={!ownerSetup || !!incomingInvitations.length}
+                >
                   <T raw style={styles.muted(c.muted)}>
-                    {m("noIncomingInvitations")}
+                    {m("joinDescription")}
                   </T>
-                ) : (
-                  pilot.inbox.map((invitation) => (
-                    <View
-                      key={invitation.id}
-                      style={[styles.listItem, { borderColor: c.line }]}
-                    >
-                      <T raw style={{ fontWeight: "600" }}>
-                        {m("invitedBy", { name: invitation.ownerDisplayName })}
-                      </T>
-                      <T raw style={styles.muted(c.muted)}>
-                        {m("expiresAt", {
-                          time: displayDate(invitation.expiresAt, locale),
-                        })}
-                      </T>
-                      <View style={styles.actions}>
-                        <Button
-                          label={m("acceptInvite")}
-                          disabled={workspaceBusy}
-                          style={styles.flexButton}
-                          onPress={() =>
-                            confirm(
-                              "acceptInviteTitle",
-                              `${m("joinWarning")}\n\n${m("joinDeclineWarning")}`,
-                              "acceptInvite",
-                              () => pilot.acceptInvitation(invitation.id),
-                              "joinConsent",
-                            )
-                          }
-                        />
-                        <Button
-                          label={m("declineInvite")}
-                          secondary
-                          disabled={workspaceBusy}
-                          style={styles.flexButton}
-                          onPress={() =>
-                            confirm(
-                              "declineInviteTitle",
-                              m("declineInviteDescription"),
-                              "declineInvite",
-                              () => pilot.declineInvitation(invitation.id),
-                            )
-                          }
-                        />
-                      </View>
-                    </View>
-                  ))
-                )}
-              </Disclosure>
+                  {!incomingInvitations.length ? (
+                    <T raw style={styles.muted(c.muted)}>
+                      {m("noIncomingInvitations")}
+                    </T>
+                  ) : (
+                    renderIncomingInvitations()
+                  )}
+                </Disclosure>
+              ) : null}
               {ownerSetup ??
                 (demo ? (
                   <Disclosure title={m("createSection")}>

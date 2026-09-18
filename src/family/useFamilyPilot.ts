@@ -1595,6 +1595,7 @@ export function useFamilyPilot() {
     tokenRecognized,
     sessionAvailable,
     ready,
+    hasFamilyMembership: !!identity?.families.length || !!state.snapshot,
     sharedMode:
       sessionUnresolved ||
       !!state.snapshot ||

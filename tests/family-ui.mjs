@@ -146,6 +146,7 @@ function fixture(
     recordPending: [],
     recordConflicts: [],
     sharedMode: false,
+    hasFamilyMembership: false,
     hasPrivateWork: false,
     ...Object.fromEntries(
       [
@@ -539,7 +540,7 @@ test("embedded account includes account controls and omits family management and
     assert.match(screen.text(), /My account/);
     assert.match(screen.text(), /test@example.invalid/);
     assert.equal(screen.buttons("Sign out").length, 1);
-    assert.equal(screen.buttons("Request account deletion").length, 1);
+    assert.equal(screen.buttons("Delete account").length, 1);
     assert.equal(screen.buttons("Back").length, 0);
     assert.equal(screen.buttons("Add invitation").length, 0);
     assert.equal(screen.buttons("Leave family").length, 0);
@@ -547,6 +548,279 @@ test("embedded account includes account controls and omits family management and
       screen.text(),
       /Family sharing|Creating a family shares|Test baby profile|Family members|Create a family group|All family records are connected/,
     );
+  }
+});
+
+const incomingInvitation = (id = "received") => ({
+  id,
+  familyId: `family-${id}`,
+  ownerDisplayName: `Inviter ${id}`,
+  expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+});
+
+test("received invitations stay directly below signed-in status when account details are collapsed", () => {
+  for (const locale of ["en", "zh-CN"]) {
+    const zh = locale === "zh-CN";
+    for (const section of ["account", "all"]) {
+      const view = fixture(
+        { inbox: [incomingInvitation("one"), incomingInvitation("two")] },
+        locale,
+        false,
+        section,
+        false,
+      );
+      view.render();
+      const header = view
+        .nodes()
+        .find(
+          (node) =>
+            node.props?.accessibilityLabel ===
+            (zh ? "展开我的账户" : "Show My account"),
+        );
+      assert(header, "Signed-in account details start collapsed");
+      assert.equal(header.props.accessibilityState.expanded, false);
+      const text = view.text();
+      const signedIn = text.indexOf(zh ? "已登录" : "Signed in");
+      const inbox = text.indexOf(
+        zh ? "收到的家庭邀请（2）" : "Received family invitations (2)",
+      );
+      assert(signedIn >= 0 && inbox > signedIn);
+      assert(text.indexOf("Inviter one") > inbox);
+      assert.equal(
+        view.buttons(zh ? "接受邀请" : "Accept invitation").length,
+        2,
+      );
+      assert.equal(view.buttons(zh ? "拒绝" : "Decline").length, 2);
+      assert.equal(view.buttons(zh ? "退出登录" : "Sign out").length, 0);
+      assert.equal(view.buttons(zh ? "删除账户" : "Delete account").length, 0);
+      assert.doesNotMatch(text, /test@example.invalid/);
+      header.props.onPress();
+      view.render();
+      assert.equal(
+        view.buttons(zh ? "接受邀请" : "Accept invitation").length,
+        2,
+      );
+      const expanded = view
+        .nodes()
+        .find(
+          (node) =>
+            node.props?.accessibilityLabel ===
+            (zh ? "收起我的账户" : "Hide My account"),
+        );
+      expanded.props.onPress();
+      view.render();
+      assert.match(view.text(), /Inviter one/);
+      view.unmount();
+      view.render();
+      assert.match(view.text(), /Inviter one/);
+      assert.equal(view.controller.inbox.length, 2);
+    }
+  }
+});
+
+test("account inbox excludes expired dates and never exposes cached or granted-family invitations", () => {
+  const live = incomingInvitation("live");
+  for (const locale of ["en", "zh-CN"]) {
+    const zh = locale === "zh-CN";
+    const view = fixture(
+      {
+        inbox: [
+          live,
+          {
+            ...incomingInvitation("expired"),
+            expiresAt: new Date(Date.now() - 1).toISOString(),
+          },
+          { ...incomingInvitation("invalid"), expiresAt: "not-a-date" },
+        ],
+      },
+      locale,
+      false,
+      "account",
+      false,
+    );
+    view.render();
+    assert.match(
+      view.text(),
+      zh ? /收到的家庭邀请（1）/ : /Received family invitations \(1\)/,
+    );
+    assert.match(view.text(), /Inviter live/);
+    assert.doesNotMatch(view.text(), /Inviter expired|Inviter invalid/);
+    live.expiresAt = new Date(Date.now() - 1).toISOString();
+    view.render();
+    assert.equal(view.buttons(zh ? "接受邀请" : "Accept invitation").length, 0);
+    live.expiresAt = new Date(Date.now() + 86_400_000).toISOString();
+
+    for (const overrides of [
+      { user: null, authStatus: "signed_out" },
+      { authStatus: "token_confirmed" },
+      { authStatus: "checking" },
+      { authStatus: "unverified" },
+      { authStatus: "reauth_required" },
+      { snapshot: snapshot(), hasFamilyMembership: true },
+      { hasFamilyMembership: true, sharedMode: true, transitionPending: true },
+      { sharedMode: true, ready: false },
+      {
+        accountDeletion: {
+          deletionId: "deletion",
+          status: "pending",
+          requestedAt: "2026-09-18T00:00:00Z",
+        },
+      },
+    ]) {
+      const hidden = fixture(
+        { inbox: [live], ...overrides },
+        locale,
+        false,
+        "account",
+        false,
+      );
+      hidden.render();
+      assert.doesNotMatch(
+        hidden.text(),
+        /Inviter live/,
+        JSON.stringify(overrides),
+      );
+      assert.equal(
+        hidden.buttons(zh ? "接受邀请" : "Accept invitation").length,
+        0,
+      );
+      assert.equal(hidden.buttons(zh ? "拒绝" : "Decline").length, 0);
+    }
+  }
+});
+
+test("account invitation actions retain rows through cancellation, pending transitions and unknown outcomes", async () => {
+  for (const action of ["acceptInvitation", "declineInvitation"]) {
+    const label =
+      action === "acceptInvitation" ? "Accept invitation" : "Decline";
+    let rejectAction;
+    const result = new Promise((_, reject) => {
+      rejectAction = reject;
+    });
+    const view = fixture(
+      { inbox: [incomingInvitation()], [action]: () => result },
+      "en",
+      false,
+      "account",
+      false,
+    );
+    view.render();
+    view.buttons(label)[0].props.onPress();
+    view.render();
+    view.buttons("Cancel").at(-1).props.onPress();
+    view.render();
+    assert.match(view.text(), /Inviter received/);
+    assert.equal(view.controller.inbox.length, 1);
+    view.buttons(label)[0].props.onPress();
+    view.render();
+    if (action === "acceptInvitation") {
+      assert.equal(view.buttons(label).at(-1).props.disabled, true);
+      assert.match(view.modalText(), /never uploaded or merged/);
+      assert.match(
+        view.modalText(),
+        /automatically decline all other pending invitations/,
+      );
+      view
+        .nodes()
+        .findLast((node) => node.props?.accessibilityRole === "checkbox")
+        .props.onPress();
+      view.render();
+    }
+    view.buttons(label).at(-1).props.onPress();
+    view.controller.transitionPending = true;
+    view.controller.sharedMode = true;
+    view.render();
+    assert.match(view.text(), /Inviter received/);
+    assert.equal(view.buttons(label)[0].props.disabled, true);
+    assert.match(view.text(), /Confirming a family change/);
+    rejectAction(new Error("network_unavailable"));
+    await tick();
+    view.render();
+    assert.match(view.text(), /Inviter received/);
+    assert.match(view.modalText(), /cannot be reached/);
+    view.buttons("Cancel").at(-1).props.onPress();
+    view.unmount();
+    view.render();
+    assert.match(view.text(), /Inviter received/);
+    assert.equal(view.buttons(label)[0].props.disabled, true);
+    // Only the refreshed authoritative inbox removes the outstanding row.
+    view.controller.inbox = [];
+    view.controller.transitionPending = false;
+    view.controller.sharedMode = false;
+    view.render();
+    assert.doesNotMatch(
+      view.text(),
+      /Inviter received|Received family invitations/,
+    );
+    assert.equal(view.buttons(label).length, 0);
+  }
+});
+
+test("resolving an invitation handler alone does not locally dismiss an unchanged authoritative inbox", async () => {
+  const view = fixture(
+    { inbox: [incomingInvitation()] },
+    "en",
+    false,
+    "account",
+    false,
+  );
+  view.render();
+  view.buttons("Decline")[0].props.onPress();
+  view.render();
+  view.buttons("Decline").at(-1).props.onPress();
+  await tick();
+  view.render();
+  assert.match(view.text(), /Inviter received/);
+  assert.equal(view.buttons("Decline").length, 1);
+  assert.equal(
+    view.calls.filter((call) => call.name === "declineInvitation").length,
+    1,
+  );
+  view.controller.inbox = [];
+  view.render();
+  assert.doesNotMatch(view.text(), /Inviter received/);
+});
+
+test("delete-account entry is the final separated account action and keeps consequences in consent", () => {
+  for (const locale of ["en", "zh-CN"]) {
+    const zh = locale === "zh-CN";
+    const label = zh ? "删除账户" : "Delete account";
+    const view = fixture({}, locale, false, "account", false);
+    view.render();
+    assert.equal(view.buttons(label).length, 0);
+    view
+      .nodes()
+      .find(
+        (node) =>
+          node.props?.accessibilityLabel ===
+          (zh ? "展开我的账户" : "Show My account"),
+      )
+      .props.onPress();
+    view.render();
+    const buttons = view.nodes().filter((node) => node.type === "Button");
+    assert.equal(buttons.at(-1).props.label, label);
+    assert(
+      buttons.findIndex(
+        (node) => node.props.label === (zh ? "退出登录" : "Sign out"),
+      ) <
+        buttons.length - 1,
+    );
+    assert.doesNotMatch(view.text(), /permanent deletion|永久删除/);
+    view.buttons(label)[0].props.onPress();
+    view.render();
+    assert.match(view.modalText(), zh ? /永久删除/ : /permanent deletion/);
+    assert.equal(
+      view.buttons(zh ? "申请删除账户" : "Request account deletion").at(-1)
+        .props.disabled,
+      true,
+    );
+    view
+      .buttons(zh ? "取消" : "Cancel")
+      .at(-1)
+      .props.onPress();
+    view.render();
+    assert.equal(view.calls.length, 0);
+    assert.doesNotMatch(view.text(), /permanent deletion|永久删除/);
   }
 });
 
@@ -577,7 +851,7 @@ test("family mode omits the normal account and duplicate legacy baby profile", (
     screen.render();
     assert.doesNotMatch(screen.text(), /My account|Test baby profile/);
     assert.equal(screen.buttons("Sign out").length, 0);
-    assert.equal(screen.buttons("Request account deletion").length, 0);
+    assert.equal(screen.buttons("Delete account").length, 0);
     assert.equal(
       screen.buttons("Add invitation").length,
       role === "owner" ? 1 : 0,
@@ -600,10 +874,7 @@ test("family mode retains reauthentication and unconfirmed-transition recovery",
   assert.match(expired.text(), /Session expired/);
   assert.equal(expired.buttons("Sign in again").length, 1);
   assert.equal(expired.buttons("Sign out").length, 1);
-  assert.equal(
-    expired.buttons("Request account deletion")[0].props.disabled,
-    true,
-  );
+  assert.equal(expired.buttons("Delete account")[0].props.disabled, true);
   for (const section of ["account", "family"]) {
     const recovery = fixture({ transitionPending: true }, "en", false, section);
     recovery.render();
@@ -701,7 +972,7 @@ test("family recovery retains sign out when shared history is not ready", () => 
 test("embedded account deletion still requires consent and submits through its confirmation", async () => {
   const screen = fixture({}, "en", false, "account");
   screen.render();
-  screen.buttons("Request account deletion")[0].props.onPress();
+  screen.buttons("Delete account")[0].props.onPress();
   screen.render();
   assert.equal(
     screen.buttons("Request account deletion").at(-1).props.disabled,
@@ -1047,9 +1318,8 @@ test("expired cached accounts remain expired after cancellation and cannot perfo
       1,
     );
     assert.equal(
-      view.buttons(
-        locale === "en" ? "Request account deletion" : "申请删除账户",
-      )[0].props.disabled,
+      view.buttons(locale === "en" ? "Delete account" : "删除账户")[0].props
+        .disabled,
       true,
     );
     assert.equal(view.buttons(locale === "en" ? "Refresh" : "刷新").length, 0);
@@ -1068,10 +1338,7 @@ test("unverified cached identity is not presented as signed in or allowed to del
   view.render();
   assert.match(view.text(), /Connection unavailable/);
   assert.doesNotMatch(view.text(), /Signed in/);
-  assert.equal(
-    view.buttons("Request account deletion")[0].props.disabled,
-    true,
-  );
+  assert.equal(view.buttons("Delete account")[0].props.disabled, true);
   assert.equal(view.buttons("Refresh")[0].props.disabled, false);
 });
 
@@ -1093,9 +1360,8 @@ test("cached startup describes connecting without claiming authentication or exp
       locale === "en" ? /Signed in|Session expired/ : /已登录|登录已过期/,
     );
     assert.equal(
-      view.buttons(
-        locale === "en" ? "Request account deletion" : "申请删除账户",
-      )[0].props.disabled,
+      view.buttons(locale === "en" ? "Delete account" : "删除账户")[0].props
+        .disabled,
       true,
     );
     assert.equal(
@@ -1370,9 +1636,8 @@ test("connection failures describe connectivity while other verification failure
         locale === "en" ? /Signed in|Session expired/ : /已登录|登录已过期/,
       );
       assert.equal(
-        view.buttons(
-          locale === "en" ? "Request account deletion" : "申请删除账户",
-        )[0].props.disabled,
+        view.buttons(locale === "en" ? "Delete account" : "删除账户")[0].props
+          .disabled,
         true,
       );
       assert.equal(
@@ -1494,7 +1759,7 @@ test("modal action errors stay visible when controller feedback is globally hand
     { feedbackHandledByGlobalBanner: true },
   );
   view.render();
-  view.buttons("Request account deletion")[0].props.onPress();
+  view.buttons("Delete account")[0].props.onPress();
   view.render();
   view
     .nodes()
@@ -1520,10 +1785,7 @@ test("verified account ignores obsolete login errors while preserving unrelated 
       view.text(),
       /Sign-in was cancelled|Sign in again|Session expired/,
     );
-    assert.equal(
-      view.buttons("Request account deletion")[0].props.disabled,
-      false,
-    );
+    assert.equal(view.buttons("Delete account")[0].props.disabled, false);
   }
   const failed = fixture({ error: "local_save_failed" });
   failed.render();
@@ -1543,7 +1805,7 @@ test("delete confirmation isolates old errors and shows only its own failed atte
   const oldAlert = view
     .nodes()
     .find((node) => node.props?.accessibilityRole === "alert").props.children;
-  view.buttons("Request account deletion")[0].props.onPress();
+  view.buttons("Delete account")[0].props.onPress();
   view.render();
   assert(!view.modalText().includes(oldAlert));
   view
@@ -1557,7 +1819,7 @@ test("delete confirmation isolates old errors and shows only its own failed atte
   assert.match(view.modalText(), /could not be saved on this device/i);
   view.buttons("Cancel")[0].props.onPress();
   view.render();
-  view.buttons("Request account deletion")[0].props.onPress();
+  view.buttons("Delete account")[0].props.onPress();
   view.render();
   assert.doesNotMatch(view.modalText(), /could not be saved on this device/i);
 });
@@ -1565,7 +1827,7 @@ test("delete confirmation isolates old errors and shows only its own failed atte
 test("an open delete confirmation follows session expiry and cannot submit", () => {
   const view = fixture();
   view.render();
-  view.buttons("Request account deletion")[0].props.onPress();
+  view.buttons("Delete account")[0].props.onPress();
   view.render();
   view
     .nodes()
@@ -2054,10 +2316,7 @@ test("isolated demo admins can change any feed and profile but cannot delete the
   assert.equal(screen.buttons("Delete").length, 2);
   assert.equal(screen.buttons("Save baby profile").length, 1);
   assert.equal(screen.buttons("Add invitation").length, 1);
-  assert.equal(
-    screen.buttons("Request account deletion")[0].props.disabled,
-    true,
-  );
+  assert.equal(screen.buttons("Delete pilot account")[0].props.disabled, true);
 });
 
 test("uncertain membership transitions hide family records and offer refresh", () => {

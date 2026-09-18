@@ -59,6 +59,31 @@ The browser bundle was rebuilt with demo mode disabled and Metro's cache cleared
 an earlier cached bundle failed the unrelated signed-out family-entry assertion.
 Physical iPhone rendering and VoiceOver checks for this follow-up remain pending.
 
+## My account invitations and deletion — preview 28
+
+Eligible, verified users now see **Received family invitations / 收到的家庭邀请**
+directly below **Signed in / 已登录**, even when account details are collapsed.
+Each invitation shows its inviter, expiry, and Accept/Decline actions. Existing
+join review and local-data replacement/other-invitation consent are unchanged.
+The inbox follows authoritative controller results, not a local dismissal flag:
+cancellation or failure does not mark an invitation handled. A no-family action
+awaiting confirmation retains disabled rows with an explicit pending status.
+Known family membership, unverified/expired sign-in and account deletion do not
+expose join actions; expired invitations are omitted.
+
+**Delete account / 删除账户** is a separate final item in expanded account details,
+below Sign out. Its full consequences and acknowledgement remain in the existing
+confirmation dialog; administrators must still resolve ownership first.
+
+TypeScript and all 522 verification tests passed, including 55 family UI tests.
+The full browser regression, Apple layout checks and isolated bilingual Light/Dark
+family flows at 320/390px also passed. Those flows check collapsed-account visibility,
+non-nested action buttons, cancellation, confirmed decline and the separated
+deletion confirmation. Physical iPhone VoiceOver order, large Dynamic Type and
+keyboard behavior remain unverified. This follow-up is being published as
+**0.2.1 / preview 28**; preview 27 does not contain it. The exact source, build
+status and installation link are recorded separately in the manual runbook.
+
 ## Implementation boundaries
 
 This is an Expo/React Native UI update, not a rewrite in SwiftUI. Existing

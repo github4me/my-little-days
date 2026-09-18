@@ -263,6 +263,10 @@ const messages = {
     "Enter 1–5 valid, different family email addresses.",
   ],
   joinSection: ["接受家庭邀请", "Accept a family invitation"],
+  receivedInvitations: [
+    "收到的家庭邀请（{count}）",
+    "Received family invitations ({count})",
+  ],
   inviteLink: ["邀请链接", "Invitation link"],
   inviteLinkPlaceholder: [
     "粘贴收到的完整邀请链接",
