@@ -1179,3 +1179,23 @@ Those physical-device checks remain explicit release follow-ups.
   cancellation and legacy family draft time-input consistency before release.
 - No schema, API, authentication grant or family data operation is part of this
   release. Native build and installation status are recorded separately below.
+
+### Preview 26 release record
+
+- Source: `1ffac7adbbef6431fcba79097f3bc0dd3960ea5e` on
+  `feature/family-invitations`, committed/pushed through the GitHub plugin.
+- Expo build: `c004f0be-9969-4f37-bda4-a3360c75c020`, version **0.2.1**, iOS
+  build **26**, internal distribution / preview environment, reusing existing
+  remote signing credentials and registered devices.
+  [Build and installation page](https://expo.dev/accounts/expo4chao/projects/little-days/builds/c004f0be-9969-4f37-bda4-a3360c75c020).
+- Build status: **FINISHED** at `2026-09-18T03:31:11Z` (13:31 Sydney), with an
+  internal IPA returned for the exact source SHA/version above. Submitted at
+  `2026-09-18T03:26:59Z`; physical installation is not yet confirmed.
+- All five public preview values matched, with no same-name account overrides.
+  The inspected clean archive matched the exact source SHA and excluded private
+  working files, server source, local dependency copies and credential files.
+- [Family sharing CI for the source commit](https://github.com/github4me/my-little-days/actions/runs/35303127666)
+  passed both TypeScript/browser and API/SQL integration jobs. The API/SQL tests
+  use CI's disposable SQL instance; they do not deploy or modify production.
+- Install over the current app using the page above. Physical-device acceptance remains
+  outstanding; no Azure/API/database deployment or TestFlight submission occurred.

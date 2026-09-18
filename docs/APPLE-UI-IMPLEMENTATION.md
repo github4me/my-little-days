@@ -63,7 +63,7 @@ operations against the real family.
    summaries, forms and reachable Save/Cancel controls. Hold a tab on iOS to
    check Large Content Viewer; its full localized title should be readable.
 2. Toggle **Bold Text** and **Increase Contrast**, return to the app, and verify
-   both **More → Theme → Light/Night**. Also test Automatic against the system
+   both **More → Theme → Light/Dark** (浅色/深色). Also test Automatic against the system
    appearance. Pickers and keyboards should match the active appearance.
 3. In **Settings → Accessibility → Motion**, enable **Reduce Motion** and, where
    offered, **Prefer Cross-Fade Transitions**. Open/close editors and confirmation
