@@ -1,6 +1,6 @@
 # Night appearance and recording inputs
 
-18 September 2026. Baseline tag: `pre-night-theme-2026-09-18` at `7c9e752`.
+18 September 2026. Local baseline tag: `pre-night-theme-2026-09-18` at `7c9e752`.
 
 ## Direction and scope
 

@@ -1072,8 +1072,13 @@ branch updates but not tag creation, so this checkpoint is currently local.
    local SQL migration files, private `work/` outputs or generated screenshots.
 2. Create a clean checkout of the pushed SHA. From that checkout run
    `npx --yes eas-cli@24.6.0 config --platform ios --profile preview --non-interactive`.
-   Confirm internal distribution, preview environment, the HTTPS API URL, customer
-   tenant/mobile client/API scope and `EXPO_PUBLIC_FAMILY_UI_DEMO=0`.
+   Confirm internal distribution, preview environment and iOS build number. Then
+   use `npx --yes eas-cli@24.6.0 env:list preview --scope project --format short`
+   to compare the five public values with the approved HTTPS API URL, customer
+   tenant/mobile client/API scope and `EXPO_PUBLIC_FAMILY_UI_DEMO=0`. Also check
+   `--scope account` for conflicting definitions. `config` lists environment names,
+   not their actual values; do not treat that list as a value comparison. Do not
+   copy any unrelated sensitive environment values into a report or commit.
 3. Inspect the upload with
    `npx --yes eas-cli@24.6.0 build:inspect --platform ios --profile preview --stage archive --output <new-inspection-directory>`.
    Use a new directory outside the source checkout; confirm no private work or
@@ -1101,3 +1106,23 @@ Validation before publication: typecheck/unit/controller/native-boundary suites,
 full browser regression, dedicated night layout checks at 320/390/768px, contrast
 checks and iOS JavaScript export. Physical iPhone/iPad rendering and accessibility
 acceptance remain device checks, not claims inferred from those tests.
+
+### Preview 25 release record
+
+- Source: `bf51b428bf0a38832366b796c1e98a181903e1d2` on
+  `feature/family-invitations`; app changes are in `d7e33a1`.
+- Expo build: `7c35ee3b-02a0-402e-93ef-527dadb2b0e3`, version `0.2.1`, build `25`,
+  internal distribution / preview environment; submitted on 18 September 2026.
+  [Build and installation page](https://expo.dev/accounts/expo4chao/projects/little-days/builds/7c35ee3b-02a0-402e-93ef-527dadb2b0e3).
+- Build status: **FINISHED** at `2026-09-18T00:31:44Z` (10:31 Sydney).
+  EAS returned the internal IPA artifact for the exact source SHA/version above;
+  installation and native acceptance on a physical phone remain user checks.
+- All five project preview values matched; no same-name account-level overrides.
+  The clean upload excludes private work, source-server files and credentials.
+  EAS's expected shallow Git metadata and empty directory placeholders are not
+  evidence of excluded file contents being uploaded.
+- GitHub Family sharing CI passed for `d7e33a1`; local verification and browser
+  checks passed. Actual iOS wheel/keyboard/appearance checks remain pending on the
+  registered phones. Install over the current app, without deleting local data.
+- This build does not deploy Azure resources, API code or database migrations and
+  does not submit to TestFlight. OTA remains disabled.
