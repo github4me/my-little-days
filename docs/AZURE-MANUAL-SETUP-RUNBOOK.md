@@ -1445,3 +1445,31 @@ the public App Store. Build, submission and Apple readback results follow below.
 ## Watch backend release — 18 September 2026
 
 The backend-only release is recorded in [Watch backend deployment](APPLE-WATCH-BACKEND-DEPLOYMENT.md), including exact commit/workflow, migration verification, timer-guard activation and remaining notification setup. Use that record for current rollout status; the earlier build-only entries are historical checkpoints. This deployment does not submit the mobile build to TestFlight or enable push delivery.
+
+## Watch TestFlight build 31 — 18 September 2026
+
+The user subsequently approved the next step: submit the existing combined iPhone/Watch build, not create another build or publish an App Store release.
+
+- Exact EAS build: `24af9879-54a8-4044-998a-5ce4197536b2`, **0.2.1 (31)**, production/STORE, `com.littledays.babylog` with embedded `com.littledays.babylog.watchkitapp`.
+- Preflight: build FINISHED; no existing submission for build 31 and no build 31 in Apple's TestFlight list. Existing build 30 was valid and in beta testing internally/externally. No earlier builds were expired or cancelled.
+- Submission: [`a55adbe9-5ce7-4656-9eb9-17a0c5bd21d4`](https://expo.dev/accounts/expo4chao/projects/little-days/submissions/a55adbe9-5ce7-4656-9eb9-17a0c5bd21d4), scheduled **11:07:51 UTC** (21:07 Sydney), targeting existing App Store Connect app `6809826484` with the existing EAS-held Apple API key.
+- Command: `npx --yes eas-cli@24.6.0 submit --platform ios --profile production --id 24af9879-54a8-4044-998a-5ce4197536b2 --non-interactive --no-auto-testflight-setup --no-wait`. Do not use `--latest`, resubmit while processing, add the plan-restricted changelog flag or create new tester groups.
+- Native source remains the frozen, previously verified local snapshot described in section 32.2; the backend was separately committed/deployed as `cd369de`. Do not mislabel the current backend commit as the native build's source revision.
+
+### Install and verify on paired devices
+
+1. Once Apple marks this build available to your tester, open **TestFlight → My Little Days**, select **0.2.1 (31)** and update over the installed iPhone app. Do not uninstall or clear records.
+2. In TestFlight's app page, open **Information → App Details**. If the embedded Watch app is compatible, use its install/update button. The generated build requires iOS 16.4+ and watchOS 9.4+. See [Apple's TestFlight Watch installation instructions](https://testflight.apple.com/#installation).
+3. Open Little Days on the paired iPhone, sign in if needed and refresh the family. Keep the phone app open for the first Watch connection; confirm the expected family/baby before entering data.
+4. Open Little Days on Watch. At the next real care event, verify milk-feed, nappy and sleep recording appears once on the phone and synchronizes. A Watch-local or phone-received status is not yet SQL confirmation. Do not fabricate records in a real family just to test.
+5. Verify timer controls respond immediately, reconnect does not duplicate a saved entry, and the family guard prevents competing live timers. The under-one-minute live-sleep cancellation rule remains; manual backfills are separate.
+6. Family-entry push delivery is still disabled pending protected Expo credentials and acceptance-account configuration. Missing alerts are expected in this recording-only rollout; do not change Azure flags just to dismiss that state.
+7. For external testers, check **App Store Connect → My Little Days → TestFlight → build 31** and the existing intended group. If Apple requires beta review, complete the approved beta-review information there; upload success alone is not external availability. Do not publish a public App Store release.
+
+### Submission blocked — diagnostic handoff
+
+The submission ended **ERRORED at 11:09:01 UTC**. Both EAS CLI 24.6.0 and 24.7.0 returned no error detail and an empty submission `logFiles` array. Apple readback afterward contained no build 31. The cause is therefore **not yet diagnosed**; native-build success must not be described as successful TestFlight upload.
+
+The exact submission page was opened in the in-app browser, but it redirects to Expo sign-in. Next: the account owner signs in there, then inspect the failed submission's error/logs. Do not share passwords or tokens in chat. Do not blindly resubmit, regenerate profiles, modify the Watch target or increment the build number before identifying the failure. If Expo identifies a transient service failure, retry the same submission; if Apple identifies a binary issue, fix and verify that specific issue before a new build.
+
+No tester groups, Apple app metadata, older builds, Azure configuration or production data were changed by this submission attempt. Physical-device installation and Watch behaviour remain unverified.
