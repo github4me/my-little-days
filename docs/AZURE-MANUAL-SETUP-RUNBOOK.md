@@ -1368,3 +1368,48 @@ remains separate and pending.
 - Install from that Expo page over the existing app, without clearing data.
   Phone installation, VoiceOver and Dynamic Type acceptance remain pending.
   No Azure/API/SQL deployment or TestFlight submission occurred.
+
+## 30. TestFlight 0.2.1 build 30 (18 September 2026)
+
+The user requested TestFlight delivery of the app changes in preview 29. Internal
+preview 29 is not a store-signed IPA, so a new production build was required.
+No runtime code changed for packaging. This includes the Apple-guided UI updates,
+task-first Care/Play help, received invitations below Signed in, and the standalone
+Delete account item at the bottom of More.
+
+### Build and submission procedure
+
+1. Use the reviewed release checkout at `550e425fbb42bd13b54fea9aaee0c093a332a636`,
+   preserving unrelated local work. Recheck the **production** EAS environment,
+   not preview: all five approved public values must match section 12.1, including
+   the HTTPS API URL and demo `0`, with no same-name account-level overrides.
+2. Confirm store distribution, production environment/channel, bundle
+   `com.littledays.babylog`, App Store Connect app `6809826484`, and disabled OTA.
+   Inspect the clean archive and use existing frozen remote signing credentials.
+   The current profile auto-increments local build number **29 → 30**; retain that
+   generated app.json-only change in Git using the GitHub plugin.
+3. Wait for the exact store build
+   [`d0c59fb1-064a-4796-a39a-d20602deaa53`](https://expo.dev/accounts/expo4chao/projects/little-days/builds/d0c59fb1-064a-4796-a39a-d20602deaa53)
+   to finish. Confirm version **0.2.1 (30)**, distribution **STORE** and source
+   `550e425`. EAS records the checkout SHA before its local build-number bump.
+4. Submit that exact ID with the production profile, noninteractive mode and
+   `--no-auto-testflight-setup`, as in section 23.7. Do not submit the internal
+   preview or use `--latest`. Do not add the plan-restricted changelog flag.
+5. Verify EAS submission completion, then Apple processing and internal/external
+   availability separately. Do not upload again just because Apple is processing.
+6. In **App Store Connect → My Little Days → TestFlight → iOS → 0.2.1 → build 30**,
+   add What to Test if desired: "Refined Light/Dark layouts and care forms.
+   Received family invitations now appear below Signed in. Delete account is a
+   separate item at the bottom of More; opening it still requires confirmation."
+   Use only the intended existing tester group; external beta approval is separate.
+7. Install the new build through TestFlight over the existing app. Do not uninstall,
+   clear data, or test deletion against a real account. Check both languages and
+   appearances, invitations, cancellation, sign-in and normal family recording.
+   Device acceptance is not established by upload or Apple processing alone.
+
+Preflight verified the production public values and lack of account overrides.
+The clean archive matched the reviewed source and excluded private work, generated
+exports, dependencies, credentials and server files. The existing TestFlight
+build 24 was VALID and IN_BETA_TESTING internally and externally at preflight.
+This release does not deploy Azure/API/SQL, change tester groups or publish to
+the public App Store. Build, submission and Apple readback results follow below.
