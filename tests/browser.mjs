@@ -242,8 +242,11 @@ const compactEdit = await page
   .first()
   .boundingBox();
 assert.ok(
-  compactEdit && compactEdit.height <= 38,
-  "record actions should be compact",
+  compactEdit &&
+    compactEdit.width >= 44 &&
+    compactEdit.height >= 44 &&
+    compactEdit.height <= 60,
+  "record actions should keep a compact layout without shrinking below the 44pt touch target",
 );
 const recordKindOptions = await Promise.all(
   ["喂奶", "尿布", "睡眠"].map((name) =>
@@ -678,7 +681,7 @@ assert.equal(
 await page.getByRole("tab", { name: "Records", exact: true }).click();
 await page.getByText("Last 7 days", { exact: true }).waitFor();
 const narrowRecordsHeading = await page
-  .getByText("Every day remembered", { exact: true })
+  .getByRole("heading", { name: "Records", exact: true })
   .boundingBox();
 assert.ok(narrowRecordsHeading);
 assert.ok(
@@ -692,10 +695,24 @@ const narrowRecordKindOptions = await Promise.all(
 );
 assert.ok(
   narrowRecordKindOptions.every(
-    (box) => Math.abs(box.y - narrowRecordKindOptions[0].y) < 1,
+    (box) =>
+      box &&
+      box.width >= 44 &&
+      box.height >= 44 &&
+      box.x >= 20 &&
+      box.x + box.width <= 320,
   ),
-  "record type choices should stay on one row on a narrow phone",
+  "record type choices should wrap within the narrow content area without shrinking touch targets",
 );
+for (let index = 1; index < narrowRecordKindOptions.length; index++) {
+  const current = narrowRecordKindOptions[index],
+    previous = narrowRecordKindOptions[index - 1];
+  assert.ok(
+    current.x >= previous.x + previous.width ||
+      current.y >= previous.y + previous.height,
+    "wrapped record choices must retain reading order without overlap",
+  );
+}
 await page.getByRole("tab", { name: "Today", exact: true }).click();
 await page.getByRole("button", { name: "+ Add", exact: true }).first().click();
 await page.getByLabel("Time date", { exact: true }).fill("2026-08-28");
@@ -1127,12 +1144,22 @@ for (const names of [playControls.slice(0, 3), playControls.slice(3)]) {
   assert.ok(
     boxes.every(
       (b) =>
-        Math.abs(b.y - boxes[0].y) < 1 &&
+        b.width >= 44 &&
         b.height >= 44 &&
         b.x >= 0 &&
         b.x + b.width <= page.viewportSize().width,
     ),
+    `care choices must fit the screen with accessible touch targets: ${JSON.stringify(boxes)}`,
   );
+  for (let index = 1; index < boxes.length; index++) {
+    const current = boxes[index],
+      previous = boxes[index - 1];
+    assert.ok(
+      current.x >= previous.x + previous.width ||
+        current.y >= previous.y + previous.height,
+      "care choices may wrap, but must preserve reading order without overlap",
+    );
+  }
 }
 await page
   .getByRole("button", { name: "Temp", exact: true })
@@ -1739,7 +1766,9 @@ async function assertCompactCalendarToolbar(labels) {
       ),
     "calendar tools stay left aligned",
   );
-  const title = await page.getByRole("heading").boundingBox();
+  const title = await page
+    .getByRole("heading", { name: /^(Records|记录)$/ })
+    .boundingBox();
   assert.ok(title && title.x + title.width <= boxes[3].x);
   assert.ok(
     Math.abs(title.y + title.height / 2 - (boxes[3].y + boxes[3].height / 2)) <=

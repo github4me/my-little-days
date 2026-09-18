@@ -1,4 +1,5 @@
 import React, { useContext, useRef, useState } from "react";
+import NativeDateTimeField from "../NativeDateTimeField";
 import { View, Switch, Platform } from "react-native";
 import { randomUUID } from "expo-crypto";
 import { Button, Chips, Field, T, Theme, row } from "../ui";
@@ -166,11 +167,11 @@ export default function SharedReminders(props: SharedRemindersProps) {
           }
         />
         {draft.mode === "daily" ? (
-          <Field
+          <NativeDateTimeField
+            mode="time"
             label={copy("每日时间 · HH:mm", "Daily time · HH:mm")}
             value={draft.dailyTime}
             onChange={(dailyTime) => setDraft({ ...draft, dailyTime })}
-            maxLength={5}
           />
         ) : (
           <Field

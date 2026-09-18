@@ -1,5 +1,6 @@
 import React, { useContext, useEffect, useState } from "react";
-import { Modal, Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, View } from "react-native";
+import Modal from "../AccessibleModal";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useI18n, type AppLocale } from "../i18n";
 import { Button, Card, T, Theme } from "../ui";

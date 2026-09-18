@@ -2,7 +2,6 @@ import React, { useContext, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
-  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -10,10 +9,11 @@ import {
   TextInput,
   View,
 } from "react-native";
-import DateTimePicker from "@react-native-community/datetimepicker";
+import NativeDateTimeField from "../NativeDateTimeField";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useI18n, type AppLocale } from "../i18n";
-import { Button, Card, T, Theme, dark } from "../ui";
+import { Button, Card, T, Theme } from "../ui";
+import Modal from "../AccessibleModal";
 import type { SharedFeed } from "./contracts";
 import type { FeedDraft } from "./pilotState";
 import {
@@ -139,7 +139,10 @@ function Input({
         {...props}
         accessibilityLabel={label}
         placeholderTextColor={c.muted}
-        keyboardAppearance={c === dark ? "dark" : "light"}
+        keyboardAppearance={c.isDark ? "dark" : "light"}
+        allowFontScaling
+        maxFontSizeMultiplier={0}
+        accessibilityState={{ disabled: props.editable === false }}
         selectionColor={c.primary}
         style={[
           styles.input,
@@ -261,9 +264,7 @@ function DateFields({
   onValidityChange: (valid: boolean) => void;
   disabled: boolean;
 }) {
-  const c = useContext(Theme);
   const [fields, setFields] = useState(() => localFields(value));
-  const [picker, setPicker] = useState<"date" | "time" | null>(null);
   useEffect(() => {
     setFields(localFields(value));
     onValidityChange(true);
@@ -302,48 +303,28 @@ function DateFields({
           </>
         ) : (
           <>
-            <View style={{ flex: 1.25, gap: 4 }}>
-              <T raw style={{ color: c.muted, fontSize: 13 }}>
-                {dateLabel}
-              </T>
-              <Button
-                label={fields.date}
-                secondary
-                disabled={disabled}
-                onPress={() => setPicker(picker === "date" ? null : "date")}
+            <View style={{ flex: 1.25 }}>
+              <NativeDateTimeField
+                label={dateLabel}
+                value={fields.date}
+                mode="date"
+                editable={!disabled}
+                maximumDate={new Date()}
+                onChange={(date) => update({ ...fields, date })}
               />
             </View>
-            <View style={{ flex: 1, gap: 4 }}>
-              <T raw style={{ color: c.muted, fontSize: 13 }}>
-                {timeLabel}
-              </T>
-              <Button
-                label={fields.time}
-                secondary
-                disabled={disabled}
-                onPress={() => setPicker(picker === "time" ? null : "time")}
+            <View style={{ flex: 1 }}>
+              <NativeDateTimeField
+                label={timeLabel}
+                value={fields.time}
+                mode="time"
+                editable={!disabled}
+                onChange={(time) => update({ ...fields, time })}
               />
             </View>
           </>
         )}
       </View>
-      {picker && Platform.OS !== "web" ? (
-        <DateTimePicker
-          value={new Date(value)}
-          mode={picker}
-          display={Platform.OS === "ios" ? "spinner" : "default"}
-          maximumDate={new Date()}
-          is24Hour
-          onChange={(event, next) => {
-            if (Platform.OS !== "ios" || event.type === "dismissed")
-              setPicker(null);
-            if (next && event.type !== "dismissed") {
-              onValidityChange(true);
-              onChange(next.toISOString());
-            }
-          }}
-        />
-      ) : null}
     </View>
   );
 }
@@ -2049,7 +2030,7 @@ const styles = {
       minHeight: 48,
       paddingHorizontal: 12,
       paddingVertical: 10,
-      fontSize: 15,
+      fontSize: 17,
     },
     inputLineHeight: { lineHeight: 22 },
     consent: {
@@ -2068,7 +2049,7 @@ const styles = {
       justifyContent: "center",
       marginTop: 2,
     },
-    dateRow: { flexDirection: "row", gap: 10 },
+    dateRow: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
     actions: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
     flexButton: { flexGrow: 1, flexBasis: 120, paddingHorizontal: 12 },
     listItem: { borderTopWidth: 1, paddingTop: 12, gap: 6 },

@@ -34,6 +34,7 @@ jobs:
       - run: npm run export:web
       - run: npx playwright install --with-deps chromium
       - run: npm run test:browser
+      - run: npm run test:apple-browser
       - name: Export isolated family UI preview
         env:
           EXPO_PUBLIC_FAMILY_UI_DEMO: "1"

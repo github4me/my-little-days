@@ -157,6 +157,7 @@ function fixture(overrides = {}, locale = "en") {
       Set,
       require(name) {
         if (name === "react") return react;
+        if (name === "../AccessibleModal") return "Modal";
         if (name === "react-native") return native;
         if (name === "react-native-safe-area-context")
           return { SafeAreaView: "SafeAreaView" };

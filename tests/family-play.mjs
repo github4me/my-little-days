@@ -9,7 +9,7 @@ import ts from "typescript";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 // Exercise the real screen and play-domain code at React Native/storage boundaries.
-function fixture(sharedMode = true) {
+function fixture(sharedMode = true, display = { width: 390, fontScale: 1 }) {
   let active = "",
     slot = 0,
     nodes = [],
@@ -88,8 +88,11 @@ function fixture(sharedMode = true) {
       Pressable: "Pressable",
       ScrollView: "ScrollView",
       View: "View",
+      useWindowDimensions: () => display,
       Linking: { openURL: async () => {} },
     },
+    "react-native-safe-area-context": { SafeAreaView: "SafeAreaView" },
+    "./AccessibleModal": { __esModule: true, default: "Modal" },
     "./ui": { Theme: palette, Button: "Button", Card: "Card", T: "T" },
     "./i18n": { useI18n: () => ({ locale: "en-US" }) },
     "./DailyCare": { __esModule: true, default: "DailyCare" },
@@ -257,4 +260,34 @@ test("offline check-ins retain their existing personal persistence behavior", as
     world.calls.filter((c) => c.kind.startsWith("shared")).length,
     0,
   );
+});
+
+test("play storage disclosure reflects the active family or personal workspace", async () => {
+  for (const shared of [false, true]) {
+    const world = fixture(shared);
+    await world.ready();
+    const contents = JSON.stringify(world.render());
+    assert.equal(
+      contents.includes("Play settings and dated check-ins stay locally"),
+      !shared,
+    );
+    assert.equal(
+      contents.includes(
+        "Family play settings and check-ins depend on confirmed synchronization",
+      ),
+      shared,
+    );
+  }
+});
+
+test("large-text play section controls reflow without reducing label size", async () => {
+  const world = fixture(true, { width: 390, fontScale: 2 });
+  await world.ready();
+  for (const label of ["Play activities", "Daily care", "Play settings"]) {
+    const option = world.node(label);
+    assert.equal(option.props.style.flexBasis, "100%");
+    assert.ok(
+      option.props.style.minWidth >= 44 && option.props.style.minHeight >= 44,
+    );
+  }
 });

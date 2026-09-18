@@ -2,16 +2,17 @@ import React, { useCallback, useContext, useRef, useState } from "react";
 import {
   Keyboard,
   Linking,
-  Modal,
   Platform,
   Pressable,
   View,
+  useWindowDimensions,
 } from "react-native";
+import Modal from "./AccessibleModal";
 import { SafeAreaView } from "react-native-safe-area-context";
 import DateTimePicker, {
   type DateTimePickerEvent,
 } from "@react-native-community/datetimepicker";
-import { Button, Card, Field, T, Theme, dark } from "./ui";
+import { Button, Card, Field, T, Theme } from "./ui";
 import { useI18n } from "./i18n";
 import { CareRecord, validateCareRecord, makeId } from "./domain";
 import {
@@ -50,6 +51,8 @@ export default function DailyCare({
   canEdit?: (id: string) => boolean;
 }) {
   const c = useContext(Theme);
+  const { fontScale } = useWindowDimensions();
+  const largeText = fontScale > 1.3;
   const { locale } = useI18n();
   const copy = (w: LearningText) => (locale === "en-US" ? w.en : w.zh);
   const text = (zh: string, en: string) => (locale === "en-US" ? en : zh);
@@ -177,7 +180,7 @@ export default function DailyCare({
       value={boundedCarePickerDate(picker.value, now, birthDate)}
       mode={picker.mode}
       display={Platform.OS === "ios" ? "spinner" : "default"}
-      themeVariant={c === dark ? "dark" : "light"}
+      themeVariant={c.isDark ? "dark" : "light"}
       locale={locale}
       is24Hour
       minimumDate={birthDate ? new Date(`${birthDate}T00:00:00`) : undefined}
@@ -271,7 +274,13 @@ export default function DailyCare({
   }
   return (
     <View style={{ gap: 14 }}>
-      <View style={{ flexDirection: "row", gap: 5 }}>
+      <View
+        style={{
+          flexDirection: "row",
+          flexWrap: largeText ? "wrap" : "nowrap",
+          gap: 5,
+        }}
+      >
         {careOptions.map((o) => (
           <Pressable
             key={o.id}
@@ -288,8 +297,11 @@ export default function DailyCare({
             }}
             style={{
               flex: 1,
+              ...(largeText ? { flexBasis: "44%", flexGrow: 1 } : {}),
               minWidth: 0,
               minHeight: 62,
+              paddingVertical: 8,
+              paddingHorizontal: 3,
               alignItems: "center",
               justifyContent: "center",
               borderRadius: 14,
@@ -299,7 +311,7 @@ export default function DailyCare({
             }}
           >
             <PlayIcon kind={o.icon} color={c.primary} />
-            <T raw style={{ fontSize: 11 }}>
+            <T raw style={{ fontSize: 11, textAlign: "center" }}>
               {copy(o.label)}
             </T>
           </Pressable>
@@ -371,20 +383,32 @@ export default function DailyCare({
                 "Measurement method · defaults to armpit; select the site used",
               )}
             </T>
-            <View style={{ flexDirection: "row", gap: 4 }}>
+            <View
+              style={{
+                flexDirection: "row",
+                flexWrap: largeText ? "wrap" : "nowrap",
+                gap: 4,
+              }}
+            >
               {temperatureMethods.map((m) => (
                 <Pressable
                   key={m.id}
                   accessibilityRole="button"
                   accessibilityLabel={copy(m.label)}
-                  accessibilityState={{ selected: method === m.id }}
+                  accessibilityState={{
+                    selected: method === m.id,
+                    disabled: busy,
+                  }}
                   aria-pressed={method === m.id}
                   disabled={busy}
                   onPress={() => setMethod(m.id)}
                   style={{
                     flex: 1,
+                    ...(largeText ? { flexBasis: "44%", flexGrow: 1 } : {}),
                     minWidth: 0,
                     minHeight: 44,
+                    paddingVertical: 8,
+                    paddingHorizontal: 3,
                     justifyContent: "center",
                     alignItems: "center",
                     borderRadius: 10,
@@ -393,7 +417,7 @@ export default function DailyCare({
                     backgroundColor: method === m.id ? c.soft : c.bg,
                   }}
                 >
-                  <T raw style={{ fontSize: 10 }}>
+                  <T raw style={{ fontSize: 12, textAlign: "center" }}>
                     {copy(m.label)}
                   </T>
                 </Pressable>
@@ -401,7 +425,7 @@ export default function DailyCare({
             </View>
           </>
         ) : null}
-        <View style={{ flexDirection: "row", gap: 8 }}>
+        <View style={{ flexDirection: largeText ? "column" : "row", gap: 8 }}>
           <View style={{ flex: 1.4, minWidth: 0 }}>
             {dateTimeField("date")}
           </View>
@@ -409,6 +433,7 @@ export default function DailyCare({
         </View>
         <Pressable
           accessibilityRole="button"
+          accessibilityState={{ disabled: busy }}
           disabled={busy}
           onPress={() => {
             setDate(playDayKey(new Date(now)));
@@ -474,9 +499,14 @@ export default function DailyCare({
             }}
           >
             <View
-              style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
+              style={{
+                flexDirection: "row",
+                flexWrap: "wrap",
+                alignItems: "center",
+                gap: 6,
+              }}
             >
-              <View style={{ flex: 1 }}>
+              <View style={{ flex: 1, minWidth: largeText ? "100%" : 0 }}>
                 <T raw style={{ fontSize: 14, fontWeight: "600" }}>
                   {r.kind === "temperature"
                     ? `${r.temperature}°C · ${copy(temperatureMethods.find((m) => m.id === r.method)!.label)}`
@@ -513,6 +543,7 @@ export default function DailyCare({
                 }}
                 style={{
                   minHeight: 44,
+                  minWidth: 44,
                   justifyContent: "center",
                   paddingHorizontal: 4,
                 }}
@@ -534,6 +565,7 @@ export default function DailyCare({
                 }}
                 style={{
                   minHeight: 44,
+                  minWidth: 44,
                   justifyContent: "center",
                   paddingHorizontal: 4,
                 }}
@@ -627,6 +659,7 @@ export default function DailyCare({
             <SafeAreaView
               edges={["bottom", "left", "right"]}
               accessibilityViewIsModal
+              onAccessibilityEscape={() => setPicker(null)}
               style={{
                 backgroundColor: c.elevated,
                 borderTopLeftRadius: 24,
@@ -641,6 +674,7 @@ export default function DailyCare({
                   alignItems: "center",
                   justifyContent: "space-between",
                   gap: 8,
+                  flexWrap: "wrap",
                 }}
               >
                 <Pressable
@@ -648,6 +682,7 @@ export default function DailyCare({
                   onPress={() => setPicker(null)}
                   style={{
                     minHeight: 44,
+                    minWidth: 44,
                     justifyContent: "center",
                     padding: 8,
                   }}
@@ -656,7 +691,15 @@ export default function DailyCare({
                     {text("取消", "Cancel")}
                   </T>
                 </Pressable>
-                <T raw accessibilityRole="header" style={{ fontWeight: "700" }}>
+                <T
+                  raw
+                  accessibilityRole="header"
+                  style={{
+                    flexShrink: 1,
+                    textAlign: "center",
+                    fontWeight: "700",
+                  }}
+                >
                   {picker.mode === "date"
                     ? text("照护日期", "Care date")
                     : text("照护时间", "Care time")}
@@ -666,6 +709,7 @@ export default function DailyCare({
                   onPress={() => acceptPicker(picker.value)}
                   style={{
                     minHeight: 44,
+                    minWidth: 44,
                     justifyContent: "center",
                     padding: 8,
                   }}

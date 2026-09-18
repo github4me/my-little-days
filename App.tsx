@@ -7,13 +7,25 @@ import {
   Appearance,
   AppState,
   Image,
-  Modal,
+  Keyboard,
   Platform,
   useWindowDimensions,
   useColorScheme,
 } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
+import Modal from "./src/AccessibleModal";
+import {
+  AccessibilityPreferencesProvider,
+  useAccessibilityPreferences,
+} from "./src/accessibilityPreferences";
+import { selectPalette } from "./src/palette";
+import {
+  AppTabBar,
+  appTabs,
+  type AppTab,
+  useNavigationAnnouncement,
+} from "./src/AppNavigation";
 import {
   Entry,
   State,
@@ -61,18 +73,7 @@ import { finishLiveSleep } from "./src/sleepTimer";
 import CareIcon from "./src/CareIcon";
 import PlayLearning from "./src/PlayLearning";
 import { rescheduleAutoFeedReminders } from "./src/reminders";
-import {
-  Theme,
-  light,
-  dark,
-  T,
-  Card,
-  Button,
-  Chips,
-  Field,
-  row,
-  heading,
-} from "./src/ui";
+import { Theme, T, Card, Button, Chips, Field, row, heading } from "./src/ui";
 import {
   formatDate,
   formatTime,
@@ -140,18 +141,20 @@ export default function App() {
   }, []);
   const locale = resolveLocale(language);
   return (
-    <SafeAreaProvider>
-      <I18nProvider locale={locale}>
-        <BabyApp
-          language={language}
-          onLanguageChange={async (next) => {
-            setActiveLocale(resolveLocale(next));
-            await saveLanguage(next);
-            setLanguage(next);
-          }}
-        />
-      </I18nProvider>
-    </SafeAreaProvider>
+    <AccessibilityPreferencesProvider>
+      <SafeAreaProvider>
+        <I18nProvider locale={locale}>
+          <BabyApp
+            language={language}
+            onLanguageChange={async (next) => {
+              setActiveLocale(resolveLocale(next));
+              await saveLanguage(next);
+              setLanguage(next);
+            }}
+          />
+        </I18nProvider>
+      </SafeAreaProvider>
+    </AccessibilityPreferencesProvider>
   );
 }
 function BabyApp({
@@ -161,13 +164,16 @@ function BabyApp({
   language: LanguagePreference;
   onLanguageChange: (language: LanguagePreference) => Promise<void>;
 }) {
-  const compactTitle = useWindowDimensions().width < 360;
+  const { width, fontScale } = useWindowDimensions();
+  const compactTitle = width < 360;
+  const largeType = fontScale >= 1.35;
+  const { highContrast } = useAccessibilityPreferences();
   const systemTheme = useColorScheme();
   const [themePreference, setThemePreference] = useState<boolean | null>(null);
   const [recordView, setRecordView] = useState<RecordView>("bars");
   const [activeRecordView, setActiveRecordView] = useState<RecordView>("bars");
   const darkMode = themePreference ?? systemTheme === "dark";
-  const c = darkMode ? dark : light;
+  const c = selectPalette(darkMode, highContrast);
   useEffect(() => {
     if (Platform.OS === "web") return;
     Appearance.setColorScheme(
@@ -185,7 +191,7 @@ function BabyApp({
     [fatal, setFatal] = useState(""),
     [message, setMessage] = useState(""),
     [sleepNotice, setSleepNotice] = useState(""),
-    [tab, setTab] = useState("today"),
+    [tab, setTab] = useState<AppTab>("today"),
     [settingsPage, setSettingsPage] = useState<
       "main" | "privacy" | "family" | "family-demo"
     >("main"),
@@ -311,6 +317,19 @@ function BabyApp({
     stoppedAt: string;
     baseVersion?: string;
   } | null>(null);
+  const routeKey = tab === "settings" ? `settings/${settingsPage}` : tab;
+  const routeTitle = t(
+    tab === "settings" && settingsPage !== "main"
+      ? settingsPage === "privacy"
+        ? "隐私与支持"
+        : "家庭共享"
+      : appTabs.find((item) => item.key === tab)!.label,
+  );
+  useNavigationAnnouncement(
+    routeKey,
+    routeTitle,
+    !!editor || !!deleting || !!finishingFeed,
+  );
   function showProfile() {
     setOpenProfile(true);
     setSettingsPage("main");
@@ -667,8 +686,8 @@ function BabyApp({
       .sort((a, b) => Date.parse(b.end!) - Date.parse(a.end!))[0];
   const pageTitles: Record<string, string> = {
     today: "今天的小日子",
-    records: "每一天，都记得",
-    growth: "慢慢长大的你",
+    records: "记录",
+    growth: "成长",
     play: "照护",
     settings: "我的",
   };
@@ -682,7 +701,14 @@ function BabyApp({
           borderColor: c.line,
         }}
       >
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 9 }}>
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 9,
+            flexWrap: largeType ? "wrap" : "nowrap",
+          }}
+        >
           <View
             style={{
               backgroundColor: c[e.type],
@@ -702,10 +728,7 @@ function BabyApp({
             )}
           </View>
           <View style={{ flex: 1, minWidth: 0, gap: 1 }}>
-            <T
-              numberOfLines={1}
-              style={{ fontSize: 13, lineHeight: 19, fontWeight: "600" }}
-            >
+            <T style={{ fontSize: 13, lineHeight: 19, fontWeight: "600" }}>
               {detail(e, now)}
             </T>
             <T style={{ fontSize: 11, lineHeight: 16, color: c.muted }}>
@@ -717,7 +740,15 @@ function BabyApp({
               </T>
             ) : null}
           </View>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 6,
+              width: largeType ? "100%" : undefined,
+              justifyContent: "flex-end",
+            }}
+          >
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={t("编辑{kind}", {
@@ -726,11 +757,17 @@ function BabyApp({
               disabled={
                 family.sharedMode && !family.canEditRecord("entry", e.id)
               }
+              accessibilityState={{
+                disabled:
+                  family.sharedMode && !family.canEditRecord("entry", e.id),
+              }}
               onPress={() => beginEditor(e)}
               style={{
-                minHeight: 36,
+                minHeight: 44,
+                minWidth: 44,
                 justifyContent: "center",
-                paddingHorizontal: 3,
+                alignItems: "center",
+                paddingHorizontal: 5,
               }}
             >
               <T style={{ color: c.primary, fontSize: 12 }}>编辑</T>
@@ -743,11 +780,17 @@ function BabyApp({
               disabled={
                 family.sharedMode && !family.canEditRecord("entry", e.id)
               }
+              accessibilityState={{
+                disabled:
+                  family.sharedMode && !family.canEditRecord("entry", e.id),
+              }}
               onPress={() => beginDelete(e)}
               style={{
-                minHeight: 36,
+                minHeight: 44,
+                minWidth: 44,
                 justifyContent: "center",
-                paddingHorizontal: 3,
+                alignItems: "center",
+                paddingHorizontal: 5,
               }}
             >
               <T style={{ fontSize: 11, color: c.muted }}>删除</T>
@@ -756,7 +799,6 @@ function BabyApp({
         </View>
         {e.note ? (
           <T
-            numberOfLines={1}
             style={{
               color: c.muted,
               fontSize: 11,
@@ -777,74 +819,71 @@ function BabyApp({
         edges={["top", "left", "right"]}
       >
         <StatusBar style={darkMode ? "light" : "dark"} />
-        <View
-          style={{ flex: 1, width: "100%", maxWidth: 720, alignSelf: "center" }}
-        >
+        <View style={{ flex: 1 }}>
           <ScrollView
             ref={mainScroll}
-            contentContainerStyle={{ padding: 20, gap: 20, paddingBottom: 28 }}
+            nativeID={`screen-${tab}`}
+            {...(Platform.OS === "web"
+              ? { role: "tabpanel" as const, "aria-labelledby": `tab-${tab}` }
+              : {})}
+            contentContainerStyle={{
+              padding: 20,
+              gap: 20,
+              paddingBottom: 28,
+              width: "100%",
+              maxWidth: 720,
+              alignSelf: "center",
+            }}
             automaticallyAdjustKeyboardInsets
             keyboardDismissMode={
               Platform.OS === "ios" ? "interactive" : "on-drag"
             }
             keyboardShouldPersistTaps="handled"
           >
-            <View>
-              <View>
+            {tab !== "settings" || settingsPage === "main" ? (
+              <View
+                style={{
+                  flexDirection: largeType ? "column" : "row",
+                  alignItems: largeType ? "stretch" : "center",
+                  gap: 8,
+                }}
+              >
                 <T
-                  style={{
-                    fontSize: 11,
-                    letterSpacing: 3,
-                    color: c.muted,
-                    fontWeight: "700",
-                  }}
+                  accessibilityRole="header"
+                  style={[
+                    heading,
+                    {
+                      fontSize: compactTitle ? 24 : 28,
+                      lineHeight: compactTitle ? 31 : 36,
+                      flexShrink: 1,
+                      flex: largeType ? undefined : 1,
+                      minWidth: 0,
+                    },
+                  ]}
                 >
-                  MY LITTLE DAYS · 小日子
+                  {tab === "today"
+                    ? t("{name}的小日子", { name: state.profile.name })
+                    : pageTitles[tab]}
                 </T>
-                {tab !== "settings" ? (
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      alignItems: "center",
-                      gap: 8,
-                      marginTop: 6,
-                    }}
-                  >
-                    <T
-                      accessibilityRole="header"
-                      style={[
-                        heading,
-                        {
-                          fontSize: compactTitle ? 24 : 28,
-                          lineHeight: compactTitle ? 31 : 36,
-                          flexShrink: 1,
-                          flex: 1,
-                          minWidth: 0,
-                        },
-                      ]}
-                    >
-                      {tab === "today"
-                        ? t("{name}的小日子", { name: state.profile.name })
-                        : pageTitles[tab]}
-                    </T>
-                    {tab === "records" ? (
-                      <RecordsViewToggle
-                        value={activeRecordView}
-                        onChange={setActiveRecordView}
-                      />
-                    ) : null}
-                  </View>
+                {tab === "records" ? (
+                  <RecordsViewToggle
+                    value={activeRecordView}
+                    onChange={setActiveRecordView}
+                  />
                 ) : null}
               </View>
-            </View>
+            ) : null}
             {message ? (
               <Pressable
+                accessibilityRole="button"
                 onPress={() => setMessage("")}
                 accessibilityLabel={t("关闭提示")}
                 style={{
                   padding: 12,
                   borderRadius: 14,
                   backgroundColor: c.soft,
+                  minHeight: 44,
+                  justifyContent: "center",
                 }}
               >
                 <T style={{ fontSize: 13 }}>{t(message)}　×</T>
@@ -953,7 +992,12 @@ function BabyApp({
                       >
                         一点一滴，都是成长
                       </T>
-                      <Pressable onPress={showProfile}>
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={`${t("打开宝宝档案")} · ${age(state.profile.birthDate, new Date(now))}`}
+                        onPress={showProfile}
+                        style={{ minHeight: 44, justifyContent: "center" }}
+                      >
                         <T
                           style={{
                             color: c.heroMuted,
@@ -1011,7 +1055,16 @@ function BabyApp({
                   >
                     今日数据
                   </T>
-                  <View style={row}>
+                  <View
+                    style={[
+                      row,
+                      largeType && {
+                        flexDirection: "column",
+                        alignItems: "stretch",
+                        gap: 16,
+                      },
+                    ]}
+                  >
                     {[
                       [String(summary.feedMl), "mL 已记录奶量"],
                       [
@@ -1022,7 +1075,7 @@ function BabyApp({
                       ],
                       [String(summary.diaperCount), "次 换尿布"],
                     ].map(([v, l]) => (
-                      <View key={l}>
+                      <View key={l} style={{ flexShrink: 1, minWidth: 0 }}>
                         <T
                           style={{
                             color: c.heroText,
@@ -1038,7 +1091,7 @@ function BabyApp({
                     ))}
                   </View>
                 </View>
-                <View style={row}>
+                <View style={[row, { flexWrap: "wrap" }]}>
                   <T style={heading}>照顾此刻</T>
                   <T style={{ fontSize: 12, color: c.muted }}>
                     {formatDate(now, {
@@ -1057,7 +1110,12 @@ function BabyApp({
                         : latestSleep;
                   return (
                     <Card key={type} style={{ padding: 18 }}>
-                      <View style={row}>
+                      <View
+                        style={[
+                          row,
+                          { flexWrap: largeType ? "wrap" : "nowrap" },
+                        ]}
+                      >
                         <View
                           style={{
                             backgroundColor: c[type],
@@ -1070,7 +1128,9 @@ function BabyApp({
                         >
                           <CareIcon kind={type} color={c.icon} />
                         </View>
-                        <View style={{ flex: 1 }}>
+                        <View
+                          style={{ flex: 1, minWidth: largeType ? "70%" : 0 }}
+                        >
                           <T style={{ fontWeight: "700", fontSize: 17 }}>
                             {type === "feed" && activeFeed
                               ? "正在喂养"
@@ -1137,6 +1197,7 @@ function BabyApp({
                             }
                             disabled={busy || (type === "sleep" && family.busy)}
                             secondary
+                            style={largeType ? { width: "100%" } : undefined}
                             onPress={() => {
                               if (type === "sleep")
                                 void act(() => toggleSleep(active));
@@ -1156,7 +1217,7 @@ function BabyApp({
                           onPress={() => beginEditor(newEntry("sleep"))}
                           style={{
                             alignSelf: "flex-start",
-                            minHeight: 36,
+                            minHeight: 44,
                             justifyContent: "center",
                           }}
                         >
@@ -1197,7 +1258,7 @@ function BabyApp({
             {tab === "growth" ? (
               <>
                 <Card>
-                  <View style={row}>
+                  <View style={[row, { flexWrap: "wrap" }]}>
                     <T style={heading}>成长曲线</T>
                     <Button
                       label="＋测量"
@@ -1205,7 +1266,13 @@ function BabyApp({
                       onPress={() => beginEditor(newEntry("growth"))}
                     />
                   </View>
-                  <View style={{ flexDirection: "row", gap: 6 }}>
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      gap: 6,
+                      flexWrap: largeType ? "wrap" : "nowrap",
+                    }}
+                  >
                     {[
                       { value: "all" as const, icon: "≋", label: "全部" },
                       { value: "weight" as const, icon: "⚖", label: "体重" },
@@ -1217,7 +1284,7 @@ function BabyApp({
                         value === "length"
                           ? darkMode
                             ? "#F2AF94"
-                            : "#C97962"
+                            : "#9F4935"
                           : value === "head"
                             ? darkMode
                               ? "#C7B7FF"
@@ -1233,7 +1300,7 @@ function BabyApp({
                           style={({ pressed }) => [
                             {
                               flex: 1,
-                              minWidth: 0,
+                              minWidth: largeType ? "42%" : 0,
                               minHeight: 64,
                               borderRadius: 15,
                               alignItems: "center",
@@ -1243,6 +1310,8 @@ function BabyApp({
                               borderWidth: 1,
                               borderColor: selected ? accent : c.line,
                               opacity: pressed ? 0.72 : 1,
+                              paddingHorizontal: 5,
+                              paddingVertical: 8,
                             },
                           ]}
                         >
@@ -1260,11 +1329,10 @@ function BabyApp({
                           <T
                             style={{
                               color: selected ? accent : c.muted,
-                              fontSize: 10,
-                              lineHeight: 14,
+                              fontSize: 13,
+                              lineHeight: 18,
                               fontWeight: selected ? "700" : "500",
                             }}
-                            numberOfLines={1}
                           >
                             {label}
                           </T>
@@ -1515,58 +1583,24 @@ function BabyApp({
               borderColor: c.line,
             }}
           >
-            <View style={{ flexDirection: "row", paddingVertical: 7 }}>
-              {[
-                ["today", "⌂", "今天"],
-                ["records", "≡", "记录"],
-                ["growth", "↗", "成长"],
-                ["play", "♡", "照护"],
-                ["settings", "☷", "我的"],
-              ].map(([key, icon, label]) => (
-                <Pressable
-                  accessibilityRole="tab"
-                  accessibilityState={{ selected: tab === key }}
-                  accessibilityLabel={t(label)}
-                  key={key}
-                  onPress={() => {
-                    setOpenProfile(false);
-                    if (key === "records" && tab !== "records") {
-                      setActiveRecordView(recordView);
-                    }
-                    setTab(key);
-                    setSettingsPage("main");
-                    setMessage("");
-                    setDeleting(null);
-                  }}
-                  style={{
-                    flex: 1,
-                    alignItems: "center",
-                    gap: 1,
-                    minHeight: 49,
-                    justifyContent: "center",
-                  }}
-                >
-                  <T
-                    style={{
-                      fontSize: 23,
-                      color: tab === key ? c.primary : c.muted,
-                      fontWeight: "600",
-                    }}
-                  >
-                    {icon}
-                  </T>
-                  <T
-                    style={{
-                      fontSize: 11,
-                      color: tab === key ? c.primary : c.muted,
-                      fontWeight: tab === key ? "700" : "400",
-                    }}
-                  >
-                    {label}
-                  </T>
-                </Pressable>
-              ))}
-            </View>
+            <AppTabBar
+              tab={tab}
+              colors={c}
+              onSelect={(key) => {
+                Keyboard.dismiss();
+                setOpenProfile(false);
+                if (key === "records" && tab !== "records") {
+                  setActiveRecordView(recordView);
+                }
+                if (key !== tab) {
+                  mainScroll.current?.scrollTo({ y: 0, animated: false });
+                }
+                setTab(key);
+                setSettingsPage("main");
+                setMessage("");
+                setDeleting(null);
+              }}
+            />
           </SafeAreaView>
         </View>
         {finishingFeed ? (

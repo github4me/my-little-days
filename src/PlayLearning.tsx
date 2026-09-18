@@ -1,5 +1,13 @@
 import React, { useContext, useEffect, useRef, useState } from "react";
-import { Linking, Modal, Pressable, ScrollView, View } from "react-native";
+import {
+  Linking,
+  Pressable,
+  ScrollView,
+  View,
+  useWindowDimensions,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import Modal from "./AccessibleModal";
 import { Button, Card, T, Theme } from "./ui";
 import { useI18n } from "./i18n";
 import DailyCare from "./DailyCare";
@@ -36,8 +44,11 @@ function Options({
   onChange: (value: string) => void;
 }) {
   const c = useContext(Theme);
+  const { width, fontScale } = useWindowDimensions();
+  const basis =
+    fontScale >= 2 ? "100%" : fontScale >= 1.3 || width < 360 ? "46%" : 0;
   return (
-    <View style={{ flexDirection: "row", gap: 6 }}>
+    <View style={{ flexDirection: "row", gap: 6, flexWrap: "wrap" }}>
       {options.map((o) => (
         <Pressable
           key={o.value}
@@ -46,15 +57,16 @@ function Options({
           accessibilityState={{ selected: value === o.value }}
           onPress={() => onChange(o.value)}
           style={{
-            flex: 1,
-            minWidth: 0,
+            flexGrow: 1,
+            flexBasis: basis,
+            minWidth: 44,
             minHeight: 62,
             borderRadius: 16,
-            padding: 4,
+            padding: 8,
             alignItems: "center",
             justifyContent: "center",
             backgroundColor: value === o.value ? c.soft : c.card,
-            borderWidth: 1,
+            borderWidth: value === o.value ? 2 : 1,
             borderColor: value === o.value ? c.primary : c.line,
           }}
         >
@@ -62,8 +74,8 @@ function Options({
           <T
             raw
             style={{
-              fontSize: 11,
-              lineHeight: 16,
+              fontSize: 13,
+              lineHeight: 18,
               textAlign: "center",
               fontWeight: value === o.value ? "700" : "400",
             }}
@@ -105,6 +117,7 @@ export default function PlayLearning({
   };
 }) {
   const c = useContext(Theme);
+  const { fontScale } = useWindowDimensions();
   const { locale } = useI18n();
   const copy = (value: LearningText) =>
     locale === "en-US" ? value.en : value.zh;
@@ -293,7 +306,7 @@ export default function PlayLearning({
           if (!saving) setPendingSelection(null);
         }}
       >
-        <View
+        <SafeAreaView
           style={{
             flex: 1,
             backgroundColor: "rgba(0,0,0,0.5)",
@@ -310,7 +323,11 @@ export default function PlayLearning({
             }}
             contentContainerStyle={{ padding: 20, gap: 14 }}
           >
-            <T raw style={{ fontSize: 18, fontWeight: "700" }}>
+            <T
+              raw
+              accessibilityRole="header"
+              style={{ fontSize: 20, fontWeight: "700" }}
+            >
               {text("确认添加早教活动", "Confirm play activity")}
             </T>
             <T raw>{pendingActivity ? copy(pendingActivity.title) : ""}</T>
@@ -347,6 +364,7 @@ export default function PlayLearning({
             <Button
               label={text("仍然加入", "Add anyway")}
               disabled={saving}
+              busy={saving}
               onPress={() => {
                 if (pendingActivity)
                   void updateSelection(pendingActivity.id, true);
@@ -359,7 +377,7 @@ export default function PlayLearning({
               onPress={() => setPendingSelection(null)}
             />
           </ScrollView>
-        </View>
+        </SafeAreaView>
       </Modal>
       <View
         style={{
@@ -442,16 +460,26 @@ export default function PlayLearning({
                 }}
                 style={{
                   minHeight: 44,
+                  minWidth: 44,
                   paddingHorizontal: 12,
+                  paddingVertical: 8,
                   justifyContent: "center",
                   borderRadius: 13,
+                  borderWidth:
+                    months !== null && months >= band.min && months < band.max
+                      ? 2
+                      : 1,
+                  borderColor:
+                    months !== null && months >= band.min && months < band.max
+                      ? c.primary
+                      : c.line,
                   backgroundColor:
                     months !== null && months >= band.min && months < band.max
                       ? c.soft
                       : c.card,
                 }}
               >
-                <T raw style={{ fontSize: 12, color: c.primary }}>
+                <T raw style={{ fontSize: 15, color: c.primary }}>
                   {text(`${band.label} 月`, `${band.label} mo`)}
                 </T>
               </Pressable>
@@ -470,7 +498,7 @@ export default function PlayLearning({
                 setManualMonths(null);
                 setExpanded(null);
               }}
-              style={{ minHeight: 40, justifyContent: "center" }}
+              style={{ minHeight: 44, justifyContent: "center" }}
             >
               <T raw style={{ fontSize: 12, color: c.primary }}>
                 {text("回到宝宝实际月龄", "Use baby's actual age")}
@@ -656,7 +684,7 @@ export default function PlayLearning({
                 ) : null}
                 {open ? (
                   <View style={{ gap: 10, paddingTop: 4 }}>
-                    <T raw style={{ fontSize: 13 }}>
+                    <T raw style={{ fontSize: 17 }}>
                       {text("准备：", "You need: ")}
                       {copy(a.materials)}
                     </T>
@@ -670,7 +698,7 @@ export default function PlayLearning({
                         </T>
                         <T
                           raw
-                          style={{ fontSize: 14, lineHeight: 22, flex: 1 }}
+                          style={{ fontSize: 17, lineHeight: 24, flex: 1 }}
                         >
                           {copy(step)}
                         </T>
@@ -683,7 +711,7 @@ export default function PlayLearning({
                         borderRadius: 12,
                       }}
                     >
-                      <T raw style={{ fontSize: 12, lineHeight: 19 }}>
+                      <T raw style={{ fontSize: 15, lineHeight: 22 }}>
                         {text("安全提醒：", "Keep it safe: ")}
                         {copy(a.safety)}
                       </T>
@@ -695,7 +723,7 @@ export default function PlayLearning({
                         `Reference: ${source.label}`,
                       )}
                       onPress={() => void openSource(source.url)}
-                      style={{ minHeight: 40, justifyContent: "center" }}
+                      style={{ minHeight: 44, justifyContent: "center" }}
                     >
                       <T raw style={{ fontSize: 12, color: c.primary }}>
                         {text("参考原则 · ", "Reference · ")}
@@ -706,8 +734,9 @@ export default function PlayLearning({
                 ) : null}
                 <View
                   style={{
-                    flexDirection: "row",
-                    alignItems: "center",
+                    flexDirection: fontScale >= 1.3 ? "column" : "row",
+                    alignItems: fontScale >= 1.3 ? "stretch" : "center",
+                    flexWrap: "wrap",
                     justifyContent: "space-between",
                     gap: 8,
                   }}
@@ -722,6 +751,7 @@ export default function PlayLearning({
                       )}
                       accessibilityState={{
                         checked: doneToday.includes(a.id),
+                        busy: checking,
                         disabled:
                           !checkinsReady || checking || !canToggleCheckin(a.id),
                       }}
@@ -766,6 +796,7 @@ export default function PlayLearning({
                     )}
                     accessibilityState={{
                       checked: saved,
+                      busy: saving,
                       disabled:
                         !selectionReady || saving || !canChangeSelection,
                     }}
@@ -773,6 +804,7 @@ export default function PlayLearning({
                     onPress={() => requestSelection(a.id)}
                     style={{
                       minHeight: 44,
+                      flexShrink: 1,
                       justifyContent: "center",
                       paddingHorizontal: 4,
                       opacity:
@@ -812,9 +844,18 @@ export default function PlayLearning({
             </T>
             <T raw style={{ fontSize: 11, lineHeight: 18, color: c.muted }}>
               {text(
-                "活动由参考资料整理改写，时长和分组为浏览建议，未作临床验证。打卡仅表示今天做过，不代表完成建议活动量。早教设置和每日打卡仅保存在本机，不包含在记录备份中。",
-                "Activities are editorial adaptations; times and age groups are browsing suggestions, not clinically validated guidance. A check-in means you tried it today, not that a recommended activity amount was met. Play settings and dated check-ins stay locally and are not included in record backups.",
-              )}
+                "活动由参考资料整理改写，时长和分组为浏览建议，未作临床验证。打卡仅表示今天做过，不代表完成建议活动量。",
+                "Activities are editorial adaptations; times and age groups are browsing suggestions, not clinically validated guidance. A check-in means you tried it today, not that a recommended activity amount was met.",
+              )}{" "}
+              {sharedMode
+                ? text(
+                    "家庭早教设置和打卡以服务确认的同步结果为准。",
+                    "Family play settings and check-ins depend on confirmed synchronization.",
+                  )
+                : text(
+                    "早教设置和每日打卡仅保存在本机，不包含在记录备份中。",
+                    "Play settings and dated check-ins stay locally and are not included in record backups.",
+                  )}
             </T>
             <Pressable
               accessibilityRole="link"

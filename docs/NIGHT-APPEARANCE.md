@@ -4,6 +4,11 @@
 
 ## Direction and scope
 
+Apple's Human Interface Guidelines are the project-wide standard for **all** UI
+and interaction design, not just this theme. The durable checklist is in
+[AGENTS.md](../AGENTS.md#apple-first-design-standard). This document records a
+scoped implementation, not certification of the rest of the app.
+
 Parents record care one-handed in a dim room. Keep the familiar layout, system
 type, readable labels and existing light appearance; remove the broad blue wash
 and bright pastel islands from night mode. Dark neutral base, lighter grouped
@@ -40,3 +45,23 @@ installed preview, check all five care categories, cancel/confirm, current-minut
 and birth-date limits, existing-record editing, night keyboard/picker, System mode,
 large text, Increase Contrast, iPhone and iPad. Never uninstall or erase real data
 to run these checks.
+
+## Whole-app acceptance still to verify
+
+The subsequent [preview 26 implementation](APPLE-UI-IMPLEMENTATION.md) addresses
+the shared components, contrast preferences and navigation semantics below.
+Physical-device checks remain open; do not confuse implementation with acceptance.
+
+A bounded source check on 18 September identified these gaps in verification,
+not demonstrated visual failures or a complete HIG audit:
+
+- Largest accessibility text sizes with Chinese/English on narrow screens,
+  especially single-line icon-chip labels in `src/ui.tsx`. Text scaling is not
+  explicitly disabled by the shared text component; actual clipping remains a
+  device check.
+- VoiceOver announcements, selection and focus after navigation through the
+  custom tabs in `App.tsx`. Roles, selected states and labels exist, but browser
+  tests do not establish the native accessibility experience.
+- Full light-theme foreground/background contrast coverage and iOS Increase
+  Contrast behavior. Current palette tests focus on Night; separate light/dark
+  tokens alone do not establish accommodation of every accessibility setting.

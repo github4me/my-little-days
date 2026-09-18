@@ -66,6 +66,7 @@ function view(overrides = {}) {
       Set,
       Map,
       require(name) {
+        if (name === "../NativeDateTimeField") return "Field";
         if (name === "react") return react;
         if (name === "react-native")
           return { View: "View", Switch: "Switch", Platform: { OS: "ios" } };

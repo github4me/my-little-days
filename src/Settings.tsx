@@ -1,5 +1,12 @@
 import React, { useContext, useEffect, useRef, useState } from "react";
-import { Image, Platform, Pressable, Switch, View } from "react-native";
+import {
+  Image,
+  Platform,
+  Pressable,
+  Switch,
+  View,
+  useWindowDimensions,
+} from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { State, validateState } from "./domain";
 import { Theme, T, Card, Field, Button, Chips, row, heading } from "./ui";
@@ -21,6 +28,7 @@ import { type ReminderMode, type ReminderSettings } from "./reminderSettings";
 import { copyAvatarFile, deleteAvatarFile } from "./avatar";
 import { t, useI18n, type LanguagePreference } from "./i18n";
 import type { RecordView } from "./recordCalendar";
+import NativeDateTimeField from "./NativeDateTimeField";
 
 const reminderKindLabels = {
   feed: "喂养",
@@ -50,7 +58,10 @@ function SettingsSection({
         aria-expanded={expanded}
         disabled={busy}
         onPress={() => setExpanded((value) => !value)}
-        style={({ pressed }) => [row, { opacity: pressed ? 0.7 : 1 }]}
+        style={({ pressed }) => [
+          row,
+          { minHeight: 44, flexWrap: "wrap", opacity: pressed ? 0.7 : 1 },
+        ]}
       >
         <T style={{ flex: 1, minWidth: 0, fontSize: 18, fontWeight: "700" }}>
           {title}
@@ -115,6 +126,8 @@ export default function Settings({
 }) {
   const c = useContext(Theme);
   const { locale } = useI18n();
+  const { fontScale } = useWindowDimensions();
+  const largeText = fontScale > 1.3;
   const copy = (zh: string, en: string) => (locale === "en-US" ? en : zh);
   const [profileDirty, setProfileDirty] = useState(false);
   const draftProfileVersion = useRef(profileVersion);
@@ -292,13 +305,18 @@ export default function Settings({
           accessibilityLabel={t(
             profileExpanded ? "收起宝宝档案" : "展开宝宝档案",
           )}
-          accessibilityState={{ expanded: profileExpanded }}
+          accessibilityState={{ expanded: profileExpanded, disabled: busy }}
           aria-expanded={profileExpanded}
           disabled={busy}
           onPress={() => setProfileExpanded((expanded) => !expanded)}
-          style={({ pressed }) => [row, { opacity: pressed ? 0.7 : 1 }]}
+          style={({ pressed }) => [
+            row,
+            { minHeight: 44, flexWrap: "wrap", opacity: pressed ? 0.7 : 1 },
+          ]}
         >
-          <T style={{ fontSize: 18, fontWeight: "700" }}>宝宝档案</T>
+          <T style={{ flex: 1, minWidth: 0, fontSize: 18, fontWeight: "700" }}>
+            宝宝档案
+          </T>
           <T style={{ color: c.primary, fontSize: 13 }}>
             {profileExpanded ? "收起　⌃" : "展开　⌄"}
           </T>
@@ -361,7 +379,12 @@ export default function Settings({
                   网页预览不支持保存本机头像，请在手机安装版中设置。
                 </T>
               ) : (
-                <View style={{ flexDirection: "row", gap: 10 }}>
+                <View
+                  style={{
+                    flexDirection: largeText ? "column" : "row",
+                    gap: 10,
+                  }}
+                >
                   <Button
                     label={avatarUri ? "更换照片" : "选择照片"}
                     secondary
@@ -426,7 +449,7 @@ export default function Settings({
                 </View>
               )}
               <Field
-                editable={!sharedMode || sharedOwner}
+                editable={!busy && (!sharedMode || sharedOwner)}
                 label="宝宝名字"
                 value={name}
                 onChange={(value) => {
@@ -436,21 +459,25 @@ export default function Settings({
                 maxLength={100}
                 placeholder="宝宝"
               />
-              <Field
-                editable={!sharedMode || sharedOwner}
+              <NativeDateTimeField
+                editable={!busy && (!sharedMode || sharedOwner)}
                 label="出生日期 · 可暂不填写"
+                mode="date"
+                optional
+                minimumDate={new Date(1900, 0, 1)}
+                maximumDate={new Date()}
                 value={birthDate}
                 onChange={(value) => {
                   setProfileDirty(true);
                   setBirthDate(value);
                 }}
                 placeholder="YYYY-MM-DD"
-                maxLength={10}
               />
               <T style={{ color: c.muted, fontSize: 13 }}>
                 性别 · 用于匹配成长参考曲线
               </T>
               <Chips
+                disabled={busy || (sharedMode && !sharedOwner)}
                 value={sex}
                 onChange={(value) => {
                   setProfileDirty(true);
@@ -536,7 +563,7 @@ export default function Settings({
         <T style={{ color: c.muted, fontSize: 13 }}>
           跟随系统语言，或在这里固定选择显示语言。
         </T>
-        <View style={{ flexDirection: "row", gap: 8 }}>
+        <View style={{ flexDirection: largeText ? "column" : "row", gap: 8 }}>
           {[
             {
               value: "system" as const,
@@ -562,7 +589,7 @@ export default function Settings({
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={t(accessibilityLabel)}
-                accessibilityState={{ selected }}
+                accessibilityState={{ selected, disabled: busy }}
                 disabled={busy}
                 key={value}
                 onPress={() =>
@@ -580,6 +607,8 @@ export default function Settings({
                     alignItems: "center",
                     justifyContent: "center",
                     gap: 2,
+                    paddingVertical: 8,
+                    paddingHorizontal: 8,
                     backgroundColor: selected ? c.soft : c.card,
                     borderWidth: 1,
                     borderColor: selected ? c.primary : c.line,
@@ -604,6 +633,7 @@ export default function Settings({
                     fontSize: 11,
                     lineHeight: 15,
                     fontWeight: selected ? "700" : "500",
+                    textAlign: "center",
                   }}
                 >
                   {label}
@@ -737,7 +767,12 @@ export default function Settings({
                   pointerEvents={busy ? "none" : "auto"}
                   style={{ gap: 13 }}
                 >
-                  <View style={{ flexDirection: "row", gap: 10 }}>
+                  <View
+                    style={{
+                      flexDirection: largeText ? "column" : "row",
+                      gap: 10,
+                    }}
+                  >
                     {[
                       { value: "feed", icon: "◒" },
                       { value: "diaper", icon: "♧" },
@@ -752,7 +787,8 @@ export default function Settings({
                               value as ReminderSettings["kind"]
                             ],
                           )}
-                          accessibilityState={{ selected }}
+                          accessibilityState={{ selected, disabled: busy }}
+                          disabled={busy}
                           key={value}
                           onPress={() => {
                             const next = value as ReminderSettings["kind"];
@@ -764,6 +800,8 @@ export default function Settings({
                             {
                               flex: 1,
                               minHeight: 70,
+                              paddingVertical: 8,
+                              paddingHorizontal: 8,
                               borderRadius: 18,
                               alignItems: "center",
                               justifyContent: "center",
@@ -788,6 +826,7 @@ export default function Settings({
                               color: selected ? c.primary : c.muted,
                               fontSize: 12,
                               fontWeight: selected ? "700" : "400",
+                              textAlign: "center",
                             }}
                           >
                             {
@@ -801,13 +840,19 @@ export default function Settings({
                     })}
                   </View>
                   <Field
+                    editable={!busy}
                     label="提醒标题 · 可选"
                     value={title}
                     onChange={setTitle}
                     placeholder={t(`${reminderKindLabels[kind]}提醒`)}
                     maxLength={100}
                   />
-                  <View style={{ flexDirection: "row", gap: 10 }}>
+                  <View
+                    style={{
+                      flexDirection: largeText ? "column" : "row",
+                      gap: 10,
+                    }}
+                  >
                     {(kind === "feed"
                       ? [
                           {
@@ -849,13 +894,16 @@ export default function Settings({
                         <Pressable
                           accessibilityRole="button"
                           accessibilityLabel={t(label)}
-                          accessibilityState={{ selected }}
+                          accessibilityState={{ selected, disabled: busy }}
+                          disabled={busy}
                           key={value}
                           onPress={() => setMode(value)}
                           style={({ pressed }) => [
                             {
                               flex: 1,
                               minHeight: 68,
+                              paddingVertical: 8,
+                              paddingHorizontal: 8,
                               borderRadius: 18,
                               alignItems: "center",
                               justifyContent: "center",
@@ -880,6 +928,7 @@ export default function Settings({
                               color: selected ? c.primary : c.muted,
                               fontSize: 12,
                               fontWeight: selected ? "700" : "400",
+                              textAlign: "center",
                             }}
                           >
                             {shortLabel}
@@ -889,15 +938,17 @@ export default function Settings({
                     })}
                   </View>
                   {mode === "daily" ? (
-                    <Field
+                    <NativeDateTimeField
+                      editable={!busy}
                       label="每天当地时间 · HH:mm"
+                      mode="time"
                       value={dailyTime}
                       onChange={setDailyTime}
                       placeholder="09:00"
-                      maxLength={5}
                     />
                   ) : (
                     <Field
+                      editable={!busy}
                       label={
                         mode === "after-feed"
                           ? "喂养开始后多少分钟"

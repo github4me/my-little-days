@@ -1,12 +1,11 @@
 import React, { useContext, useEffect, useMemo, useRef, useState } from "react";
-import { Modal, ScrollView, View } from "react-native";
+import { ScrollView, View, useWindowDimensions } from "react-native";
+import Modal from "./AccessibleModal";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Entry } from "./domain";
 import { isBottleFeed, milkAmounts } from "./feedFinish";
 import { elapsed, formatTime, useI18n } from "./i18n";
 import { Button, T, Theme } from "./ui";
-
-const rowHeight = 44;
 
 export default function FinishFeedDialog({
   entry,
@@ -21,6 +20,8 @@ export default function FinishFeedDialog({
 }) {
   const c = useContext(Theme);
   const { t } = useI18n();
+  const { fontScale } = useWindowDimensions();
+  const rowHeight = Math.max(44, Math.ceil(32 * fontScale));
   const bottle = isBottleFeed(entry);
   const [amount, setAmount] = useState(entry.amount ?? 0);
   const [saving, setSaving] = useState(false);
@@ -75,6 +76,9 @@ export default function FinishFeedDialog({
       >
         <View
           accessibilityViewIsModal
+          onAccessibilityEscape={() => {
+            if (!saving) onCancel();
+          }}
           style={{
             backgroundColor: c.elevated,
             borderRadius: 24,
@@ -86,7 +90,10 @@ export default function FinishFeedDialog({
             maxHeight: "100%",
           }}
         >
-          <ScrollView contentContainerStyle={{ gap: 12 }}>
+          <ScrollView
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={{ gap: 12 }}
+          >
             <T
               accessibilityRole="header"
               style={{ fontSize: 22, fontWeight: "700" }}
@@ -142,7 +149,27 @@ export default function FinishFeedDialog({
                   />
                   <ScrollView
                     ref={wheel}
+                    accessible
                     accessibilityLabel={t("奶量滚轮")}
+                    accessibilityRole="adjustable"
+                    accessibilityValue={{
+                      min: values[0],
+                      max: values[values.length - 1],
+                      now: amount,
+                      text: `${amount} mL`,
+                    }}
+                    accessibilityState={{ disabled: saving }}
+                    accessibilityActions={[
+                      { name: "increment", label: t("增加奶量") },
+                      { name: "decrement", label: t("减少奶量") },
+                    ]}
+                    onAccessibilityAction={({ nativeEvent }) => {
+                      if (saving) return;
+                      if (nativeEvent.actionName === "increment")
+                        select(index + 1);
+                      if (nativeEvent.actionName === "decrement")
+                        select(index - 1);
+                    }}
                     scrollEnabled={!saving}
                     nestedScrollEnabled
                     showsVerticalScrollIndicator={false}
@@ -154,7 +181,7 @@ export default function FinishFeedDialog({
                     }}
                     onLayout={() =>
                       wheel.current?.scrollTo({
-                        y: values.indexOf(entry.amount ?? 0) * rowHeight,
+                        y: index * rowHeight,
                         animated: false,
                       })
                     }
@@ -180,6 +207,8 @@ export default function FinishFeedDialog({
                     {values.map((value) => (
                       <View
                         key={value}
+                        accessibilityElementsHidden
+                        importantForAccessibility="no-hide-descendants"
                         style={{
                           height: rowHeight,
                           alignItems: "center",
@@ -200,7 +229,12 @@ export default function FinishFeedDialog({
                     ))}
                   </ScrollView>
                 </View>
-                <View style={{ flexDirection: "row", gap: 8 }}>
+                <View
+                  style={{
+                    flexDirection: fontScale > 1.3 ? "column" : "row",
+                    gap: 8,
+                  }}
+                >
                   <Button
                     label="减少奶量"
                     secondary

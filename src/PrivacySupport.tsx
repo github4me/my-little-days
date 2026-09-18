@@ -1,4 +1,4 @@
-import React, { useContext } from "react";
+import React, { useContext, useState } from "react";
 import { Linking, Pressable, View } from "react-native";
 import { Card, Theme, T, heading, row } from "./ui";
 import { t, useI18n } from "./i18n";
@@ -28,6 +28,9 @@ function PrivacySection({
       }}
     >
       <View
+        accessibilityElementsHidden
+        aria-hidden
+        importantForAccessibility="no-hide-descendants"
         style={{
           width: 34,
           height: 34,
@@ -42,8 +45,13 @@ function PrivacySection({
         </T>
       </View>
       <View style={{ flex: 1, gap: 2 }}>
-        <T style={{ fontSize: 15, fontWeight: "700" }}>{title}</T>
-        <T style={{ color: c.muted, fontSize: 12, lineHeight: 19 }}>
+        <T
+          accessibilityRole="header"
+          style={{ fontSize: 17, fontWeight: "700" }}
+        >
+          {title}
+        </T>
+        <T style={{ color: c.muted, fontSize: 17, lineHeight: 25 }}>
           {children}
         </T>
       </View>
@@ -54,6 +62,7 @@ function PrivacySection({
 export default function PrivacySupport({ onBack }: { onBack: () => void }) {
   const c = useContext(Theme);
   const { locale } = useI18n();
+  const [supportError, setSupportError] = useState(false);
   const copy = (zh: string, en: string) => (locale === "zh-CN" ? zh : en);
   return (
     <View style={{ gap: 18 }}>
@@ -67,7 +76,9 @@ export default function PrivacySupport({ onBack }: { onBack: () => void }) {
             flexDirection: "row",
             alignItems: "center",
             gap: 6,
-            minHeight: 34,
+            minHeight: 44,
+            minWidth: 44,
+            paddingVertical: 8,
             opacity: pressed ? 0.7 : 1,
           },
         ]}
@@ -75,13 +86,19 @@ export default function PrivacySupport({ onBack }: { onBack: () => void }) {
         <T raw style={{ color: c.primary, fontSize: 22, lineHeight: 24 }}>
           ‹
         </T>
-        <T style={{ color: c.primary, fontSize: 13, fontWeight: "700" }}>
+        <T style={{ color: c.primary, fontSize: 17, fontWeight: "600" }}>
           返回我的
         </T>
       </Pressable>
 
       <View style={{ gap: 4 }}>
-        <T style={[heading, { fontSize: 28, lineHeight: 36 }]}>隐私与支持</T>
+        <T
+          accessibilityRole="header"
+          dynamicTypeRamp="title1"
+          style={[heading, { fontSize: 28, lineHeight: 36 }]}
+        >
+          隐私与支持
+        </T>
         <T raw style={{ color: c.muted }}>
           {copy(
             "了解本机记录与可选家庭共享",
@@ -91,10 +108,13 @@ export default function PrivacySupport({ onBack }: { onBack: () => void }) {
       </View>
 
       <Card style={{ backgroundColor: c.soft }}>
-        <T style={{ color: c.primary, fontSize: 18, fontWeight: "700" }}>
+        <T
+          accessibilityRole="header"
+          style={{ color: c.primary, fontSize: 18, fontWeight: "700" }}
+        >
           你的数据，由你掌控
         </T>
-        <T raw style={{ color: c.muted, fontSize: 13 }}>
+        <T raw style={{ color: c.muted, fontSize: 17 }}>
           {copy(
             "离线记录无需账户，也不会自动上传。首次共享需登录并确认创建或加入家庭。已加入家庭的账户再次登录时会恢复家庭共享；仅在另一台手机登录不会执行新的个人资料清理。",
             "Offline records need no account and are not uploaded automatically. First-time sharing requires sign-in and confirmation to create or join a family. Signing back into an account already in a family resumes its sharing; signing in on another phone alone does not trigger new personal-data cleanup.",
@@ -103,34 +123,38 @@ export default function PrivacySupport({ onBack }: { onBack: () => void }) {
       </Card>
 
       <Card>
-        <T raw style={{ fontSize: 18, fontWeight: "700" }}>
+        <T
+          raw
+          accessibilityRole="header"
+          style={{ fontSize: 18, fontWeight: "700" }}
+        >
           {copy("家庭共享", "Family sharing")}
         </T>
-        <T raw style={{ color: c.muted, fontSize: 13 }}>
+        <T raw style={{ color: c.muted, fontSize: 17 }}>
           {copy(
             "家庭账户通过 Microsoft Entra External ID 登录。创建家庭会上传你审核并确认的宝宝档案、全部已保存喂养、尿布、睡眠、成长、里程碑与照护记录，以及当前宝宝头像、提醒规则与设置、早教打卡和活动选择。上传成功且家庭资料已保存到本机后，会清理原个人资料及恢复副本，之后使用家庭记录，不保留可恢复的个人副本。建议由资料最完整的成员创建。",
             "Family accounts use Microsoft Entra External ID. Creating a family uploads the baby profile, all saved feeding, nappy, sleep, growth, milestone and care records, the current baby avatar, reminder rules and settings, play check-ins and activity selections that you review and confirm. After successful upload and local saving of the family data, the original personal data and recovery copies are cleared. You then use the family records; no recoverable personal copy is retained. The member with the most complete history should create the family.",
           )}
         </T>
-        <T raw style={{ color: c.muted, fontSize: 13 }}>
+        <T raw style={{ color: c.muted, fontSize: 17 }}>
           {copy(
             "确认加入家庭后，会先验证并保存下载的家庭资料，再清空并替换原本机资料及恢复副本，包括原头像、提醒和早教资料；不保留可恢复的个人副本，也不会上传或合并你的原有资料。仅查看邀请或取消确认不会清理资料。",
             "After you confirm joining, the app validates and saves the downloaded family data before clearing and replacing your original on-device data and recovery copies, including your avatar, reminders and play data. No recoverable personal copy is retained, and your original data is not uploaded or merged. Viewing an invitation or cancelling confirmation does not clear data.",
           )}
         </T>
-        <T raw style={{ color: c.muted, fontSize: 13 }}>
+        <T raw style={{ color: c.muted, fontSize: 17 }}>
           {copy(
             "成员可以查看全部家庭记录并编辑或删除自己的记录；管理员可编辑或删除任何记录，并管理头像和早教设置。管理员可不经提前通知移除成员。离开或被移除后，服务端访问停止；本机检测到变更后会清理家庭缓存、草稿和未发送修改，离线设备需重连后才能检测。退出登录也会清理本机家庭内容；已共享的贡献仍留在家庭。",
             "Members can view all family records and edit or delete their own records. Admins can edit or delete any record and manage the avatar and play settings. Admins can remove members without advance notice. Leaving or removal ends server access; the app clears family cache, drafts and unsent changes when it detects the change, which requires reconnection on an offline device. Signing out also clears local family content; contributions already shared stay with the family.",
           )}
         </T>
-        <T raw style={{ color: c.muted, fontSize: 13 }}>
+        <T raw style={{ color: c.muted, fontSize: 17 }}>
           {copy(
             "语言、主题、视图偏好、通知权限和本机通知启用状态不共享。家庭模式下，记录保存在服务器；本机缓存和待同步修改不等于备份，也不会写回个人离线资料。共享期间不能导出或导入本机备份。",
             "Language, theme, view preferences, notification permissions and this phone’s notification opt-in are not shared. Family records are stored on the server; local cache and pending changes are not a backup and are not copied into personal offline records. Local backup export and import are unavailable while sharing.",
           )}
         </T>
-        <T raw style={{ color: c.muted, fontSize: 13 }}>
+        <T raw style={{ color: c.muted, fontSize: 17 }}>
           {copy(
             "此版本在 iOS 上将应用的 SQLite 数据目录排除在系统备份之外，包括家庭缓存、待同步修改和个人离线记录。个人模式仍可手动导出备份；换机或卸载前请保存。更新应用不能撤回旧系统备份、截图或先前导出的副本。",
             "On iOS this version excludes the app’s SQLite data directory from system backups, including family cache, pending changes and personal offline records. Personal mode still supports manual backup export; save a copy before changing phones or uninstalling. An app update cannot recall older system backups, screenshots or previously exported copies.",
@@ -174,7 +198,10 @@ export default function PrivacySupport({ onBack }: { onBack: () => void }) {
         accessibilityRole="button"
         accessibilityLabel={t("联系支持")}
         onPress={() => {
-          void Linking.openURL(`mailto:${supportEmail}`).catch(() => {});
+          setSupportError(false);
+          void Linking.openURL(`mailto:${supportEmail}`).catch(() =>
+            setSupportError(true),
+          );
         }}
         style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}
       >
@@ -182,11 +209,12 @@ export default function PrivacySupport({ onBack }: { onBack: () => void }) {
           <View style={row}>
             <View style={{ flex: 1, gap: 3 }}>
               <T style={{ fontSize: 17, fontWeight: "700" }}>联系支持</T>
-              <T style={{ color: c.muted, fontSize: 13 }}>
+              <T style={{ color: c.muted, fontSize: 17 }}>
                 这款应用可离线使用，无需账号。需要帮助？请发送邮件给我们。
               </T>
               <T
-                style={{ color: c.primary, fontSize: 13, fontWeight: "700" }}
+                style={{ color: c.primary, fontSize: 17, fontWeight: "600" }}
+                selectable
                 raw
               >
                 {supportEmail}
@@ -198,6 +226,14 @@ export default function PrivacySupport({ onBack }: { onBack: () => void }) {
           </View>
         </Card>
       </Pressable>
+      {supportError ? (
+        <T raw accessibilityRole="alert" style={{ color: c.danger }}>
+          {copy(
+            "无法打开邮件应用。请复制上方邮箱地址，在你的邮件应用中联系我们。",
+            "Could not open your email app. Copy the address above and contact us using your email app.",
+          )}
+        </T>
+      ) : null}
     </View>
   );
 }

@@ -1,5 +1,5 @@
 import React, { useContext, useState } from "react";
-import { View, Pressable, ScrollView } from "react-native";
+import { View, Pressable, ScrollView, useWindowDimensions } from "react-native";
 import Svg, { Rect, Line, Text as Label } from "react-native-svg";
 import { Entry, summarize } from "./domain";
 import { Theme, T, Card, Chips, row } from "./ui";
@@ -53,6 +53,8 @@ function Bars({
       width="100%"
       height={values ? 132 : 172}
       viewBox={`0 0 330 ${values ? 132 : 172}`}
+      accessible
+      accessibilityRole="image"
       accessibilityLabel={t("统计图，单位{unit}，数值见每日汇总和明细", {
         unit: t(unit),
       })}
@@ -71,7 +73,7 @@ function Bars({
               x={326}
               y={114 - f * 82}
               fill={c.muted}
-              fontSize={10}
+              fontSize={12}
               textAnchor="end"
             >
               {(max * f).toFixed(unit === "小时" ? 1 : 0)}
@@ -93,7 +95,7 @@ function Bars({
             <Label
               x={x(b.x)}
               y={103 - (b.value / max) * 82}
-              fontSize={9}
+              fontSize={11}
               textAnchor="middle"
               fill={c.muted}
             >
@@ -108,7 +110,7 @@ function Bars({
           x={x(l.x)}
           y={129}
           fill={c.muted}
-          fontSize={10}
+          fontSize={12}
           textAnchor="middle"
         >
           {l.text}
@@ -265,6 +267,8 @@ function BarRecords({
   authorLabel,
   canEdit,
 }: RecordsProps) {
+  const { fontScale } = useWindowDimensions();
+  const largeText = fontScale >= 1.3;
   const c = useContext(Theme),
     [kind, setKind] = useState<Kind>("feed"),
     [unit, setUnit] = useState("mL"),
@@ -397,7 +401,10 @@ function BarRecords({
         }}
       />
       <Card>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+        <ScrollView
+          horizontal={!largeText}
+          showsHorizontalScrollIndicator={false}
+        >
           <Chips
             value={range}
             options={ranges}
@@ -409,7 +416,12 @@ function BarRecords({
             }}
           />
         </ScrollView>
-        <View style={row}>
+        <View
+          style={[
+            row,
+            largeText && { flexDirection: "column", alignItems: "stretch" },
+          ]}
+        >
           <T style={{ flex: 1, fontSize: 18, fontWeight: "700" }}>
             {ranges.find((option) => option.value === range)!.title}
           </T>
@@ -510,7 +522,10 @@ function BarRecords({
                 accessibilityLabel={t(
                   detailsExpanded ? "收起当日明细" : "展开当日明细",
                 )}
-                accessibilityState={{ expanded: detailsExpanded }}
+                accessibilityState={{
+                  expanded: detailsExpanded,
+                  disabled: key === today,
+                }}
                 onPress={() =>
                   setExpandedDays((current) => {
                     const next = new Set(current);
@@ -520,7 +535,7 @@ function BarRecords({
                   })
                 }
                 style={{
-                  minHeight: 36,
+                  minHeight: 44,
                   flexDirection: "row",
                   alignItems: "center",
                   gap: 8,
@@ -600,9 +615,17 @@ function BarRecords({
                           gap: 2,
                         }}
                       >
-                        <View style={row}>
+                        <View
+                          style={[
+                            row,
+                            largeText && {
+                              flexDirection: "column",
+                              alignItems: "stretch",
+                            },
+                          ]}
+                        >
                           <View style={{ flex: 1, minWidth: 0, gap: 1 }}>
-                            <View style={row}>
+                            <View style={[row, { flexWrap: "wrap", gap: 8 }]}>
                               <T
                                 style={{
                                   fontSize: 13,
@@ -689,10 +712,10 @@ function BarRecords({
                             ) : null}
                             {e.note ? (
                               <T
-                                numberOfLines={1}
+                                raw
                                 style={{
-                                  fontSize: 11,
-                                  lineHeight: 16,
+                                  fontSize: 15,
+                                  lineHeight: 21,
                                   color: c.muted,
                                 }}
                               >
@@ -704,7 +727,8 @@ function BarRecords({
                             style={{
                               flexDirection: "row",
                               alignItems: "center",
-                              gap: 3,
+                              gap: 8,
+                              flexWrap: "wrap",
                             }}
                           >
                             <Pressable
@@ -720,13 +744,18 @@ function BarRecords({
                               })}
                               onPress={() => onEdit(e)}
                               disabled={canEdit && !canEdit(e.id)}
+                              accessibilityState={{
+                                disabled: !!canEdit && !canEdit(e.id),
+                              }}
                               style={{
-                                minHeight: 36,
+                                minHeight: 44,
+                                minWidth: 44,
                                 justifyContent: "center",
-                                paddingHorizontal: 3,
+                                paddingHorizontal: 8,
+                                paddingVertical: 8,
                               }}
                             >
-                              <T style={{ fontSize: 11, color: c.primary }}>
+                              <T style={{ fontSize: 15, color: c.primary }}>
                                 编辑
                               </T>
                             </Pressable>
@@ -743,13 +772,18 @@ function BarRecords({
                               })}
                               onPress={() => onDelete(e)}
                               disabled={canEdit && !canEdit(e.id)}
+                              accessibilityState={{
+                                disabled: !!canEdit && !canEdit(e.id),
+                              }}
                               style={{
-                                minHeight: 36,
+                                minHeight: 44,
+                                minWidth: 44,
                                 justifyContent: "center",
-                                paddingHorizontal: 3,
+                                paddingHorizontal: 8,
+                                paddingVertical: 8,
                               }}
                             >
-                              <T style={{ fontSize: 11, color: c.muted }}>
+                              <T style={{ fontSize: 15, color: c.danger }}>
                                 删除
                               </T>
                             </Pressable>
@@ -779,8 +813,10 @@ function BarRecords({
                       }
                       style={({ pressed }) => ({
                         alignSelf: "flex-start",
-                        minHeight: 36,
+                        minHeight: 44,
+                        minWidth: 44,
                         paddingHorizontal: 8,
+                        paddingVertical: 8,
                         justifyContent: "center",
                         opacity: pressed ? 0.72 : 1,
                       })}
@@ -817,8 +853,10 @@ function BarRecords({
           accessibilityState={{ expanded: historyExpanded }}
           onPress={() => setHistoryExpanded((expanded) => !expanded)}
           style={({ pressed }) => ({
-            minHeight: 40,
+            minHeight: 44,
+            minWidth: 44,
             paddingHorizontal: 12,
+            paddingVertical: 8,
             alignSelf: "flex-start",
             borderRadius: 13,
             justifyContent: "center",

@@ -1126,3 +1126,56 @@ acceptance remain device checks, not claims inferred from those tests.
   registered phones. Install over the current app, without deleting local data.
 - This build does not deploy Azure resources, API code or database migrations and
   does not submit to TestFlight. OTA remains disabled.
+
+## 26. App-wide Apple-guided UI preview (18 September 2026)
+
+This extends the Night-only pass to shared controls, navigation, forms, records,
+calendar and accessibility preferences. See the [implementation and native
+acceptance checklist](APPLE-UI-IMPLEMENTATION.md). It does not change account,
+family, storage or synchronization rules, or require Azure/SQL configuration.
+
+### Publish the exact preview
+
+1. Use version **0.2.1**, iOS build **26**, profile/environment **preview** and
+   internal distribution. Commit through the GitHub plugin on
+   `feature/family-invitations`, excluding unrelated SQL work and private outputs.
+2. Freeze the pushed source SHA in a clean checkout. Repeat section 25's resolved
+   EAS configuration, five public environment-value comparisons and account-level
+   override check. Keep `EXPO_PUBLIC_FAMILY_UI_DEMO=0`; preview connects to the real
+   service, not a disposable family. Do not change credentials or enroll devices.
+3. Inspect a fresh upload archive, confirming its source SHA and absence of
+   private files. Run exactly one native build using
+   `npx --yes eas-cli@24.6.0 build --platform ios --profile preview --non-interactive --freeze-credentials --no-wait --json`.
+   Record the build ID, then check that ID with `build:view <BUILD_ID> --json`.
+   Do not run `eas update`: OTA remains disabled. Do not submit to TestFlight.
+4. Once that exact build reports **FINISHED**, open its Expo installation page on
+   an already registered iPhone and install over the existing app. Keep local
+   records; never uninstall or clear storage as part of this UI check.
+
+### Phone acceptance
+
+Follow the linked checklist in both appearances and Chinese/English. In iPhone
+Settings, test Larger Text, Bold Text, Increase Contrast, Reduce Motion and
+VoiceOver. Confirm all five tabs remain reachable; form actions stay visible
+with the keyboard; time wheels keep draft changes until Done; Cancel/VoiceOver
+Escape closes a picker before its underlying editor. Check the same shared
+records and truthful save/sync messages without creating test family data.
+
+Browser layout tests and native-boundary mocks do not establish actual UIKit
+rendering, VoiceOver focus, font scaling, Large Content Viewer or iPad acceptance.
+Those physical-device checks remain explicit release follow-ups.
+
+### Automated validation
+
+- Full `npm run verify` passed, including authentication, family lifecycle,
+  synchronization, native security and new UI-boundary coverage. Final focused
+  checks include real installed React Native Web semantics for busy controls and
+  readonly inputs, not only mocked native props.
+- Full browser regression and all nine isolated family demo scenarios passed.
+  Apple-specific browser checks passed at 320/390/768px across Chinese/English,
+  Light/Night and increased contrast, with 12 reviewed captures and no external
+  traffic. This browser check is also part of the existing CI workflow.
+- iOS JavaScript export passed. Independent review found and fixed picker-first
+  cancellation and legacy family draft time-input consistency before release.
+- No schema, API, authentication grant or family data operation is part of this
+  release. Native build and installation status are recorded separately below.

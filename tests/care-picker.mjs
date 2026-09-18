@@ -24,7 +24,12 @@ function fixture(platform = "ios", overrides = {}) {
     onDelete: async () => {},
     ...overrides,
   };
-  const palette = { input: "#123", elevated: "#234", controlLine: "#abc" };
+  const palette = {
+    isDark: true,
+    input: "#123",
+    elevated: "#234",
+    controlLine: "#abc",
+  };
   const react = {
     createElement: (type, props, ...children) => ({
       type,
@@ -87,7 +92,13 @@ function fixture(platform = "ios", overrides = {}) {
             Platform: { OS: platform },
             Linking: {},
             Keyboard: { dismiss: () => keyboardDismissals++ },
+            useWindowDimensions: () => ({
+              width: 390,
+              height: 844,
+              fontScale: 1,
+            }),
           };
+        if (name === "./AccessibleModal") return "Modal";
         if (name === "react-native-safe-area-context")
           return { SafeAreaView: "SafeAreaView" };
         if (name === "@react-native-community/datetimepicker")

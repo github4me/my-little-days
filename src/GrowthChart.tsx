@@ -3,8 +3,8 @@ import { View } from "react-native";
 import Svg, { Path, Line, Circle, Text as SvgText } from "react-native-svg";
 import { Entry, State } from "./domain";
 import { referenceSeries, type GrowthMetric } from "./growth";
-import { dark, T, Theme } from "./ui";
-import { t } from "./i18n";
+import { T, Theme } from "./ui";
+import { t, formatDate, useI18n } from "./i18n";
 
 export type Metric = GrowthMetric | "all";
 
@@ -30,6 +30,7 @@ function pointsFor(entries: Entry[], birth: string, metric: GrowthMetric) {
       month: ageMonths(birth, e.start),
       value: e[metric]!,
       id: e.id,
+      date: e.start,
     }))
     .filter((e) => e.month >= 0)
     .sort((a, b) => a.month - b.month);
@@ -51,6 +52,7 @@ function GrowthPlot({
   showReferences?: boolean;
 }) {
   const c = useContext(Theme);
+  const { locale } = useI18n();
   const points = pointsFor(entries, profile.birthDate, metric);
   const maxMonth = Math.max(
     3,
@@ -66,7 +68,10 @@ function GrowthPlot({
   if (!values.length)
     return (
       <View
-        style={{ height: compact ? 94 : undefined, justifyContent: "center" }}
+        style={{
+          minHeight: compact ? 94 : undefined,
+          justifyContent: "center",
+        }}
       >
         <T style={{ color: c.muted, fontSize: 12 }}>
           {t("还没有{metric}记录", { metric: t(labels[metric]) })}
@@ -91,13 +96,29 @@ function GrowthPlot({
           `${index ? "L" : "M"}${x(point.month)},${y(point.value)}`,
       )
       .join(" ");
+  const latest = points.reduce<(typeof points)[number] | undefined>(
+    (current, point) =>
+      !current || Date.parse(point.date) > Date.parse(current.date)
+        ? point
+        : current,
+    undefined,
+  );
+  const summary = latest
+    ? locale === "zh-CN"
+      ? `${points.length} 条实测记录。最新：${formatDate(latest.date)}，${latest.value} ${metric === "weight" ? "kg" : "cm"}。准确数值可在下方成长记录中查看。`
+      : `${points.length} recorded measurements. Latest: ${latest.value} ${metric === "weight" ? "kg" : "cm"}, ${formatDate(latest.date)}. Exact measurements are listed in the growth records below.`
+    : locale === "zh-CN"
+      ? "尚无实测记录；当前只显示参考曲线。"
+      : "No recorded measurements; only reference curves are shown.";
 
   return (
     <Svg
       width="100%"
       height={height}
       viewBox={`0 0 340 ${height}`}
-      accessibilityLabel={`${t(labels[metric])} ${t("成长曲线")}`}
+      accessible
+      accessibilityRole="image"
+      accessibilityLabel={`${t(labels[metric])} ${t("成长曲线")}. ${summary}`}
     >
       {[0, 1, 2, 3].map((index) => {
         const value = min + (index * range) / 3;
@@ -115,7 +136,7 @@ function GrowthPlot({
               y={y(value) + 4}
               textAnchor="end"
               fill={c.muted}
-              fontSize={compact ? 9 : 10}
+              fontSize={compact ? 11 : 12}
             >
               {value.toFixed(metric === "weight" ? 1 : 0)}
             </SvgText>
@@ -157,7 +178,7 @@ function GrowthPlot({
           x={x((index * maxMonth) / 3)}
           y={axisLabelY}
           fill={c.muted}
-          fontSize={compact ? 10 : 11}
+          fontSize={compact ? 11 : 12}
           textAnchor="middle"
         >
           {t("{months}月", { months: ((index * maxMonth) / 3).toFixed(0) })}
@@ -184,10 +205,9 @@ export default function GrowthChart({
       </T>
     );
 
-  const colors =
-    c === dark
-      ? { weight: "#A8D6F5", length: "#F2AF94", head: "#C7B7FF" }
-      : { weight: "#34759D", length: "#C97962", head: "#7565A5" };
+  const colors = c.isDark
+    ? { weight: "#A8D6F5", length: "#F2AF94", head: "#C7B7FF" }
+    : { weight: "#34759D", length: "#9F4935", head: "#7565A5" };
 
   if (metric === "all")
     return (
@@ -202,7 +222,7 @@ export default function GrowthChart({
               paddingTop: 7,
             }}
           >
-            <T style={{ color: colors[item], fontSize: 12, fontWeight: "700" }}>
+            <T style={{ color: colors[item], fontSize: 13, fontWeight: "700" }}>
               ● {t(labels[item])}
             </T>
             <GrowthPlot

@@ -170,6 +170,7 @@ const english: Record<string, string> = {
   入睡时间: "Sleep start",
   记录时间: "Time",
   "✓ 记录结束时间": "✓ End time recorded",
+  记录结束时间: "Record end time",
   "+ 记录结束时间（可选）": "+ Add end time (optional)",
   醒来时间: "Wake time",
   结束时间: "End time",

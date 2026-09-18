@@ -1,19 +1,20 @@
 import React, { useContext, useRef, useState } from "react";
 import {
-  Modal,
   Platform,
   Pressable,
   ScrollView,
   TextInput,
   View,
+  useWindowDimensions,
 } from "react-native";
+import Modal from "./AccessibleModal";
 import { SafeAreaView } from "react-native-safe-area-context";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import Svg, { Rect } from "react-native-svg";
 import CareIcon from "./CareIcon";
 import { Entry, summarize } from "./domain";
-import { Button, Card, T, Theme, light, row } from "./ui";
-import { elapsed, formatDate, formatTime, t } from "./i18n";
+import { Button, Card, T, Theme, row } from "./ui";
+import { elapsed, formatDate, formatTime, t, useI18n } from "./i18n";
 import {
   calendarDayKey,
   calendarItems,
@@ -83,13 +84,18 @@ export default function RecordsCalendar({
   canEdit?: (id: string) => boolean;
 }) {
   const c = useContext(Theme);
+  const { fontScale } = useWindowDimensions();
+  const { locale } = useI18n();
+  // A dense, time-proportional chart cannot grow every event label safely.
+  // At larger reading sizes, expose the same filtered records as full rows.
+  const largeText = fontScale >= 1.3;
   const [chosenDay, setChosenDay] = useState<string | null>(null);
   const [mode, setMode] = useState("day");
   const [kind, setKind] = useState<CalendarKind>("all");
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [toolbarWidth, setToolbarWidth] = useState(0);
   const [periodWidth, setPeriodWidth] = useState(0);
-  const compactFilters = toolbarWidth - periodWidth < 184;
+  const compactFilters = largeText || toolbarWidth - periodWidth < 184;
   const [datePicker, setDatePicker] = useState(false);
   const [dateDraft, setDateDraft] = useState("");
   const [dateError, setDateError] = useState(false);
@@ -144,10 +150,7 @@ export default function RecordsCalendar({
     days[0],
     shiftCalendarDay(days[days.length - 1], 1),
   );
-  const fills =
-    c === light
-      ? { feed: "#FBE0D3", diaper: "#FFF0C9", sleep: "#C9E6FA" }
-      : { feed: "#59434B", diaper: "#534B35", sleep: "#2C4C66" };
+  const fills = { feed: c.feed, diaper: c.diaper, sleep: c.sleep };
   function chooseDate(next: Date) {
     setChosenDay(calendarDayKey(next > today ? today : next));
     setExpandedList(false);
@@ -188,16 +191,17 @@ export default function RecordsCalendar({
           alignItems: "center",
           justifyContent: showLabel ? "flex-start" : "center",
           paddingHorizontal: showLabel ? 12 : 0,
+          paddingVertical: showLabel ? 10 : 0,
           gap: 12,
           borderRadius: 10,
-          borderWidth: 1,
+          borderWidth: kind === value ? 2 : 1,
           borderColor: kind === value ? c.primary : "transparent",
           backgroundColor: kind === value ? c.soft : "transparent",
           opacity: pressed ? 0.65 : 1,
         })}
       >
         <FilterIcon kind={value} color={kind === value ? c.primary : c.muted} />
-        {showLabel && <T>{filterLabel(value)}</T>}
+        {showLabel && <T style={{ flexShrink: 1 }}>{filterLabel(value)}</T>}
       </Pressable>
     );
   }
@@ -210,11 +214,17 @@ export default function RecordsCalendar({
           alignItems: "center",
           justifyContent: "space-between",
           gap: 8,
+          flexWrap: "wrap",
         }}
       >
         <View
           onLayout={(event) => setPeriodWidth(event.nativeEvent.layout.width)}
-          style={{ flexDirection: "row", alignItems: "center", flexShrink: 0 }}
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            flexShrink: 1,
+            flexWrap: "wrap",
+          }}
         >
           {(["day", "week", "today"] as const).map((option) => (
             <Pressable
@@ -236,6 +246,7 @@ export default function RecordsCalendar({
                 minWidth: 44,
                 minHeight: 44,
                 paddingHorizontal: 8,
+                paddingVertical: 8,
                 alignItems: "center",
                 justifyContent: "center",
                 borderRadius: 10,
@@ -266,7 +277,7 @@ export default function RecordsCalendar({
             onPress={() => setFiltersOpen(true)}
             style={{
               width: 56,
-              height: 44,
+              minHeight: 44,
               flexDirection: "row",
               gap: 4,
               alignItems: "center",
@@ -306,10 +317,11 @@ export default function RecordsCalendar({
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={t("选择日历日期")}
+          accessibilityState={{ expanded: datePicker }}
           onPress={openDatePicker}
           style={{ flex: 1, minHeight: 44, justifyContent: "center" }}
         >
-          <T style={{ textAlign: "center", fontSize: 15, fontWeight: "700" }}>
+          <T style={{ textAlign: "center", fontSize: 17, fontWeight: "700" }}>
             {mode === "day"
               ? formatDate(date, {
                   month: "short",
@@ -318,7 +330,7 @@ export default function RecordsCalendar({
                 })
               : `${formatDate(days[0], { month: "short", day: "numeric" })} – ${formatDate(days[6], { month: "short", day: "numeric" })}`}
           </T>
-          <T style={{ textAlign: "center", fontSize: 11, color: c.muted }}>
+          <T style={{ textAlign: "center", fontSize: 13, color: c.muted }}>
             {date.getFullYear()} ▾
           </T>
         </Pressable>
@@ -350,16 +362,21 @@ export default function RecordsCalendar({
           <View style={{ gap: 8 }}>
             <TextInput
               accessibilityLabel={t("日历日期")}
+              allowFontScaling
+              maxFontSizeMultiplier={0}
               value={dateDraft}
               onChangeText={setDateDraft}
               placeholder="YYYY-MM-DD"
+              placeholderTextColor={c.muted}
+              selectionColor={c.primary}
               style={{
                 padding: 12,
                 minHeight: 48,
                 color: c.text,
-                backgroundColor: c.card,
+                fontSize: 17,
+                backgroundColor: c.input,
                 borderWidth: 1,
-                borderColor: c.line,
+                borderColor: c.controlLine,
                 borderRadius: 12,
               }}
             />
@@ -384,7 +401,7 @@ export default function RecordsCalendar({
           <DateTimePicker
             value={date}
             mode="date"
-            themeVariant={c === light ? "light" : "dark"}
+            themeVariant={c.isDark ? "dark" : "light"}
             maximumDate={new Date(now)}
             onChange={(event, next) => {
               setDatePicker(false);
@@ -424,222 +441,239 @@ export default function RecordsCalendar({
           这段时间还没有记录。
         </T>
       )}
-      <View
-        onLayout={(event) => setWidth(event.nativeEvent.layout.width)}
-        style={{
-          borderWidth: 1,
-          borderColor: c.line,
-          backgroundColor: c.card,
-          borderRadius: 16,
-          overflow: "hidden",
-        }}
-      >
-        <ScrollView
-          horizontal
-          nestedScrollEnabled
-          showsHorizontalScrollIndicator={totalWidth > width}
+      {!largeText && (
+        <View
+          onLayout={(event) => setWidth(event.nativeEvent.layout.width)}
+          style={{
+            borderWidth: 1,
+            borderColor: c.line,
+            backgroundColor: c.card,
+            borderRadius: 16,
+            overflow: "hidden",
+          }}
         >
-          <View style={{ width: totalWidth }}>
-            <View
-              style={{
-                flexDirection: "row",
-                paddingLeft: axisWidth,
-                borderBottomWidth: 1,
-                borderColor: c.line,
-              }}
-            >
-              {days.map((day, index) => (
-                <View
-                  key={calendarDayKey(day)}
-                  style={{
-                    width: columnWidths[index],
-                    paddingVertical: 10,
-                    alignItems: "center",
-                    backgroundColor:
-                      calendarDayKey(day) === calendarDayKey(today)
-                        ? c.soft
-                        : c.card,
-                  }}
-                >
-                  <T style={{ fontSize: 12, fontWeight: "700" }}>
-                    {formatDate(day, { weekday: "short", day: "numeric" })}
-                  </T>
-                </View>
-              ))}
-            </View>
-            <ScrollView
-              key={chartKey}
-              ref={verticalScroll}
-              nestedScrollEnabled
-              style={{ height: 420 }}
-              onContentSizeChange={() =>
-                verticalScroll.current?.scrollTo({
-                  y: initialMinute,
-                  animated: false,
-                })
-              }
-            >
+          <ScrollView
+            horizontal
+            nestedScrollEnabled
+            showsHorizontalScrollIndicator={totalWidth > width}
+          >
+            <View style={{ width: totalWidth }}>
               <View
-                accessibilityLabel={t("日历时间轴")}
-                style={{ height: gridMinutes + 24, flexDirection: "row" }}
+                style={{
+                  flexDirection: "row",
+                  paddingLeft: axisWidth,
+                  borderBottomWidth: 1,
+                  borderColor: c.line,
+                }}
               >
-                <View style={{ width: axisWidth }}>
-                  {Array.from(
-                    { length: Math.ceil(gridMinutes / 60) + 1 },
-                    (_, hour) => (
-                      <T
-                        key={hour}
-                        raw
-                        style={{
-                          position: "absolute",
-                          top: hour * 60,
-                          left: 3,
-                          color: c.muted,
-                          fontSize: 10,
-                          lineHeight: 16,
-                        }}
-                      >
-                        {mode === "week" && clockChange
-                          ? `${hour}h`
-                          : hour * 60 === layouts[0].dayMinutes
-                            ? "24:00"
-                            : formatTime(
-                                new Date(days[0].getTime() + hour * 3600000),
-                              )}
-                      </T>
-                    ),
-                  )}
-                </View>
-                {layouts.map((layout, index) => (
+                {days.map((day, index) => (
                   <View
-                    key={calendarDayKey(days[index])}
+                    key={calendarDayKey(day)}
                     style={{
                       width: columnWidths[index],
-                      height: layout.dayMinutes,
-                      borderLeftWidth: 1,
-                      borderColor: c.line,
+                      paddingVertical: 10,
+                      alignItems: "center",
+                      backgroundColor:
+                        calendarDayKey(day) === calendarDayKey(today)
+                          ? c.soft
+                          : c.card,
                     }}
                   >
-                    {Array.from(
-                      { length: Math.ceil(layout.dayMinutes / 60) + 1 },
-                      (_, hour) => (
-                        <View
-                          key={hour}
-                          style={{
-                            position: "absolute",
-                            left: 0,
-                            right: 0,
-                            top: hour * 60,
-                            height: 1,
-                            backgroundColor: c.line,
-                          }}
-                        />
-                      ),
-                    )}
-                    {layout.items.map((item) => (
-                      <Pressable
-                        key={item.entry.id}
-                        accessibilityRole="button"
-                        accessibilityLabel={t("查看记录：{detail}", {
-                          detail: eventName(item),
-                        })}
-                        onPress={() => setSelectedId(item.entry.id)}
-                        style={{
-                          position: "absolute",
-                          top: item.visualStart,
-                          height: item.visualEnd - item.visualStart,
-                          left:
-                            (item.lane * columnWidths[index]) / item.laneCount +
-                            3,
-                          width: columnWidths[index] / item.laneCount - 7,
-                          backgroundColor:
-                            fills[item.entry.type as keyof typeof fills],
-                          borderRadius: 7,
-                          borderWidth: item.running ? 2 : 1,
-                          borderColor: item.running ? c.primary : c.line,
-                          paddingHorizontal: 5,
-                          paddingVertical: 3,
-                          overflow: "hidden",
-                        }}
-                      >
-                        <T
-                          numberOfLines={1}
-                          style={{
-                            fontSize: 11,
-                            lineHeight: 16,
-                            fontWeight: "700",
-                          }}
-                        >
-                          {entryLabel(item.entry)}
-                        </T>
-                        <T
-                          numberOfLines={1}
-                          style={{ fontSize: 10, lineHeight: 15 }}
-                        >{`${item.continuesBefore ? "↳ " : ""}${formatTime(item.entry.start)}${item.running ? ` · ${t("进行中")}` : !item.point ? ` · ${elapsed((item.endMinute - item.startMinute) * 60000)}` : ""}${item.continuesAfter ? " ↴" : ""}`}</T>
-                      </Pressable>
-                    ))}
-                    {calendarDayKey(days[index]) === calendarDayKey(today) && (
-                      <View
-                        pointerEvents="none"
-                        style={{
-                          position: "absolute",
-                          top: (now - today.getTime()) / 60000,
-                          left: 0,
-                          right: 0,
-                          height: 2,
-                          backgroundColor: "#D56868",
-                        }}
-                      />
-                    )}
+                    <T style={{ fontSize: 12, fontWeight: "700" }}>
+                      {formatDate(day, { weekday: "short", day: "numeric" })}
+                    </T>
                   </View>
                 ))}
               </View>
-            </ScrollView>
-          </View>
-        </ScrollView>
-      </View>
-      <T style={{ fontSize: 12, color: c.muted }}>
-        {totalWidth > width
-          ? "左右滑动查看更多，点击色块查看记录。"
-          : "上下滑动查看全天，点击色块查看记录。"}
-      </T>
-      {clockChange && (
+              <ScrollView
+                key={chartKey}
+                ref={verticalScroll}
+                nestedScrollEnabled
+                style={{ height: 420 }}
+                onContentSizeChange={() =>
+                  verticalScroll.current?.scrollTo({
+                    y: initialMinute,
+                    animated: false,
+                  })
+                }
+              >
+                <View
+                  accessibilityLabel={t("日历时间轴")}
+                  style={{ height: gridMinutes + 24, flexDirection: "row" }}
+                >
+                  <View style={{ width: axisWidth }}>
+                    {Array.from(
+                      { length: Math.ceil(gridMinutes / 60) + 1 },
+                      (_, hour) => (
+                        <T
+                          key={hour}
+                          raw
+                          style={{
+                            position: "absolute",
+                            top: hour * 60,
+                            left: 3,
+                            color: c.muted,
+                            fontSize: 11,
+                            lineHeight: 16,
+                          }}
+                        >
+                          {mode === "week" && clockChange
+                            ? `${hour}h`
+                            : hour * 60 === layouts[0].dayMinutes
+                              ? "24:00"
+                              : formatTime(
+                                  new Date(days[0].getTime() + hour * 3600000),
+                                )}
+                        </T>
+                      ),
+                    )}
+                  </View>
+                  {layouts.map((layout, index) => (
+                    <View
+                      key={calendarDayKey(days[index])}
+                      style={{
+                        width: columnWidths[index],
+                        height: layout.dayMinutes,
+                        borderLeftWidth: 1,
+                        borderColor: c.line,
+                      }}
+                    >
+                      {Array.from(
+                        { length: Math.ceil(layout.dayMinutes / 60) + 1 },
+                        (_, hour) => (
+                          <View
+                            key={hour}
+                            style={{
+                              position: "absolute",
+                              left: 0,
+                              right: 0,
+                              top: hour * 60,
+                              height: 1,
+                              backgroundColor: c.line,
+                            }}
+                          />
+                        ),
+                      )}
+                      {layout.items.map((item) => (
+                        <Pressable
+                          key={item.entry.id}
+                          accessibilityRole="button"
+                          accessibilityLabel={t("查看记录：{detail}", {
+                            detail: eventName(item),
+                          })}
+                          onPress={() => setSelectedId(item.entry.id)}
+                          style={{
+                            position: "absolute",
+                            top: item.visualStart,
+                            height: item.visualEnd - item.visualStart,
+                            left:
+                              (item.lane * columnWidths[index]) /
+                                item.laneCount +
+                              3,
+                            width: columnWidths[index] / item.laneCount - 7,
+                            backgroundColor:
+                              fills[item.entry.type as keyof typeof fills],
+                            borderRadius: 7,
+                            borderWidth: item.running ? 2 : 1,
+                            borderColor: item.running ? c.primary : c.line,
+                            paddingHorizontal: 5,
+                            paddingVertical: 3,
+                            overflow: "hidden",
+                          }}
+                        >
+                          <T
+                            numberOfLines={1}
+                            style={{
+                              fontSize: 11,
+                              lineHeight: 16,
+                              fontWeight: "700",
+                            }}
+                          >
+                            {entryLabel(item.entry)}
+                          </T>
+                          <T
+                            numberOfLines={1}
+                            style={{ fontSize: 11, lineHeight: 15 }}
+                          >{`${item.continuesBefore ? "↳ " : ""}${formatTime(item.entry.start)}${item.running ? ` · ${t("进行中")}` : !item.point ? ` · ${elapsed((item.endMinute - item.startMinute) * 60000)}` : ""}${item.continuesAfter ? " ↴" : ""}`}</T>
+                        </Pressable>
+                      ))}
+                      {calendarDayKey(days[index]) ===
+                        calendarDayKey(today) && (
+                        <View
+                          pointerEvents="none"
+                          style={{
+                            position: "absolute",
+                            top: (now - today.getTime()) / 60000,
+                            left: 0,
+                            right: 0,
+                            height: 2,
+                            backgroundColor: c.danger,
+                          }}
+                        />
+                      )}
+                    </View>
+                  ))}
+                </View>
+              </ScrollView>
+            </View>
+          </ScrollView>
+        </View>
+      )}
+      {!largeText && (
+        <T style={{ fontSize: 12, color: c.muted }}>
+          {totalWidth > width
+            ? "左右滑动查看更多，点击色块查看记录。"
+            : "上下滑动查看全天，点击色块查看记录。"}
+        </T>
+      )}
+      {clockChange && !largeText && (
         <T style={{ fontSize: 12, color: c.muted }}>
           {mode === "week"
             ? "本周有夏令时切换，纵轴按当地午夜后的实际小时数排列。"
             : "当天有夏令时切换，时间轴保留跳过或重复的小时。"}
         </T>
       )}
+      {largeText && (
+        <T raw style={{ color: c.muted }}>
+          {locale === "en-US"
+            ? "For larger text, calendar records are shown in a full list below. Your selected date and filters still apply."
+            : "较大字体下，日历记录在下方完整列出。仍按所选日期和筛选条件显示。"}
+        </T>
+      )}
       <Card style={{ padding: 14, gap: 6 }}>
-        <T style={{ fontSize: 16, fontWeight: "700" }}>
+        <T
+          accessibilityRole="header"
+          style={{ fontSize: 17, fontWeight: "700" }}
+        >
           {t("日历明细（{count}）", { count: visibleEntries.length })}
         </T>
-        {(expandedList ? visibleEntries : visibleEntries.slice(0, 5)).map(
-          (entry) => (
-            <Pressable
-              key={entry.id}
-              accessibilityRole="button"
-              accessibilityLabel={t("打开日历记录：{detail}", {
-                detail: `${entryLabel(entry)} ${formatTime(entry.start)}`,
-              })}
-              onPress={() => setSelectedId(entry.id)}
-              style={{
-                minHeight: 48,
-                paddingVertical: 7,
-                borderTopWidth: 1,
-                borderColor: c.line,
-              }}
-            >
-              <T style={{ fontSize: 13, fontWeight: "600" }}>
-                {entryLabel(entry)}
-              </T>
-              <T
-                style={{ fontSize: 12, color: c.muted }}
-              >{`${formatDate(entry.start, { month: "short", day: "numeric" })} · ${formatTime(entry.start)}`}</T>
-            </Pressable>
-          ),
-        )}
-        {visibleEntries.length > 5 && (
+        {(largeText || expandedList
+          ? visibleEntries
+          : visibleEntries.slice(0, 5)
+        ).map((entry) => (
+          <Pressable
+            key={entry.id}
+            accessibilityRole="button"
+            accessibilityLabel={t("打开日历记录：{detail}", {
+              detail: `${entryLabel(entry)} ${formatTime(entry.start)}`,
+            })}
+            onPress={() => setSelectedId(entry.id)}
+            style={{
+              minHeight: 48,
+              paddingVertical: 7,
+              borderTopWidth: 1,
+              borderColor: c.line,
+            }}
+          >
+            <T style={{ fontSize: 17, fontWeight: "600" }}>
+              {entryLabel(entry)}
+            </T>
+            <T
+              style={{ fontSize: 15, color: c.muted }}
+            >{`${formatDate(entry.start, { month: "short", day: "numeric" })} · ${formatTime(entry.start)}`}</T>
+          </Pressable>
+        ))}
+        {!largeText && visibleEntries.length > 5 && (
           <Button
             secondary
             label={expandedList ? "收起日历明细" : "展开全部日历明细"}
@@ -710,7 +744,10 @@ export default function RecordsCalendar({
             }}
           >
             <View style={row}>
-              <T style={{ flex: 1, fontSize: 21, fontWeight: "700" }}>
+              <T
+                accessibilityRole="header"
+                style={{ flex: 1, fontSize: 22, fontWeight: "700" }}
+              >
                 记录详情
               </T>
               <Pressable

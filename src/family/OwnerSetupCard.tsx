@@ -3,7 +3,6 @@ import {
   Keyboard,
   KeyboardAvoidingView,
   Image,
-  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -12,6 +11,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import Modal from "../AccessibleModal";
 import type { State } from "../domain";
 import { useI18n } from "../i18n";
 import { Button, Card, T, Theme } from "../ui";
@@ -252,9 +252,18 @@ export default function OwnerSetupCard({
               editable={!busy}
               placeholder="family@example.com"
               placeholderTextColor={c.muted}
+              keyboardAppearance={c.isDark ? "dark" : "light"}
+              selectionColor={c.primary}
+              allowFontScaling
+              maxFontSizeMultiplier={0}
+              accessibilityState={{ disabled: busy }}
               style={[
                 styles.input,
-                { color: c.text, backgroundColor: c.bg, borderColor: c.line },
+                {
+                  color: c.text,
+                  backgroundColor: c.input,
+                  borderColor: c.controlLine,
+                },
               ]}
             />
             <T raw style={[styles.body, { color: c.muted }]}>

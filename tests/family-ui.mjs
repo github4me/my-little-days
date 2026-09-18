@@ -207,6 +207,8 @@ function fixture(
           return () => null;
         if (name === "../i18n") return { useI18n: () => ({ locale }) };
         if (name === "../ui") return ui;
+        if (name === "../AccessibleModal") return "Modal";
+        if (name === "../NativeDateTimeField") return "NativeDateTimeField";
         if (name === "./messages") return messages;
         if (name === "./invitationCapacity")
           return load("src/family/invitationCapacity.ts");

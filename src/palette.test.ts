@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { dark, light } from "./palette";
+import {
+  dark,
+  light,
+  darkHighContrast,
+  lightHighContrast,
+  selectPalette,
+} from "./palette";
 
 function luminance(hex: string) {
   const values = hex.match(/[a-f\d]{2}/gi)!.map((part) => {
@@ -15,22 +21,48 @@ function contrast(a: string, b: string) {
   return (values[0] + 0.05) / (values[1] + 0.05);
 }
 
-test("night text, placeholders and actions remain legible on every surface", () => {
-  for (const surface of [
-    dark.bg,
-    dark.card,
-    dark.elevated,
-    dark.input,
-    dark.soft,
-  ]) {
-    for (const ink of [dark.text, dark.muted, dark.primary, dark.danger]) {
-      assert.ok(contrast(ink, surface) >= 4.5, `${ink} on ${surface}`);
+test("both appearances and increased contrast preserve text and control legibility", () => {
+  for (const palette of [light, dark, lightHighContrast, darkHighContrast]) {
+    for (const surface of [
+      palette.bg,
+      palette.card,
+      palette.elevated,
+      palette.input,
+      palette.soft,
+    ]) {
+      for (const ink of [
+        palette.text,
+        palette.muted,
+        palette.primary,
+        palette.danger,
+      ]) {
+        assert.ok(contrast(ink, surface) >= 4.5, `${ink} on ${surface}`);
+      }
     }
+    assert.ok(contrast(palette.onPrimary, palette.primary) >= 4.5);
+    assert.ok(contrast(palette.heroMuted, palette.hero) >= 4.5);
+    assert.ok(contrast(palette.heroText, palette.hero) >= 4.5);
+    assert.ok(contrast(palette.controlLine, palette.input) >= 3);
   }
-  assert.ok(contrast(dark.onPrimary, dark.primary) >= 4.5);
-  assert.ok(contrast(light.onPrimary, light.primary) >= 4.5);
-  assert.ok(contrast(dark.heroMuted, dark.hero) >= 4.5);
-  assert.ok(contrast(dark.controlLine, dark.input) >= 3);
+});
+
+test("contrast changes retain the chosen appearance and strengthen secondary text", () => {
+  assert.equal(selectPalette(false), light);
+  assert.equal(selectPalette(true), dark);
+  assert.equal(selectPalette(false, true), lightHighContrast);
+  assert.equal(selectPalette(true, true), darkHighContrast);
+  for (const [base, high] of [
+    [light, lightHighContrast],
+    [dark, darkHighContrast],
+  ]) {
+    assert.equal(high.isDark, base.isDark);
+    assert.ok(high.isHighContrast);
+    assert.ok(contrast(high.muted, high.bg) > contrast(base.muted, base.bg));
+    assert.ok(
+      contrast(high.controlLine, high.input) >
+        contrast(base.controlLine, base.input),
+    );
+  }
 });
 
 test("night surfaces communicate elevation and category icons do not glare", () => {
