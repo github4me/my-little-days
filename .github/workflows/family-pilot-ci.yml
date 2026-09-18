@@ -30,6 +30,8 @@ jobs:
           node-version: "24"
           cache: npm
       - run: npm ci
+      - name: Verify Watch offline summaries and protocol
+        run: swift test --package-path watch
       - run: npm run verify
       - run: npm run export:web
       - run: npx playwright install --with-deps chromium

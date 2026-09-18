@@ -56,6 +56,9 @@ struct WatchContext: Codable {
   let language: String?
   let totals: Totals?
   var totalsDate: String?
+  // Completed sleep intervals, merged and bounded by the phone, in Unix seconds.
+  // Older phones omit them; in that case sleep totals wait for confirmation.
+  var sleepRanges: [[Double]]?
 
   func isValid(at now: Date) -> Bool {
     guard schemaVersion == 1, status == "ready", !workspaceKey.isEmpty,
@@ -135,6 +138,92 @@ struct WatchDisk: Codable {
   var outbox: [WatchOutboxItem] = []
   var retiredBridgeIds: [String] = []
   var milkAmountDraft: WatchMilkAmountDraft?
+  var summaryBase: WatchContext?
+  var summaryCommandIds: [String]?
+
+  mutating func append(_ command: WatchCommand) {
+    // Pin the last known phone totals BEFORE adding the first local operation.
+    // Keep this baseline until the entire batch is reflected by phone receipts
+    // AND a corresponding snapshot, regardless of transport arrival order.
+    if summaryBase == nil {
+      summaryBase = context
+      summaryCommandIds = []
+    }
+    summaryCommandIds?.append(command.id)
+    outbox.append(WatchOutboxItem(command: command))
+  }
+
+  func summary(at now: Date, calendar: Calendar = .current) -> WatchSummary? {
+    guard let context, context.isValid(at: now) else { return nil }
+    let base = summaryBase ?? context
+    let start = calendar.startOfDay(for: now)
+    guard let end = calendar.date(byAdding: .day, value: 1, to: start) else { return nil }
+    let formatter = DateFormatter()
+    formatter.calendar = Calendar(identifier: .gregorian)
+    formatter.timeZone = calendar.timeZone
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.dateFormat = "yyyy-MM-dd"
+    let isToday = base.totalsDate == formatter.string(from: now)
+    var milk = isToday ? base.totals?.feedMl ?? 0 : 0
+    var feeds = isToday ? base.totals?.feedCount ?? 0 : 0
+    var nappies = isToday ? base.totals?.diaperCount ?? 0 : 0
+    let ids = Set(summaryCommandIds ?? [])
+    let batch = outbox.filter { ids.contains($0.id) && $0.command.workspaceKey == context.workspaceKey &&
+      $0.command.bridgeId == context.bridgeId && $0.command.generation == context.generation }
+    let rejected = Set(outbox.filter { $0.receipt?.status == "rejected" }.map(\.id))
+    var records: [String: WatchEntry] = [:]
+    var sleepRanges = isToday ? base.sleepRanges ?? [] : []
+    var hasLocal = false
+    for item in batch {
+      let command = item.command
+      guard !rejected.contains(item.id), !rejected.contains(command.dependsOn ?? "") else { continue }
+      if command.kind == "create", let entry = command.entry {
+        records[entry.id] = entry
+        hasLocal = true
+      } else if let expected = command.expectedEntry,
+                let stopped = command.stoppedAt.flatMap(WatchClock.date) {
+        var entry = records[command.recordId] ?? expected
+        if command.kind == "finish-feed" {
+          // A phone-started feed is already counted; only its amount changes.
+          if isToday && records[entry.id] == nil && base.entries?.contains(where: { $0.id == entry.id }) == true &&
+              entry.startedAt >= start && entry.startedAt < end {
+            feeds -= 1
+            milk -= entry.amount ?? 0
+          }
+          entry.feedRunning = false
+          entry.amount = entry.isBottle ? command.amount ?? 0 : nil
+          entry.end = command.stoppedAt
+          records[entry.id] = entry
+        } else if command.kind == "finish-sleep" {
+          records.removeValue(forKey: entry.id)
+          if stopped.timeIntervalSince(entry.startedAt) >= 60 {
+            entry.end = command.stoppedAt
+            records[entry.id] = entry
+          }
+        }
+        hasLocal = true
+      }
+    }
+    for entry in records.values {
+      if entry.startedAt >= start && entry.startedAt < end {
+        if entry.type == "feed" { feeds += 1; milk += entry.amount ?? 0 }
+        if entry.type == "diaper" { nappies += 1 }
+      }
+      if entry.type == "sleep", let finished = entry.end.flatMap(WatchClock.date) {
+        sleepRanges.append([max(start, entry.startedAt).timeIntervalSince1970,
+          min(end, finished).timeIntervalSince1970])
+      }
+    }
+    // Merge with the phone's completed intervals, not just add minutes: a
+    // backfilled sleep can overlap a Watch timer. Missing/oversized old metadata
+    // must not manufacture precision; retain the phone sleep total until synced.
+    let sleep = !isToday || base.sleepRanges != nil
+      ? WatchSummary.sleepMinutes(sleepRanges)
+      : base.totals?.sleepMinutes ?? 0
+    return WatchSummary(totals: .init(feedMl: max(0, milk), feedCount: max(0, feeds),
+      diaperCount: max(0, nappies), sleepMinutes: sleep), phoneUpdatedAt: base.publishedAt,
+      needsPhoneUpdate: !isToday, includesLocalChanges: hasLocal)
+  }
 
   func initialMilkAmount(for entry: WatchEntry) -> Int {
     if let draft = milkAmountDraft, draft.matches(entry, context: context), (0...2_000).contains(draft.amount) {
@@ -173,6 +262,11 @@ struct WatchDisk: Codable {
   mutating func acceptContext(_ value: WatchContext) {
     guard value.schemaVersion == 1, !retiredBridgeIds.contains(value.bridgeId), value.supersedes(context) else { return }
     if let old = context, old.bridgeId != value.bridgeId { retiredBridgeIds.append(old.bridgeId) }
+    if let base = summaryBase, value.bridgeId != base.bridgeId ||
+        value.workspaceKey != base.workspaceKey || value.generation != base.generation {
+      summaryBase = nil
+      summaryCommandIds = nil
+    }
     context = value
     reconcileProjection()
   }
@@ -202,8 +296,34 @@ struct WatchDisk: Codable {
     }
     // Retain bounded terminal receipt history, not unsynced work. Quarantined old
     // generations are never replayed or rendered under the new workspace.
-    let finished = outbox.filter { ["saved", "shared"].contains($0.receipt?.status ?? "") && $0.projectionReconciled }
+    if let ids = summaryCommandIds, ids.allSatisfy({ id in
+      outbox.contains { $0.id == id && ($0.projectionReconciled || $0.receipt?.status == "rejected") }
+    }) {
+      summaryBase = nil
+      summaryCommandIds = nil
+    }
+    let pinned = Set(summaryCommandIds ?? [])
+    let finished = outbox.filter { !pinned.contains($0.id) && ["saved", "shared"].contains($0.receipt?.status ?? "") && $0.projectionReconciled }
     let removable = Set(finished.dropLast(100).map(\.id))
     outbox.removeAll { removable.contains($0.id) }
+  }
+}
+
+struct WatchSummary {
+  let totals: WatchContext.Totals
+  let phoneUpdatedAt: String?
+  let needsPhoneUpdate: Bool
+  let includesLocalChanges: Bool
+
+  static func sleepMinutes(_ ranges: [[Double]]) -> Double {
+    let sorted = ranges.filter { $0.count == 2 && $0[0].isFinite && $0[1].isFinite && $0[1] > $0[0] }
+      .sorted { $0[0] < $1[0] }
+    var stop = -Double.infinity
+    var seconds = 0.0
+    for range in sorted {
+      seconds += max(0, range[1] - max(stop, range[0]))
+      stop = max(stop, range[1])
+    }
+    return seconds / 60
   }
 }

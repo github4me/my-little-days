@@ -53,6 +53,7 @@ export type WatchContext = {
     sleepMinutes: number;
   };
   totalsDate: string;
+  sleepRanges?: [number, number][];
   // Read-only widget access is independent from the Watch recording rollout.
   widgetTotals?: { feedMl: number; diaperCount: number; sleepMinutes: number };
   bridgeId?: string;

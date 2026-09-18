@@ -198,6 +198,7 @@ private final class WatchBridgeTransport: NSObject, WCSessionDelegate {
       context.removeValue(forKey: "profile")
       context.removeValue(forKey: "entries")
       context.removeValue(forKey: "totals")
+      context.removeValue(forKey: "sleepRanges")
       context.removeValue(forKey: "widgetTotals")
       value.context = try stringify(context)
       try save(value)

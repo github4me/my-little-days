@@ -57,6 +57,49 @@ build 30 lacks the Watch changes; successful compilation is not Apple acceptance
 
 ## Boundaries to understand before testing
 
+### Watch summary and navigation refinement — 19 September 2026
+
+Source changes, pending native release/device validation:
+
+- One native list row groups **Today**, milk volume, nappy count, completed sleep
+  minutes and the phone snapshot's absolute date/time. There is no resetting
+  relative seconds counter. Labels wrap at accessibility sizes.
+- **Notifications** is a home-menu destination alongside **Sync status**, not
+  nested within it. Settings still belong to iPhone; moving this help page does
+  not enable server notification delivery or change Apple's forwarding rules.
+- After a command is atomically saved on Watch, totals include its local effect.
+  Prepared milk is not counted as consumed; confirming a bottle adds the chosen
+  actual volume. Sleep under 60 seconds remains cancelled. Completed sleep uses
+  interval union so overlapping backfills are not counted twice.
+- A persisted summary baseline and bounded command batch prevent phone snapshots
+  arriving before receipts (or vice versa) from double counting a record. The
+  baseline advances when every command in that batch is reflected or rejected.
+  During that short reconciliation window other phone changes wait with the
+  labelled baseline; local additions remain visible. Pending family sharing is
+  still shown separately and never presented as server confirmation.
+- Yesterday's totals are not labelled as today's. Until a new-day phone snapshot
+  arrives, only known Watch records for today are counted and the UI says that
+  today's phone totals await sync. Scope/generation changes discard the overlay;
+  expired/unavailable access hides it. A temporary same-scope phone pause retains
+  pending local work for subsequent authorized recovery.
+- Sleep range metadata is merged and capped at 512 intervals, within the existing
+  32 KiB envelope budget. With an older phone or pathological larger history,
+  sleep retains the phone total until confirmation, rather than adding an
+  inaccurate overlapping estimate. Milk/nappy projection is unaffected.
+
+Foundation-only regression tests run in GitHub's existing Ubuntu CI job and on
+the EAS macOS host, covering immediate totals, receipt/context arrival order,
+durable restart, selected consumption, rejected dependencies, overlap, minute
+boundary, midnight and scope isolation. These are not Watch screenshots or
+physical-device acceptance. The layout uses [Apple's watchOS guidance](https://developer.apple.com/design/human-interface-guidelines/designing-for-watchos).
+
+Device check after installing the new paired build: record a nappy with iPhone
+unreachable (count immediately +1); finish a 150 mL bottle (immediate +150 mL);
+reconnect/open iPhone (counts must not increase again); confirm the dated update
+label does not count seconds; open Notifications directly from the home menu.
+Also check a ≥60-second sleep, a <60-second cancellation, Chinese/English and
+large text on the smallest supported Watch. Do not reset/uninstall real data.
+
 ### Milk amount interaction refinement (source only; not in build 32)
 
 The four unmarked volume shortcuts have been replaced with one explicitly styled

@@ -101,7 +101,7 @@ final class WatchStore: NSObject, ObservableObject, WCSessionDelegate {
       baseVersion: dependency == nil ? entry.version : nil, expectedEntry: kind == "create" ? nil : entry.commandEntry,
       dependsOn: kind == "create" ? nil : dependency)
     var value = disk
-    value.outbox.append(WatchOutboxItem(command: command))
+    value.append(command)
     if kind == "create", let initialMilkAmount {
       value.rememberMilkAmount(initialMilkAmount, for: entry)
     }

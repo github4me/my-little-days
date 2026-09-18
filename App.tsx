@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { watchSleepRanges } from "./src/watchSummary";
 import {
   View,
   ScrollView,
@@ -635,6 +636,7 @@ function BabyApp({
           sleepMinutes: totals.sleepMinutes,
         },
         totalsDate: localDay(today),
+        sleepRanges: watchSleepRanges(current?.entries ?? [], today, tomorrow),
         widgetTotals: widgetTotals && {
           feedMl: widgetTotals.feedMl,
           diaperCount: widgetTotals.diaperCount,
