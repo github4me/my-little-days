@@ -1288,5 +1288,25 @@ item; its confirmation, consent and administrator restrictions are unchanged.
 
 Validation: TypeScript and 522 verification tests, full browser regression,
 Apple layout scenarios and isolated bilingual family flows passed. The focused
-family suite includes 55 tests. Source/build/CI evidence is recorded below after
-publication; native installation and acceptance remain pending.
+family suite includes 55 tests. Native installation and acceptance remain pending.
+
+### Preview 28 release record
+
+- Source: `32d60b7c201e8307b9e659499935cb01dbe5cf95`, pushed via the GitHub plugin
+  on `feature/family-invitations`. Exactly nine reviewed app/test/docs files were
+  included; unrelated AGENTS, SQL/infrastructure and runbook edits were preserved.
+- [Family sharing CI](https://github.com/github4me/my-little-days/actions/runs/35307572959)
+  passed both TypeScript/browser and disposable API/SQL integration jobs. No
+  production SQL operation is part of this CI or app preview release.
+- Expo build: `7bf78b99-0bd0-4021-950b-94ca057ff670`, **0.2.1 / 28**, internal
+  distribution and preview profile/environment, matching the exact source above.
+  [Build and installation page](https://expo.dev/accounts/expo4chao/projects/little-days/builds/7bf78b99-0bd0-4021-950b-94ca057ff670).
+  Submitted at `2026-09-18T04:37:38Z`; **FINISHED** at `2026-09-18T04:42:06Z`
+  (14:42 Sydney), with an internal IPA returned for the exact source/version.
+- All five public preview settings matched; no account-level overrides were
+  present. The inspected clean archive matched the source and excluded private
+  work, credentials, dependencies, generated exports and server files. Existing
+  signing credentials and registered devices were reused; OTA remains disabled.
+- Install from the page above, over the existing app without clearing data.
+  Physical-device checks remain pending. No Azure/API/SQL deployment or TestFlight
+  submission occurred.

@@ -80,9 +80,9 @@ The full browser regression, Apple layout checks and isolated bilingual Light/Da
 family flows at 320/390px also passed. Those flows check collapsed-account visibility,
 non-nested action buttons, cancellation, confirmed decline and the separated
 deletion confirmation. Physical iPhone VoiceOver order, large Dynamic Type and
-keyboard behavior remain unverified. This follow-up is being published as
-**0.2.1 / preview 28**; preview 27 does not contain it. The exact source, build
-status and installation link are recorded separately in the manual runbook.
+keyboard behavior remain unverified. **0.2.1 / preview 28** finished successfully
+from source `32d60b7`; preview 27 does not contain it. The exact build and
+installation link are recorded in the manual runbook. Device acceptance is separate.
 
 ## Implementation boundaries
 
