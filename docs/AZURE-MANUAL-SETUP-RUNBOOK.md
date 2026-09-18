@@ -1785,4 +1785,32 @@ If EAS cannot configure the new capabilities/profile unattended:
    retain an already-rendered widget briefly; this feature cannot retract photos,
    screenshots, or promise instantaneous remote revocation while offline.
 
-Release evidence will be appended after the actual build and Apple readback.
+### Widget release attempt — 18 September 2026, 12:56 UTC
+
+- Implementation pushed through the GitHub plugin as
+  [`cfa0913281e9ec435d9e0b22bfbeae04a2227cfd`](https://github.com/github4me/my-little-days/commit/cfa0913281e9ec435d9e0b22bfbeae04a2227cfd).
+  Local `npm run verify`, web export and browser regressions passed. The source
+  [CI run 35347244057](https://github.com/github4me/my-little-days/actions/runs/35347244057)
+  was still running at this checkpoint; this is not a CI success claim.
+- Resolved production environment was rechecked: expected HTTPS API, customer
+  tenant/mobile client/API scope, demo `0`, STORE distribution and OTA disabled.
+  No account-level environment overrides were present.
+- An isolated 180-file stage (`work/widget-store-build34`) was byte-compared with
+  the reviewed sources. The directory name is only a planned build label: **no
+  build 34 was produced**, and staged/root buildNumber remain 33.
+- EAS reached credential preparation with the three expected targets. Existing
+  phone/Watch profiles were found, and Watch capabilities needed no changes.
+  EAS registered the new Widget App ID, Apple identifier **8GYSC98QT3**, but Apple
+  rejected automated `APP_GROUPS=ON` capability configuration. The same session
+  reported that capability-identifier association requires cookie (Apple login)
+  authentication rather than the available App Store Connect API key.
+- Configure the widget at [Apple Developer — Widget App ID](https://developer.apple.com/account/resources/identifiers/bundleId/edit/8GYSC98QT3),
+  then follow the phone/App Group/profile steps above. Do not disable capability
+  syncing or remove the entitlement as a workaround. Both phone and widget need
+  the shared group in their signed profiles before the next frozen build.
+- **No cloud build ID, native compile, Swift-test result, IPA, submission or Apple
+  processing result exists for this attempt.** The installed/current TestFlight 33
+  is unaffected. Once signing is ready, refresh the isolated stage from the exact
+  reviewed revision and resume the native build, then submit its exact ID.
+- EAS displayed 80% included-build-credit usage and an incident affecting Android
+  queues/submissions/workflows. No paid upgrade or quota change was requested.
