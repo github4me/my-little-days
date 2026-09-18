@@ -129,6 +129,7 @@ function fixture(
     inbox: [],
     busy: false,
     syncing: false,
+    ready: true,
     error: null,
     notice: null,
     dismissedFeedback: null,
@@ -540,7 +541,7 @@ test("embedded account includes account controls and omits family management and
     assert.match(screen.text(), /My account/);
     assert.match(screen.text(), /test@example.invalid/);
     assert.equal(screen.buttons("Sign out").length, 1);
-    assert.equal(screen.buttons("Delete account").length, 1);
+    assert.equal(screen.buttons("Delete account").length, 0);
     assert.equal(screen.buttons("Back").length, 0);
     assert.equal(screen.buttons("Add invitation").length, 0);
     assert.equal(screen.buttons("Leave family").length, 0);
@@ -592,7 +593,10 @@ test("received invitations stay directly below signed-in status when account det
       );
       assert.equal(view.buttons(zh ? "拒绝" : "Decline").length, 2);
       assert.equal(view.buttons(zh ? "退出登录" : "Sign out").length, 0);
-      assert.equal(view.buttons(zh ? "删除账户" : "Delete account").length, 0);
+      assert.equal(
+        view.buttons(zh ? "删除账户" : "Delete account").length,
+        section === "account" ? 0 : 1,
+      );
       assert.doesNotMatch(text, /test@example.invalid/);
       header.props.onPress();
       view.render();
@@ -781,30 +785,21 @@ test("resolving an invitation handler alone does not locally dismiss an unchange
   assert.doesNotMatch(view.text(), /Inviter received/);
 });
 
-test("delete-account entry is the final separated account action and keeps consequences in consent", () => {
+test("standalone deletion panel omits account details and keeps consequences in consent", () => {
   for (const locale of ["en", "zh-CN"]) {
     const zh = locale === "zh-CN";
     const label = zh ? "删除账户" : "Delete account";
-    const view = fixture({}, locale, false, "account", false);
-    view.render();
-    assert.equal(view.buttons(label).length, 0);
-    view
-      .nodes()
-      .find(
-        (node) =>
-          node.props?.accessibilityLabel ===
-          (zh ? "展开我的账户" : "Show My account"),
-      )
-      .props.onPress();
+    const view = fixture({}, locale, false, "deletion", false);
     view.render();
     const buttons = view.nodes().filter((node) => node.type === "Button");
+    assert.equal(buttons.length, 1);
     assert.equal(buttons.at(-1).props.label, label);
-    assert(
-      buttons.findIndex(
-        (node) => node.props.label === (zh ? "退出登录" : "Sign out"),
-      ) <
-        buttons.length - 1,
+    assert.doesNotMatch(
+      view.text(),
+      /My account|我的账户|Signed in|已登录|Test member|test@example.invalid/,
     );
+    assert.equal(view.buttons(zh ? "退出登录" : "Sign out").length, 0);
+    assert.equal(view.buttons(zh ? "返回" : "Back").length, 0);
     assert.doesNotMatch(view.text(), /permanent deletion|永久删除/);
     view.buttons(label)[0].props.onPress();
     view.render();
@@ -821,6 +816,81 @@ test("delete-account entry is the final separated account action and keeps conse
     view.render();
     assert.equal(view.calls.length, 0);
     assert.doesNotMatch(view.text(), /permanent deletion|永久删除/);
+  }
+});
+
+test("standalone deletion item is absent for signed-out or deleted accounts and retains lifecycle safeguards", () => {
+  for (const locale of ["en", "zh-CN"]) {
+    const label = locale === "zh-CN" ? "删除账户" : "Delete account";
+    for (const overrides of [
+      { user: null, authStatus: "signed_out" },
+      { user: null, authStatus: "token_confirmed" },
+      { authStatus: "token_confirmed" },
+      { configured: false },
+      { webUnsupported: true },
+      {
+        accountDeletion: {
+          deletionId: "delete",
+          status: "pending",
+          requestedAt: "2026-09-18T00:00:00Z",
+        },
+      },
+      {
+        deletionStatus: {
+          deletionId: "delete",
+          status: "completed",
+          requestedAt: "2026-09-18T00:00:00Z",
+        },
+      },
+    ]) {
+      const view = fixture(overrides, locale, false, "deletion", false);
+      view.render();
+      assert.equal(view.buttons(label).length, 0, JSON.stringify(overrides));
+      assert.equal(
+        view
+          .nodes()
+          .filter(
+            (node) =>
+              node.type === "Card" || node.type === "Button" || node.text,
+          ).length,
+        0,
+        "Empty deletion slot renders no duplicate account or receipt UI",
+      );
+    }
+    for (const overrides of [
+      { snapshot: snapshot("owner"), hasFamilyMembership: true },
+      { transitionPending: true },
+      { busy: true },
+      { hasFamilyMembership: true, sharedMode: true, snapshot: null },
+      {
+        hasFamilyMembership: true,
+        sharedMode: true,
+        snapshot: snapshot("caregiver"),
+        ready: false,
+      },
+      { authStatus: "reauth_required" },
+      { authStatus: "unverified" },
+      { authStatus: "checking" },
+    ]) {
+      const view = fixture(overrides, locale, false, "deletion", false);
+      view.render();
+      assert.equal(
+        view.buttons(label)[0].props.disabled,
+        true,
+        JSON.stringify(overrides),
+      );
+      assert.equal(view.calls.length, 0);
+      if (overrides.snapshot?.family.role === "owner")
+        assert.match(
+          view.text(),
+          locale === "zh-CN" ? /家庭管理员/ : /administer a family/,
+        );
+      else if (overrides.sharedMode)
+        assert.match(
+          view.text(),
+          locale === "zh-CN" ? /刷新家庭权限/ : /Refresh family access/,
+        );
+    }
   }
 });
 
@@ -874,7 +944,7 @@ test("family mode retains reauthentication and unconfirmed-transition recovery",
   assert.match(expired.text(), /Session expired/);
   assert.equal(expired.buttons("Sign in again").length, 1);
   assert.equal(expired.buttons("Sign out").length, 1);
-  assert.equal(expired.buttons("Delete account")[0].props.disabled, true);
+  assert.equal(expired.buttons("Delete account").length, 0);
   for (const section of ["account", "family"]) {
     const recovery = fixture({ transitionPending: true }, "en", false, section);
     recovery.render();
@@ -969,8 +1039,8 @@ test("family recovery retains sign out when shared history is not ready", () => 
   assert(screen.buttons("Refresh").length > 0);
 });
 
-test("embedded account deletion still requires consent and submits through its confirmation", async () => {
-  const screen = fixture({}, "en", false, "account");
+test("standalone account deletion still requires consent and submits through its confirmation", async () => {
+  const screen = fixture({}, "en", false, "deletion");
   screen.render();
   screen.buttons("Delete account")[0].props.onPress();
   screen.render();
@@ -1754,7 +1824,7 @@ test("modal action errors stay visible when controller feedback is globally hand
     },
     "en",
     false,
-    "account",
+    "deletion",
     true,
     { feedbackHandledByGlobalBanner: true },
   );
@@ -1824,8 +1894,8 @@ test("delete confirmation isolates old errors and shows only its own failed atte
   assert.doesNotMatch(view.modalText(), /could not be saved on this device/i);
 });
 
-test("an open delete confirmation follows session expiry and cannot submit", () => {
-  const view = fixture();
+test("an open standalone delete confirmation follows session expiry and cannot submit", () => {
+  const view = fixture({}, "en", false, "deletion");
   view.render();
   view.buttons("Delete account")[0].props.onPress();
   view.render();

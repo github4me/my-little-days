@@ -163,3 +163,84 @@ test("web uses roving keyboard focus; Android and web labels are not capped", ()
     ),
   );
 });
+
+test("More composes account and deletion as separate sibling slots using the same controller", () => {
+  // Composition boundary only; rendered family-card behavior is covered by the
+  // family UI/browser suites. Do not import the live App or its storage/API.
+  const source = (filename) =>
+    ts.createSourceFile(
+      filename,
+      fs.readFileSync(filename, "utf8"),
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TSX,
+    );
+  const settings = source("src/Settings.tsx");
+  const declaration = settings.statements.find(
+    (node) => ts.isFunctionDeclaration(node) && node.name?.text === "Settings",
+  );
+  const result = declaration.body.statements.findLast(
+    ts.isReturnStatement,
+  ).expression;
+  const root = ts.isParenthesizedExpression(result)
+    ? result.expression
+    : result;
+  assert(ts.isJsxElement(root));
+  const children = root.children.filter(
+    (node) => !ts.isJsxText(node) || node.text.trim(),
+  );
+  const slot = (name) =>
+    children.findIndex(
+      (node) =>
+        ts.isJsxExpression(node) &&
+        ts.isIdentifier(node.expression) &&
+        node.expression.text === name,
+    );
+  const accountIndex = slot("accountPanel");
+  const deletionIndex = slot("accountDeletionPanel");
+  const lastSection = children.findLastIndex(
+    (node) =>
+      ts.isJsxElement(node) &&
+      node.openingElement.tagName.getText(settings) === "SettingsSection",
+  );
+  assert.ok(accountIndex >= 0);
+  assert.ok(deletionIndex > lastSection && deletionIndex > accountIndex);
+  assert.equal(
+    deletionIndex,
+    children.length - 2,
+    "Deletion is the final Settings item, before the footer",
+  );
+  assert.match(
+    children.at(-1).getText(settings),
+    /No account for offline records/,
+  );
+
+  const app = source("App.tsx");
+  const elements = [];
+  const visit = (node) => {
+    if (ts.isJsxSelfClosingElement(node)) elements.push(node);
+    ts.forEachChild(node, visit);
+  };
+  visit(app);
+  const appSettings = elements.find(
+    (node) => node.tagName.getText(app) === "Settings",
+  );
+  const attribute = (element, name) =>
+    element.attributes.properties.find(
+      (node) => ts.isJsxAttribute(node) && node.name.text === name,
+    )?.initializer;
+  const account = attribute(appSettings, "accountPanel").expression;
+  const deletion = attribute(appSettings, "accountDeletionPanel").expression;
+  for (const [panel, section] of [
+    [account, "account"],
+    [deletion, "deletion"],
+  ]) {
+    assert(ts.isJsxSelfClosingElement(panel));
+    assert.equal(panel.tagName.getText(app), "FamilyScreenView");
+    assert.equal(attribute(panel, "section").text, section);
+  }
+  assert.equal(
+    attribute(account, "pilot").expression.getText(app),
+    attribute(deletion, "pilot").expression.getText(app),
+  );
+});

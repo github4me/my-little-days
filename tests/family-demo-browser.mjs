@@ -203,7 +203,6 @@ async function englishFlows(page) {
   ).toHaveValue("135");
   await button(page, "Save and share").click();
   await expect(page.getByText("135 mL", { exact: true })).toBeVisible();
-  await button(page, "Show My account").click();
   await expect(button(page, "Delete pilot account")).toBeDisabled();
   await button(page, "Show Family members (2)").click();
   await button(page, "Remove").click();
@@ -307,7 +306,6 @@ async function englishFlows(page) {
   await expect(button(page, "Edit")).toHaveCount(0);
 
   await button(page, "Member").click();
-  await button(page, "Show My account").click();
   await button(page, "Delete pilot account").click();
   await confirm(page, "Request account deletion", true);
   await expect(
@@ -375,13 +373,23 @@ async function accountInvitationPlacementFlow(page, zh, dark, width) {
   await expect(button(page, label("Sign out", "退出登录"))).toHaveCount(0);
   await expect(
     button(page, label("Delete pilot account", "删除试点账户")),
-  ).toHaveCount(0);
+  ).toHaveCount(1);
   // Invitation actions are siblings below the disclosure header, never nested
   // interactive controls inside the account disclosure's button.
   await expect(
     accountHeader.getByRole("button", { name: accept, exact: true }),
   ).toHaveCount(0);
-  const account = accountHeader.locator("..");
+  const account = page
+    .getByRole("button", {
+      name: zh ? /^(?:展开|收起)我的账户$/ : /^(?:Show|Hide) My account$/,
+    })
+    .locator("..");
+  await expect(
+    account.getByRole("button", {
+      name: label("Delete pilot account", "删除试点账户"),
+      exact: true,
+    }),
+  ).toHaveCount(0);
   await expect(
     account.getByRole("heading", { name: receivedTitle, exact: true }),
   ).toHaveCount(1);
@@ -412,19 +420,36 @@ async function accountInvitationPlacementFlow(page, zh, dark, width) {
   const signOut = button(page, label("Sign out", "退出登录"));
   await expect(deleteAccount).toBeVisible();
   await expect(
+    account.getByRole("button", {
+      name: label("Delete pilot account", "删除试点账户"),
+      exact: true,
+    }),
+  ).toHaveCount(0);
+  await expect(
     page.getByText(/permanent deletion processing|永久删除流程/),
   ).toHaveCount(0);
   const deleteBox = await deleteAccount.boundingBox();
   const signOutBox = await signOut.boundingBox();
   assert.ok(deleteBox && signOutBox && deleteBox.y > signOutBox.y);
+  const deletionCard = deleteAccount.locator("..");
   assert.ok(
-    await deleteAccount
-      .locator("..")
-      .evaluate(
-        (element) =>
-          Number.parseFloat(getComputedStyle(element).borderTopWidth) >= 1,
-      ),
-    "Destructive entry is visibly separated from ordinary account actions",
+    await page.evaluate(
+      ({ account, deletion }) =>
+        account.parentElement === deletion.parentElement,
+      {
+        account: await account.elementHandle(),
+        deletion: await deletionCard.elementHandle(),
+      },
+    ),
+    "Delete account and My account are separate sibling cards",
+  );
+  const createBox = await button(
+    page,
+    label("Show Create a family group", "展开创建家庭群组"),
+  ).boundingBox();
+  assert.ok(
+    createBox && deleteBox.y > createBox.y + createBox.height,
+    "Standalone deletion entry is below other management sections",
   );
   await deleteAccount.click();
   await confirmationPainted(page, zh);
@@ -438,6 +463,15 @@ async function accountInvitationPlacementFlow(page, zh, dark, width) {
   await expect(received).toBeVisible();
   await button(page, hideAccount).click();
   await expect(received).toBeVisible();
+  await expect(deleteAccount).toBeVisible();
+  await deleteAccount.scrollIntoViewIfNeeded();
+  await page.screenshot({
+    path: path.join(
+      screenshots,
+      `standalone-deletion-${zh ? "zh" : "en"}-${dark ? "dark" : "light"}-${width}.png`,
+    ),
+    animations: "disabled",
+  });
   await expect(button(page, accept)).toHaveCount(2);
   await button(page, decline).first().click();
   await confirmationPainted(page, zh);
@@ -931,6 +965,15 @@ try {
     await nestedInvitationHistoryFlow(page, zh, dark, width);
     for (const scenario of scenarios[locale]) {
       await button(page, scenario).click();
+      if (
+        ["Signed out", "Account deletion", "未登录", "删除账户"].includes(
+          scenario,
+        )
+      ) {
+        await expect(
+          button(page, zh ? "删除试点账户" : "Delete pilot account"),
+        ).toHaveCount(0);
+      }
       await noOverflow(
         page,
         `${locale}/${dark ? "dark" : "light"}/${width}/${scenario}`,
@@ -980,7 +1023,7 @@ try {
     await context.close();
   }
   console.log(
-    "PASS: 9 family UI scenarios, collapsed-account incoming invitations and cancellation/confirmed decline, separated deletion entry with consent, first-invitation seed review/cancel/consent with multiple emails, nested collapsed invitation history with preserved drafts, invitation consent, roles, editing, removal, transfer, closure, deletion and reset; English/Chinese, light/dark at 390/320px; all original record types preserved, no family persistence or API/auth traffic.",
+    "PASS: 9 family UI scenarios, collapsed-account incoming invitations and cancellation/confirmed decline, standalone bottom-level deletion card with consent, first-invitation seed review/cancel/consent with multiple emails, nested collapsed invitation history with preserved drafts, invitation consent, roles, editing, removal, transfer, closure, deletion and reset; English/Chinese, light/dark at 390/320px; all original record types preserved, no family persistence or API/auth traffic.",
   );
 } finally {
   await browser.close();

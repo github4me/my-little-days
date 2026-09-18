@@ -458,7 +458,7 @@ export default function FamilyScreenView({
   onBack?: () => void;
   pilot: ReturnType<typeof useFamilyPilot>;
   demo?: boolean;
-  section?: "all" | "account" | "family";
+  section?: "all" | "account" | "family" | "deletion";
   feedbackHandledByGlobalBanner?: boolean;
   ownerSetup?: React.ReactNode;
   initialDataSummary?: OwnerSeedSummary;
@@ -857,6 +857,148 @@ export default function FamilyScreenView({
     );
   }
 
+  function renderDeletionAction() {
+    // A standalone More item, separate from expandable account details.
+    // Token recognition is not authoritative account or family access.
+    if (
+      !pilot.configured ||
+      pilot.webUnsupported ||
+      !pilot.user ||
+      deletion ||
+      accountAccessPending
+    )
+      return null;
+    const familyAccessPending =
+      (pilot.hasFamilyMembership || pilot.sharedMode) &&
+      (!snapshot || !pilot.ready);
+    return (
+      <Card style={styles.card}>
+        <Button
+          label={m("deletion")}
+          secondary
+          disabled={workspaceBusy || owner || familyAccessPending}
+          onPress={() =>
+            confirm(
+              "deleteAccountTitle",
+              m("deleteAccountDescription"),
+              "deleteAccount",
+              pilot.deleteAccount,
+              "deleteAccountConsent",
+            )
+          }
+        />
+        {owner ? (
+          <T raw style={styles.muted(c.muted)}>
+            {m("deleteAccountBlocked")}
+          </T>
+        ) : familyAccessPending ? (
+          <T raw style={styles.muted(c.muted)}>
+            {locale === "zh-CN"
+              ? "请在“我的账户”刷新家庭权限后继续。"
+              : "Refresh family access in My account before continuing."}
+          </T>
+        ) : null}
+      </Card>
+    );
+  }
+
+  function renderConfirmation() {
+    return (
+      <Modal
+        visible={confirmation !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          if (!busy) setConfirmation(null);
+        }}
+      >
+        <SafeAreaView style={styles.modalBackdrop}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === "ios" ? "padding" : undefined}
+            style={{
+              width: "100%",
+              maxWidth: 420,
+              maxHeight: "100%",
+              flexShrink: 1,
+              alignSelf: "center",
+            }}
+          >
+            <View
+              accessibilityViewIsModal
+              style={[styles.modal, { backgroundColor: c.elevated }]}
+            >
+              <ScrollView
+                contentContainerStyle={styles.stack}
+                keyboardShouldPersistTaps="handled"
+              >
+                <T raw accessibilityRole="header" style={styles.title}>
+                  {confirmation?.title}
+                </T>
+                {demo ? (
+                  <T raw style={{ color: c.primary, fontWeight: "600" }}>
+                    {m("demoConfirmation")}
+                  </T>
+                ) : null}
+                <T raw>{confirmation?.body}</T>
+                {confirmation?.acknowledgement ? (
+                  <Consent
+                    checked={acknowledged}
+                    onChange={setAcknowledged}
+                    disabled={busy}
+                    label={confirmation.acknowledgement}
+                  />
+                ) : null}
+                {modalError ? (
+                  <T raw accessibilityRole="alert">
+                    {modalError}
+                  </T>
+                ) : null}
+                <Button
+                  label={
+                    busy ? m("working") : (confirmation?.label ?? m("confirm"))
+                  }
+                  disabled={
+                    busy ||
+                    confirmationAuthBlocked ||
+                    (!!confirmation?.acknowledgement && !acknowledged) ||
+                    (pilot.transitionPending &&
+                      !confirmation?.allowDuringTransition)
+                  }
+                  onPress={() => {
+                    if (
+                      confirmation &&
+                      !confirmationAuthBlocked &&
+                      !busy &&
+                      (!confirmation.acknowledgement || acknowledged) &&
+                      (!pilot.transitionPending ||
+                        confirmation.allowDuringTransition)
+                    )
+                      void run(confirmation.action, true);
+                  }}
+                />
+                <Button
+                  label={m("cancel")}
+                  secondary
+                  disabled={busy}
+                  onPress={() => setConfirmation(null)}
+                />
+              </ScrollView>
+            </View>
+          </KeyboardAvoidingView>
+        </SafeAreaView>
+      </Modal>
+    );
+  }
+
+  if (section === "deletion") {
+    return (
+      <>
+        {renderDeletionAction()}
+        {renderConfirmation()}
+      </>
+    );
+  }
+
   return (
     <View style={styles.screen}>
       {section !== "account" ? (
@@ -1232,34 +1374,6 @@ export default function FamilyScreenView({
                   )
                 }
               />
-              {!pilot.accountDeletion ? (
-                <View
-                  style={[
-                    styles.listItem,
-                    { borderColor: c.line, marginTop: 8 },
-                  ]}
-                >
-                  <Button
-                    label={m("deletion")}
-                    secondary
-                    disabled={workspaceBusy || owner}
-                    onPress={() =>
-                      confirm(
-                        "deleteAccountTitle",
-                        m("deleteAccountDescription"),
-                        "deleteAccount",
-                        pilot.deleteAccount,
-                        "deleteAccountConsent",
-                      )
-                    }
-                  />
-                  {owner ? (
-                    <T raw style={styles.muted(c.muted)}>
-                      {m("deleteAccountBlocked")}
-                    </T>
-                  ) : null}
-                </View>
-              ) : null}
             </Disclosure>
           ) : null}
 
@@ -1959,89 +2073,8 @@ export default function FamilyScreenView({
         />
       ) : null}
 
-      <Modal
-        visible={confirmation !== null}
-        transparent
-        animationType="fade"
-        onRequestClose={() => {
-          if (!busy) setConfirmation(null);
-        }}
-      >
-        <SafeAreaView style={styles.modalBackdrop}>
-          <KeyboardAvoidingView
-            behavior={Platform.OS === "ios" ? "padding" : undefined}
-            style={{
-              width: "100%",
-              maxWidth: 420,
-              maxHeight: "100%",
-              flexShrink: 1,
-              alignSelf: "center",
-            }}
-          >
-            <View
-              accessibilityViewIsModal
-              style={[styles.modal, { backgroundColor: c.elevated }]}
-            >
-              <ScrollView
-                contentContainerStyle={styles.stack}
-                keyboardShouldPersistTaps="handled"
-              >
-                <T raw accessibilityRole="header" style={styles.title}>
-                  {confirmation?.title}
-                </T>
-                {demo ? (
-                  <T raw style={{ color: c.primary, fontWeight: "600" }}>
-                    {m("demoConfirmation")}
-                  </T>
-                ) : null}
-                <T raw>{confirmation?.body}</T>
-                {confirmation?.acknowledgement ? (
-                  <Consent
-                    checked={acknowledged}
-                    onChange={setAcknowledged}
-                    disabled={busy}
-                    label={confirmation.acknowledgement}
-                  />
-                ) : null}
-                {modalError ? (
-                  <T raw accessibilityRole="alert">
-                    {modalError}
-                  </T>
-                ) : null}
-                <Button
-                  label={
-                    busy ? m("working") : (confirmation?.label ?? m("confirm"))
-                  }
-                  disabled={
-                    busy ||
-                    confirmationAuthBlocked ||
-                    (!!confirmation?.acknowledgement && !acknowledged) ||
-                    (pilot.transitionPending &&
-                      !confirmation?.allowDuringTransition)
-                  }
-                  onPress={() => {
-                    if (
-                      confirmation &&
-                      !confirmationAuthBlocked &&
-                      !busy &&
-                      (!confirmation.acknowledgement || acknowledged) &&
-                      (!pilot.transitionPending ||
-                        confirmation.allowDuringTransition)
-                    )
-                      void run(confirmation.action, true);
-                  }}
-                />
-                <Button
-                  label={m("cancel")}
-                  secondary
-                  disabled={busy}
-                  onPress={() => setConfirmation(null)}
-                />
-              </ScrollView>
-            </View>
-          </KeyboardAvoidingView>
-        </SafeAreaView>
-      </Modal>
+      {section === "all" ? renderDeletionAction() : null}
+      {renderConfirmation()}
     </View>
   );
 }

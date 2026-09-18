@@ -1310,3 +1310,41 @@ family suite includes 55 tests. Native installation and acceptance remain pendin
 - Install from the page above, over the existing app without clearing data.
   Physical-device checks remain pending. No Azure/API/SQL deployment or TestFlight
   submission occurred.
+
+## 29. Standalone Delete account in More (18 September 2026)
+
+Delete account is a separate More item, at the same level as My account, after
+ordinary settings and before the footer. It is no longer inside My account.
+Pending received invitations still appear directly below Signed in. The existing
+deletion explanation, acknowledgement, administrator restriction and server
+confirmation remain unchanged; unavailable family access cannot enable deletion.
+
+### Publish and phone acceptance
+
+1. Push the reviewed app/test/docs changes via the GitHub plugin on
+   `feature/family-invitations`, version **0.2.1**, iOS build **29**, without
+   unrelated SQL/infra changes. Use section 26's exact-source, preview environment,
+   five public values, account-override and clean archive checks.
+2. Build a native internal **preview** from that pushed SHA with the existing
+   signing credentials and registered devices. Demo stays `0`, OTA stays disabled.
+   This release does not require Azure/API/SQL deployment or TestFlight submission.
+3. After the build finishes, install over the existing app from its Expo page.
+   Do not uninstall, clear storage or submit account deletion as a test.
+4. Open **More / 我的**. Expand My account: there must be no Delete account action
+   inside it. Scroll below the ordinary settings to find the separate
+   **Delete account / 删除账户** item before the footer.
+5. For an eligible non-administrator, inspect and cancel the confirmation only.
+   The full consequences and unchecked consent must be visible; opening or
+   cancelling must not submit a deletion. Family administrators remain blocked
+   with the ownership explanation. Expired/unverified accounts and unavailable
+   family access cannot submit deletion; signed-out users have no deletion item.
+6. Check Chinese/English, Light/Dark, large Dynamic Type and VoiceOver focus.
+   Verify received invitations are still visible below Signed in and deletion
+   progress, if genuinely applicable, appears only in My account.
+
+Validation: TypeScript and all 524 verification tests passed, including 56 family
+UI tests and the More sibling-composition check. Full browser regression, four
+Apple layout scenarios and isolated bilingual Light/Dark family flows passed.
+No real account was deleted and no production service was used by these tests.
+The exact native preview release is recorded below when available; physical-device
+acceptance remains separate and pending.

@@ -78,6 +78,7 @@ function SettingsSection({
 export default function Settings({
   familyUiPreview = false,
   accountPanel,
+  accountDeletionPanel,
   familySharingVisible = false,
   sharedMode = false,
   sharedOwner = false,
@@ -100,6 +101,7 @@ export default function Settings({
 }: {
   familyUiPreview?: boolean;
   accountPanel?: React.ReactNode;
+  accountDeletionPanel?: React.ReactNode;
   familySharingVisible?: boolean;
   sharedMode?: boolean;
   sharedOwner?: boolean;
@@ -1184,6 +1186,7 @@ export default function Settings({
           提出的建议与想法，也感谢群里每一位妈妈爸爸的支持。期待更多妈妈爸爸出现在这里，一起让小日子更好。
         </T>
       </SettingsSection>
+      {accountDeletionPanel}
       <View style={{ padding: 10, gap: 5 }}>
         <T style={{ color: c.muted, fontSize: 12, textAlign: "center" }}>
           {copy(

@@ -1530,6 +1530,13 @@ function BabyApp({
                     />
                   }
                   familySharingVisible={!!family.user || family.sharedMode}
+                  accountDeletionPanel={
+                    <FamilyScreenView
+                      pilot={family}
+                      section="deletion"
+                      feedbackHandledByGlobalBanner
+                    />
+                  }
                   initialProfileExpanded={openProfile}
                   state={state}
                   avatarUri={avatarUri}

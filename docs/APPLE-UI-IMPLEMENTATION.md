@@ -84,6 +84,23 @@ keyboard behavior remain unverified. **0.2.1 / preview 28** finished successfull
 from source `32d60b7`; preview 27 does not contain it. The exact build and
 installation link are recorded in the manual runbook. Device acceptance is separate.
 
+## More-level account deletion (preview 29)
+
+Delete account is now a standalone item at the bottom of **More**, after ordinary
+settings and before the passive footer. It is a sibling of **My account**, not
+inside that disclosure. Received invitations remain directly below Signed in.
+The item opens the existing confirmation with full consequences and explicit
+acknowledgement; it does not directly submit deletion. Administrator restrictions,
+authentication and lifecycle guards remain. A known family with unavailable
+role/access keeps deletion disabled until refreshed. Deletion progress/recovery
+stays in My account rather than being duplicated at the bottom.
+
+This change requires the new native preview 29; preview 28 has the old location.
+TypeScript and all 524 verification tests, full browser regression, four Apple
+layout scenarios and isolated bilingual Light/Dark family flows passed. The
+manual runbook records release evidence and the new phone acceptance steps.
+Physical iPhone layout, large Dynamic Type and VoiceOver acceptance remain pending.
+
 ## Implementation boundaries
 
 This is an Expo/React Native UI update, not a rewrite in SwiftUI. Existing
