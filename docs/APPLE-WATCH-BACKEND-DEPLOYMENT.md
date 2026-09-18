@@ -33,4 +33,18 @@ Disable timer enforcement to withdraw family Watch capability on refresh if nece
 
 ## Execution evidence
 
-Release execution and post-deployment results will be recorded here after the workflow completes. Physical Watch connectivity, notifications and TestFlight availability remain separate acceptance steps.
+- Backend commit: `cd369debdc3e60fe0288fcc17703ba1f4d1dcbd2`, committed/pushed through the GitHub plugin.
+- [Deployment workflow 35337145549](https://github.com/github4me/my-little-days/actions/runs/35337145549): **success**, including TypeScript/browser tests, API/SQL tests, migration and API deployment.
+- Migration completed at **10:59:55 UTC** on 18 September. The run's temporary SQL firewall rule was removed at **10:59:57 UTC**; 33 existing rules remain, including the explicitly retained operator rule.
+- App Service deployment ID: `ad93f301-5e7f-4efb-9fce-689c64f13439`. Package deployment succeeded at **11:01 UTC**; liveness passed at **11:03:04 UTC** after startup.
+- Post-deployment read-only verification: six applied migrations, zero pending, all catalog/checksum/runtime-grant checks passing, four notification tables, zero duplicate family/timer groups. No production family records were edited for testing.
+- `Family__EnforceSingleActiveTimers=true` saved and read back at approximately **11:03 UTC**. The four push flags (registration, event creation, delivery, allow-all) are explicitly `false`; no push credentials or cohort were configured.
+- The new `/v2/push/capabilities` route changed from pre-release 404 to authenticated 401 without a token. This confirms the new route is deployed and not public; it does not prove a customer-authenticated operation.
+
+### Next manual acceptance
+
+1. Submit/install combined build **0.2.1 (31)**, EAS ID `24af9879-54a8-4044-998a-5ce4197536b2`, through the separate TestFlight workflow when requested. No submission was performed in this backend release.
+2. Open the signed-in phone app and refresh the family. Confirm the new family snapshot enables Watch recording, then test milk feeds, nappies and sleep on paired hardware. Do not uninstall either app or clear records.
+3. For notifications, complete the protected Expo sending-token/APNs setup and explicit customer-account allowlist described above before enabling gates in order. No actual notification was sent during deployment.
+
+Authenticated customer read/write/WatchConnectivity, notification delivery and TestFlight tester availability remain unverified. Cloud deployment and schema verification do not substitute for this device acceptance.

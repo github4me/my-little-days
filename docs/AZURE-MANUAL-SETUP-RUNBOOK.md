@@ -1441,3 +1441,7 @@ the public App Store. Build, submission and Apple readback results follow below.
 - Installation on a physical iPhone and real-user acceptance remain unverified.
   Install over the existing app without uninstalling or clearing records.
   No Azure/API/SQL deployment, credential change or public App Store release occurred.
+
+## Watch backend release — 18 September 2026
+
+The backend-only release is recorded in [Watch backend deployment](APPLE-WATCH-BACKEND-DEPLOYMENT.md), including exact commit/workflow, migration verification, timer-guard activation and remaining notification setup. Use that record for current rollout status; the earlier build-only entries are historical checkpoints. This deployment does not submit the mobile build to TestFlight or enable push delivery.
