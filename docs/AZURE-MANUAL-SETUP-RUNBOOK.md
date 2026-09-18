@@ -1683,7 +1683,7 @@ infrastructure drafts, screenshots and earlier uncommitted documentation were pr
 - Submitted this exact store build once with `--no-auto-testflight-setup`:
   [submission 31f9012f-642a-496e-b4df-9fdb1535a84e](https://expo.dev/accounts/expo4chao/projects/little-days/submissions/31f9012f-642a-496e-b4df-9fdb1535a84e).
   EAS submission finished successfully at **12:26:26 UTC**. Apple readback shows
-  **VALID**, internal **READY_FOR_BETA_TESTING**, external
+  **VALID**, internal **IN_BETA_TESTING** on final readback, external
   **READY_FOR_BETA_SUBMISSION**, uploaded at **12:24:39 UTC**. This is successful
   upload/processing, not a claim that every tester has access. No tester groups
   were created/modified and no public App Store release was requested.
