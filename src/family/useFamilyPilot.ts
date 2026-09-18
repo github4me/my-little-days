@@ -1646,8 +1646,14 @@ export function useFamilyPilot() {
       (Date.parse(state.watchVerifiedAt ?? "") || 0) + 24 * 60 * 60 * 1000,
     ).toISOString(),
     watchReceipts: familyWatchReceipts(state),
+    // Opaque stable identity, not a fresh projection on every app-clock render.
+    companionRevision: state as object,
     getWatchState: () => ({
       admissionBlocked: lifecycleActive.current,
+      readableState:
+        verified.current && isFullSnapshot(current.current.snapshot)
+          ? projectedFullState(current.current)
+          : null,
       workspaceKey: watchWorkspaceKey(current.current),
       expiresAt: new Date(
         (Date.parse(current.current.watchVerifiedAt ?? "") || 0) +

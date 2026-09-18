@@ -64,7 +64,8 @@
       "expo-localization",
       "expo-web-browser",
       "expo-secure-store",
-      "./plugins/with-watch-companion"
+      "./plugins/with-watch-companion",
+      "./plugins/with-today-widget"
     ],
     "web": {
       "bundler": "metro"

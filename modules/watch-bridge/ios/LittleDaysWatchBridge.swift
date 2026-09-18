@@ -113,8 +113,12 @@ private final class WatchBridgeTransport: NSObject, WCSessionDelegate {
       context["bridgeId"] = value.bridgeId
       context["sequence"] = value.sequence
       context["publishedAt"] = ISO8601DateFormatter().string(from: Date())
+      let widgetContext = context
+      context.removeValue(forKey: "widgetTotals")
       value.context = try stringify(context)
       try save(value)
+      do { try TodayWidgetPublisher.publish(widgetContext) }
+      catch { NSLog("LittleDays: widget snapshot update failed") }
       return value.context!
     }
     sendContext(result)
@@ -179,6 +183,7 @@ private final class WatchBridgeTransport: NSObject, WCSessionDelegate {
   }
 
   func suspend(invalidate: Bool) throws {
+    var widgetCleanupError: Error?
     let context = try queue.sync { () throws -> String in
       var value = try load()
       var context = try value.context.map { try parse($0) } ?? ["schemaVersion": 1, "workspaceKey": "watch-unavailable"]
@@ -193,11 +198,15 @@ private final class WatchBridgeTransport: NSObject, WCSessionDelegate {
       context.removeValue(forKey: "profile")
       context.removeValue(forKey: "entries")
       context.removeValue(forKey: "totals")
+      context.removeValue(forKey: "widgetTotals")
       value.context = try stringify(context)
       try save(value)
+      do { try TodayWidgetPublisher.clear() }
+      catch { widgetCleanupError = error }
       return value.context!
     }
     sendContext(context)
+    if let widgetCleanupError { throw widgetCleanupError }
   }
 
   private func confirmReceipt(_ json: String) throws {

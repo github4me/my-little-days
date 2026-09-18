@@ -26,6 +26,7 @@ try {
     "modules",
     "plugins",
     "watch",
+    "widgets",
   ]) {
     fs.cpSync(path.join(root, name), path.join(directory, name), {
       recursive: true,

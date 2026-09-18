@@ -19,6 +19,7 @@ import {
 
 type Options = {
   changeToken: string;
+  recordsRevision?: unknown;
   context(): Promise<WatchContext | null>;
   apply(command: WatchCommand): Promise<WatchReceipt>;
   receipts(): WatchReceipt[];
@@ -164,5 +165,5 @@ export function useWatchCompanion(options: Options) {
   }, []);
   useEffect(() => {
     void run.current();
-  }, [options.changeToken]);
+  }, [options.changeToken, options.recordsRevision]);
 }

@@ -3444,6 +3444,10 @@ for (const flag of [undefined, false]) {
       assert.equal(controller.result().watchRecordingEnabled, false);
       assert.equal(controller.result().getWatchState().state, null);
       assert.ok(
+        controller.result().getWatchState().readableState,
+        "read-only widget aggregates do not require the Watch write rollout",
+      );
+      assert.ok(
         controller.result().sharedState,
         "ordinary phone records remain available",
       );

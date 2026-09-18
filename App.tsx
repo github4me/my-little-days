@@ -64,6 +64,8 @@ import { useFamilyPilot } from "./src/family/useFamilyPilot";
 import { useFamilyPush } from "./src/family/useFamilyPush";
 import FamilyPushSettings from "./src/family/FamilyPushSettings";
 import { useWatchCompanion } from "./src/useWatchCompanion";
+import { useWidgetHomeLink } from "./src/useWidgetHomeLink";
+import { summarizeToday } from "./src/todaySummary";
 import { watchBridgeAvailable } from "./src/watchBridge";
 import type { WatchContext } from "./src/watchProtocol";
 import { familyErrorMessage } from "./src/family/messages";
@@ -211,6 +213,14 @@ function BabyApp({
   const privateDataGeneration = useRef(0);
   const family = useFamilyPilot();
   const familyPush = useFamilyPush(family, () => setTab("records"));
+  useWidgetHomeLink(() => {
+    Keyboard.dismiss();
+    setTab("today");
+    setSettingsPage("main");
+    setOpenProfile(false);
+    mainScroll.current?.scrollTo({ y: 0, animated: false });
+    // Keep record-editor/finish-feed sheets and their unsaved drafts intact.
+  });
   const sharingRef = useRef(family.sharedMode || family.booting);
   sharingRef.current = family.sharedMode || family.booting;
   setPersonalStorageBlocked(family.booting || family.sharedMode);
@@ -522,6 +532,9 @@ function BabyApp({
       );
   }
   useWatchCompanion({
+    recordsRevision: family.sharedMode
+      ? family.companionRevision
+      : state?.entries,
     changeToken: JSON.stringify([
       family.booting,
       family.busy,
@@ -559,6 +572,14 @@ function BabyApp({
       const tomorrow = new Date(today);
       tomorrow.setDate(tomorrow.getDate() + 1);
       const totals = summarize(current?.entries ?? [], today, tomorrow);
+      const widgetState = familyState.admissionBlocked
+        ? null
+        : shared
+          ? familyState.readableState
+          : stateRef.current;
+      const widgetTotals = widgetState
+        ? summarizeToday(widgetState.entries, new Date())
+        : undefined;
       const context: WatchContext = {
         schemaVersion: 1,
         workspaceKey,
@@ -614,6 +635,11 @@ function BabyApp({
           sleepMinutes: totals.sleepMinutes,
         },
         totalsDate: localDay(today),
+        widgetTotals: widgetTotals && {
+          feedMl: widgetTotals.feedMl,
+          diaperCount: widgetTotals.diaperCount,
+          sleepMinutes: widgetTotals.sleepMinutes,
+        },
       };
       return context;
     },
@@ -801,12 +827,7 @@ function BabyApp({
   today.setHours(0, 0, 0, 0);
   const tomorrow = new Date(today);
   tomorrow.setDate(tomorrow.getDate() + 1);
-  const forStats = entries.map((e) =>
-    e.type === "sleep" && !e.end
-      ? { ...e, end: new Date(now).toISOString() }
-      : e,
-  );
-  const summary = summarize(forStats, today, tomorrow);
+  const summary = summarizeToday(entries, new Date(now));
   const latestFeed = entries.find((e) => e.type === "feed"),
     latestDiaper = entries.find((e) => e.type === "diaper"),
     latestSleep = entries

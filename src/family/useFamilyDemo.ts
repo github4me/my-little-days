@@ -56,8 +56,10 @@ export function useFamilyDemo(scenario: FamilyDemoScenario): ReturnType<
     watchRecordingEnabled: false,
     watchExpiresAt: new Date(0).toISOString(),
     watchReceipts: [],
+    companionRevision: state,
     getWatchState: () => ({
       admissionBlocked: false,
+      readableState: null,
       workspaceKey: null,
       expiresAt: new Date(0).toISOString(),
       state: null,

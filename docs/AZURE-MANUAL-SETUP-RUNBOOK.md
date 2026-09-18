@@ -1709,3 +1709,80 @@ If build 33 is not offered in a tester's TestFlight app:
    reporting external access; no public App Store release is needed.
 4. Update in TestFlight over the existing installation, then update the companion
    on the paired Watch. Never uninstall/clear records merely to reveal a new build.
+
+## Today Home Screen widget: signing and validation — 18 September 2026
+
+Design/data contract: [iOS Today widget](IOS-TODAY-WIDGET.md). This is a native
+extension: OTA cannot add it. It needs no Azure, SQL, Entra or push-delivery changes.
+The widget works without a paired Watch and never accesses the API itself.
+
+### Apple configuration (new target and App Group)
+
+Use Apple Developer team **A9974KXQ4G**, not an Azure tenant. These identifiers are
+public configuration, not credentials:
+
+| Item | Exact value |
+| --- | --- |
+| Existing phone App ID | `com.littledays.babylog` |
+| Existing Watch App ID (unchanged) | `com.littledays.babylog.watchkitapp` |
+| New widget App ID / Xcode target | `com.littledays.babylog.widget` / `LittleDaysTodayWidget` |
+| Shared App Group | `group.com.littledays.babylog.widgets` |
+| Widget destination | `mylittledays://today` |
+
+If EAS cannot configure the new capabilities/profile unattended:
+
+1. Open **Apple Developer → Certificates, Identifiers & Profiles → Identifiers**,
+   select **App Groups**, then **+**. Register the exact group above with description
+   `Little Days Widgets`. If it already exists in this team, reuse it.
+2. Under **Identifiers → App IDs**, open the existing phone identifier. Enable
+   **App Groups → Configure**, select the group above, and save. Preserve Push
+   Notifications and all other existing capabilities.
+3. Register an explicit **App ID → App** for `com.littledays.babylog.widget`,
+   description `Little Days Today Widget`. Enable App Groups and associate the same
+   group. Do not add independent push or sign-in capabilities to this extension.
+4. In a local terminal at this repository, run
+   `npx eas-cli@24.6.0 credentials -p ios`, choose **production**. Reuse the existing
+   distribution certificate; update the phone provisioning profile to include its
+   App Group, and generate an App Store provisioning profile for
+   **LittleDaysTodayWidget**. Leave the Watch profile unchanged. Complete Apple
+   login/2FA privately in the CLI; never paste a password or private key into chat.
+5. Expected result: EAS lists **three targets**, with ready App Store credentials.
+   Both phone and widget profiles must include the exact shared App Group; a green
+   old phone profile without that entitlement is not sufficient.
+6. Recheck the resolved production environment, demo `0`, distribution STORE and
+   OTA disabled. Build the reviewed source with `eas build --platform ios --profile
+   production --non-interactive --freeze-credentials --no-wait`. Do not substitute
+   an internal/ad-hoc preview IPA for a store build.
+7. Inspect the finished IPA: embedded `PlugIns/LittleDaysTodayWidget.appex`, widget
+   extension-point `com.apple.widgetkit-extension`, matching phone/Watch/widget
+   versions, both required App Group entitlements and OTA disabled. The cloud
+   post-install hook runs the Swift snapshot boundary tests before compilation.
+8. Submit only that exact EAS build ID using `eas submit --platform ios --profile
+   production --id <ID> --non-interactive --no-auto-testflight-setup --no-wait`.
+   Confirm Apple **VALID**, then the intended tester group's availability. Do not
+   duplicate submissions while Apple processing is pending.
+
+### Adding and checking the widget on a device
+
+1. Update the existing app through TestFlight, then open it once so authorized
+   local statistics can populate the widget snapshot. Do not uninstall or reset.
+2. Long-press an empty area on the Home Screen → **Edit → Add Widget** (or **+**, by
+   iOS version) → search **My Little Days / 小日子** → **Today's care / 今日照护**.
+3. Select small or medium → **Add Widget → Done**. Tap anywhere on it; Today opens.
+   A record-editor sheet already open is retained so its draft is not discarded.
+4. Check known-empty totals `0`, record/edit milk and nappies, and start/finish
+   sleep. Compare with Today at the snapshot's update time. Sleep includes an
+   ongoing timer only through that time; this is not a Live Activity.
+5. Check Chinese/English, light/dark/tinted modes, large text, VoiceOver and iPad.
+   Native visual checks require Apple hardware/Simulator, not a browser export.
+6. After midnight or changing time zones, old totals must not appear as Today;
+   open the app to recompute. Offline snapshots expire on their access lease.
+   Family changes appear only after the phone receives them; iOS controls widget
+   refresh timing. The update timestamp describes the local snapshot, not proof
+   that every family device has synchronized.
+7. Logout, membership loss and workspace switches request cache removal/reload.
+   Test lifecycle scenarios only with disposable test identities/data. iOS may
+   retain an already-rendered widget briefly; this feature cannot retract photos,
+   screenshots, or promise instantaneous remote revocation while offline.
+
+Release evidence will be appended after the actual build and Apple readback.

@@ -10,7 +10,7 @@ Pod::Spec.new do |s|
   s.source = { :git => 'https://github.com/github4me/my-little-days.git' }
   s.static_framework = true
   s.dependency 'ExpoModulesCore'
-  s.frameworks = 'WatchConnectivity', 'CryptoKit'
+  s.frameworks = 'WatchConnectivity', 'CryptoKit', 'WidgetKit'
   s.source_files = '**/*.{h,m,mm,swift}'
   s.swift_version = '5.9'
 end

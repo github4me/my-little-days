@@ -20,3 +20,5 @@ artifacts/
 .DS_Store
 watch/.build/
 watch/.swiftpm/
+modules/watch-bridge/.build/
+modules/watch-bridge/.swiftpm/
