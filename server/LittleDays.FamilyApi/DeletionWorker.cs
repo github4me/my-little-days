@@ -51,6 +51,10 @@ public sealed class DeletionProcessor(PilotDatabase db, PilotConfiguration confi
                 if (await db.Operations.AnyAsync(x => x.FamilyId == family.Id, ct))
                     throw new InvalidOperationException("Closed-family receipt cleanup is incomplete.");
                 await db.Memberships.Where(x => x.FamilyId == family.Id).ExecuteDeleteAsync(ct);
+                await db.PushInstallations.Where(x => x.FamilyId == family.Id).ExecuteUpdateAsync(s => s
+                    .SetProperty(x => x.Enabled, false).SetProperty(x => x.ProtectedToken, "").SetProperty(x => x.TokenHash, (string?)null), ct);
+                await db.NotificationSummaryBuckets.Where(x => x.FamilyId == family.Id && (x.State == "pending" || x.State == "leased"))
+                    .ExecuteUpdateAsync(s => s.SetProperty(x => x.State, "cancelled"), ct);
                 family.BabyName = ""; family.BabyBirthDate = null; family.BabySex = "unspecified";
                 family.PurgedAt = clock.GetUtcNow();
                 return true;
@@ -74,6 +78,23 @@ public sealed class DeletionProcessor(PilotDatabase db, PilotConfiguration confi
             }, ct), ct)) return false;
             // An account can have authored records in several families. Preserve
             // the global lifecycle barrier, but release it between bounded jobs.
+            if (!await DrainOperationReceipts(() => service.Transaction(async () =>
+            {
+                if (!await db.AccountDeletions.AnyAsync(x => x.UserId == userId && x.Status == "pending", ct)) return 0;
+                // Purge device/event attribution before deleting the source records.
+                // Each SQL statement is bounded; release the lifecycle lock between
+                // batches. Orphan links carry only opaque IDs and expire separately.
+                return await db.Database.ExecuteSqlInterpolatedAsync($"""
+                    DELETE TOP (1000) delivery FROM dbo.PushDeliveries delivery
+                    WHERE EXISTS(SELECT 1 FROM dbo.NotificationSummaryBuckets b WHERE b.Id=delivery.BucketId AND b.RecipientUserId={userId})
+                       OR EXISTS(SELECT 1 FROM dbo.FamilyNotificationEvents e WHERE e.Id=delivery.EventId AND e.ActorUserId={userId});
+                    DELETE TOP (1000) FROM dbo.NotificationSummaryBuckets WHERE RecipientUserId={userId};
+                    DELETE TOP (1000) e FROM dbo.FamilyNotificationEvents e
+                    WHERE e.ActorUserId={userId} OR EXISTS(SELECT 1 FROM dbo.FamilyRecords r
+                        WHERE r.FamilyId=e.FamilyId AND r.Collection='entry' AND r.IdHash=e.RecordIdHash
+                        AND (r.RecordedBy={userId} OR r.LastEditedBy={userId}));
+                    """, ct);
+            }, ct), ct)) return false;
             await service.Transaction(async () =>
             {
                 var job = await db.AccountDeletions.SingleAsync(x => x.UserId == userId, ct);
@@ -96,6 +117,9 @@ public sealed class DeletionProcessor(PilotDatabase db, PilotConfiguration confi
                 if (await db.Operations.AnyAsync(x => x.UserId == job.UserId, ct))
                     throw new InvalidOperationException("Deleted-account receipt cleanup is incomplete.");
                 await db.Memberships.Where(x => x.UserId == job.UserId).ExecuteDeleteAsync(ct);
+                await db.PushInstallations.Where(x => x.UserId == job.UserId).ExecuteDeleteAsync(ct);
+                await db.NotificationSummaryBuckets.Where(x => x.RecipientUserId == job.UserId && (x.State == "pending" || x.State == "leased"))
+                    .ExecuteUpdateAsync(s => s.SetProperty(x => x.State, "cancelled"), ct);
                 foreach (var family in await db.Families.Where(x => familyIds.Contains(x.Id) && x.DeletedAt == null).ToArrayAsync(ct)) family.Revision++;
                 job.Status = "awaiting_identity_deletion";
                 job.PendingEmail = null;

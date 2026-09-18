@@ -94,7 +94,9 @@ public sealed partial class FamilyService
         var family = await Family(familyId, ct);
         RequireFullFamily(family);
         await ExpireInvitations(family, ct);
-        var etag = $"\"v2-extras1:{config.Family.HistoryId:D}:{Revision(family)}:{grant.Id:D}\"";
+        // The capability is current host configuration, not part of a family's
+        // data revision. A gate change must invalidate a cached enabled result.
+        var etag = $"\"v2-extras1-watch{(config.Family.EnforceSingleActiveTimers ? 1 : 0)}:{config.Family.HistoryId:D}:{Revision(family)}:{grant.Id:D}\"";
         if (ifNoneMatch == etag) return new ConditionalSnapshot<FullFamilySnapshot>(etag, null);
         return new ConditionalSnapshot<FullFamilySnapshot>(etag, await FullSnapshotData(family, grant, ct, expire: false));
     }, ct);
@@ -117,12 +119,14 @@ public sealed partial class FamilyService
             if (operation.Kind != "delete") await CheckCapacity(familyId, ct);
             var idHash = RecordIdHash(operation.RecordId);
             var row = await db.FamilyRecords.SingleOrDefaultAsync(x => x.FamilyId == familyId && x.Collection == operation.Collection && x.IdHash == idHash, ct);
+            if (operation.Collection == "entry" && value is not null) await GuardActiveTimer(familyId, operation.RecordId, value.Value, ct);
             if (operation.Kind == "create")
             {
                 if (row is not null) throw new ApiException(412, "record_changed");
                 await CheckRecordBudget(familyId, null, json!, ct);
                 row = NewRecord(familyId, operation.Collection, value!.Value, user.ObjectId, json);
                 db.FamilyRecords.Add(row);
+                await QueueRecordPush(user, family, operation, value!.Value, ct);
             }
             else
             {
@@ -133,7 +137,11 @@ public sealed partial class FamilyService
                     ReadRecord(row).GetProperty("kind").GetString() != value.Value.GetProperty("kind").GetString()) Invalid();
                 if (operation.Kind != "delete") await CheckRecordBudget(familyId, row, json!, ct);
                 row.LastEditedBy = user.ObjectId;
-                if (operation.Kind == "delete") { row.Deleted = true; row.RecordJson = "{}"; }
+                if (operation.Kind == "delete")
+                {
+                    row.Deleted = true; row.RecordJson = "{}";
+                    if (operation.Collection == "entry") await CancelRecordPush(familyId, operation.RecordId, ct);
+                }
                 else row.RecordJson = json!;
                 // A logically unchanged accepted update still consumes the base rowversion.
                 db.Entry(row).Property(x => x.LastEditedBy).IsModified = true;
@@ -187,7 +195,8 @@ public sealed partial class FamilyService
             Summary(family, grant), config.Family.HistoryId, Revision(family), members.Select(x => Member(x, grant.Role == "owner")).ToArray(),
             invitations.Select(Invitation).ToArray(), [], transfer is null ? null : Transfer(transfer), 1,
             records.Where(x => x.Collection == "extra").OrderBy(x => x.Id, StringComparer.Ordinal)
-                .Select(x => new SharedExtraRecord(ReadRecord(x), Convert.ToBase64String(x.Version), x.RecordedBy, x.LastEditedBy)).ToArray());
+                .Select(x => new SharedExtraRecord(ReadRecord(x), Convert.ToBase64String(x.Version), x.RecordedBy, x.LastEditedBy)).ToArray(),
+            config.Family.EnforceSingleActiveTimers);
         return FamilyAvailability.RequireResponseBudget(snapshot);
     }
 

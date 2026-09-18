@@ -28,6 +28,13 @@ builder.Services.AddDbContext<PilotDatabase>(options => options.UseSqlServer(con
 
 var config = PilotConfiguration.Load(builder.Configuration);
 builder.Services.AddSingleton(config);
+builder.Services.AddSingleton(config.Push);
+builder.Services.AddSingleton<PushWakeSignal>();
+builder.Services.AddHttpClient<IPushGateway, ExpoPushGateway>(http => http.Timeout = TimeSpan.FromSeconds(20))
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+builder.Services.AddScoped<PushProcessor>();
+if (config.Push.RegistrationEnabled || config.Push.EventCreationEnabled || config.Push.DeliveryEnabled)
+    builder.Services.AddHostedService<PushWorker>();
 builder.Services.AddSingleton<RecoveryGate>();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<FamilyService>();
@@ -205,6 +212,19 @@ fullApi.AddEndpointFilter(async (context, next) =>
     return await next(context);
 });
 fullApi.MapGet("/capabilities", () => new FullFamilyCapabilities(2, FullDomainValidation.RecordKinds, FullDomainValidation.MaxSeedBytes));
+fullApi.MapGet("/push/capabilities", (HttpContext context) =>
+{
+    var allowed = config.Push.Allows(PublicIdentityAdmission.Get(context).ObjectId);
+    return new { registrationEnabled = config.Push.RegistrationEnabled && allowed,
+        eventCreationEnabled = config.Push.EventCreationEnabled && allowed, categories = PushPolicy.Categories,
+        projectId = config.Push.RegistrationEnabled && allowed ? (Guid?)config.Push.ProjectId : null };
+});
+fullApi.MapPut("/push/installations/{installationId:guid}", (Guid installationId, HttpContext context,
+    RegisterPushRequest request, FamilyService service, CancellationToken ct) =>
+    service.RegisterPush(PublicIdentityAdmission.Get(context), installationId, request, ct)).RequireRateLimiting("sensitive");
+fullApi.MapPost("/push/installations/{installationId:guid}/unregister", (Guid installationId, HttpContext context,
+    UnregisterPushRequest request, FamilyService service, CancellationToken ct) =>
+    service.UnregisterPush(PublicIdentityAdmission.Get(context), installationId, request, ct)).RequireRateLimiting("sensitive");
 fullApi.MapPost("/families", (HttpContext context, CreateFullFamilyRequest request, FamilyService service, CancellationToken ct) =>
     FullCreation(context, request, service, ct)).RequireRateLimiting("sensitive");
 fullApi.MapGet("/families/{familyId:guid}/snapshot", async (Guid familyId, HttpContext context, FamilyService service, CancellationToken ct) =>

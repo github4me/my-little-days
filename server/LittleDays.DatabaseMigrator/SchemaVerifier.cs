@@ -14,7 +14,7 @@ internal static class SchemaVerifier
     [
         "0001_LegacySchemaBaseline.sql", "0002_VerifyBaselineAndRuntimeGrants.sql",
         "0003_FamilySharedExtras.sql", "0004_FamilyAvailabilityBounds.sql",
-        "0005_QueryIndexesAndOperationCounts.sql"
+        "0005_QueryIndexesAndOperationCounts.sql", "0006_FamilyPushAndTimerIndex.sql"
     ];
 
     internal static int Version(IEnumerable<string> applied) => applied
@@ -30,6 +30,7 @@ internal static class SchemaVerifier
         VerifyForeignKeys(factory, tables);
         VerifyChecks(factory, version, tables);
         VerifyTriggers(factory, version, tables);
+        if (version >= 6) VerifyTimerColumn(factory);
     }
 
     private sealed record Index(string Table, string Name, string[] Keys, bool Unique = false,
@@ -55,6 +56,18 @@ internal static class SchemaVerifier
         {
             expected[("FamilyOperationCounts", "FamilyId")] = new(36, 16);
             expected[("FamilyOperationCounts", "ReceiptCount")] = new(127, 8, 19, 0);
+        }
+        if (version >= 6)
+        {
+            foreach (var table in new[] { "PushInstallations", "FamilyNotificationEvents", "NotificationSummaryBuckets" })
+                expected[(table, "Id")] = new(36, 16);
+            expected[("PushInstallations", "SecretHash")] = new(167, 64);
+            expected[("PushInstallations", "ProtectedToken")] = new(167, 1024);
+            expected[("PushInstallations", "Generation")] = new(56, 4);
+            expected[("NotificationSummaryBuckets", "BucketKey")] = new(167, 64);
+            expected[("NotificationSummaryBuckets", "Generation")] = new(56, 4);
+            expected[("PushDeliveries", "EventId")] = new(36, 16);
+            expected[("PushDeliveries", "BucketId")] = new(36, 16);
         }
         using var command = factory();
         command.CommandText = """
@@ -132,6 +145,34 @@ internal static class SchemaVerifier
                 new("Feeds", "IX_Feeds_LastEditedBy", ["LastEditedBy"]),
                 new("FamilyRecords", "IX_FamilyRecords_RecordedBy", ["RecordedBy"]),
                 new("FamilyRecords", "IX_FamilyRecords_LastEditedBy", ["LastEditedBy"])
+            ]);
+        if (version >= 6)
+            indexes.AddRange([
+                new("PushInstallations", "PK_PushInstallations", ["Id"], true, Primary: true),
+                new("FamilyNotificationEvents", "PK_FamilyNotificationEvents", ["Id"], true, Primary: true),
+                new("NotificationSummaryBuckets", "PK_NotificationSummaryBuckets", ["Id"], true, Primary: true),
+                new("PushDeliveries", "PK_PushDeliveries", ["EventId", "BucketId"], true, Primary: true),
+                new("PushInstallations", "IX_PushInstallations_ProjectId_Environment_TokenHash", ["ProjectId", "Environment", "TokenHash"], true, Filter: "TokenHash IS NOT NULL"),
+                new("PushInstallations", "IX_PushInstallations_UserId_Enabled", ["UserId", "Enabled"]),
+                new("PushInstallations", "IX_PushInstallations_FamilyId", ["FamilyId"]),
+                new("PushInstallations", "IX_PushInstallations_MembershipId", ["MembershipId"]),
+                new("PushInstallations", "IX_PushInstallations_ExpiresAt", ["ExpiresAt"]),
+                new("FamilyNotificationEvents", "IX_FamilyNotificationEvents_HistoryId_ActorUserId_OperationId_Category", ["HistoryId", "ActorUserId", "OperationId", "Category"], true),
+                new("FamilyNotificationEvents", "IX_FamilyNotificationEvents_FamilyId_CreatedAt", ["FamilyId", "CreatedAt"]),
+                new("FamilyNotificationEvents", "IX_FamilyNotificationEvents_FamilyId_RecordIdHash", ["FamilyId", "RecordIdHash"]),
+                new("FamilyNotificationEvents", "IX_FamilyNotificationEvents_ActorUserId", ["ActorUserId"]),
+                new("FamilyNotificationEvents", "IX_FamilyNotificationEvents_ExpiresAt", ["ExpiresAt"]),
+                new("PushDeliveries", "IX_PushDeliveries_BucketId", ["BucketId"]),
+                new("PushDeliveries", "IX_PushDeliveries_ExpiresAt", ["ExpiresAt"]),
+                new("NotificationSummaryBuckets", "IX_NotificationSummaryBuckets_BucketKey", ["BucketKey"], true),
+                new("NotificationSummaryBuckets", "IX_NotificationSummaryBuckets_State_DueAt_Id", ["State", "DueAt", "Id"]),
+                new("NotificationSummaryBuckets", "IX_NotificationSummaryBuckets_State_LeaseUntil", ["State", "LeaseUntil"]),
+                new("NotificationSummaryBuckets", "IX_NotificationSummaryBuckets_InstallationId_Generation", ["InstallationId", "Generation"]),
+                new("NotificationSummaryBuckets", "IX_NotificationSummaryBuckets_MembershipId_State", ["MembershipId", "State"]),
+                new("NotificationSummaryBuckets", "IX_NotificationSummaryBuckets_FamilyId_State", ["FamilyId", "State"]),
+                new("NotificationSummaryBuckets", "IX_NotificationSummaryBuckets_RecipientUserId_State", ["RecipientUserId", "State"]),
+                new("NotificationSummaryBuckets", "IX_NotificationSummaryBuckets_ExpiresAt", ["ExpiresAt"]),
+                new("FamilyRecords", "IX_FamilyRecords_FamilyId_ActiveTimerKind", ["FamilyId", "ActiveTimerKind"])
             ]);
         return indexes;
     }
@@ -240,6 +281,14 @@ internal static class SchemaVerifier
                 : "ISJSON(RecordJson) = 1 AND DATALENGTH(RecordJson) <= 131072";
         }
         if (version >= 5) expected["FamilyOperationCounts.CK_FamilyOperationCounts_ReceiptCount"] = "ReceiptCount >= 0";
+        if (version >= 6)
+        {
+            expected["PushInstallations.CK_PushInstallations_Generation"] = "Generation >= 0";
+            expected["PushInstallations.CK_PushInstallations_CategoryMask"] = "CategoryMask >= 0 AND CategoryMask <= 7";
+            expected["FamilyNotificationEvents.CK_FamilyNotificationEvents_Category"] = "Category IN ('feed', 'diaper', 'sleep')";
+            expected["NotificationSummaryBuckets.CK_NotificationSummaryBuckets_State"] = "State IN ('pending', 'leased', 'receipt', 'sent', 'cancelled', 'failed')";
+            expected["NotificationSummaryBuckets.CK_NotificationSummaryBuckets_Attempts"] = "Attempts >= 0";
+        }
         using var command = factory();
         command.CommandText = """
             SELECT t.name, cc.name, cc.definition, cc.is_disabled, cc.is_not_trusted, cc.is_not_for_replication
@@ -257,6 +306,20 @@ internal static class SchemaVerifier
                 Fail(table, name, "check definition or trusted/enabled state differs");
         }
         if (expected.Count != 0) throw new InvalidOperationException("Schema verification failed: missing check dbo." + expected.First().Key + ".");
+    }
+
+    private static void VerifyTimerColumn(Func<IDbCommand> factory)
+    {
+        using var command = factory();
+        command.CommandText = "SELECT system_type_id, max_length, is_persisted, definition FROM sys.computed_columns WHERE object_id=OBJECT_ID('dbo.FamilyRecords') AND name='ActiveTimerKind'";
+        using var rows = command.ExecuteReader();
+        // This approved CASE uses only AND predicates, no arithmetic/OR. SQL adds
+        // grouping parentheses; removing them here cannot change its precedence.
+        static string Canonical(string sql) => NormalizeModule(sql.Replace("(", " ").Replace(")", " "));
+        const string expected = "CONVERT(varchar(5), CASE WHEN Deleted = 0 AND Collection = 'entry' AND JSON_VALUE(RecordJson, '$.type') = 'sleep' AND JSON_VALUE(RecordJson, '$.end') IS NULL THEN 'sleep' WHEN Deleted = 0 AND Collection = 'entry' AND JSON_VALUE(RecordJson, '$.type') = 'feed' AND JSON_VALUE(RecordJson, '$.feedRunning') = 'true' THEN 'feed' END)";
+        if (!rows.Read() || Convert.ToInt32(rows.GetValue(0)) != 167 || Convert.ToInt32(rows.GetValue(1)) != 5 ||
+            !rows.GetBoolean(2) || Canonical(rows.GetString(3)) != Canonical(expected))
+            Fail("FamilyRecords", "ActiveTimerKind", "persisted computed timer definition differs");
     }
 
     private static void Fail(string table, string name, string reason) =>

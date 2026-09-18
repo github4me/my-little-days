@@ -1,6 +1,6 @@
 # Little Days family-sharing API
 
-.NET 10 Minimal API with EF Core SQL Server. The current v2 API shares the full baby profile and feed, diaper, sleep, growth, milestone and care records, plus the selected baby avatar, reminder rules/settings and play selections/check-ins. Owner setup commits the reviewed history and extras, owner membership and invitations atomically. Members accept an invitation before downloading and durably storing the family data; their personal data is replaced, never uploaded or merged. Device preferences, notification permission and notification delivery remain local. Invitations appear in the recipient's app inbox; this API does not send invitation email.
+.NET 10 Minimal API with EF Core SQL Server. The current v2 API shares the full baby profile and feed, diaper, sleep, growth, milestone and care records, plus the selected baby avatar, reminder rules/settings and play selections/check-ins. Owner setup commits the reviewed history and extras, owner membership and invitations atomically. Members accept an invitation before downloading and durably storing the family data; their personal data is replaced, never uploaded or merged. Device preferences and notification permission remain local; the optional family-entry push service stores a device's explicit delivery subscription. Invitations appear in the recipient's app inbox; this API does not send invitation email.
 
 See the [current API contract](../docs/FAMILY-API-CONTRACT.md) for JSON shapes and concurrency, and the [Azure setup guide](../docs/AZURE-FAMILY-SETUP.md) for tenant, admission, deployment and release configuration. The v1 family lifecycle routes remain in use; legacy bottle-only families remain separate.
 
@@ -24,6 +24,103 @@ Local verification on 2026-09-15: 106 tests passed, zero failed and zero skipped
 The separate DbUp suite then added 10 passing tests, including real SQL initialization/adoption, rollback, journal integrity and restricted permissions (116 backend tests total, no skips). These are historical results. Later extras verification and completed database/API publication are recorded in [shared extras](../docs/FAMILY-EXTRAS.md) and the [release runbook](../docs/AZURE-MANUAL-SETUP-RUNBOOK.md#shared-extras-release-evidence-16-september-2026); native two-phone acceptance remains separate. Both projects publish independently.
 
 ## Configuration and admission
+
+### Optional family-entry push (disabled by default)
+
+Apply additive migration `0006_FamilyPushAndTimerIndex.sql` before this API. It
+preserves record IDs, rowversions, receipts and existing duplicate running timers;
+it never backfills notification events. All three `Push:RegistrationEnabled`,
+`Push:EventCreationEnabled` and `Push:DeliveryEnabled` flags default to false.
+Enable only an isolated acceptance cohort first using `Push:AllowedUserIds:0`,
+`:1`, etc. `Push:AllowAllUsers` defaults to false: an empty cohort permits nobody,
+and enabling a push gate without a cohort is rejected at startup. Broader rollout
+requires the separate explicit `Push:AllowAllUsers=true` setting. Current
+authoritative account/membership checks always apply.
+
+Required when enabling any push gate: `Push:ProjectId`, `Push:Environment` (default
+`production`) and persistent server-only `Push:TokenEncryptionKey` (32 random bytes
+encoded as base64). Delivery also requires a protected Expo `Push:AccessToken`.
+Never put either secret in `EXPO_PUBLIC_*`, request logs, repository files or app
+builds. Changing the encryption key without planned token re-registration makes
+existing ciphertext unreadable; the sender fails those deliveries closed.
+`Push:MaxInstallationsPerAccount` defaults to five (range 1–10).
+
+The admitted authenticated routes are:
+
+- `GET /v2/push/capabilities`: `{registrationEnabled,eventCreationEnabled,categories,
+  projectId}`. Categories are `feed`, `diaper`, `sleep`; disabled admission returns
+  `projectId:null`. An older server's 404 means unsupported, not permission to use
+  an unguarded fallback.
+- `PUT /v2/push/installations/{installationId}`: `{operationId,installationSecret,
+  expectedGeneration,expoPushToken,projectId,platform,locale,enabled,categories,
+  familyId,membershipId,historyId}`. IDs are UUIDs, secret is 64 lowercase hex
+  characters from 32 cryptographically random bytes, platform is `ios`/`android`,
+  locale is `en`/`zh`. Start with generation zero. Persist secret and a pending
+  request before sending; reuse the exact request after an ambiguous response.
+- `POST /v2/push/installations/{installationId}/unregister`:
+  `{operationId,installationSecret,expectedGeneration}`. Still available with
+  registration disabled and without a current family grant. A currently admitted
+  account with the exact installation secret may revoke an old account's device
+  binding after offline logout; this revocation-only proof cannot enable or
+  transfer membership. It permits no private family response.
+
+Both mutations return `{operationId,installationId,generation,enabled,categories,
+expiresAt}`. Every change advances the combined binding/preference generation and
+cancels older pending deliveries. Registrations expire after 24 hours; an opted-in
+foreground client can renew before expiry with a new operation ID/current
+generation. Disabling clears the token, retaining bounded retry metadata.
+Wrong device proof returns `403 push_binding_forbidden`, stale extant generation
+`409 push_binding_changed`, active token collision `409 push_token_bound`, and
+installation quota `409 push_installation_limit`. A missing installation with a
+nonzero expected generation returns `404 push_installation_unknown`: only this
+explicit result permits a returning client to replace an expired binding with a
+fresh ID/secret. New account binding needs the same installation proof and an
+already disabled old binding. Enablement requires an authorized current grant and
+history; no caller-supplied account ID is accepted.
+
+An exact same-account/secret/operation/hash registration replay is acknowledged
+before checking today's family grant or registration feature gate. It never
+mutates a subscription or grants access. If removal or provider invalidation
+superseded a committed registration, replay returns `enabled:false` with that
+operation's stored generation/categories. New requests still require current
+grant/history. A definitive `membership_revoked`/`history_changed` on a nonreplay
+registration means it did not apply; an established prior binding can then be
+revoked using the device proof. Ambiguous transport failures remain retryable.
+
+Pushes contain only generic localized copy and opaque data:
+`{kind:"family-entry",eventId,familyId,membershipId,historyId,installationId,generation}`.
+Here `eventId` identifies the stable delivery bucket (including a catch-up summary).
+Clients must match current context/generation and fetch authorized records on open.
+All devices belonging to the actor are excluded. Seeds/downloads/replays/edits do
+not generate alerts. Live sleep waits at least 60 seconds after both captured
+start and server commit, rechecking cancellation. Old entries use durable
+five-minute catch-up buckets; recovery sends at most one overdue summary per
+installation per five minutes. Events stop sending 24 hours after commit.
+
+The separate bounded worker runs only when at least one push gate is enabled;
+delivery remains separately gated. It resumes leases on restart, uses a
+post-commit wake-up signal plus fallback polling, checks Expo tickets/receipts
+separately, and never calls the provider under a SQL/lifecycle lock. Receipt
+lookups can continue after send expiry. Metadata older than seven days past
+expiry is deleted in bounded batches; domain operation receipts are untouched.
+`Recovery:Blocked` also blocks this worker. Pause it during restores and reconcile
+history IDs, device bindings and revocations before reopening; a provider-accepted
+push cannot be recalled. Acceptance does not prove device delivery or observation.
+
+`Family:EnforceSingleActiveTimers` is a separate default-false rollout switch.
+After every API writer has migration 0006/compatible code, inspect existing
+`ActiveTimerKind` duplicates per family and resolve them explicitly. Only then
+enable the indexed transaction guard: conflicting new/updated live timers return
+`409 active_timer_conflict`, preserving the existing winner. Edits that finish a
+timer and deletes remain possible. No migration silently deletes old timers.
+Full snapshots expose `watchRecordingEnabled` from this current guard setting,
+and include it in their ETag. Clients must require an explicit true before family
+Watch writes; an omitted/false value does not permit an unguarded fallback.
+
+No Apple/Expo credentials, Azure resources or feature gates are changed by adding
+this code. Manual environment/release steps belong in the existing runbook.
+
+### Existing account configuration
 
 Use environment variables or a restricted host provider. Colons in setting names become double underscores in environment variables. Credentials must stay outside source control, mobile settings and artifacts.
 

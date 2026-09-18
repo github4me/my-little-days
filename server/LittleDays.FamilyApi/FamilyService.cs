@@ -7,7 +7,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace LittleDays.FamilyApi;
 
-public sealed partial class FamilyService(PilotDatabase db, PilotConfiguration config, TimeProvider clock)
+public sealed partial class FamilyService(PilotDatabase db, PilotConfiguration config, TimeProvider clock, PushWakeSignal? pushWake = null)
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private DateTimeOffset Now => clock.GetUtcNow();
@@ -40,6 +40,7 @@ public sealed partial class FamilyService(PilotDatabase db, PilotConfiguration c
         var result = await action();
         if (!readOnly) await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
+        if (!readOnly && config.Push.EventCreationEnabled) pushWake?.Notify();
         return result;
     }
 
@@ -292,7 +293,7 @@ public sealed partial class FamilyService(PilotDatabase db, PilotConfiguration c
         await Receipt(user, request.OperationId, hash, ct);
         family.DeletedAt = Now; family.DeletedBy = user.ObjectId; family.DeleteOperationId = request.OperationId;
         family.Revision++;
-        EndGrant(grant, "left");
+        await EndGrant(grant, "left", ct);
         await InvalidateTransfers(familyId, user.ObjectId, ct);
         foreach (var invite in await db.Invitations.Where(x => x.FamilyId == familyId && x.Status == "pending").ToArrayAsync(ct)) invite.Status = "revoked";
         return new OkResult();
@@ -314,9 +315,18 @@ public sealed partial class FamilyService(PilotDatabase db, PilotConfiguration c
             throw new ApiException(409, "family_owner_cannot_delete");
         var row = new AccountDeletionRow { UserId = user.ObjectId, OperationId = request.OperationId, RequestedAt = Now, ReceiptHash = receiptHash, PendingEmail = user.Email };
         db.AccountDeletions.Add(row);
+        // Include old grants and the current creator-or-last-editor erasure policy.
+        await db.PushInstallations.Where(x => x.UserId == user.ObjectId).ExecuteUpdateAsync(s => s
+            .SetProperty(x => x.Enabled, false).SetProperty(x => x.TokenHash, (string?)null).SetProperty(x => x.ProtectedToken, ""), ct);
+        await db.NotificationSummaryBuckets.Where(x => x.RecipientUserId == user.ObjectId && (x.State == "pending" || x.State == "leased"))
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.State, "cancelled"), ct);
+        await db.FamilyNotificationEvents.Where(e => e.ActorUserId == user.ObjectId || db.FamilyRecords.Any(r =>
+            r.FamilyId == e.FamilyId && r.Collection == "entry" && r.IdHash == e.RecordIdHash &&
+            (r.RecordedBy == user.ObjectId || r.LastEditedBy == user.ObjectId)))
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.Cancelled, true), ct);
         foreach (var grant in await db.Memberships.Where(x => x.UserId == user.ObjectId && x.Active).ToArrayAsync(ct))
         {
-            EndGrant(grant, "left");
+            await EndGrant(grant, "left", ct);
             (await Family(grant.FamilyId, ct)).Revision++;
             await InvalidateTransfers(grant.FamilyId, user.ObjectId, ct);
         }
@@ -456,7 +466,7 @@ public sealed partial class FamilyService(PilotDatabase db, PilotConfiguration c
         if (member is not null && member.Role == "owner") throw new ApiException(403, "forbidden");
         if (member is null || request.TargetMembershipId != member.Id) throw new ApiException(409, "member_changed");
         // Existing grants/invites can always be revoked even when ordinary writes reached the cap.
-        EndGrant(member, "removed");
+        await EndGrant(member, "removed", ct);
         await RevokePending(familyId, memberId, ct);
         await InvalidateTransfers(familyId, memberId, ct);
         (await Family(familyId, ct)).Revision++;
@@ -479,7 +489,7 @@ public sealed partial class FamilyService(PilotDatabase db, PilotConfiguration c
         var grant = await RequireGrant(user, familyId, null, ct);
         RequireContext(request, grant);
         if (grant.Role == "owner") throw new ApiException(403, "forbidden");
-        EndGrant(grant, "left");
+        await EndGrant(grant, "left", ct);
         await RevokePending(familyId, user.ObjectId, ct);
         await InvalidateTransfers(familyId, user.ObjectId, ct);
         (await Family(familyId, ct)).Revision++;
@@ -590,7 +600,15 @@ public sealed partial class FamilyService(PilotDatabase db, PilotConfiguration c
         DisplayName = user.DisplayName,
         Email = user.Email
     };
-    private void EndGrant(MembershipRow grant, string status) { grant.Active = false; grant.EndedAt = Now; grant.Status = status; }
+    private async Task EndGrant(MembershipRow grant, string status, CancellationToken ct)
+    {
+        grant.Active = false; grant.EndedAt = Now; grant.Status = status;
+        await db.PushInstallations.Where(x => x.MembershipId == grant.Id)
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.Enabled, false).SetProperty(x => x.TokenHash, (string?)null)
+                .SetProperty(x => x.ProtectedToken, ""), ct);
+        await db.NotificationSummaryBuckets.Where(x => x.MembershipId == grant.Id && (x.State == "pending" || x.State == "leased"))
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.State, "cancelled"), ct);
+    }
     private async Task RevokePending(Guid familyId, Guid recipientId, CancellationToken ct)
     {
         var email = await db.Memberships.Where(x => x.FamilyId == familyId && x.UserId == recipientId)

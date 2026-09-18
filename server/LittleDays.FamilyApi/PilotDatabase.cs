@@ -2,7 +2,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace LittleDays.FamilyApi;
 
-public sealed class PilotDatabase(DbContextOptions<PilotDatabase> options) : DbContext(options)
+public sealed partial class PilotDatabase(DbContextOptions<PilotDatabase> options) : DbContext(options)
 {
     public DbSet<FamilyRow> Families => Set<FamilyRow>();
     public DbSet<MembershipRow> Memberships => Set<MembershipRow>();
@@ -16,6 +16,7 @@ public sealed class PilotDatabase(DbContextOptions<PilotDatabase> options) : DbC
 
     protected override void OnModelCreating(ModelBuilder model)
     {
+        ConfigurePush(model);
         model.Entity<FamilyRow>(entity =>
         {
             entity.HasKey(x => x.Id);

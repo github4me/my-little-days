@@ -15,6 +15,7 @@ public sealed class FamilySettings
 {
     public string PublicBaseUrl { get; set; } = "";
     public Guid HistoryId { get; set; }
+    public bool EnforceSingleActiveTimers { get; set; }
 }
 
 public sealed class PilotIdentity
@@ -43,6 +44,7 @@ public sealed record PilotConfiguration(EntraSettings Entra, FamilySettings Fami
 {
     // Direct constructors support isolated fixtures; deployed configuration must choose its mode.
     public PublicIdentitySettings Admission { get; init; } = new() { Mode = "Static" };
+    public PushSettings Push { get; init; } = new();
 
     public static PilotConfiguration Load(IConfiguration configuration)
     {
@@ -75,7 +77,7 @@ public sealed record PilotConfiguration(EntraSettings Entra, FamilySettings Fami
             pilot.Identities.Select(x => x.Email).Distinct(StringComparer.Ordinal).Count() != pilot.Identities.Length)
             throw new InvalidOperationException("Pilot object IDs and recipient emails must be unique.");
         family.PublicBaseUrl = uri.GetLeftPart(UriPartial.Authority);
-        return new(entra, family, pilot) { Admission = admission };
+        return new(entra, family, pilot) { Admission = admission, Push = PushSettings.Load(configuration) };
     }
 
     public PilotIdentity Admit(ClaimsPrincipal principal)

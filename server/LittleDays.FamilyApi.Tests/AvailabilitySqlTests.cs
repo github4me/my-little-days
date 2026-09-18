@@ -27,6 +27,28 @@ public sealed class AvailabilitySqlTests(SqlFixture sql) : IClassFixture<SqlFixt
     }
 
     [SqlFact]
+    public async Task WatchRecordingRequiresTimerGuardAndGateChangesInvalidateConditionalSnapshot()
+    {
+        var s = new Scenario(sql);
+        var created = await Create(s);
+        Assert.False(created.Snapshot.WatchRecordingEnabled);
+        var disabled = await s.Call(x => x.ConditionalFullSnapshot(s.Owner, created.FamilyId, null, default));
+        Assert.False(disabled.Snapshot!.WatchRecordingEnabled);
+        s.Config.Family.EnforceSingleActiveTimers = true;
+        var enabled = await s.Call(x => x.ConditionalFullSnapshot(s.Owner, created.FamilyId, disabled.ETag, default));
+        Assert.True(enabled.Snapshot!.WatchRecordingEnabled);
+        Assert.NotEqual(disabled.ETag, enabled.ETag);
+        Assert.Equal(disabled.Snapshot.Revision, enabled.Snapshot.Revision);
+        Assert.Null((await s.Call(x => x.ConditionalFullSnapshot(s.Owner, created.FamilyId, enabled.ETag, default))).Snapshot);
+        s.Config.Family.EnforceSingleActiveTimers = false;
+        var revoked = await s.Call(x => x.ConditionalFullSnapshot(s.Owner, created.FamilyId, enabled.ETag, default));
+        Assert.False(revoked.Snapshot!.WatchRecordingEnabled);
+        Assert.Equal(disabled.ETag, revoked.ETag);
+        var json = JsonSerializer.SerializeToElement(revoked.Snapshot, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        Assert.False(json.GetProperty("watchRecordingEnabled").GetBoolean());
+    }
+
+    [SqlFact]
     public async Task DifferentFamilySnapshotAndIdentityReadProceedWhileLifecycleWaitsForAtomicBarrier()
     {
         var a = new Scenario(sql);

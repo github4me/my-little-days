@@ -36,7 +36,7 @@ public sealed record SharedExtraRecord(JsonElement Record, string Version, Guid 
 public sealed record FullFamilySnapshot(int SchemaVersion, FullFamilyProfile Profile,
     SharedEntry[] Entries, SharedCareRecord[] CareRecords, FamilySummary Family, Guid HistoryId, string Revision,
     FamilyMember[] Members, FamilyInvitation[] Invitations, SharedFeed[] Feeds, OwnershipTransfer? OwnershipTransfer,
-    int ExtrasSchemaVersion = 1, SharedExtraRecord[]? ExtraRecords = null);
+    int ExtrasSchemaVersion = 1, SharedExtraRecord[]? ExtraRecords = null, bool WatchRecordingEnabled = false);
 public sealed record CreateFullFamilyRequest(Guid OperationId, string ConsentRevision, JsonElement Seed, bool DeclinePendingInvitations = false);
 public sealed record CreateFullFamilyResult(Guid OperationId, Guid FamilyId, Guid MembershipId, Guid HistoryId, string SeedDigest, FullFamilySnapshot Snapshot);
 public sealed record FullRecordOperation(Guid OperationId, string RecordId, Guid MembershipId, Guid HistoryId,
