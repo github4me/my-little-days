@@ -1199,3 +1199,36 @@ Those physical-device checks remain explicit release follow-ups.
   use CI's disposable SQL instance; they do not deploy or modify production.
 - Install over the current app using the page above. Physical-device acceptance remains
   outstanding; no Azure/API/database deployment or TestFlight submission occurred.
+
+## 27. Task-first Care and Play help preview (18 September 2026)
+
+This app-only release places recording controls before general explanations.
+Care and Play help/references are below the main content and initially collapsed.
+Temperature accuracy/urgent warnings, bath supervision, nail-tool safety and
+permission/consent notices remain visible. No record, sync or medical rules change.
+
+### Publish and check
+
+1. Publish the reviewed UI/test/documentation changes through the GitHub plugin
+   on `feature/family-invitations`, using version **0.2.1**, iOS build **27**.
+   Exclude unrelated SQL/infrastructure work and private verification files.
+2. Follow section 26's clean-checkout, resolved preview-environment, five public
+   value/account-override and upload-archive checks. Use internal distribution,
+   existing signing credentials/devices and demo mode `0`. OTA remains disabled.
+3. Start one native preview build for the exact pushed SHA and verify that build
+   reaches **FINISHED**. Do not submit to TestFlight or deploy Azure/API/SQL.
+4. On an already registered iPhone, use the resulting Expo installation page to
+   install over the existing app; never uninstall or clear local data.
+5. In **Care → Daily care**, confirm the form follows the care choices. Below the
+   history, **Recording help & references / 记录说明与参考** should start collapsed.
+   Opening/closing help must preserve an unsaved entry. Do not save synthetic
+   records to the real family. Confirm urgent temperature, raw-reading, bath and
+   nail safety instructions remain visible without opening help.
+6. Check **Play activities / Play settings** for collapsed **Play help & references /
+   早教说明与参考** below their content. Repeat in Chinese/English and Light/Dark;
+   check larger text, keyboard reachability and VoiceOver's expanded/collapsed state.
+
+Validation: TypeScript and all 517 verification tests passed; full browser and
+four Apple layout scenarios passed (16 isolated captures, no external traffic).
+Physical iPhone/VoiceOver acceptance remains pending. Exact source/build status
+will be recorded below after publication.

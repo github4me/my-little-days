@@ -6,8 +6,12 @@ export const careOptions = [
     icon: "temperature",
     label: words("体温", "Temp"),
     hint: words(
-      "有需要时测量，不要求每日测温。记录原始读数，不按测量部位自行加减。",
-      "Measure when needed, not as a daily target. Record the reading without adding or subtracting for the measurement site.",
+      "有需要时测量，不要求每日测温。",
+      "Measure when needed, not as a daily target.",
+    ),
+    safety: words(
+      "记录原始读数，不按测量部位自行加减。",
+      "Record the reading without adding or subtracting for the measurement site.",
     ),
     url: "https://www.healthdirect.gov.au/types-of-thermometer",
   },
@@ -46,8 +50,12 @@ export const careOptions = [
     icon: "nails",
     label: words("指甲", "Nails"),
     hint: words(
-      "按需要记录指甲护理，不是每日任务。由成人使用婴儿适用工具，宝宝挣动时暂停。",
-      "Record nail care as needed, not as a daily task. An adult should use baby-suitable tools and pause if baby wriggles.",
+      "按需要记录指甲护理，不是每日任务。",
+      "Record nail care as needed, not as a daily task.",
+    ),
+    safety: words(
+      "由成人使用婴儿适用工具，宝宝挣动时暂停。",
+      "An adult should use baby-suitable tools and pause if baby wriggles.",
     ),
     url: "https://www.nhs.uk/baby/caring-for-a-newborn/washing-and-bathing-your-baby/",
   },

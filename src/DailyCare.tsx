@@ -24,6 +24,7 @@ import {
   parseTemperatureInput,
 } from "./care";
 import PlayIcon from "./PlayIcon";
+import HelpDisclosure from "./HelpDisclosure";
 import { playDayKey, type LearningText } from "./learning";
 import {
   boundedCarePickerDate,
@@ -317,41 +318,6 @@ export default function DailyCare({
           </Pressable>
         ))}
       </View>
-      <T raw style={{ fontSize: 12, color: c.muted, lineHeight: 19 }}>
-        {copy(option.hint)}
-      </T>
-      {kind === "temperature" ? (
-        <View style={{ gap: 6 }}>
-          <T raw style={{ fontSize: 12, lineHeight: 19 }}>
-            {text(
-              "本应用不能测温。请使用适龄体温计并遵循说明；不同测量方式的读数不能直接比较。",
-              "This app cannot measure temperature. Use an age-suitable thermometer as directed; readings from different methods are not directly comparable.",
-            )}
-          </T>
-          <T raw style={{ fontSize: 12, lineHeight: 19, fontWeight: "600" }}>
-            {text(
-              "未满 3 个月且体温 ≥38°C，请立即就医。任何年龄出现呼吸困难、难以唤醒或抽搐，应立即寻求急救，不要等记录完成。",
-              "Under 3 months with a temperature of 38°C or above: seek urgent medical care. At any age, breathing difficulty, difficulty waking or seizures need emergency help. Do not wait to finish recording.",
-            )}
-          </T>
-          <Pressable
-            accessibilityRole="link"
-            onPress={() =>
-              void openSource(
-                "https://www.healthdirect.gov.au/fever-and-high-temperature-in-children",
-              )
-            }
-            style={{ minHeight: 44, justifyContent: "center" }}
-          >
-            <T raw style={{ color: c.primary, fontSize: 12 }}>
-              {text(
-                "发热安全提示 · healthdirect ↗",
-                "Fever safety · healthdirect ↗",
-              )}
-            </T>
-          </Pressable>
-        </View>
-      ) : null}
       <Card style={{ padding: 14, gap: 12 }}>
         <T raw style={{ fontWeight: "700" }}>
           {text(
@@ -375,6 +341,12 @@ export default function DailyCare({
               {text(
                 "预填 36.8°C，并非测量结果，请按实际读数修改；支持小数点或逗号。",
                 "36.8°C is prefilled, not a measurement. Adjust to the actual reading; a decimal point or comma is accepted.",
+              )}
+            </T>
+            <T raw style={{ fontSize: 13, lineHeight: 20, fontWeight: "600" }}>
+              {text(
+                "未满 3 个月且体温 ≥38°C，请立即就医。任何年龄出现呼吸困难、难以唤醒或抽搐，应立即寻求急救，不要等记录完成。",
+                "Under 3 months with a temperature of 38°C or above: seek urgent medical care. At any age, breathing difficulty, difficulty waking or seizures need emergency help. Do not wait to finish recording.",
               )}
             </T>
             <T raw style={{ fontSize: 12, color: c.muted }}>
@@ -424,6 +396,16 @@ export default function DailyCare({
               ))}
             </View>
           </>
+        ) : null}
+        {"safety" in option ? (
+          <T raw style={{ fontSize: 13, color: c.muted, lineHeight: 20 }}>
+            {copy(option.safety)}
+          </T>
+        ) : null}
+        {kind === "bath" ? (
+          <T raw style={{ fontSize: 13, color: c.muted, lineHeight: 20 }}>
+            {copy(option.hint)}
+          </T>
         ) : null}
         <View style={{ flexDirection: largeText ? "column" : "row", gap: 8 }}>
           <View style={{ flex: 1.4, minWidth: 0 }}>
@@ -618,25 +600,67 @@ export default function DailyCare({
           />
         ) : null}
       </View>
-      <Pressable
-        accessibilityRole="link"
-        onPress={() => void openSource(option.url)}
-        style={{ minHeight: 44, justifyContent: "center" }}
+      <HelpDisclosure
+        key={kind}
+        title={text("记录说明与参考", "Recording help & references")}
       >
-        <T raw style={{ color: c.primary, fontSize: 12 }}>
-          {text("查看照护参考来源 ↗", "Care reference ↗")}
+        <T raw style={{ fontSize: 15, color: c.muted, lineHeight: 22 }}>
+          {text(
+            "记录实际做过的照护，不是每日任务。测温、洗澡等记录会保留历史，填写后点保存才生效。",
+            "Record care you actually provided, not daily tasks. Temperature and care history are kept; drafts are only stored when you tap Save.",
+          )}
         </T>
-      </Pressable>
-      <T raw style={{ fontSize: 12, color: c.muted }}>
-        {text(
-          sharedMode
-            ? "照护记录保存到家庭服务器，不允许本机导出；每天可记多次，不替代医疗评估。"
-            : "照护历史保存在本机并包含在记录备份中；每天可记多次，不替代医疗评估。",
-          sharedMode
-            ? "Care records are saved to the family server; local export is unavailable. Multiple sessions per day are supported; this is not a medical assessment."
-            : "Care history stays locally and is included in record backups. Multiple sessions per day are supported; this is not a medical assessment.",
-        )}
-      </T>
+        {kind !== "bath" ? (
+          <T raw style={{ fontSize: 15, color: c.muted, lineHeight: 22 }}>
+            {copy(option.hint)}
+          </T>
+        ) : null}
+        {kind === "temperature" ? (
+          <>
+            <T raw style={{ fontSize: 15, lineHeight: 22 }}>
+              {text(
+                "本应用不能测温。请使用适龄体温计并遵循说明；不同测量方式的读数不能直接比较。",
+                "This app cannot measure temperature. Use an age-suitable thermometer as directed; readings from different methods are not directly comparable.",
+              )}
+            </T>
+            <Pressable
+              accessibilityRole="link"
+              onPress={() =>
+                void openSource(
+                  "https://www.healthdirect.gov.au/fever-and-high-temperature-in-children",
+                )
+              }
+              style={{ minHeight: 44, justifyContent: "center" }}
+            >
+              <T raw style={{ color: c.primary, fontSize: 15 }}>
+                {text(
+                  "发热安全提示 · healthdirect ↗",
+                  "Fever safety · healthdirect ↗",
+                )}
+              </T>
+            </Pressable>
+          </>
+        ) : null}
+        <Pressable
+          accessibilityRole="link"
+          onPress={() => void openSource(option.url)}
+          style={{ minHeight: 44, justifyContent: "center" }}
+        >
+          <T raw style={{ color: c.primary, fontSize: 12 }}>
+            {text("查看照护参考来源 ↗", "Care reference ↗")}
+          </T>
+        </Pressable>
+        <T raw style={{ fontSize: 12, color: c.muted }}>
+          {text(
+            sharedMode
+              ? "照护记录保存到家庭服务器，不允许本机导出；每天可记多次，不替代医疗评估。"
+              : "照护历史保存在本机并包含在记录备份中；每天可记多次，不替代医疗评估。",
+            sharedMode
+              ? "Care records are saved to the family server; local export is unavailable. Multiple sessions per day are supported; this is not a medical assessment."
+              : "Care history stays locally and is included in record backups. Multiple sessions per day are supported; this is not a medical assessment.",
+          )}
+        </T>
+      </HelpDisclosure>
       {Platform.OS === "ios" && picker ? (
         <Modal
           transparent

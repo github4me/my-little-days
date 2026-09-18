@@ -34,6 +34,30 @@
   privacy navigation, family dialogs and form layouts receive corresponding
   touch-target/readability improvements. Charts retain textual record access.
 
+## Care hierarchy follow-up — preview 27
+
+General Care/Play introductions and references now live in initially collapsed
+help after the main content. Daily care opens with category choices and the
+recording form; help expansion does not save, clear or reset an in-progress
+record. Urgent temperature guidance, the prefilled-reading warning, unadjusted
+measurement instructions, bath supervision and baby-safe nail-tool guidance,
+errors and permission/consent notices remain visible.
+Medical wording, storage behavior and validation are unchanged.
+
+This applies Apple's [secondary help](https://developer.apple.com/design/human-interface-guidelines/offering-help)
+and [disclosure](https://developer.apple.com/design/human-interface-guidelines/disclosure-controls)
+guidance without moving critical information into hidden help. This follow-up is
+being published as preview 27; preview 26 does not contain it. Build completion
+and the installation link are recorded in the manual runbook separately.
+
+Local verification: `npm run verify` passed (TypeScript and 517 tests), the full
+browser regression passed, and the Apple layout suite passed all four bilingual
+light/dark viewport scenarios with 16 isolated captures. Tests cover initially
+collapsed help, retained unsaved care values and visible safety instructions.
+The browser bundle was rebuilt with demo mode disabled and Metro's cache cleared;
+an earlier cached bundle failed the unrelated signed-out family-entry assertion.
+Physical iPhone rendering and VoiceOver checks for this follow-up remain pending.
+
 ## Implementation boundaries
 
 This is an Expo/React Native UI update, not a rewrite in SwiftUI. Existing

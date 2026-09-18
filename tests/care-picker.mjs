@@ -99,6 +99,7 @@ function fixture(platform = "ios", overrides = {}) {
             }),
           };
         if (name === "./AccessibleModal") return "Modal";
+        if (name === "./HelpDisclosure") return "HelpDisclosure";
         if (name === "react-native-safe-area-context")
           return { SafeAreaView: "SafeAreaView" };
         if (name === "@react-native-community/datetimepicker")

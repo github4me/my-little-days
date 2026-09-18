@@ -92,6 +92,7 @@ function fixture(sharedMode = true, display = { width: 390, fontScale: 1 }) {
       Linking: { openURL: async () => {} },
     },
     "react-native-safe-area-context": { SafeAreaView: "SafeAreaView" },
+    "react-native-svg": { __esModule: true, default: "Svg", Path: "Path" },
     "./AccessibleModal": { __esModule: true, default: "Modal" },
     "./ui": { Theme: palette, Button: "Button", Card: "Card", T: "T" },
     "./i18n": { useI18n: () => ({ locale: "en-US" }) },
@@ -136,7 +137,13 @@ function fixture(sharedMode = true, display = { width: 390, fontScale: 1 }) {
       require(name) {
         if (Object.hasOwn(overrides, name)) return overrides[name];
         if (!name.startsWith(".")) throw new Error(`Unexpected ${name}`);
-        return load(path.resolve(path.dirname(file), name + ".ts"));
+        const dependency = [".ts", ".tsx"]
+          .map((extension) =>
+            path.resolve(path.dirname(file), name + extension),
+          )
+          .find(fs.existsSync);
+        if (!dependency) throw new Error(`Missing dependency ${name}`);
+        return load(dependency);
       },
     });
     return result.exports;
@@ -184,6 +191,19 @@ function fixture(sharedMode = true, display = { width: 390, fontScale: 1 }) {
   };
   world.node = (label) =>
     nodes.find((n) => n.props.accessibilityLabel === label);
+  const textContent = (value) => {
+    if (Array.isArray(value)) return value.map(textContent).join("");
+    if (typeof value === "string" || typeof value === "number")
+      return String(value);
+    return value?.props ? textContent(value.props.children) : "";
+  };
+  // Only mounted text nodes count; serializing parent props includes children
+  // passed into a collapsed component even when it doesn't render them.
+  world.visibleText = () =>
+    nodes
+      .filter((node) => node.type === "T")
+      .map((node) => textContent(node.props.children))
+      .join("\n");
   world.press = async (label) => {
     const node = world.node(label);
     assert.ok(node, label);
@@ -266,7 +286,8 @@ test("play storage disclosure reflects the active family or personal workspace",
   for (const shared of [false, true]) {
     const world = fixture(shared);
     await world.ready();
-    const contents = JSON.stringify(world.render());
+    await world.press("Play help & references");
+    const contents = world.visibleText();
     assert.equal(
       contents.includes("Play settings and dated check-ins stay locally"),
       !shared,
@@ -278,6 +299,67 @@ test("play storage disclosure reflects the active family or personal workspace",
       shared,
     );
   }
+});
+
+test("play help starts collapsed and retains the mode-specific intro and references", async () => {
+  const world = fixture();
+  await world.ready();
+  const help = world.node("Play help & references");
+  assert.equal(help.props.accessibilityState.expanded, false);
+  assert.equal(help.props["aria-expanded"], false);
+  assert.ok(help.props.style({ pressed: false }).minHeight >= 44);
+  assert.ok(!world.visibleText().includes("Parent-led play activities"));
+  assert.ok(
+    !world.visibleText().includes("Activities are editorial adaptations"),
+  );
+  await world.press("Play help & references");
+  assert.equal(
+    world.node("Play help & references").props["aria-expanded"],
+    true,
+  );
+  assert.ok(world.visibleText().includes("A little play in everyday moments"));
+  assert.ok(world.visibleText().includes("Parent-led play activities"));
+  assert.ok(
+    world.visibleText().includes("Activities are editorial adaptations"),
+  );
+  assert.ok(
+    world.visibleText().includes("Why put the screen away? WHO reference"),
+  );
+  await world.press("Play help & references");
+  await world.press("Play settings");
+  assert.ok(!world.visibleText().includes("Choose the play that suits you"));
+  await world.press("Play help & references");
+  assert.ok(world.visibleText().includes("Choose the play that suits you"));
+  assert.ok(
+    world.visibleText().includes("Browse by age and choose activities"),
+  );
+  assert.deepEqual(world.calls, []);
+});
+
+test("shared capability notices and expanded activity safety remain outside secondary help", async () => {
+  const world = fixture();
+  await world.ready();
+  assert.ok(
+    world
+      .visibleText()
+      .includes("Play settings and check-ins are shared with your family"),
+  );
+  await world.press("View Gentle touch");
+  assert.ok(world.visibleText().includes("Keep it safe:"));
+  assert.equal(
+    world.node("Play help & references").props["aria-expanded"],
+    false,
+  );
+  world.sharedPlay = undefined;
+  await world.ready();
+  assert.ok(
+    world
+      .visibleText()
+      .includes(
+        "This server does not yet support shared play settings or check-ins",
+      ),
+  );
+  assert.deepEqual(world.calls, []);
 });
 
 test("large-text play section controls reflow without reducing label size", async () => {

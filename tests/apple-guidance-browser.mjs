@@ -25,6 +25,16 @@ const copy = {
     save: /^(Start|Save record)$/,
     local: "Saved on this device · no internet needed",
     daily: "Daily care",
+    temperature: "Temp",
+    temperatureField: "Temperature · °C",
+    careHelp: "Recording help & references",
+    careIntro:
+      "Record care you actually provided, not daily tasks. Temperature and care history are kept; drafts are only stored when you tap Save.",
+    urgentCare: /Under 3 months with a temperature/,
+    rawReading:
+      "Record the reading without adding or subtracting for the measurement site.",
+    nailSafety:
+      "An adult should use baby-suitable tools and pause if baby wriggles.",
     nails: "Nails",
     careDate: "Care date",
     careTime: "Care time",
@@ -47,6 +57,14 @@ const copy = {
     save: /^(开始|保存记录)$/,
     local: "仅保存在这台设备 · 无需联网",
     daily: "日常照护",
+    temperature: "体温",
+    temperatureField: "体温 · °C",
+    careHelp: "记录说明与参考",
+    careIntro:
+      "记录实际做过的照护，不是每日任务。测温、洗澡等记录会保留历史，填写后点保存才生效。",
+    urgentCare: /未满 3 个月且体温/,
+    rawReading: "记录原始读数，不按测量部位自行加减。",
+    nailSafety: "由成人使用婴儿适用工具，宝宝挣动时暂停。",
     nails: "指甲",
     careDate: "照护日期",
     careTime: "照护时间",
@@ -272,7 +290,62 @@ try {
 
     await select(3);
     await page.getByRole("button", { name: words.daily, exact: true }).click();
+    const temperature = page.getByLabel(words.temperatureField, {
+      exact: true,
+    });
+    const help = page.getByRole("button", {
+      name: words.careHelp,
+      exact: true,
+    });
+    assert.equal(await help.getAttribute("aria-expanded"), "false");
+    assert.equal(
+      await page.getByText(words.careIntro, { exact: true }).count(),
+      0,
+    );
+    const temperatureBox = await temperature.boundingBox();
+    const safetyBox = await page.getByText(words.urgentCare).boundingBox();
+    assert.equal(
+      await page.getByText(words.rawReading, { exact: true }).isVisible(),
+      true,
+    );
+    assert.ok(
+      temperatureBox &&
+        temperatureBox.y >= 0 &&
+        temperatureBox.y + temperatureBox.height < 550,
+      `${name}: the recording input must precede explanatory help and remain above the fold`,
+    );
+    assert.ok(
+      safetyBox && safetyBox.y >= temperatureBox.y + temperatureBox.height,
+      "urgent safety guidance must remain outside collapsed help, next to the measured input",
+    );
+    await page.screenshot({
+      path: path.join(output, `temperature-${name}.png`),
+    });
+    await temperature.fill("37.2");
+    await page
+      .getByLabel(words.careNotes, { exact: true })
+      .fill("Unsaved care draft");
+    await bounded(help, "care help disclosure", 44);
+    await help.click();
+    await page.getByText(words.careIntro, { exact: true }).waitFor();
+    assert.equal(await help.getAttribute("aria-expanded"), "true");
+    assert.equal(await temperature.inputValue(), "37.2");
+    assert.equal(
+      await page.getByLabel(words.careNotes, { exact: true }).inputValue(),
+      "Unsaved care draft",
+    );
+    await help.click();
+    assert.equal(await help.getAttribute("aria-expanded"), "false");
+    assert.equal(
+      await page.getByText(words.careIntro, { exact: true }).count(),
+      0,
+    );
     await page.getByRole("button", { name: words.nails, exact: true }).click();
+    assert.equal(await help.getAttribute("aria-expanded"), "false");
+    assert.equal(
+      await page.getByText(words.nailSafety, { exact: true }).isVisible(),
+      true,
+    );
     const careDate = page.getByLabel(words.careDate, { exact: true });
     const careTime = page.getByLabel(words.careTime, { exact: true });
     const careNotes = page.getByLabel(words.careNotes, { exact: true });
@@ -305,7 +378,7 @@ try {
     await context.close();
   }
   console.log(
-    `PASS: 12 isolated browser captures; no external requests were allowed (${blockedExternalRequests} blocked). Native accessibility and keyboard acceptance remains separate.`,
+    `PASS: 16 isolated browser captures; no external requests were allowed (${blockedExternalRequests} blocked). Native accessibility and keyboard acceptance remains separate.`,
   );
 } finally {
   await browser.close();

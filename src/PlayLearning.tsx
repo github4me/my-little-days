@@ -11,6 +11,7 @@ import Modal from "./AccessibleModal";
 import { Button, Card, T, Theme } from "./ui";
 import { useI18n } from "./i18n";
 import DailyCare from "./DailyCare";
+import HelpDisclosure from "./HelpDisclosure";
 import PlayIcon, { type PlayIconKind } from "./PlayIcon";
 import type { CareRecord } from "./domain";
 import {
@@ -379,44 +380,6 @@ export default function PlayLearning({
           </ScrollView>
         </SafeAreaView>
       </Modal>
-      <View
-        style={{
-          borderLeftWidth: 3,
-          borderLeftColor: c.primary,
-          paddingLeft: 12,
-          gap: 4,
-        }}
-      >
-        <T raw style={{ fontWeight: "600", fontSize: 16 }}>
-          {mode === "care"
-            ? text(
-                "日常照护，按需要记录",
-                "Everyday care, recorded when needed",
-              )
-            : mode === "choose"
-              ? text("设置适合你们的早教活动", "Choose the play that suits you")
-              : text(
-                  "把日常，变成一起玩的时光",
-                  "A little play in everyday moments",
-                )}
-        </T>
-        <T raw style={{ color: c.muted, fontSize: 13, lineHeight: 20 }}>
-          {mode === "care"
-            ? text(
-                "记录实际做过的照护，不是每日任务。测温、洗澡等记录会保留历史，填写后点保存才生效。",
-                "Record care you actually provided, not daily tasks. Temperature and care history are kept; drafts are only stored when you tap Save.",
-              )
-            : mode === "choose"
-              ? text(
-                  "按月龄浏览并选择，勾选后自动保存，所选项目会显示在「早教活动」。可跨月龄选择，参考范围不符时会提示。",
-                  "Browse by age and choose activities. Selections save automatically and appear in Play activities. You can choose other ages; a prompt flags activities outside your baby's reference age.",
-                )
-              : text(
-                  "给家长参考的亲子早教活动，不是宝宝的屏幕课程。先读步骤，再放下手机陪伴。做过可自愿打卡，不必全部完成。",
-                  "Parent-led play activities, not screen lessons for babies. Read first, then put the phone away. Check in if you like; there is no need to do everything.",
-                )}
-        </T>
-      </View>
       {mode === "choose" ? (
         <View style={{ gap: 8 }}>
           <T raw style={{ fontSize: 13, color: c.muted }}>
@@ -835,7 +798,31 @@ export default function PlayLearning({
                   )}
             </T>
           ) : null}
-          <View style={{ gap: 8, paddingTop: 6 }}>
+          <HelpDisclosure
+            title={text("早教说明与参考", "Play help & references")}
+          >
+            <T raw style={{ fontWeight: "600", fontSize: 16 }}>
+              {mode === "choose"
+                ? text(
+                    "设置适合你们的早教活动",
+                    "Choose the play that suits you",
+                  )
+                : text(
+                    "把日常，变成一起玩的时光",
+                    "A little play in everyday moments",
+                  )}
+            </T>
+            <T raw style={{ color: c.muted, fontSize: 13, lineHeight: 20 }}>
+              {mode === "choose"
+                ? text(
+                    "按月龄浏览并选择，勾选后自动保存，所选项目会显示在「早教活动」。可跨月龄选择，参考范围不符时会提示。",
+                    "Browse by age and choose activities. Selections save automatically and appear in Play activities. You can choose other ages; a prompt flags activities outside your baby's reference age.",
+                  )
+                : text(
+                    "给家长参考的亲子早教活动，不是宝宝的屏幕课程。先读步骤，再放下手机陪伴。做过可自愿打卡，不必全部完成。",
+                    "Parent-led play activities, not screen lessons for babies. Read first, then put the phone away. Check in if you like; there is no need to do everything.",
+                  )}
+            </T>
             <T raw style={{ fontSize: 12, lineHeight: 20, color: c.muted }}>
               {text(
                 "月龄只是浏览参考，不是敏感期或达标清单。按宝宝兴趣和能力选择；早产或有特殊需要时，适龄活动请咨询儿科医生。若担心发展或已会的技能退步，请及时咨询专业人员。",
@@ -869,7 +856,7 @@ export default function PlayLearning({
                 )}
               </T>
             </Pressable>
-          </View>
+          </HelpDisclosure>
         </>
       )}
     </View>
