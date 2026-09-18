@@ -305,7 +305,7 @@ export default function PlayLearning({
             style={{
               flexGrow: 0,
               maxHeight: "80%",
-              backgroundColor: c.card,
+              backgroundColor: c.elevated,
               borderRadius: 20,
             }}
             contentContainerStyle={{ padding: 20, gap: 14 }}

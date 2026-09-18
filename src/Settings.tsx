@@ -273,7 +273,7 @@ export default function Settings({
       </View>
       {!!error && (
         <Card>
-          <T accessibilityRole="alert" style={{ color: "#B34B3B" }}>
+          <T accessibilityRole="alert" style={{ color: c.danger }}>
             {t(error)}
           </T>
         </Card>

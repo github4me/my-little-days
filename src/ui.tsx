@@ -10,34 +10,8 @@ import {
 } from "react-native";
 import { useI18n } from "./i18n";
 import CareIcon from "./CareIcon";
-export const light = {
-  bg: "#F4F9FD",
-  card: "#FFFFFF",
-  text: "#29475E",
-  muted: "#60798D",
-  line: "#DCE8F1",
-  primary: "#34759D",
-  soft: "#E3F1FB",
-  hero: "#C9E6FA",
-  heroText: "#294E6B",
-  heroMuted: "#476B85",
-  heroLine: "#A8CCE6",
-  avatar: "#FFF5E6",
-};
-export const dark = {
-  bg: "#182837",
-  card: "#233A4C",
-  text: "#EDF6FF",
-  muted: "#AEC6D9",
-  line: "#3B5468",
-  primary: "#A8D6F5",
-  soft: "#304F67",
-  hero: "#2C4C66",
-  heroText: "#EDF6FF",
-  heroMuted: "#C1D9EB",
-  heroLine: "#52728B",
-  avatar: "#E1EFF9",
-};
+import { light, dark } from "./palette";
+export { light, dark } from "./palette";
 export const Theme = createContext(light);
 export function T({
   children,
@@ -118,7 +92,7 @@ export function Button({
     >
       <T
         style={{
-          color: secondary ? c.text : c === dark ? "#183C56" : "#FFFFFF",
+          color: secondary ? c.text : c.onPrimary,
           fontWeight: "600",
         }}
       >
@@ -239,15 +213,17 @@ export function Field({
         onChangeText={onChange}
         placeholder={placeholder ? t(placeholder) : undefined}
         placeholderTextColor={c.muted}
+        keyboardAppearance={c === dark ? "dark" : "light"}
+        selectionColor={c.primary}
         keyboardType={keyboardType}
         style={{
           borderWidth: 1,
-          borderColor: c.line,
+          borderColor: c.controlLine,
           borderRadius: 14,
           padding: 14,
           color: c.text,
           fontSize: 16,
-          backgroundColor: c.bg,
+          backgroundColor: c.input,
         }}
         {...rest}
       />

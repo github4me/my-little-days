@@ -324,7 +324,7 @@ export default function OwnerSetupCard({
           >
             <View
               accessibilityViewIsModal
-              style={[styles.modal, { backgroundColor: c.card }]}
+              style={[styles.modal, { backgroundColor: c.elevated }]}
             >
               <ScrollView
                 style={{ flexShrink: 1 }}

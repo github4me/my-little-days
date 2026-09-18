@@ -384,6 +384,7 @@ export default function RecordsCalendar({
           <DateTimePicker
             value={date}
             mode="date"
+            themeVariant={c === light ? "light" : "dark"}
             maximumDate={new Date(now)}
             onChange={(event, next) => {
               setDatePicker(false);
@@ -660,7 +661,9 @@ export default function RecordsCalendar({
             padding: 20,
           }}
         >
-          <Card style={{ maxHeight: "90%", gap: 12 }}>
+          <Card
+            style={{ maxHeight: "90%", gap: 12, backgroundColor: c.elevated }}
+          >
             <T
               accessibilityRole="header"
               style={{ fontSize: 20, fontWeight: "700" }}
@@ -699,7 +702,7 @@ export default function RecordsCalendar({
         >
           <View
             style={{
-              backgroundColor: c.card,
+              backgroundColor: c.elevated,
               borderRadius: 22,
               padding: 20,
               maxHeight: "90%",

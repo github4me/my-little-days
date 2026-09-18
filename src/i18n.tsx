@@ -188,6 +188,10 @@ const english: Record<string, string> = {
   "保存 · 继续计时": "Save · keep timing",
   保存记录: "Save record",
   "仅保存在这台设备 · 无需联网": "Saved on this device · no internet needed",
+  "本机记录 · 登录不会自动上传":
+    "Local records · signing in does not upload them",
+  "家庭共享记录 · 保存后等待同步确认":
+    "Family-shared records · saved changes await sync confirmation",
   "属于宝宝，也属于你的小小日常。":
     "For your baby, and for your everyday moments together.",
   宝宝档案: "Baby profile",

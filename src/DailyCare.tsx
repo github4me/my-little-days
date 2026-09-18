@@ -1,6 +1,17 @@
-import React, { useContext, useRef, useState } from "react";
-import { Linking, Pressable, View } from "react-native";
-import { Button, Card, Field, T, Theme } from "./ui";
+import React, { useCallback, useContext, useRef, useState } from "react";
+import {
+  Keyboard,
+  Linking,
+  Modal,
+  Platform,
+  Pressable,
+  View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import DateTimePicker, {
+  type DateTimePickerEvent,
+} from "@react-native-community/datetimepicker";
+import { Button, Card, Field, T, Theme, dark } from "./ui";
 import { useI18n } from "./i18n";
 import { CareRecord, validateCareRecord, makeId } from "./domain";
 import {
@@ -13,6 +24,11 @@ import {
 } from "./care";
 import PlayIcon from "./PlayIcon";
 import { playDayKey, type LearningText } from "./learning";
+import {
+  boundedCarePickerDate,
+  updateCarePickerDate,
+  type CarePickerMode,
+} from "./careDateTime";
 
 export default function DailyCare({
   records,
@@ -44,6 +60,38 @@ export default function DailyCare({
   );
   const [date, setDate] = useState(playDayKey(new Date(now)));
   const [time, setTime] = useState(new Date(now).toTimeString().slice(0, 5));
+  const [picker, setPicker] = useState<{
+    mode: CarePickerMode;
+    value: Date;
+  } | null>(null);
+  const pickerContext = useRef({ picker, now, birthDate });
+  pickerContext.current = { picker, now, birthDate };
+  // Android reopens its dialog when onChange changes. Keep it stable while the
+  // app clock ticks, but use fresh bounds when the user finally confirms.
+  const onPickerChange = useCallback(
+    (event: DateTimePickerEvent, selected?: Date) => {
+      const latest = pickerContext.current;
+      if (!picker || picker !== latest.picker) return;
+      if (event.type !== "set" || !selected) {
+        if (Platform.OS !== "ios") setPicker(null);
+        return;
+      }
+      const value = updateCarePickerDate(
+        picker.value,
+        selected,
+        picker.mode,
+        latest.now,
+        latest.birthDate,
+      );
+      if (Platform.OS === "ios") setPicker({ ...picker, value });
+      else {
+        setDate(playDayKey(value));
+        setTime(value.toTimeString().slice(0, 5));
+        setPicker(null);
+      }
+    },
+    [picker],
+  );
   const [note, setNote] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<string | null>(null);
@@ -58,7 +106,87 @@ export default function DailyCare({
     .filter((r) => r.kind === kind)
     .sort((a, b) => Date.parse(b.time) - Date.parse(a.time));
   const shown = expanded ? history : history.slice(0, 5);
+  function openPicker(mode: CarePickerMode) {
+    Keyboard.dismiss();
+    setPicker({
+      mode,
+      value: boundedCarePickerDate(
+        new Date(`${date}T${time}:00`),
+        now,
+        birthDate,
+      ),
+    });
+  }
+  function acceptPicker(value: Date) {
+    const bounded = boundedCarePickerDate(value, now, birthDate);
+    setDate(playDayKey(bounded));
+    setTime(bounded.toTimeString().slice(0, 5));
+    setPicker(null);
+  }
+  function dateTimeField(mode: CarePickerMode) {
+    const label =
+      mode === "date"
+        ? text("照护日期", "Care date")
+        : text("照护时间", "Care time");
+    const value = mode === "date" ? date : time;
+    if (Platform.OS === "web")
+      return (
+        <Field
+          editable={!busy}
+          label={label}
+          value={value}
+          onChange={mode === "date" ? setDate : setTime}
+          placeholder={mode === "date" ? "YYYY-MM-DD" : "HH:mm"}
+          maxLength={mode === "date" ? 10 : 5}
+        />
+      );
+    return (
+      <View style={{ gap: 8 }}>
+        <T raw style={{ fontSize: 12, color: c.muted }}>
+          {label}
+        </T>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={label}
+          accessibilityValue={{ text: value }}
+          accessibilityState={{
+            disabled: busy,
+            expanded: picker?.mode === mode,
+          }}
+          disabled={busy}
+          onPress={() => openPicker(mode)}
+          style={({ pressed }) => ({
+            backgroundColor: c.input,
+            borderWidth: 1,
+            borderColor: c.controlLine,
+            borderRadius: 14,
+            minHeight: 48,
+            paddingHorizontal: 12,
+            paddingVertical: 10,
+            justifyContent: "center",
+            opacity: busy ? 0.4 : pressed ? 0.7 : 1,
+          })}
+        >
+          <T raw>{value}</T>
+        </Pressable>
+      </View>
+    );
+  }
+  const nativePicker = picker ? (
+    <DateTimePicker
+      value={boundedCarePickerDate(picker.value, now, birthDate)}
+      mode={picker.mode}
+      display={Platform.OS === "ios" ? "spinner" : "default"}
+      themeVariant={c === dark ? "dark" : "light"}
+      locale={locale}
+      is24Hour
+      minimumDate={birthDate ? new Date(`${birthDate}T00:00:00`) : undefined}
+      maximumDate={new Date(now)}
+      onChange={onPickerChange}
+    />
+  ) : null;
   function reset() {
+    setPicker(null);
     setTemperature(defaultTemperatureInput);
     setMethod(defaultTemperatureMethod);
     setNote("");
@@ -275,25 +403,9 @@ export default function DailyCare({
         ) : null}
         <View style={{ flexDirection: "row", gap: 8 }}>
           <View style={{ flex: 1.4, minWidth: 0 }}>
-            <Field
-              editable={!busy}
-              label={text("照护日期", "Care date")}
-              value={date}
-              onChange={setDate}
-              placeholder="YYYY-MM-DD"
-              maxLength={10}
-            />
+            {dateTimeField("date")}
           </View>
-          <View style={{ flex: 1, minWidth: 0 }}>
-            <Field
-              editable={!busy}
-              label={text("照护时间", "Care time")}
-              value={time}
-              onChange={setTime}
-              placeholder="HH:mm"
-              maxLength={5}
-            />
-          </View>
+          <View style={{ flex: 1, minWidth: 0 }}>{dateTimeField("time")}</View>
         </View>
         <Pressable
           accessibilityRole="button"
@@ -493,6 +605,83 @@ export default function DailyCare({
             : "Care history stays locally and is included in record backups. Multiple sessions per day are supported; this is not a medical assessment.",
         )}
       </T>
+      {Platform.OS === "ios" && picker ? (
+        <Modal
+          transparent
+          animationType="fade"
+          onRequestClose={() => setPicker(null)}
+        >
+          <View
+            style={{
+              flex: 1,
+              backgroundColor: "rgba(0,0,0,0.45)",
+              justifyContent: "flex-end",
+            }}
+          >
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={text("取消选择时间", "Cancel time selection")}
+              onPress={() => setPicker(null)}
+              style={{ flex: 1 }}
+            />
+            <SafeAreaView
+              edges={["bottom", "left", "right"]}
+              accessibilityViewIsModal
+              style={{
+                backgroundColor: c.elevated,
+                borderTopLeftRadius: 24,
+                borderTopRightRadius: 24,
+                paddingHorizontal: 14,
+                paddingTop: 10,
+              }}
+            >
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 8,
+                }}
+              >
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => setPicker(null)}
+                  style={{
+                    minHeight: 44,
+                    justifyContent: "center",
+                    padding: 8,
+                  }}
+                >
+                  <T raw style={{ color: c.primary }}>
+                    {text("取消", "Cancel")}
+                  </T>
+                </Pressable>
+                <T raw accessibilityRole="header" style={{ fontWeight: "700" }}>
+                  {picker.mode === "date"
+                    ? text("照护日期", "Care date")
+                    : text("照护时间", "Care time")}
+                </T>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => acceptPicker(picker.value)}
+                  style={{
+                    minHeight: 44,
+                    justifyContent: "center",
+                    padding: 8,
+                  }}
+                >
+                  <T raw style={{ color: c.primary, fontWeight: "700" }}>
+                    {text("完成", "Done")}
+                  </T>
+                </Pressable>
+              </View>
+              {nativePicker}
+            </SafeAreaView>
+          </View>
+        </Modal>
+      ) : Platform.OS === "android" ? (
+        nativePicker
+      ) : null}
     </View>
   );
 }

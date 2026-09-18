@@ -4,6 +4,7 @@ import {
   ScrollView,
   Pressable,
   ActivityIndicator,
+  Appearance,
   AppState,
   Image,
   Modal,
@@ -167,6 +168,17 @@ function BabyApp({
   const [activeRecordView, setActiveRecordView] = useState<RecordView>("bars");
   const darkMode = themePreference ?? systemTheme === "dark";
   const c = darkMode ? dark : light;
+  useEffect(() => {
+    if (Platform.OS === "web") return;
+    Appearance.setColorScheme(
+      themePreference === null
+        ? "unspecified"
+        : themePreference
+          ? "dark"
+          : "light",
+    );
+    return () => Appearance.setColorScheme("unspecified");
+  }, [themePreference]);
   const [offlineState, setState] = useState<State | null>(null),
     [privateAvatarUri, setAvatarUri] = useState<string | null>(null),
     [avatarFailed, setAvatarFailed] = useState(false),
@@ -673,7 +685,7 @@ function BabyApp({
         <View style={{ flexDirection: "row", alignItems: "center", gap: 9 }}>
           <View
             style={{
-              backgroundColor: kinds[e.type].color,
+              backgroundColor: c[e.type],
               borderRadius: 12,
               width: 36,
               height: 36,
@@ -682,9 +694,9 @@ function BabyApp({
             }}
           >
             {e.type === "feed" || e.type === "sleep" || e.type === "diaper" ? (
-              <CareIcon kind={e.type} size={22} color="#3A5267" />
+              <CareIcon kind={e.type} size={22} color={c.icon} />
             ) : (
-              <T style={{ color: "#3A5267", fontSize: 20, lineHeight: 26 }}>
+              <T style={{ color: c.icon, fontSize: 20, lineHeight: 26 }}>
                 {kinds[e.type].icon}
               </T>
             )}
@@ -1048,7 +1060,7 @@ function BabyApp({
                       <View style={row}>
                         <View
                           style={{
-                            backgroundColor: kinds[type].color,
+                            backgroundColor: c[type],
                             width: 45,
                             height: 45,
                             borderRadius: 15,
@@ -1056,7 +1068,7 @@ function BabyApp({
                             justifyContent: "center",
                           }}
                         >
-                          <CareIcon kind={type} color="#3A5267" />
+                          <CareIcon kind={type} color={c.icon} />
                         </View>
                         <View style={{ flex: 1 }}>
                           <T style={{ fontWeight: "700", fontSize: 17 }}>
@@ -1591,6 +1603,8 @@ function BabyApp({
             onSave={upsert}
             onClose={() => setEditor(null)}
             dark={darkMode}
+            sharedMode={family.sharedMode}
+            hasAccount={!!family.user || family.tokenRecognized}
           />
         ) : null}
       </SafeAreaView>

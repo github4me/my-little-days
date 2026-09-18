@@ -13,7 +13,7 @@ import {
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useI18n, type AppLocale } from "../i18n";
-import { Button, Card, T, Theme } from "../ui";
+import { Button, Card, T, Theme, dark } from "../ui";
 import type { SharedFeed } from "./contracts";
 import type { FeedDraft } from "./pilotState";
 import {
@@ -139,6 +139,8 @@ function Input({
         {...props}
         accessibilityLabel={label}
         placeholderTextColor={c.muted}
+        keyboardAppearance={c === dark ? "dark" : "light"}
+        selectionColor={c.primary}
         style={[
           styles.input,
           // Let UITextField use its native baseline/descender metrics. Explicit
@@ -146,7 +148,11 @@ function Input({
           Platform.OS !== "ios" || props.multiline
             ? styles.inputLineHeight
             : null,
-          { color: c.text, backgroundColor: c.bg, borderColor: c.line },
+          {
+            color: c.text,
+            backgroundColor: c.input,
+            borderColor: c.controlLine,
+          },
           props.style,
         ]}
       />
@@ -1943,7 +1949,7 @@ export default function FamilyScreenView({
           >
             <View
               accessibilityViewIsModal
-              style={[styles.modal, { backgroundColor: c.card }]}
+              style={[styles.modal, { backgroundColor: c.elevated }]}
             >
               <ScrollView
                 contentContainerStyle={styles.stack}

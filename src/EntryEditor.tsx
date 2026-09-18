@@ -20,6 +20,7 @@ import Svg, { Path } from "react-native-svg";
 import { light, dark as night } from "./ui";
 import { Entry, makeId, validateEntry } from "./domain";
 import { t } from "./i18n";
+import { entryStorageDisclosure } from "./entryStorageDisclosure";
 import { feedAmountPresets, formulaFeedingSource } from "./feedAmountPresets";
 
 const names = {
@@ -130,12 +131,16 @@ export default function EntryEditor({
   onSave,
   onClose,
   dark,
+  sharedMode = false,
+  hasAccount = false,
 }: {
   entry: Entry;
   birthDate: string;
   onSave: (entry: Entry) => Promise<void>;
   onClose: () => void;
   dark: boolean;
+  sharedMode?: boolean;
+  hasAccount?: boolean;
 }) {
   const [draft, setDraft] = useState(entry);
   const initialEnd = useRef(entry.end ?? new Date().toISOString());
@@ -162,19 +167,19 @@ export default function EntryEditor({
     [error, setError] = useState("");
   const saving = useRef(false);
   const palette = dark ? night : light;
-  const bg = palette.bg,
-    card = palette.card,
+  const bg = dark ? palette.card : palette.bg,
+    card = dark ? palette.elevated : palette.card,
     ink = palette.text,
     muted = palette.muted;
-  const accent = dark ? "#447FA6" : "#34759D";
+  const accent = palette.primary;
   const bottle = draft.feedKind === "formula" || draft.feedKind === "expressed";
   const quickAmounts = feedAmountPresets(birthDate, start.date, draft.feedKind);
   const inputStyle = [
     s.input,
     {
-      backgroundColor: card,
+      backgroundColor: dark ? palette.input : card,
       color: ink,
-      borderColor: palette.line,
+      borderColor: palette.controlLine,
     },
   ];
   const label = (text: string) => (
@@ -203,7 +208,7 @@ export default function EntryEditor({
     >
       <Text
         style={{
-          color: selected ? "#FFFFFF" : ink,
+          color: selected ? palette.onPrimary : ink,
           fontSize: 15,
           fontWeight: "600",
         }}
@@ -236,7 +241,7 @@ export default function EntryEditor({
     >
       <Text
         style={{
-          color: selected ? "#FFFFFF" : accent,
+          color: selected ? palette.onPrimary : accent,
           fontSize: 21,
           lineHeight: 24,
           fontWeight: "600",
@@ -247,7 +252,7 @@ export default function EntryEditor({
       <Text
         numberOfLines={1}
         style={{
-          color: selected ? "#FFFFFF" : muted,
+          color: selected ? palette.onPrimary : muted,
           fontSize: 11,
           lineHeight: 15,
           fontWeight: selected ? "700" : "600",
@@ -278,7 +283,10 @@ export default function EntryEditor({
             },
           ]}
         >
-          <FeedModeIcon kind={kind} color={selected ? "#FFFFFF" : accent} />
+          <FeedModeIcon
+            kind={kind}
+            color={selected ? palette.onPrimary : accent}
+          />
         </View>
         <Text
           numberOfLines={1}
@@ -305,6 +313,8 @@ export default function EntryEditor({
           {Platform.OS === "web" ? (
             <>
               <TextInput
+                keyboardAppearance={dark ? "dark" : "light"}
+                selectionColor={accent}
                 accessibilityLabel={t("{title}日期", { title: t(title) })}
                 editable={!busy}
                 value={fields.date}
@@ -314,6 +324,8 @@ export default function EntryEditor({
                 style={[inputStyle, { flex: 1.4 }]}
               />
               <TextInput
+                keyboardAppearance={dark ? "dark" : "light"}
+                selectionColor={accent}
                 accessibilityLabel={t("{title}时刻", { title: t(title) })}
                 editable={!busy}
                 value={fields.time}
@@ -446,6 +458,8 @@ export default function EntryEditor({
                     <View style={s.feedAmount}>
                       {label("实际喝奶量 · mL")}
                       <TextInput
+                        keyboardAppearance={dark ? "dark" : "light"}
+                        selectionColor={accent}
                         accessibilityLabel={t("实际喝奶量")}
                         editable={!busy}
                         value={amount}
@@ -595,6 +609,8 @@ export default function EntryEditor({
                     <View key={text} style={{ marginBottom: 15 }}>
                       {label(text)}
                       <TextInput
+                        keyboardAppearance={dark ? "dark" : "light"}
+                        selectionColor={accent}
                         accessibilityLabel={t(text)}
                         editable={!busy}
                         value={value}
@@ -612,6 +628,8 @@ export default function EntryEditor({
                 <View style={s.section}>
                   {label("里程碑标题")}
                   <TextInput
+                    keyboardAppearance={dark ? "dark" : "light"}
+                    selectionColor={accent}
                     accessibilityLabel={t("里程碑标题")}
                     editable={!busy}
                     value={draft.title ?? ""}
@@ -626,6 +644,8 @@ export default function EntryEditor({
               <View style={s.section}>
                 {label("备注 · 可选")}
                 <TextInput
+                  keyboardAppearance={dark ? "dark" : "light"}
+                  selectionColor={accent}
                   accessibilityLabel={t("备注")}
                   editable={!busy}
                   value={draft.note}
@@ -641,7 +661,10 @@ export default function EntryEditor({
                 />
               </View>
               {!!error && (
-                <Text accessibilityRole="alert" style={s.error}>
+                <Text
+                  accessibilityRole="alert"
+                  style={[s.error, { color: palette.danger }]}
+                >
                   {t(error)}
                 </Text>
               )}
@@ -655,9 +678,9 @@ export default function EntryEditor({
                 ]}
               >
                 {busy ? (
-                  <ActivityIndicator color="#FFFFFF" />
+                  <ActivityIndicator color={palette.onPrimary} />
                 ) : (
-                  <Text style={s.saveText}>
+                  <Text style={[s.saveText, { color: palette.onPrimary }]}>
                     {t(
                       entry.type === "feed" && !hasEnd
                         ? "开始"
@@ -669,11 +692,11 @@ export default function EntryEditor({
                 )}
               </Pressable>
               <Text style={[s.footer, { color: muted }]}>
-                {t("仅保存在这台设备 · 无需联网")}
+                {t(entryStorageDisclosure({ sharedMode, hasAccount }))}
               </Text>
             </ScrollView>
             {picker && Platform.OS !== "web" && (
-              <View style={{ backgroundColor: card }}>
+              <View style={{ backgroundColor: palette.elevated }}>
                 {Platform.OS === "ios" && (
                   <Pressable
                     onPress={() => setPicker(null)}

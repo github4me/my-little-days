@@ -76,7 +76,7 @@ export default function FinishFeedDialog({
         <View
           accessibilityViewIsModal
           style={{
-            backgroundColor: c.card,
+            backgroundColor: c.elevated,
             borderRadius: 24,
             padding: 20,
             gap: 12,

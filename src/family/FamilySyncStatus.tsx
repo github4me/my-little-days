@@ -264,7 +264,7 @@ export function FamilySyncDetails({ pilot }: { pilot: Pilot }) {
         <SafeAreaView style={styles.backdrop}>
           <View
             accessibilityViewIsModal
-            style={[styles.modal, { backgroundColor: c.card }]}
+            style={[styles.modal, { backgroundColor: c.elevated }]}
           >
             <ScrollView contentContainerStyle={styles.stack}>
               <T raw accessibilityRole="header" style={styles.heading}>
