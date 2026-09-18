@@ -95,7 +95,9 @@ authentication and lifecycle guards remain. A known family with unavailable
 role/access keeps deletion disabled until refreshed. Deletion progress/recovery
 stays in My account rather than being duplicated at the bottom.
 
-This change requires the new native preview 29; preview 28 has the old location.
+This change ships in native **0.2.1 / preview 29**, which finished successfully
+from source `12ea638`. Preview 28 has the old location; the manual runbook has the
+exact build and installation link.
 TypeScript and all 524 verification tests, full browser regression, four Apple
 layout scenarios and isolated bilingual Light/Dark family flows passed. The
 manual runbook records release evidence and the new phone acceptance steps.
