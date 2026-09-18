@@ -10,7 +10,10 @@ delivery remains disabled. Build 31's TestFlight upload was rejected because its
 Watch icon retained an alpha channel (90396/90717). The packaging now composites
 the existing artwork onto its blue background and encodes RGB, with regression
 checks for alpha, dimensions, artwork preservation and repeatable generation.
-Replacement build 32 is tracked in the manual runbook. Existing installed iPhone
+Replacement build 32 compiled/signed successfully and was submitted to Apple;
+validation is pending at this checkpoint. Its source is published as `502a18f`,
+and GitHub CI passed. See the manual runbook for exact build/submission IDs.
+Existing installed iPhone
 build 30 lacks the Watch changes; successful compilation is not Apple acceptance.
 
 ## Implemented

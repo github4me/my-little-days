@@ -7,7 +7,8 @@ for implemented components, verification and remaining release gates. EAS combin
 build 31 subsequently passed native compilation/signing with the new Watch profile;
 its IPA contains the embedded Watch app. The API/database have since been deployed;
 build 31 was rejected by Apple for an alpha channel in its Watch icon. The icon
-packaging is fixed and replacement build 32 is running. TestFlight acceptance and
+packaging is fixed; replacement build 32 compiled and was submitted to Apple.
+TestFlight acceptance is pending at this checkpoint, and
 physical-device verification remain outstanding; see the
 [manual runbook](AZURE-MANUAL-SETUP-RUNBOOK.md) for current release evidence.
 
