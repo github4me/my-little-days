@@ -46,9 +46,10 @@ Medical wording, storage behavior and validation are unchanged.
 
 This applies Apple's [secondary help](https://developer.apple.com/design/human-interface-guidelines/offering-help)
 and [disclosure](https://developer.apple.com/design/human-interface-guidelines/disclosure-controls)
-guidance without moving critical information into hidden help. This follow-up is
-being published as preview 27; preview 26 does not contain it. Build completion
-and the installation link are recorded in the manual runbook separately.
+guidance without moving critical information into hidden help. Preview **0.2.1 / 27**
+finished successfully from source `5dea17c`; preview 26 does not contain it.
+The exact build and installation link are recorded in the manual runbook;
+physical-device acceptance remains separate.
 
 Local verification: `npm run verify` passed (TypeScript and 517 tests), the full
 browser regression passed, and the Apple layout suite passed all four bilingual

@@ -1230,5 +1230,26 @@ permission/consent notices remain visible. No record, sync or medical rules chan
 
 Validation: TypeScript and all 517 verification tests passed; full browser and
 four Apple layout scenarios passed (16 isolated captures, no external traffic).
-Physical iPhone/VoiceOver acceptance remains pending. Exact source/build status
-will be recorded below after publication.
+Physical iPhone/VoiceOver acceptance remains pending.
+
+### Preview 27 release record
+
+- Source: `5dea17ce45e8e047cfdfffa22ae95671baed2234`, pushed through the GitHub
+  plugin on `feature/family-invitations`. Only the 11 reviewed UI, test,
+  documentation and build-number files were included; unrelated local SQL work
+  remains uncommitted.
+- [Family sharing CI](https://github.com/github4me/my-little-days/actions/runs/35304521914)
+  passed both TypeScript/browser and API/SQL integration jobs. The latter uses
+  disposable CI SQL, not the production database.
+- Expo build: `bbe33166-550b-4fd0-926b-82618b98c605`, **0.2.1 / 27**, internal
+  distribution, profile/environment **preview**, exact source SHA above.
+  [Build and installation page](https://expo.dev/accounts/expo4chao/projects/little-days/builds/bbe33166-550b-4fd0-926b-82618b98c605).
+  Submitted at `2026-09-18T03:49:21Z`; **FINISHED** at `2026-09-18T03:54:06Z`
+  (13:54 Sydney), with an internal IPA returned for the exact source/version.
+  Open the page on an already registered iPhone and install over the current app.
+- The five public preview values matched and no same-name account overrides were
+  present. The clean upload archive matched the release source and excluded
+  private work, server files, dependencies, generated exports and credentials.
+  Existing signing credentials/devices were reused; OTA remains disabled.
+- No Azure/API/SQL deployment or TestFlight submission is part of this release.
+  Physical iPhone installation and accessibility/keyboard acceptance are pending.
