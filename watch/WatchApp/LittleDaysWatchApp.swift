@@ -120,7 +120,7 @@ private struct MilkEntryView: View {
         Text(store.text("Breast: both", "母乳：双侧")).tag("breast-both")
       }
       if bottle {
-        MilkAmountPicker(amount: $amount)
+        MilkAmountPicker(amount: $amount, title: store.text("Milk amount · mL", "奶量 · mL"))
         Button(store.text("Save milk feed", "保存喂奶")) {
           save(running: false)
         }.buttonStyle(.borderedProminent)
@@ -140,7 +140,7 @@ private struct MilkEntryView: View {
   private func save(running: Bool) {
     guard !saving else { return }
     saving = true
-    if store.recordFeed(kind: kind, amount: running ? nil : Double(amount), running: running) { dismiss() }
+    if store.recordFeed(kind: kind, amount: bottle ? Double(amount) : nil, running: running) { dismiss() }
     else { saving = false }
   }
 }
@@ -148,46 +148,71 @@ private struct MilkEntryView: View {
 private struct MilkAmountPicker: View {
   @EnvironmentObject private var store: WatchStore
   @Binding var amount: Int
+  let title: String
+  @ScaledMetric(relativeTo: .body) private var pickerHeight: CGFloat = 110
   var body: some View {
-    Section(store.text("Actually consumed · mL", "实际喝奶量 · mL")) {
-      LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())]) {
-        ForEach([60, 90, 120, 150], id: \.self) { value in
-          Button("\(value) mL") { amount = value }
-            .frame(minHeight: 44)
-            .accessibilityLabel(store.text("Set consumed volume to \(value) millilitres", "将实际喝奶量设为 \(value) 毫升"))
+    Section {
+      Picker(title, selection: $amount) {
+        ForEach(0...2_000, id: \.self) { value in
+          Text("\(value) mL").monospacedDigit().tag(value)
         }
       }
-      Picker(store.text("Adjust amount", "调整奶量"), selection: $amount) {
-        ForEach(0...2_000, id: \.self) { value in Text("\(value) mL").tag(value) }
-      }
-      .accessibilityLabel(store.text("Actually consumed, millilitres", "实际喝奶量，毫升"))
-      .accessibilityValue("\(amount)")
+      .pickerStyle(.wheel)
+      .labelsHidden()
+      .frame(height: pickerHeight)
+      .accessibilityLabel(title)
+      .accessibilityValue("\(amount) mL")
       .accessibilityHint(store.text("Turn the Digital Crown to adjust.", "转动数码表冠调整。"))
+    } header: {
+      Text(title)
+    } footer: {
+      Text(store.text("Turn the Crown to adjust", "转动表冠调整奶量"))
     }
   }
 }
 
 private struct FinishMilkView: View {
   @EnvironmentObject private var store: WatchStore
+  var body: some View {
+    Group {
+      if let feed = store.activeFeed {
+        FinishMilkForm(feed: feed, initialAmount: store.disk.initialMilkAmount(for: feed))
+          .id("\(store.disk.context?.bridgeId ?? ""):\(store.disk.context?.workspaceKey ?? ""):\(store.disk.context?.generation ?? 0):\(feed.id)")
+      } else {
+        Text(store.text("No feed is running.", "没有正在计时的喂奶。"))
+      }
+    }.navigationTitle(store.text("Finish milk", "结束喂奶"))
+  }
+}
+
+private struct FinishMilkForm: View {
+  @EnvironmentObject private var store: WatchStore
   @Environment(\.dismiss) private var dismiss
+  let feed: WatchEntry
   @State private var stoppedAt = Date()
-  @State private var amount = 120
+  @State private var amount: Int
   @State private var saving = false
+
+  init(feed: WatchEntry, initialAmount: Int) {
+    self.feed = feed
+    _amount = State(initialValue: initialAmount)
+  }
+
   var body: some View {
     List {
-      if let feed = store.activeFeed {
-        if feed.isBottle { MilkAmountPicker(amount: $amount) }
-        Text(store.text("The end time was captured when you opened this screen.", "结束时间按打开此页面的时刻记录。"))
-          .font(.caption).foregroundStyle(.secondary)
-        Button(store.text("Finish feed", "完成喂奶")) {
-          guard !saving else { return }
-          saving = true
-          if store.finishFeed(feed, stoppedAt: stoppedAt, amount: feed.isBottle ? Double(amount) : nil) { dismiss() }
-          else { saving = false }
-        }.buttonStyle(.borderedProminent).disabled(!store.ready || feed.canControl == false || saving)
-      } else { Text(store.text("No feed is running.", "没有正在计时的喂奶。")) }
+      if feed.isBottle {
+        MilkAmountPicker(amount: $amount, title: store.text("Actually consumed · mL", "实际喝奶量 · mL"))
+      }
+      Button(store.text("Confirm & finish", "确认并结束")) {
+        guard !saving else { return }
+        saving = true
+        if store.finishFeed(feed, stoppedAt: stoppedAt, amount: feed.isBottle ? Double(amount) : nil) { dismiss() }
+        else { saving = false }
+      }.buttonStyle(.borderedProminent).disabled(!store.ready || feed.canControl == false || saving)
+      Text(store.text("The end time was captured when you opened this screen.", "结束时间按打开此页面的时刻记录。"))
+        .font(.caption).foregroundStyle(.secondary)
       if let notice = store.notice { Text(notice).font(.caption) }
-    }.navigationTitle(store.text("Finish milk", "结束喂奶"))
+    }
   }
 }
 
@@ -241,8 +266,12 @@ private struct SyncStatusView: View {
           }
         }
       }
-      Section {
-        Text(store.text("Family alerts follow your iPhone notification preferences and Apple's notification routing.", "家庭提醒遵循 iPhone 的通知设置及 Apple 的通知分发规则。"))
+      Section(store.text("Notifications", "通知")) {
+        Text(store.text("Set care reminders in Little Days on iPhone → More → Care reminders. This Watch only receives alerts.", "在 iPhone 的小日子 → 我的 → 照护提醒中设置。手表仅接收提醒。"))
+          .font(.caption).foregroundStyle(.secondary)
+        Text(store.text("For other members' milk feed, nappy and sleep additions or changes, enable Family entry notifications on iPhone.", "家人新增或修改喂奶、尿布、睡眠记录的提示，请在手机启用「家人记录通知」。"))
+          .font(.caption).foregroundStyle(.secondary)
+        Text(store.text("Allow Little Days alerts in the iPhone Watch app → Notifications. Apple chooses which device alerts; Focus may silence them.", "在 iPhone 的 Watch App → 通知中允许小日子提醒。Apple 按设备状态选择提示设备；专注模式可能静音。"))
           .font(.caption).foregroundStyle(.secondary)
       }
     }.navigationTitle(store.text("Sync status", "同步状态"))

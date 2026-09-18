@@ -120,7 +120,8 @@ public sealed partial class FamilyService
             NotBeforeAt = PushPolicy.NotBefore(value, now)
         };
         db.FamilyNotificationEvents.Add(entry);
-        var summary = value.GetProperty("start").GetDateTimeOffset() < now.AddMinutes(-15);
+        // Completing a long-running feed/sleep is a current update, not a backfill.
+        var summary = operation.Kind == "create" && value.GetProperty("start").GetDateTimeOffset() < now.AddMinutes(-15);
         foreach (var device in installations)
         {
             var window = PushPolicy.Window(now);

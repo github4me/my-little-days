@@ -87,4 +87,73 @@ final class WatchProtocolTests: XCTestCase {
       }
     }
   }
+
+  private func bottle(_ id: String = "record-1", amount: Double = 0) -> WatchEntry {
+    WatchEntry(id: id, type: "feed", start: "2026-09-18T12:00:00Z", feedRunning: true,
+      amount: amount, feedKind: "formula")
+  }
+
+  func testSelectedBottleAmountSurvivesPhoneEchoAndWatchRestartWithoutChangingRecord() throws {
+    let feed = bottle()
+    var disk = WatchDisk(context: context(entries: [feed]))
+    disk.rememberMilkAmount(150, for: feed)
+    disk.acceptContext(context(sequence: 9, entries: [feed]))
+    let restored = try JSONDecoder().decode(WatchDisk.self, from: JSONEncoder().encode(disk))
+    XCTAssertEqual(restored.initialMilkAmount(for: feed), 150)
+    XCTAssertEqual(restored.visibleEntries().first?.amount, 0, "Prepared milk is not consumed milk")
+    XCTAssertEqual(restored.visibleEntries().first?.commandEntry.amount, 0)
+    XCTAssertEqual(restored.initialMilkAmount(for: bottle("other-feed")), 120)
+  }
+
+  func testAmountDraftSurvivesPendingStartBeforePhoneSnapshot() {
+    let feed = bottle()
+    let command = WatchCommand(schemaVersion: 1, commandId: UUID().uuidString, recordId: feed.id,
+      workspaceKey: "family-a", bridgeId: "bridge-a", generation: 3, snapshotSequence: 8,
+      createdAt: feed.start, kind: "create", entry: feed)
+    var disk = WatchDisk(context: context(), outbox: [.init(command: command)])
+    disk.rememberMilkAmount(150, for: feed)
+    disk.acceptContext(context(sequence: 9))
+    XCTAssertEqual(disk.initialMilkAmount(for: feed), 150)
+    disk.outbox[0].receipt = WatchReceipt(schemaVersion: 1, commandId: command.id, recordId: feed.id,
+      workspaceKey: "family-a", bridgeId: "bridge-a", generation: 3, status: "rejected", error: "running_feed", contextSequence: 9)
+    disk.reconcileProjection()
+    XCTAssertNil(disk.milkAmountDraft)
+  }
+
+  func testAmountDraftNeverCrossesFamilyOrGenerationAndClearsWhenFeedEnds() {
+    let feed = bottle()
+    var disk = WatchDisk(context: context(entries: [feed]))
+    disk.rememberMilkAmount(150, for: feed)
+    var switched = disk
+    switched.acceptContext(context(4, sequence: 9, workspace: "family-b", entries: [feed]))
+    XCTAssertNil(switched.milkAmountDraft)
+    XCTAssertEqual(switched.initialMilkAmount(for: feed), 120)
+    switched = disk
+    switched.acceptContext(context(4, sequence: 9, entries: [feed]))
+    XCTAssertNil(switched.milkAmountDraft)
+    disk.acceptContext(context(sequence: 9))
+    XCTAssertNil(disk.milkAmountDraft)
+  }
+
+  func testMilkAmountBoundsAndOldDiskCompatibility() throws {
+    let feed = bottle()
+    var disk = try JSONDecoder().decode(WatchDisk.self, from: Data("{\"outbox\":[],\"retiredBridgeIds\":[]}".utf8))
+    XCTAssertNil(disk.milkAmountDraft)
+    XCTAssertEqual(disk.initialMilkAmount(for: feed), 120, "Unfinished zero placeholder is not the selected amount")
+    XCTAssertEqual(disk.initialMilkAmount(for: bottle(amount: 150)), 150)
+    XCTAssertEqual(disk.initialMilkAmount(for: bottle(amount: .infinity)), 120)
+    XCTAssertEqual(disk.initialMilkAmount(for: bottle(amount: 2_001)), 120)
+    disk.acceptContext(context(entries: [feed]))
+    for amount in [0, 150, 2_000] {
+      disk.rememberMilkAmount(amount, for: feed)
+      XCTAssertEqual(disk.initialMilkAmount(for: feed), amount)
+    }
+    for invalid in [-1, 2_001] {
+      disk.rememberMilkAmount(invalid, for: feed)
+      XCTAssertEqual(disk.initialMilkAmount(for: feed), 2_000)
+    }
+    let breast = WatchEntry(id: "breast", type: "feed", start: feed.start, feedRunning: true, feedKind: "breast-left")
+    disk.rememberMilkAmount(90, for: breast)
+    XCTAssertEqual(disk.milkAmountDraft?.recordId, feed.id)
+  }
 }

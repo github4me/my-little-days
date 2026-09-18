@@ -1497,3 +1497,150 @@ The Watch config plugin had copied `assets/icon.png` unchanged. That source is 1
 Release lesson: the Expo image source may legitimately contain transparency, but the Watch asset-catalog icon must be generated with the required opaque encoding. Keep this conversion in the config plugin because clean EAS prebuild regenerates native files. Verify dimensions, RGB encoding and preserved artwork before uploading; do not treat successful native compilation as Apple validation. Reuse existing signing credentials for an artwork-encoding fix.
 
 No additional Azure/SQL deployment, new profiles, tester-group changes or public App Store release is required. Recording-only device acceptance follows the build-31 checklist above using build **32**; notifications remain disabled.
+
+## Watch milk-amount refinement — source verification and next device check
+
+This change is not part of build 32: the unmarked four-button volume grid is replaced
+with one Crown-operated wheel, and a bottle timer preserves its selected starting
+volume as a Watch-local suggestion for completion. It does not change API/SQL data
+contracts or add consumed volume before confirmation.
+
+1. On a Mac/Swift-equipped machine, run `swift test --package-path watch`. Windows
+   checks of the config plugin and phone protocol do not replace these Swift tests
+   or a SwiftUI/native build. The current editing host has no Swift/Xcode toolchain.
+2. When release is requested, freeze the changed source and use the existing
+   production EAS build/profile/credential procedure. This Swift change needs a
+   **new combined iPhone/Watch native build**, not Expo preview/OTA. Verify actual
+   production configuration and use the returned exact build ID for submission;
+   do not reuse build 32 or regenerate provisioning profiles for this UI change.
+3. Once Apple accepts that new build, update through **TestFlight → My Little Days**
+   and install/update its companion through **Information → App Details**. Do not
+   uninstall the app or clear real family records.
+4. At the next real bottle feed, select the intended starting volume (for example
+   150 mL) and start the timer on Watch. Open **Finish milk**: the wheel should
+   select 150, not 0. Adjust to what was actually consumed and use **Confirm & finish**.
+   Check the correct final volume arrives once on iPhone. Turning the wheel or
+   backing out must not finish the feed or save consumed volume.
+5. Check the selection survives a Watch app restart and phone snapshot refresh.
+   In a separate fixture/test workspace, check zero and maximum input, old timer
+   fallback, account/family switching, no-volume breastfeeding and offline replay.
+   Old timers created by build 32 did not retain the starting selection, so a
+   missing suggestion cannot be reconstructed and falls back to 120 mL.
+6. Verify small/large Watch sizes, English/Chinese, larger text and VoiceOver:
+   selected value and units are legible, Crown changes the current selection,
+   confirmation remains reachable, and incoming updates do not reset an edited value.
+
+## Watch care reminders and family-update activation — 18 September 2026
+
+**Scope confirmed by the user:** family alerts cover other members' **additions and
+edits to milk feeds, nappies and sleep only**. No growth, milestone, daily-care or
+play-entry alerts. Each phone opts in independently; a user's own actions do not
+notify any of that user's devices. Care reminders are a separate existing feature:
+configure them on iPhone, receive them on Watch, with no Watch editing controls.
+
+### Current state — do not mistake implementation for activation
+
+The read-only check during this task found `Push__RegistrationEnabled`,
+`Push__EventCreationEnabled`, `Push__DeliveryEnabled` and `Push__AllowAllUsers` all
+`false` on `little-days-api-522fpstfbtds2`. No `Push__ProjectId`, token-encryption
+key, sending access token or allowed customer IDs were configured. No Azure values,
+Expo credentials, real family records or device subscriptions were changed here.
+The backend update and phone/Watch help are local source changes, not a deployed
+release. Migration 0006 already supplies the needed tables; no new migration is
+needed for this update. Retain the current Basic database and timer setting.
+
+### A. Enable existing care reminders on the paired Watch
+
+1. On iPhone, open **小日子 → 我的 → 照护提醒** (**Little Days → More → Care reminders**).
+   Save the desired reminder. For shared reminders, also select **启用本机通知 /
+   Enable on this phone** on each receiving phone. Saving a shared rule alone does
+   not grant another phone notification permission.
+2. In **iPhone Settings → Notifications → My Little Days**, allow notifications.
+   Choose the desired display and sound settings. Keep an intentionally silent
+   reminder silent; the app must not bypass it to force a Watch alert.
+3. Open the iPhone **Watch app → My Watch → Notifications**. Find My Little Days;
+   select **Mirror my iPhone**, or enable its switch under **Mirror iPhone Alerts
+   From**, as offered by the installed OS. Do not add a duplicate reminder on Watch.
+4. For an alert check, wear/unlock the Watch and lock the paired iPhone. Keep devices
+   connected. If testing without Focus, turn it off temporarily and restore it after
+   the check. With iPhone unlocked, the notification normally appears on iPhone
+   instead; this is [Apple's routing behaviour](https://support.apple.com/en-au/108274),
+   not evidence that Watch delivery failed. Muting, Focus and system policy still apply.
+5. Test with a harmless short-lived reminder and cancel that specific test reminder
+   afterward. Confirm cancellation/rescheduling reaches the phone scheduler. Do not
+   uninstall either app, reset pairing or clear family data to test notifications.
+
+### B. Configure the protected server sender before opening rollout gates
+
+1. Use **Expo → expo4chao → little-days → project settings → Push notifications**
+   (dashboard wording may vary). Confirm project ID
+   `a5210f78-8729-46d4-82a4-7d1d40d30ac6`. Verify existing iOS APNs credentials for
+   `com.littledays.babylog` through EAS credentials; reuse valid credentials rather
+   than regenerating certificates/profiles for this change.
+2. Enable Expo enhanced push security and create/configure an appropriate dedicated
+   sending access token, following [Expo's sending documentation](https://docs.expo.dev/push-notifications/sending-notifications/).
+   Keep it in the approved secret store. This is the server's access token, **not**
+   a device's `ExpoPushToken[...]`. Do not reuse a developer login token implicitly,
+   paste secrets into chat, or put them in `EXPO_PUBLIC_*`, source, artifacts or logs.
+3. In Azure's infrastructure tenant `7b7e6e31-a778-4334-aee2-e969fa27fd0e`, select
+   subscription `4768a858-f23f-4a39-bb64-eabc9c142627` → **App Services →
+   little-days-api-522fpstfbtds2 → Settings → Environment variables → App settings**.
+   Resource group is `my-little-days-pilot-rg`; the name is legacy, the data is production.
+4. While all three operational push gates remain false, configure:
+
+   | App setting | Value |
+   | --- | --- |
+   | `Push__ProjectId` | `a5210f78-8729-46d4-82a4-7d1d40d30ac6` |
+   | `Push__Environment` | `production` |
+   | `Push__TokenEncryptionKey` | Persistent, securely generated base64 encoding of 32 random bytes |
+   | `Push__AccessToken` | Protected sending access token from step 2 |
+   | `Push__AllowAllUsers` | `false` until broad rollout is explicitly approved |
+   | `Push__AllowedUserIds__0`, `Push__AllowedUserIds__1`, … | Approved customer-account object IDs for initial sender/recipient cohort |
+
+   Customer IDs are user Object IDs in customer tenant
+   `deab2578-7cd3-4152-b5db-f430d6b638f8`, obtainable by the authorized operator in
+   **Microsoft Entra ID → Users → chosen customer → Object ID**. Do not use the
+   mobile/API app-registration client IDs, service-principal IDs or Azure admin IDs.
+   Preserve the encryption key across restarts/replicas; replacement requires a
+   deliberate token re-registration/rotation plan.
+5. Save/apply, allow the App Service restart to settle, and verify setting **presence**
+   without printing secret values. Confirm health and authenticated readiness. Missing
+   secrets or an empty cohort must not be bypassed by switching on the flags anyway.
+
+### C. Deploy, opt in and validate
+
+1. Freeze reviewed source and publish through the GitHub plugin. Run **GitHub →
+   Actions → Deploy family API and database** for the selected release branch.
+   Require tests, DbUp no-op/checksum/catalog verification and API deployment to pass.
+   This notification change must not resize SQL, change firewall rules or re-enable
+   the paused legacy infrastructure workflow.
+2. With credentials and the approved cohort configured, enable
+   `Push__RegistrationEnabled=true`, then `Push__EventCreationEnabled=true`, and
+   finally `Push__DeliveryEnabled=true`. Verify availability after each settings
+   restart. Broad rollout, if approved, separately sets `Push__AllowAllUsers=true`;
+   that permits registration but does not subscribe anyone automatically.
+3. Build a **new combined native iPhone/Watch build** with the production Expo
+   environment for the updated Watch UI/help; submit the exact finished store build
+   to TestFlight. Verify Apple processing before telling testers to update. Do not
+   reuse rejected build 31, assume an OTA updates Watch, or uninstall the existing app.
+4. Each receiving phone: **Little Days → More → Family entry notifications** → enable
+   notifications and desired **Milk feeds / Nappies / Sleep** categories; grant iOS
+   permission. These controls require a verified full-family context. Retry any
+   pending registration after connectivity is restored; an unresolved request is not
+   confirmation that delivery is enabled. Apply the Watch mirroring steps in A.
+5. In an agreed disposable family/test workspace, member A adds and then edits one
+   record of each category. Member B receives a generic **Family records updated**
+   alert; A's own devices do not. If A edits a record originally written by B, B may
+   receive it: exclusion is based on who made the latest change, not original authorship.
+6. Check unchanged saves and replay do not create extra events; record removal cancels
+   pending alerts; changed category obeys B's current selections. Rapid changes before
+   delivery may coalesce to the latest record state. Already sent/in-flight provider
+   requests cannot be recalled, and provider delivery is not an exactly-once guarantee.
+7. Check live sleep cancellation before one minute, long-running feed/sleep completion,
+   offline replay, opt-out, logout, removal from family, both languages and Focus.
+   Historical **new** entries retain summary batching; updates are processed without
+   that backfill delay. Background polling/network/Apple routing can still delay alerts.
+8. To stop delivery, set `Push__DeliveryEnabled=false`; disable the other operational
+   gates if needed. Keep encrypted bindings, the stable key and additive schema. Do
+   not truncate queues or receipts. Record deployed SHA, build/submission IDs and real
+   paired-device results separately; local tests are not proof of live APNs delivery.

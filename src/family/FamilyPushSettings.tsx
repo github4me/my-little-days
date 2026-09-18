@@ -1,5 +1,5 @@
 import React, { useContext } from "react";
-import { Switch, View } from "react-native";
+import { Platform, Switch, View } from "react-native";
 import { Button, T, Theme } from "../ui";
 import { useI18n } from "../i18n";
 import { pushCategories } from "./familyPushCore";
@@ -23,8 +23,8 @@ export default function FamilyPushSettings({
     <View style={{ gap: 14 }}>
       <T raw style={{ color: c.muted }}>
         {copy(
-          "家人添加喂奶、尿布或睡眠记录时通知我。不会通知自己的记录。",
-          "Notify me when another family member adds a milk feed, nappy or sleep record. Your own records are excluded.",
+          "家人新增或修改喂奶、尿布、睡眠记录时通知我。自己的操作不通知自己。",
+          "Notify me when another family member adds or changes a milk feed, nappy or sleep record. My own actions do not notify me.",
         )}
       </T>
       <View
@@ -132,6 +132,14 @@ export default function FamilyPushSettings({
           "Notifications contain no baby or record details. Apple routes alerts to iPhone or Apple Watch; Focus and system settings may delay or silence them.",
         )}
       </T>
+      {Platform.OS === "ios" ? (
+        <T raw style={{ color: c.muted, fontSize: 13 }}>
+          {copy(
+            "手表通知：在 iPhone 的 Watch App → 通知中，允许小日子镜像 iPhone 提醒。通知设置仅在手机调整。",
+            "For Watch alerts, allow Little Days to mirror iPhone alerts in the iPhone Watch app → Notifications. Change notification settings on iPhone only.",
+          )}
+        </T>
+      ) : null}
     </View>
   );
 }

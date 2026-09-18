@@ -79,7 +79,7 @@ final class WatchStore: NSObject, ObservableObject, WCSessionDelegate {
     storageAvailable = true
   }
 
-  private func enqueue(_ kind: String, entry: WatchEntry, stoppedAt: Date? = nil, amount: Double? = nil) -> Bool {
+  private func enqueue(_ kind: String, entry: WatchEntry, stoppedAt: Date? = nil, amount: Double? = nil, initialMilkAmount: Int? = nil) -> Bool {
     guard ready, let context = disk.context else {
       notice = text("Open Little Days on iPhone to verify access.", "请打开 iPhone 上的小日子以验证访问权限。")
       return false
@@ -102,6 +102,12 @@ final class WatchStore: NSObject, ObservableObject, WCSessionDelegate {
       dependsOn: kind == "create" ? nil : dependency)
     var value = disk
     value.outbox.append(WatchOutboxItem(command: command))
+    if kind == "create", let initialMilkAmount {
+      value.rememberMilkAmount(initialMilkAmount, for: entry)
+    }
+    if kind == "finish-feed", value.milkAmountDraft?.matches(entry, context: context) == true {
+      value.milkAmountDraft = nil
+    }
     do {
       try persist(value)
       WKInterfaceDevice.current().play(.success)
@@ -124,9 +130,10 @@ final class WatchStore: NSObject, ObservableObject, WCSessionDelegate {
     guard ["formula", "expressed", "breast-left", "breast-right", "breast-both"].contains(kind),
           !running || activeFeed == nil else { return false }
     let bottle = ["formula", "expressed"].contains(kind)
-    guard !bottle || running || (amount != nil && amount! >= 0 && amount! <= 2_000 && amount!.isFinite) else { return false }
+    guard !bottle || (amount != nil && amount! >= 0 && amount! <= 2_000 && amount!.isFinite) else { return false }
     return enqueue("create", entry: WatchEntry(id: UUID().uuidString.lowercased(), type: "feed", start: WatchClock.string(),
-      feedRunning: running ? true : nil, amount: bottle ? (running ? 0 : amount) : nil, feedKind: kind))
+      feedRunning: running ? true : nil, amount: bottle ? (running ? 0 : amount) : nil, feedKind: kind),
+      initialMilkAmount: bottle && running ? amount.map { Int($0.rounded()) } : nil)
   }
   @discardableResult func finishFeed(_ entry: WatchEntry, stoppedAt: Date, amount: Double?) -> Bool {
     guard stoppedAt >= entry.startedAt,

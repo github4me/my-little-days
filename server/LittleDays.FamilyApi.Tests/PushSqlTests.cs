@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 
@@ -49,6 +50,8 @@ public sealed class PushSqlTests(SqlFixture sql) : IClassFixture<SqlFixture>
             var id = Guid.NewGuid().ToString(); var start = old ? Clock.Now.AddHours(-1) : Clock.Now;
             var record = category switch
             {
+                "feed" => running ? JsonSerializer.SerializeToElement(new { id, type = "feed", start, feedKind = "formula", amount = 0, feedRunning = true, note = "" })
+                    : JsonSerializer.SerializeToElement(new { id, type = "feed", start, feedKind = "formula", amount = 150, note = "" }),
                 "sleep" => running ? JsonSerializer.SerializeToElement(new { id, type = "sleep", start, note = "" })
                     : JsonSerializer.SerializeToElement(new { id, type = "sleep", start = start.AddMinutes(-2), end = start, note = "" }),
                 _ => JsonSerializer.SerializeToElement(new { id, type = "diaper", start, diaperKind = "wet", note = "" })
@@ -56,11 +59,128 @@ public sealed class PushSqlTests(SqlFixture sql) : IClassFixture<SqlFixture>
             return new(Guid.NewGuid(), id, OwnerGrant.MembershipId, Config.Family.HistoryId, "create", "entry", null, record, null);
         }
         public Task<FeedReceipt> Create(FullRecordOperation operation) => Call(x => x.ApplyFullRecord(Scenario.Owner, OwnerGrant.Id, operation, default));
+        public async Task<FullRecordOperation> Update(FullRecordOperation original, JsonElement entry)
+        {
+            var snapshot = await Call(x => x.FullSnapshot(Scenario.Owner, OwnerGrant.Id, default));
+            var version = snapshot.Entries.Single(x => x.Entry.GetProperty("id").GetString() == original.RecordId).Version;
+            return original with { OperationId = Guid.NewGuid(), Kind = "update", BaseVersion = version, Entry = entry };
+        }
         public async Task<int> Process()
         {
             await using var db = sql.Open();
             return await new PushProcessor(db, Config, Clock, new RecoveryGate(Maintenance), Gateway).Process(default);
         }
+    }
+
+    [SqlFact]
+    public async Task EditsOfEachSupportedCategoryReplacePendingNoticeAndReplayOnlyOnce()
+    {
+        foreach (var category in PushPolicy.Categories)
+        {
+            var s = new Setup(sql); await s.Initialize();
+            await s.Call(x => x.RegisterPush(s.Scenario.Owner, Guid.NewGuid(),
+                PushTests.Registration(s.Config.Push, s.OwnerGrant, s.Config.Family.HistoryId, PushTests.Secret()), default));
+            var original = s.Record(category); await s.Create(original);
+            var changed = JsonNode.Parse(original.Entry!.Value.GetRawText())!;
+            changed["note"] = "Changed by another family member";
+            var update = await s.Update(original, JsonSerializer.SerializeToElement(changed));
+            await s.Create(update); await s.Create(update);
+            await using var db = sql.Open();
+            var events = await db.FamilyNotificationEvents.Where(x => x.FamilyId == s.OwnerGrant.Id).ToArrayAsync();
+            Assert.Equal(2, events.Length);
+            Assert.Equal(update.OperationId, Assert.Single(events, x => !x.Cancelled).OperationId);
+            Assert.All(await db.NotificationSummaryBuckets.Where(x => x.FamilyId == s.OwnerGrant.Id).ToArrayAsync(),
+                bucket => Assert.Equal(s.Scenario.Caregiver.ObjectId, bucket.RecipientUserId));
+            await s.Process(); Assert.Single(s.Gateway.Sent);
+        }
+    }
+
+    [SqlFact]
+    public async Task ReorderedButUnchangedSaveAndRejectedStaleEditDoNotNotify()
+    {
+        var s = new Setup(sql); await s.Initialize();
+        var original = s.Record(); await s.Create(original);
+        var reordered = JsonSerializer.SerializeToElement(original.Entry!.Value.EnumerateObject().Reverse()
+            .ToDictionary(x => x.Name, x => x.Value));
+        var unchanged = await s.Update(original, reordered);
+        await s.Create(unchanged);
+        var changed = JsonNode.Parse(reordered.GetRawText())!; changed["diaperKind"] = "mixed";
+        var stale = unchanged with { OperationId = Guid.NewGuid(), Entry = JsonSerializer.SerializeToElement(changed) };
+        Assert.Equal("record_changed", (await Assert.ThrowsAsync<ApiException>(() => s.Create(stale))).Code);
+        await using var db = sql.Open();
+        Assert.False(Assert.Single(await db.FamilyNotificationEvents.Where(x => x.FamilyId == s.OwnerGrant.Id).ToArrayAsync()).Cancelled);
+    }
+
+    [SqlFact]
+    public async Task OwnerEditingMembersRecordNotifiesMemberButNotEditor()
+    {
+        var s = new Setup(sql); await s.Initialize();
+        await s.Call(x => x.RegisterPush(s.Scenario.Owner, Guid.NewGuid(),
+            PushTests.Registration(s.Config.Push, s.OwnerGrant, s.Config.Family.HistoryId, PushTests.Secret()), default));
+        var original = s.Record() with { MembershipId = s.MemberGrant.MembershipId };
+        await s.Call(x => x.ApplyFullRecord(s.Scenario.Caregiver, s.OwnerGrant.Id, original, default));
+        var changed = JsonNode.Parse(original.Entry!.Value.GetRawText())!; changed["diaperKind"] = "mixed";
+        var update = (await s.Update(original, JsonSerializer.SerializeToElement(changed))) with { MembershipId = s.OwnerGrant.MembershipId };
+        await s.Create(update);
+        await using var db = sql.Open();
+        var current = await db.FamilyNotificationEvents.SingleAsync(x => x.FamilyId == s.OwnerGrant.Id && !x.Cancelled);
+        Assert.Equal(s.Scenario.Owner.ObjectId, current.ActorUserId);
+        var bucket = await (from delivery in db.PushDeliveries join b in db.NotificationSummaryBuckets on delivery.BucketId equals b.Id
+            where delivery.EventId == current.Id select b).SingleAsync();
+        Assert.Equal(s.Scenario.Caregiver.ObjectId, bucket.RecipientUserId);
+        await s.Process(); Assert.Single(s.Gateway.Sent);
+    }
+
+    [SqlFact]
+    public async Task CategoryChangeCancelsObsoleteNoticeAndRespectsRecipientPreferences()
+    {
+        var s = new Setup(sql); await s.Initialize();
+        await s.Call(x => x.RegisterPush(s.Scenario.Caregiver, s.DeviceId, s.Registration with
+            { OperationId = Guid.NewGuid(), ExpectedGeneration = 1, Categories = ["diaper"] }, default));
+        var original = s.Record(); await s.Create(original);
+        var feed = JsonSerializer.SerializeToElement(new { id = original.RecordId, type = "feed", start = s.Clock.Now, feedKind = "formula", amount = 150, note = "" });
+        await s.Create(await s.Update(original, feed));
+        await s.Process(); Assert.Empty(s.Gateway.Sent);
+        var growth = JsonSerializer.SerializeToElement(new { id = original.RecordId, type = "growth", start = s.Clock.Now, weight = 4, note = "" });
+        await s.Create(await s.Update(original, growth));
+        await s.Process(); Assert.Empty(s.Gateway.Sent);
+        await using var db = sql.Open();
+        Assert.True(Assert.Single(await db.FamilyNotificationEvents.Where(x => x.FamilyId == s.OwnerGrant.Id).ToArrayAsync()).Cancelled);
+    }
+
+    [SqlFact]
+    public async Task FinishingLongTimersNotifiesWithoutBackfillDelay()
+    {
+        foreach (var category in new[] { "feed", "sleep" })
+        {
+            var s = new Setup(sql); await s.Initialize();
+            var original = s.Record(category, old: true, running: true); await s.Create(original);
+            var completed = JsonNode.Parse(original.Entry!.Value.GetRawText())!.AsObject();
+            completed.Remove("feedRunning"); completed["end"] = JsonValue.Create(s.Clock.Now);
+            if (category == "feed") completed["amount"] = 150;
+            await s.Create(await s.Update(original, JsonSerializer.SerializeToElement(completed)));
+            await s.Process(); Assert.Single(s.Gateway.Sent);
+            await using var db = sql.Open();
+            Assert.False((await db.NotificationSummaryBuckets.SingleAsync(x => x.FamilyId == s.OwnerGrant.Id && x.State == "receipt")).IsSummary);
+        }
+    }
+
+    [SqlFact]
+    public async Task FailedEditRollsBackBothNewNoticeAndCancellationOfPreviousNotice()
+    {
+        var s = new Setup(sql); await s.Initialize();
+        var original = s.Record(); await s.Create(original);
+        var changed = JsonNode.Parse(original.Entry!.Value.GetRawText())!; changed["diaperKind"] = "mixed";
+        var update = await s.Update(original, JsonSerializer.SerializeToElement(changed));
+        await using (var db = sql.Open())
+        {
+            db.SavedChanges += (_, _) => throw new InvalidOperationException("synthetic update failure after SQL write");
+            await Assert.ThrowsAsync<InvalidOperationException>(() => new FamilyService(db, s.Config, s.Clock)
+                .ApplyFullRecord(s.Scenario.Owner, s.OwnerGrant.Id, update, default));
+        }
+        await using (var db = sql.Open())
+            Assert.False(Assert.Single(await db.FamilyNotificationEvents.Where(x => x.FamilyId == s.OwnerGrant.Id).ToArrayAsync()).Cancelled);
+        await s.Process(); Assert.Single(s.Gateway.Sent);
     }
 
     [SqlFact]

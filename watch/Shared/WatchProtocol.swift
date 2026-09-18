@@ -116,10 +116,43 @@ struct WatchOutboxItem: Codable, Identifiable {
   var terminal: Bool { ["saved", "shared", "rejected"].contains(receipt?.status ?? "") }
 }
 
+// Watch-local input seed, never part of a record or command sent to the phone.
+struct WatchMilkAmountDraft: Codable {
+  let recordId: String
+  let workspaceKey: String
+  let bridgeId: String
+  let generation: Int
+  let amount: Int
+
+  func matches(_ entry: WatchEntry, context: WatchContext?) -> Bool {
+    recordId == entry.id && workspaceKey == context?.workspaceKey &&
+      bridgeId == context?.bridgeId && generation == context?.generation
+  }
+}
+
 struct WatchDisk: Codable {
   var context: WatchContext?
   var outbox: [WatchOutboxItem] = []
   var retiredBridgeIds: [String] = []
+  var milkAmountDraft: WatchMilkAmountDraft?
+
+  func initialMilkAmount(for entry: WatchEntry) -> Int {
+    if let draft = milkAmountDraft, draft.matches(entry, context: context), (0...2_000).contains(draft.amount) {
+      return draft.amount
+    }
+    // Older/phone-started timers have no Watch draft. Zero is their unfinished
+    // record placeholder, not a previously selected consumed amount.
+    if let amount = entry.amount, amount.isFinite, amount > 0, amount <= 2_000 {
+      return Int(amount.rounded())
+    }
+    return 120
+  }
+
+  mutating func rememberMilkAmount(_ amount: Int, for entry: WatchEntry) {
+    guard entry.isBottle, entry.feedRunning == true, (0...2_000).contains(amount), let context else { return }
+    milkAmountDraft = WatchMilkAmountDraft(recordId: entry.id, workspaceKey: context.workspaceKey,
+      bridgeId: context.bridgeId, generation: context.generation, amount: amount)
+  }
 
   func visibleEntries() -> [WatchEntry] {
     guard let context else { return [] }
@@ -145,6 +178,10 @@ struct WatchDisk: Codable {
   }
 
   mutating func reconcileProjection() {
+    if let draft = milkAmountDraft,
+       !visibleEntries().contains(where: { $0.isBottle && draft.matches($0, context: context) }) {
+      milkAmountDraft = nil
+    }
     guard let value = context, value.status == "ready" else { return }
     for index in outbox.indices {
       let item = outbox[index]

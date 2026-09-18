@@ -33,8 +33,9 @@ build 30 lacks the Watch changes; successful compilation is not Apple acceptance
   reopening a cached screen cannot extend that lease. Family Watch writes require the
   server's timer-enforcement capability; older/off servers do not enable them.
 - Optional **More → Family entry notifications** while a full family is available:
-  milk feeds, nappies and sleep added by other members only. All the creator's devices
-  are excluded. Existing care reminders remain separate. Preferences are per installation.
+  milk feeds, nappies and sleep added or changed by other members only. All devices
+  belonging to the actor of that operation are excluded, not necessarily the original
+  author. Existing care reminders remain separate. Preferences are per installation.
 - Generic remote alerts contain no names, email addresses, baby details or record
   content. Opening an alert requires fresh authoritative access, not just cached
   sign-in. Apple decides whether to present a forwarded alert on iPhone or Watch.
@@ -55,6 +56,29 @@ build 30 lacks the Watch changes; successful compilation is not Apple acceptance
 | Sender, registration and schema | `server/LittleDays.FamilyApi/Push*.cs`, `server/LittleDays.DatabaseMigrator/Scripts/0006_FamilyPushAndTimerIndex.sql` |
 
 ## Boundaries to understand before testing
+
+### Milk amount interaction refinement (source only; not in build 32)
+
+The four unmarked volume shortcuts have been replaced with one explicitly styled
+native wheel picker, shared by milk entry and completion. Its selected amount is
+visible inline with an instruction to turn the Crown; **Confirm & finish** is the
+single completion action. This follows [Apple's watchOS picker guidance](https://developer.apple.com/design/human-interface-guidelines/pickers).
+
+A bottle timer started on this Watch remembers the chosen volume in protected
+Watch-local storage, atomically alongside the start command. Completion starts at
+that value (for example 150 mL), including after restart or a phone echo. It is only
+an editable suggestion: running record volume stays zero and actual consumption
+is sent only on confirmation. The suggestion is scoped to the record, workspace,
+bridge and generation, and is discarded when the feed ends or context changes.
+Opening the same finish form or receiving a new snapshot must not reset edits.
+Old/phone-started timers without a remembered selection use an existing positive
+record amount, otherwise 120 mL; the old zero placeholder cannot recover a
+previously discarded selection. Breastfeeding continues without a volume field.
+
+Focused Swift tests cover persistence, pending-start projection, family/generation
+isolation, range limits and decoding old storage. Run those on a Swift-equipped
+host; physical small/large Watch, English/Chinese, Dynamic Type and VoiceOver
+acceptance still requires a new native TestFlight build. No API or DB change is needed.
 
 1. The Watch is a paired-phone companion, not an independent cellular client. It
    receives no Entra tokens. Sign-in, family changes and detailed editing stay on
@@ -214,6 +238,41 @@ and TestFlight instructions; no release was triggered by implementing this featu
   bindings before reopening. Never replay stale queues into a restored family.
 
 ## Verification record
+
+### Notification additions/edits follow-up — local implementation, not activated
+
+The user confirmed that family update alerts remain limited to milk feeds, nappies
+and sleep. A meaningful, authorized entry update now queues a notification in the
+same SQL transaction as the record and idempotency receipt. Unchanged JSON (including
+reordered object properties), operation replay and rejected stale edits do not
+create new notices. Updating a record cancels its older unsent events, then queues
+only its latest supported category; deletion cancels pending events without a new
+alert. A provider request already in flight/accepted cannot be recalled.
+
+Finishing a long-running feed/sleep is an update and does not inherit the five-minute
+historical-create summary delay. Live sleep retains its one-minute grace. The worker
+still runs asynchronously and rechecks recipient membership, history, device binding,
+category preferences and deletion state; delivery is not guaranteed instantaneous.
+There is no new DbUp migration: existing migration 0006 supports update operation IDs.
+
+Care reminders continue using the existing phone scheduler and Apple notification
+mirroring. There is no second Watch schedule, permission bypass, Watch reminder editor
+or automatic opt-in. Phone reminder/push footers and Watch Sync status clarify where
+to enable alerts. The new Watch copy and pending milk-amount UI need a new native build.
+See the runbook's **Watch care reminders and family-update activation** section for
+exact setup, rollout gates, secrets handling and paired-device acceptance.
+
+The read-only Azure check for this task found all four push flags false and no push
+credentials/cohort configured. Local code readiness is not production activation.
+The push-focused API tests passed **32/32, zero skips**, including six new SQL tests,
+using disposable local databases and a synthetic provider. No real pushes were sent.
+The full API suite passed **252/252, zero skips**, and `npm run verify` passed
+(typecheck, unit, controller/UI, notification-adapter and Watch-plugin checks).
+The updated Swift Watch screens and physical phone/Watch notification routing have
+not been compiled/device-verified on this Windows host; those remain native-release
+acceptance steps, not implied by the JavaScript and server checks.
+
+### Original Watch implementation verification
 
 - TypeScript/unit/controller/UI/native-adapter and plugin tests: `npm run verify` passed.
 - Web export and full existing browser regression passed. iOS JavaScript bundle

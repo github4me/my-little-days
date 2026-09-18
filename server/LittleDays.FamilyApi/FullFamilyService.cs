@@ -142,7 +142,23 @@ public sealed partial class FamilyService
                     row.Deleted = true; row.RecordJson = "{}";
                     if (operation.Collection == "entry") await CancelRecordPush(familyId, operation.RecordId, ct);
                 }
-                else row.RecordJson = json!;
+                else
+                {
+                    if (operation.Collection == "entry")
+                    {
+                        var previous = ReadRecord(row);
+                        var affectsPush = PushPolicy.Categories.Contains(previous.GetProperty("type").GetString()!) ||
+                            PushPolicy.Categories.Contains(value!.Value.GetProperty("type").GetString()!);
+                        if (affectsPush && !JsonElement.DeepEquals(previous, value!.Value))
+                        {
+                            // Replace unsent notices with the latest state/actor, including category
+                            // changes. A replay or a logically unchanged save must not alert again.
+                            await CancelRecordPush(familyId, operation.RecordId, ct);
+                            await QueueRecordPush(user, family, operation, value.Value, ct);
+                        }
+                    }
+                    row.RecordJson = json!;
+                }
                 // A logically unchanged accepted update still consumes the base rowversion.
                 db.Entry(row).Property(x => x.LastEditedBy).IsModified = true;
             }

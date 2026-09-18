@@ -1059,6 +1059,14 @@ export default function Settings({
             )}
           </>
         )}
+        {Platform.OS === "ios" ? (
+          <T raw style={{ color: c.muted, fontSize: 13 }}>
+            {copy(
+              "照护提醒在手机设置；Apple Watch 仅接收通知。请在 iPhone 的 Watch App → 通知中允许小日子镜像提醒。Apple 按设备状态选择在手机或手表提示，静音与专注模式仍适用。",
+              "Set care reminders on iPhone; Apple Watch only receives alerts. Allow Little Days to mirror alerts in the iPhone Watch app → Notifications. Apple chooses which device alerts; silent settings and Focus still apply.",
+            )}
+          </T>
+        ) : null}
       </SettingsSection>
       {familyPushPanel ? (
         <SettingsSection
