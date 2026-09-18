@@ -1413,3 +1413,31 @@ exports, dependencies, credentials and server files. The existing TestFlight
 build 24 was VALID and IN_BETA_TESTING internally and externally at preflight.
 This release does not deploy Azure/API/SQL, change tester groups or publish to
 the public App Store. Build, submission and Apple readback results follow below.
+
+### Build 30 verified release record
+
+- EAS store build `d0c59fb1-064a-4796-a39a-d20602deaa53` finished at
+  `2026-09-18T05:53:30Z` (15:53 Sydney), version **0.2.1 (30)**, distribution
+  **STORE**, production profile/environment/channel, source `550e425`.
+- Packaging commit `fb5985293420b7208142370d60c2d4c272b12805` preserves the generated
+  build-number increment and these steps via the GitHub plugin. Its
+  [Family sharing CI](https://github.com/github4me/my-little-days/actions/runs/35312336039)
+  passed both mobile/browser and disposable API/SQL jobs. The tested runtime code
+  is unchanged from preview 29; this commit changes app.json and documentation only.
+- Submission [`ffc65bc8-7c7c-4497-a833-c64916cf3759`](https://expo.dev/accounts/expo4chao/projects/little-days/submissions/ffc65bc8-7c7c-4497-a833-c64916cf3759)
+  was scheduled at `2026-09-18T05:54:25Z` and verified **FINISHED** at approximately
+  `05:57:56Z`, targeting existing App Store Connect app `6809826484` and the exact
+  store build above. Existing EAS-held Apple credentials were reused.
+- Apple readback at approximately `05:58 UTC` confirmed build **30** is **VALID**
+  and **IN_BETA_TESTING** internally. External state is
+  **READY_FOR_BETA_SUBMISSION**: upload and processing are complete, but this build
+  has not been submitted for external beta review. Earlier builds were not expired
+  or cancelled, and no tester groups were created or changed.
+- Internal testers can check **TestFlight → My Little Days → 0.2.1 (30)**.
+  For external testers, use the existing intended group in App Store Connect,
+  select build 30 and complete the beta-review submission with the approved
+  reviewer/contact and login information. Do not confuse internal availability
+  with external approval or publish an App Store release for this step.
+- Installation on a physical iPhone and real-user acceptance remain unverified.
+  Install over the existing app without uninstalling or clearing records.
+  No Azure/API/SQL deployment, credential change or public App Store release occurred.
