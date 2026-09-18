@@ -1814,3 +1814,35 @@ If EAS cannot configure the new capabilities/profile unattended:
   reviewed revision and resume the native build, then submit its exact ID.
 - EAS displayed 80% included-build-credit usage and an incident affecting Android
   queues/submissions/workflows. No paid upgrade or quota change was requested.
+
+### Watch summary fixes and signing checkpoint — 19 September 2026 (Sydney)
+
+- Source pushed through the GitHub plugin as [`43c932c`](https://github.com/github4me/my-little-days/commit/43c932c6c38388c81cc19cad12189d7c2d642d74).
+  Today and its metrics/update time are grouped, locally saved commands update
+  totals immediately without double counting phone echoes, Notifications is a
+  sibling of Sync status, and update time is an absolute date/time rather than a
+  resetting seconds counter. See [implementation and device checks](APPLE-WATCH-IMPLEMENTATION.md#watch-summary-and-navigation-refinement--19-september-2026).
+- Local `npm run verify` passed. [CI 35373991978](https://github.com/github4me/my-little-days/actions/runs/35373991978)
+  completed successfully, including 20 compiled Swift protocol/summary tests
+  (9 new summary tests), TypeScript/unit/native-packaging/browser regressions and
+  API/SQL integration. Linux Foundation tests do not compile/render SwiftUI.
+- Rechecked production project variables and absence of account overrides: HTTPS
+  API, expected customer tenant/mobile client/scope, demo `0`, STORE distribution,
+  OTA disabled. Byte-compared 183 runtime/build files in the isolated
+  `work/watch-summary-store-build34` stage against source before the attempt.
+- EAS credential preparation again failed enabling `APP_GROUPS=ON` for
+  `com.littledays.babylog.widget`, with Apple's invalid capability relationship
+  response. Phone/Watch profiles were found; Watch capabilities required no changes.
+  **No new EAS build ID, IPA, TestFlight submission or native UI compilation was
+  produced.** Root/stage build number remains 33; the stage's name is not a release.
+- Read-only browser verification found the intended Apple team **A9974KXQ4G**
+  signed in, and Widget App ID **8GYSC98QT3** with **App Groups unchecked**.
+  Its existing Chrome configuration tab is retained for handoff. No portal
+  settings were changed. Confirmation is requested before enabling the shared
+  App Group for phone/Widget and updating their signing configuration. The
+  existing certificate and Watch capabilities/profile are to be preserved.
+- Resume using the exact App Group and profile procedure above once confirmed.
+  Do not bypass capability checks, silently remove the Widget or submit the old
+  build as these fixes. Then build, inspect all three signed targets, submit the
+  exact new build ID and verify Apple processing/tester availability. Physical
+  Watch layout, Dynamic Type, offline recording/reconnection remain outstanding.
