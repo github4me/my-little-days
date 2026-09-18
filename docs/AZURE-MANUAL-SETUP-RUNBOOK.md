@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 38479)
-Total output lines: 1058
-
 # My Little Days: manual Azure and GitHub setup runbook
 
 Last updated: 17 September 2026 (Australia/Sydney).
@@ -604,7 +601,183 @@ Correction verification and release steps (16 September 2026):
 2. Local `dotnet test server/LittleDays.slnx --configuration Release --no-restore` passed 89 tests; 47 SQL-dependent tests were skipped locally because no disposable SQL connection was configured. `npm run verify` also passed the TypeScript check and 161 mobile/domain/controller/UI tests. The deployment workflow runs SQL coverage against disposable SQL before release.
 3. A read-only check using the existing directory application credential returned the exact enabled customer via the corrected `mail` issuer filter: one result, same object, no pagination. No credentials, emails, customer object IDs or token payloads were saved.
 4. Commit and push the correction to `feature/family-invitations`. In GitHub **Actions → Deploy family API and database → Run workflow**, select that branch, set **database_bootstrapped=true**, and leave **adopt_ef=false**. No new SQL scripts or Azure configuration are required for this patch.
-5. Let CI complete. If GitH…8479 tokens truncated…e successful Azure or Expo release above. A local reproduction found a test synchronization race: the closing filter modal and inline toolbar share accessible labels, so the test could locate an old modal button immediately before it detached. The original sequence produced transient null boxes in 27 of 30 resize cycles; waiting for the modal-only **Close filters** button to detach produced none in 30 cycles. The fix changes only test waiting, retaining all size, alignment and filtering assertions. A fresh normal web export and three consecutive full browser-suite runs passed locally. For this test-only correction, push the reviewed change and check the new **Family sharing CI** run; do not rerun DbUp, Bicep, API deployment or Expo publication merely because the older CI entry remains red.
+5. Let CI complete. If GitHub requests an environment review, the operator should approve the expected commit for `family-database` and then `family-pilot`. Do not bypass environment protection or push another commit while awaiting approval.
+6. Confirm migration and API deployment jobs succeed, then check `/health/live`. Liveness alone does not validate sign-in.
+7. Reopen the currently installed iPhone preview (0.2.0 / Update 18) and tap **Sign in** using the existing registered email and OTP. No native rebuild or account recreation is required for this API-only patch. Confirm the family account replaces the Sign in panel before continuing with family creation/invitations.
+8. If the generic banner persists, capture the retry time/timezone and screenshot. Investigate token exchange, secure storage and the authenticated `/v1/me` response separately; do not interpret successful browser sign-in as proof of those later stages. The current mobile fallback also obscures `identity_unavailable`; no mobile error-handling change is included in this server patch.
+
+Deployment observation: API correction commit `3a9f72991653948a58283815bd31ae59e9ba1a8e` was pushed and [release 35043105949](https://github.com/github4me/my-little-days/actions/runs/35043105949) passed CI, SQL migration and Azure package deployment. Its liveness step failed after about 55 seconds while the new container was still warming up. Azure reported the new site started at `2026-09-16T01:17:34Z`, roughly 2½ minutes after package deployment finished. A subsequent independent check confirmed `/health/live` returned 200/`ok` and unauthenticated `/v1/me` returned 401/`unauthorized`. This establishes server responsiveness and an authentication boundary, not successful iPhone sign-in. The workflow retry window is being extended to five minutes before a follow-up release; do not weaken auth or reset data for transient deployment-startup errors.
+
+Final release verification: [release 35043608849](https://github.com/github4me/my-little-days/actions/runs/35043608849), deploying commit `2fec7dcbfff90f72631600cd1c4a5d68ff07102f`, completed successfully with the five-minute retry window. Validation, TypeScript/browser checks, API/real-SQL integration, DbUp migration and API deployment/liveness all passed. Independent post-release requests again returned 200/`ok` for `/health/live` and 401/`unauthorized` for unauthenticated `/v1/me`. Next manual step: reopen the existing iPhone build and retry **More → Family sharing → Sign in** with the registered email. End-to-end native sign-in is not yet confirmed; no rebuild, registration change, new credentials or data reset is required for this patch.
+
+1. Open [API liveness](https://little-days-api-522fpstfbtds2.azurewebsites.net/health/live). Success proves process responsiveness only, not SQL or sign-in health.
+2. Using the installed native build, register/sign in with a disposable email account using an actual OTP. Verify the intended customer tenant and return to the app.
+3. Verify authenticated capabilities report schema `2`, the six supported record kinds and 10 MiB seed support. Do not put access tokens in chat/logs.
+4. With disposable local data, create the first family and check the reviewed initial import succeeds without duplicate records.
+5. Invite a second test email in the app. Verify no invitation email is sent, the intended recipient sees the in-app invitation after signing in, and unrelated accounts cannot access it.
+6. Test accept and decline. Acceptance must not upload/merge the invitee's personal history into the family.
+7. On two phones, verify shared records, overlapping records, author/admin edit permissions and first-successful-write conflict handling with a refresh.
+8. Verify leave/removal revokes server access and detected revocation clears the family cache/drafts. Contributions remain with the family. Do not claim a disconnected device can detect a server removal instantaneously.
+9. Verify administrator transfer and account/family deletion rules using disposable accounts. Test durable cleanup and retry behavior; do not delete real customer accounts for verification.
+10. Verify local backup/import restrictions for joined families. Record native/offline acceptance separately from browser tests.
+
+The deletion worker retries every 120 minutes by default while the service/database are available. SQL pause or quota exhaustion can delay cleanup; keep the worker enabled and monitor pending deletion outcomes.
+
+## 14. Troubleshooting and safe reruns
+
+| Symptom | Check / next action |
+| --- | --- |
+| `SQL_ADMIN_PRINCIPAL_TYPE must be User or Group` | Use exactly `User` or `Group`, not lowercase `user`. |
+| Existing plan validation fails | Inspect actual Linux/region/SKU/status and use reviewed current scripts. Do not resize the shared plan just to bypass validation. |
+| .NET runtime preflight fails | Inspect the actual advertised runtime and checked-in runtime parsing/version. Resolve the mismatch rather than bypassing the check or changing the API target blindly. |
+| Apply/capacity flags are false | Review protection/capacity, then set the two flags in `family-infra`; repository enablement alone is insufficient. |
+| `AADSTS70025` / missing federated credential | Configure federation on the exact client ID used by that job, in the hosting tenant. |
+| No matching federated identity record | Compare issuer, full subject (including immutable IDs) and audience with the run's claims. Do not create a client secret as a workaround. |
+| API configuration gate shows blank values | Check variables in **family-pilot**, exact names, and `FAMILY_PILOT_DEPLOY_ENABLED=true` after readiness. |
+| Workflow missing / no Run workflow button | Manual discovery requires a workflow on the default branch. The repository has a discovery workflow; refresh Actions and select the feature branch. If still missing, verify remote workflow/default branch without merging unreviewed feature code. |
+| `Approval is stale` | Branch head moved after the run was pinned. Start a fresh run at current trusted head and review it; retrying the old run keeps the old commit. |
+| Migration succeeds, API fails | Keep the successful database state. Fix runtime/deployment configuration and rerun the compatible release. Do not drop tables or delete journal entries. |
+| Need to retry after only Azure/GitHub configuration changed | An unchanged trusted SHA can be rerun after the first run ends. Applied DbUp scripts are skipped. If code changed, use a new run. |
+| Migration SQL fails | Inspect the failed script and transactional result. Do not force journal entries or edit already-applied migrations. Review a forward fix. |
+| Stale `github-db-*` firewall rule | Confirm the owning run is finished; remove only that exact stale rule under SQL Networking. Preserve runtime/other valid rules. |
+| API starts but SQL fails | Check managed identity, contained user/runtime grants, exact database, outbound-IP rules and SQL availability/quota. No `db_owner` grant to runtime. |
+| Invalid audience/tenant or sign-in rejection | Check customer IDs, delegated scope, API v2 token setting, mobile redirect/flow and actual default issuer domain. Do not weaken validation. |
+| Hosted sign-in says it cannot find the email | For a first-time customer use **No account? Create one**, verify the email code and complete registration. Existing Azure/Expo credentials or an in-app family invitation do not automatically register a customer identity. If previously registered, verify email spelling and tenant. No rebuild is indicated by this message alone. |
+| Graph access denied | Check customer directory client ID, secret Value/expiry, Application permissions and admin consent. Keep secret material out of logs. |
+| Directory token request returns `AADSTS700016` | Compare the directory registration's Application (client) ID and customer tenant before inspecting secret/consent. Previously reproduced with incorrect `50ecf79c-fd34-40df-b008-fd286ebaa97b`; operator correction to `538d93ee-1d58-43cb-adcd-68e094200621` is now verified. |
+| Correct Graph credentials, but email-code account still rejected | Deploy the admission correction supporting the exact tenant-bound `creationType=null`, `federated`/`mail` OTP format, then retry the existing iPhone build. If it still fails, distinguish token exchange/storage from API admission. Do not alter the account or loosen authentication. |
+| Package deployed, but liveness step fails during warm-up | Check the deployment step and timestamped container startup logs, then request `/health/live` again. The shared B1 plan has taken about 2½ minutes to warm up. The workflow allows up to five minutes of retries; a continuing failure needs diagnosis, not repeated restarts. A passing liveness check still does not prove database access or customer sign-in. |
+| Startup rejects shared directory credentials | With reuse `true`, omit both separate Admission Graph credentials; configure AccountDeletion credentials. |
+
+Do not start another release or change the current run just because this document was added locally. No commit, push, cloud setting update or workflow execution is performed by this documentation task.
+
+## 15. Future releases, secret rotation and recovery
+
+### Database changes
+
+1. Add a new ordered SQL script under `server/LittleDays.DatabaseMigrator/Scripts`; use the next unused number.
+2. Never edit, rename or remove an applied script. `dbo.DatabaseMigrations` records names/checksums/timestamps.
+3. Keep migrations additive/backward-compatible with the currently deployed API; database changes run first.
+4. Review/test, then use the same protected API/database workflow. No manual table initialization is needed on later releases.
+5. A successful DB change is not automatically undone if API deployment fails. Review backup/recovery before any destructive migration.
+
+### Directory secret rotation
+
+1. Before expiry, create a new secret on the same customer directory registration.
+2. Update only `AccountDeletion__GraphClientSecret` in restricted App Service settings during a coordinated window.
+3. Verify customer lookup and disposable-account deletion with the new credential.
+4. Remove the old secret after verification. Record the new expiry privately; never commit either secret.
+
+### Restore and access revocation
+
+1. Keep traffic closed during a database restore.
+2. Rotate `Family__HistoryId` after restore (not on ordinary releases).
+3. Reapply post-backup deletion/revocation information from the restricted recovery record before reopening; a new history GUID cannot reconstruct lost events.
+4. Verify deleted identities and revoked memberships cannot regain access.
+5. Document SQL-backup/diagnostic retention separately from live application deletion. Do not claim all backup copies vanish immediately.
+
+### Family creation, joining and received invitations (16 September 2026)
+
+This change needs API deployment **before** the updated mobile app. It needs no new Azure resources, settings, permissions or database migrations.
+
+1. Commit/review the API and mobile changes together. Run the existing **Deploy family API and database** workflow on that revision and verify success.
+2. Publish the updated iPhone preview using the normal preview release process. Do not publish the new mobile confirmation against an older API: the older API ignores the new consent field.
+   - For this JavaScript-only change, the existing preview build `eb360c84-c263-49be-ac63-217ad61dda19` has compatible runtime `0.2.0`; no native rebuild is required. Confirm the preview channel and section 12.1 public variables, including `EXPO_PUBLIC_FAMILY_UI_DEMO=0`, before publishing.
+   - From the reviewed release commit, run `eas update --platform ios --channel preview --environment preview --clear-cache --message "Improve family creation and joining" --non-interactive`. Do not use `ui-preview`, the production channel, or a bundle exported without the real preview environment.
+   - Record the returned update-group URL and commit. On each phone, open the installed preview online to download the update, then fully close and reopen it. Check **My account**, the collapsed **Create a family group**, and the new confirmation warning. The native footer remains `0.2.0 / Update 18` for this OTA; it is not an OTA identifier. Do not uninstall a data-bearing app.
+3. On a disposable account without membership, receive two invitations. Open **Create a family group** (collapsed by default), enter another test email, and review. Verify the pending count, automatic-decline warning and required consent.
+4. Cancel. Both invitations must remain available. Reopen, acknowledge and create. The new family and outgoing invitations must be created together; received pending invitations become declined. Refresh the inviting admins' invitation history to see the automatic-decline reason.
+5. Verify an existing member sees the one-family reminder and no creation form. An admin sees guidance to transfer administration and leave, or close the group. A member sees guidance to leave first and the warning that family-record access is lost.
+6. Verify new received invitations are not actionable while an account has active membership. Existing API membership checks still reject creating or joining a second family.
+7. Older clients without automatic-decline consent cannot create a family while live invitations are pending; no invitations are changed. Update the app and review again. Previously successful creation receipts remain replayable without repeating the decline operation.
+8. On another disposable account, receive invitations from two families. Tap **Accept invitation** for one, verify the automatic-decline and local-data replacement warnings, then cancel. Both invitations must remain available. Reopen and acknowledge: only the chosen family is joined; the other invitation shows **Automatically declined · recipient joined another family group** to its inviting admin.
+9. Reconnect/restart after a lost acceptance response. The same operation must resume; it must not re-decline invitations created after the successful join. If the admin removes the user before snapshot download finishes, refreshing must end the obsolete activation and allow sign-out, without deleting untouched personal data.
+10. A schema-1 legacy family's invitation must be rejected by the updated full-history client before membership is created; invites and personal data remain unchanged. If an earlier app already committed such a join, refresh with the updated app and use **My account → Sign out**. Ask the legacy family admin to remove that membership before joining a supported family; signing out alone does not end server membership.
+
+Implementation notes: the server commits creating/joining and automatic declines in one transaction. The API presents automatic declines as `declined` with `declineReason: created_family` or `joined_family` for backward compatibility. Expired invitations and invitations belonging to closed families are not automatically declined. The updated client sends `declineOtherInvitations: true` and `requiredSchemaVersion: 2` when accepting; deploy API first because an older service ignores these fields. See [the API contract](FAMILY-API-CONTRACT.md). The checklist above remains the device acceptance procedure; deployment observations are recorded separately below.
+
+Rollback caution: once automatic declines exist, an older API would expose internal invitation states instead of the public `declined` mapping. Retain the compatible API when rolling back the mobile update; review server rollback compatibility before replacing it. Never reset family data or the migration journal as a rollback shortcut.
+
+Deployment observation, 16 September 2026: application commit `d1ad03b4de5d34ca881d03de3de916cbdfa666c1` was pushed to `feature/family-invitations`. [API/database release 35047833451](https://github.com/github4me/my-little-days/actions/runs/35047833451) completed successfully, including cloud app/browser checks, API/SQL integration, DbUp, firewall cleanup, API deployment and liveness. Independent post-release checks returned 200/`ok` from `/health/live` and 401/`unauthorized` from unauthenticated `/v1/me`. Local pre-release verification passed 171 app tests plus 147 API/database tests with no skips.
+
+After API success, the same commit was published to EAS **preview**, iOS runtime **0.2.0**, with the **preview** environment and UI demo disabled. Update group: `cbbb24e7-6c1c-41fa-a63b-0abef0eded4c`; update ID: `01a0a80e-641a-70e1-b309-eaae2aa0cc10`; published at `2026-09-16T02:31:50.554Z`. EAS readback confirmed the commit/runtime/branch, and the exported iOS bundle contained the four expected public connection values. This is an OTA update, not a new native build or TestFlight submission. Existing compatible [preview build 18](https://expo.dev/accounts/expo4chao/projects/little-days/builds/eb360c84-c263-49be-ac63-217ad61dda19) remains the install reference. Native device update receipt, invitation flows and restart/network-interruption acceptance tests still need confirmation on the phones.
+
+Second-phone login is unchanged by this release: signing into an already joined account does not itself delete that phone's independent offline data. A future per-device replacement/consent policy must be agreed before changing this behavior; do not assume it has been implemented.
+
+### Account session-status correction: device acceptance
+
+This client-side correction requires no new Azure settings, API or database changes. It is not deployed merely by adding these instructions; publish the reviewed mobile change separately using the preview OTA procedure above.
+
+1. On a signed-out test account, start sign-in and cancel it. **My account** must stay **Signed out**; cancellation is a short informational notice, not a permanent error or a successful login. Do not delete real data to prepare this test.
+2. If an existing session expires, the account must show **Session expired**, label the displayed name/email as cached details, and offer **Sign in again**. Cached profile information is not evidence of current authentication.
+3. Cancel that reauthentication. The account must remain expired; the application must not enable family creation, invitation acceptance or account deletion. Explicit sign-out remains available, subject to the existing unresolved activation safeguards.
+4. Complete reauthentication with the same account. After the server verifies it, **My account** must show **Signed in** and obsolete login errors must disappear, including for an account that has not joined a family yet.
+5. Open the app offline with cached account details. It must not claim that those details have just been verified or silently sign the user out. Reconnect and refresh to verify the status; keep existing data and pending work intact.
+6. Open **Request account deletion** without submitting. No previous login-cancellation error should appear in its confirmation. If authentication expires while the confirmation is open, submission must become unavailable and the explanation must request reauthentication. Cancel the dialog; only test a real deletion on an explicitly disposable account.
+7. Verify unrelated unresolved errors (for example, a local-save or sign-out-cleanup failure) and unknown family-operation results are not dismissed by the cancellation-notice timer. Do not confuse a dismissed notice with a cancelled server operation.
+
+### Five invited-person places and activation review
+
+The invitation-capacity change itself requires the updated API and mobile client, but no SQL migration or new Azure settings. The shared photo/reminder/play additions below do require the new migration. Deploy the database/API before the mobile update. An old `Pilot:MaxMembers=20` value is automatically capped at six active people (one administrator plus five invitees); existing excess members or invitation history are not deleted.
+
+1. Create a disposable family with five different invitee emails. Review must show the baby profile, category counts, total records and all five normalized addresses. Six different emails must be rejected without creating a family. Repeating the same address must not consume another place.
+2. Close review before confirming and verify nothing is uploaded or created. Reopen it; consent must be unchecked again. Change the original records while reviewing and verify a stale review cannot be submitted.
+3. In an existing family, active non-admin members and distinct unexpired pending invitations share the five places. At capacity, adding a new email must be blocked; renewing an existing pending invitation does not consume another place. Decline, revoke, expiry or departure releases that place. Concurrent requests must not exceed capacity.
+4. Verify the create/join copy advises that the member holding the most complete baby history should create the family. Joining does not merge the recipient's personal records. Only after verified family records are downloaded and saved does activation clear and replace original local data; no recoverable personal backup is retained.
+5. On both languages at narrow phone widths, check that the review's final action, cancellation and failure explanation remain usable without scrolling past all disclosure text.
+
+### Family photos, reminders and play: release and phone acceptance
+
+The shared-extras implementation covers the current baby avatar, reminder rules/settings, all stored play check-ins and play selections. It does not upload the device photo library. The authorized release is recorded below; successful publication does not confirm installation or native two-phone acceptance. See [the data-flow reference](FAMILY-EXTRAS.md).
+
+#### A. Azure and GitHub release
+
+1. Review the intended release commit and `server/LittleDays.DatabaseMigrator/Scripts/0003_FamilySharedExtras.sql`. This expands the existing `FamilyRecords` collection/JSON checks for extras and the bounded avatar. It does not recreate tables, replace records or require a new Azure resource. Leave scripts `0001` and `0002` unchanged.
+2. Ensure the reviewed commit has been pushed to the trusted release branch before starting a release. In GitHub, open **Actions → Deploy family API and database → Run workflow** and select **feature/family-invitations**, or the deliberately configured trusted branch. Do not use an old failed run if its branch revision has since changed.
+3. Confirm **SQL identities and runtime role are bootstrapped; I reviewed this release's SQL changes** only after reviewing the migration and verifying the existing bootstrap. Keep **Adopt a reviewed existing database with legacy EF history** unchecked for the already DbUp-managed database. No new bootstrap identities or grants are needed for this migration.
+4. Start the workflow. Review/approve the `family-database` environment when requested. Check that the migrator applies `0003_FamilySharedExtras.sql`, or reports it already applied. Do not manually execute the SQL file or edit `dbo.DatabaseMigrations` to force a rerun.
+5. After migration succeeds, review/approve API deployment through the existing `family-pilot` environment. The workflow orders the database before API packaging/deployment. Do not publish the mobile extras update before both have succeeded.
+6. Verify API liveness using the existing `/health/live` check. Liveness alone does not verify SQL, login or extras support. During authenticated app testing, the capability contract must include `extrasSchemaVersion: 1`; new create/join activation refuses an older server before clearing personal data. Do not paste access tokens into documentation or screenshots.
+7. If SQL succeeds but API deployment fails, retain the successful migration and fix/retry the compatible API release. DbUp skips already applied scripts. Do not revert or delete shared records to recover the deployment.
+8. Publish the reviewed mobile commit to the existing Expo **preview** environment/channel using the previous release procedure, with `EXPO_PUBLIC_FAMILY_UI_DEMO=0`. Record the GitHub run, source commit, Expo update group/runtime and build/install reference. This is not a TestFlight submission unless one is separately requested.
+
+No Bicep update, storage account, Key Vault, Entra registration or new environment variable is required for these extras. Existing API managed identity and database access remain in use. The original history limit is 10 MiB; the complete seed is bounded at 32 MiB and the avatar at 12 MiB decoded. Large avatars increase snapshot traffic, so monitor the existing App Service and SQL usage after release.
+
+#### B. Before creating a family
+
+1. Use disposable test histories and accounts on the two phones; joining intentionally clears/replaces the joiner's original local records. Do not run destructive acceptance against a real baby history without the person's informed approval.
+2. On the creator phone, set a recognizable baby avatar. Save play selections and check-ins on more than one date, and create daily/after-feed reminder rules plus a one-time reminder with a known due time. The member with the most complete history should be the creator.
+3. Sign in through **More → My account**, then open **More → Family sharing → Create a family group**. Review the baby profile, ordinary record counts, photo preview, reminder/check-in/settings counts and invitee emails. Cancel first and confirm nothing was uploaded or erased. Reopen and explicitly confirm the review/consent to create.
+   - **iPhone keyboard check:** enter one email, then several emails on separate lines with the software keyboard open (test Chinese and English keyboards, including a smaller iPhone). Scroll to **Review setup / 查看并确认** and confirm it can be reached above the keyboard and tapped once. The keyboard should dismiss before preparation; invalid emails should remain editable without losing text. With valid emails, cancel the review and refocus the field; repeat after rotating the phone. Keyboard spacing and drag-to-dismiss require a native-device check; the reduced-height browser regression alone does not verify iOS keyboard geometry. Reviewing or dismissing the keyboard must not create a family or send invitations.
+4. If the review shows an older-reminder warning, stop and return to personal **More → Reminders**. Old iOS one-time notifications can lack the original absolute deadline; the app will not guess or restart them. Explicitly cancel/recreate the affected reminders with the intended deadline, then prepare a fresh family review. Unknown legacy rule settings require the same review/recreation. Do not clear all app data or bypass the warning.
+5. If an avatar or extra cannot be read, correct/reselect it in the personal app and retry review. Source changes between review and first upload must request a new review, not silently upload an unseen replacement. Cancelled or failed preparation must leave original personal data intact.
+
+#### C. Two-phone acceptance after deployment
+
+Before the data-flow checks, validate the revised navigation on the installed update: **My account** appears above **Baby profile**, and the signed-in **Family sharing** row is directly below the profile and opens the menu in one tap. Real family management no longer has a separate **Test baby profile** editor; use **More → Baby profile** instead. Sign out and confirm the family entry disappears; after session expiry, verify sign-in recovery remains reachable. Offline/sync-error banners can be closed without deleting queued records or conflict drafts; review unresolved conflicts in the family menu. A different error/new conflict, or an error after recovery, should appear again. Normal pending/sync-success status must not stay at the top of every page. Network warnings currently depend on request failures, not an instant device-connectivity listener.
+
+1. Creator: confirm successful creation retains the reviewed avatar, ordinary history, all check-in dates, selections and reminder rules in the family. Restart the app and check again. No recoverable personal backup should be manufactured during activation.
+2. Invitee: sign in, accept the invitation and read the warning that existing local information will be cleared/replaced. After confirmed activation, see the creator's family data; the invitee's unrelated photo/history/play/reminders must not have been uploaded to the family. Cancel a separate disposable acceptance attempt before confirmation and verify its local data remains unchanged.
+3. On **Care → Play activities / Play settings**, verify the creator's selections and today's family check-ins appear on both phones. A member can add a check-in and undo their own; they cannot undo another member's check-in or change shared activity selections. The administrator can manage all. Refresh the other phone and test a stale edit/conflict without losing the winning record.
+4. Update the family avatar as administrator, then refresh the member phone. Confirm the member cannot change it. Remove it and add another supported photo to check that clearing the avatar does not permanently block later updates. Native photo selection/decoding must be checked on the phones, not just in the browser.
+5. On **More → Reminders**, confirm the family rules are visible but neither phone enables notifications merely by joining/downloading. Choose **Enable on this phone** on only one phone; handle the OS permission prompt. Verify the other phone stays opted out. Disabling on one phone must not delete family rules or change the other phone's choice.
+6. Verify one-time rules use the original absolute due time and expired ones do not restart. Daily rules use each phone's local time. After-feed rules follow the latest family feed and do not produce duplicate notifications after repeated refreshes. Test silent/non-silent behavior on the actual iPhone; do not infer delivery from a saved record.
+7. Add/edit/remove a reminder as its member-author and refresh the other phone. Another member cannot edit/delete it; the administrator can. Confirm the delete dialog can be cancelled without a write. Unsaved reminder edits must remain drafts.
+8. With disposable accounts, leave/remove a member or sign out while family reminders are enabled. After the action is verified, family records and notifications must be cleared from that device and must not reappear in personal storage. Retry after interrupted connectivity. A remotely removed offline phone cannot learn its removal until reconnecting; check cleanup when it reconnects rather than promising instantaneous offline erasure.
+9. Join a different disposable family and verify no avatar, check-in, selection, reminder rule or pending edit from the previous family appears there. New-family notifications require their own explicit opt-in. Record device/OS, release identifiers and any failure; do not include private baby records or auth tokens in shared logs.
+
+These checks do not change the existing policy for signing an already joined account into a second phone that has independent offline data. Explicit create/join activation is the destructive replacement flow; do not assume a newly implemented automatic second-phone migration.
+
+#### Shared-extras release evidence: 16 September 2026
+
+- Application commit `7cf0dab71ad3ed3a8668d26c573d893e5ec0d73b` was pushed to `feature/family-invitations`. Only reviewed source, tests and documentation were committed; local `work/` and `dist-ios-verification/` were excluded.
+- [API/database release 35066678308](https://github.com/github4me/my-little-days/actions/runs/35066678308) completed successfully for that exact commit. Cloud application/browser checks, API/SQL integration, DbUp migration and API deployment/liveness passed. Migration logs identify `0003_FamilySharedExtras.sql`, confirm migration success at `2026-09-16T07:07:17Z`, and confirm the temporary SQL firewall rule was removed.
+- Independent post-deployment requests returned HTTP 200 with `{"status":"ok"}` from `/health/live`, and HTTP 401/`unauthorized` from both unauthenticated `/v1/me` and `/v2/capabilities`. These prove responsiveness and an authentication boundary, not authenticated phone flows.
+- The same application commit was published to EAS **preview**, **iOS**, runtime **0.2.0**, using the **preview** environment and `EXPO_PUBLIC_FAMILY_UI_DEMO=0`. Update group: [`d540cfe1-70c4-476d-bc85-5e248131cd29`](https://expo.dev/accounts/expo4chao/projects/little-days/updates/d540cfe1-70c4-476d-bc85-5e248131cd29). Update ID: `01a0a90d-0891-75d5-a0f1-903f4bafad45`. Published at `2026-09-16T07:09:58.801Z`. EAS readback confirmed the source commit, iOS platform, preview branch and runtime. The exported bundle contains all four expected public API/Entra connection values.
+- No native rebuild, Bicep deployment, TestFlight submission or App Store submission was performed. Existing compatible [preview build 18](https://expo.dev/accounts/expo4chao/projects/little-days/builds/eb360c84-c263-49be-ac63-217ad61dda19) remains the install reference. On each phone, open the app online to download the update, then fully close and reopen it. Do not uninstall a data-bearing app. The static footer remains `0.2.0 / Update 18`; use the update group and new behavior rather than this footer alone to identify the OTA.
+- Still required: complete section C on disposable two-phone data, especially photo decoding, SQLite activation/recovery and actual notification delivery. Do not claim device acceptance from successful publication.
+
+Post-release CI diagnosis: the later documentation-only commit `703f9e8` triggered [CI 35067266702](https://github.com/github4me/my-little-days/actions/runs/35067266702), which failed the calendar filter bounding-box assertion. This was not the deployment workflow and did not undo the successful Azure or Expo release above. A local reproduction found a test synchronization race: the closing filter modal and inline toolbar share accessible labels, so the test could locate an old modal button immediately before it detached. The original sequence produced transient null boxes in 27 of 30 resize cycles; waiting for the modal-only **Close filters** button to detach produced none in 30 cycles. The fix changes only test waiting, retaining all size, alignment and filtering assertions. A fresh normal web export and three consecutive full browser-suite runs passed locally. For this test-only correction, push the reviewed change and check the new **Family sharing CI** run; do not rerun DbUp, Bicep, API deployment or Expo publication merely because the older CI entry remains red.
 
 ## 16. Remaining operator checklist
 
