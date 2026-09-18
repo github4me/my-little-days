@@ -1644,3 +1644,68 @@ needed for this update. Retain the current Basic database and timer setting.
    gates if needed. Keep encrypted bindings, the stable key and additive schema. Do
    not truncate queues or receipts. Record deployed SHA, build/submission IDs and real
    paired-device results separately; local tests are not proof of live APNs delivery.
+
+## Watch milk and notification follow-up: TestFlight build 33 — 18 September 2026
+
+The user authorized commit, push, review and TestFlight submission. Reviewed runtime
+and API source was committed/pushed through the GitHub plugin as
+`8edfaac08036cea57586fca2ba26e5f82bb97762` on `feature/family-invitations`. The commit
+contains the Watch milk selector/default fix, phone/Watch notification help, backend
+edit-event handling, tests and only the relevant new runbook sections. Unrelated
+infrastructure drafts, screenshots and earlier uncommitted documentation were preserved.
+
+- [CI run 35343601963](https://github.com/github4me/my-little-days/actions/runs/35343601963)
+  passed both **TypeScript and browser** and **API and SQL integration** jobs.
+  Local `npm run verify`, 252 API tests, four Watch-plugin tests and 12 phone/Watch
+  protocol/storage tests also passed. The optional real CNG check explicitly skipped
+  on Windows; Swift protocol tests need a Swift toolchain. Neither is claimed as passed.
+- Read-back production environment contains the approved HTTPS API URL, customer
+  tenant/mobile client/API scope and demo `0`; account-level overrides are absent.
+  Profile/channel/environment remain production, distribution STORE, OTA disabled.
+- Fresh stage `work/watch-store-build33` contains 167 runtime/build-source files,
+  compared byte-for-byte with `work/watch33-clean-archive`. It excludes private work,
+  server code, credentials, generated exports and unrelated docs. No-VCS packaging
+  means EAS's `gitCommitHash` is null; the reviewed source mapping is recorded here.
+- EAS reused the existing phone and Watch profiles/certificate without capability
+  changes, incremented build number 32 → 33, and queued **0.2.1 (33)** at
+  **12:16:02 UTC**: [build b1c9a9d8-9e3f-4e9f-af83-f518ffa1d3ec](https://expo.dev/accounts/expo4chao/projects/little-days/builds/b1c9a9d8-9e3f-4e9f-af83-f518ffa1d3ec).
+  Root app.json was aligned with the generated build number. Aside from this
+  version increment, staged app sources match the reviewed commit.
+- Fresh Apple readback confirms the previous build 32 is VALID and IN_BETA_TESTING
+  internally and externally. It was not re-submitted or expired.
+- EAS finished native compilation/signing at **12:21:36 UTC**. Final IPA SHA-256:
+  `3B45CCA44E4AF5620E74732DF40FD9EA2278DD99C8B443D5E8770711FEE5FF66`.
+  Binary-plist inspection confirms both bundled executables are **0.2.1 (33)**,
+  the embedded Watch targets the correct phone identifier, minimum OS versions are
+  iOS 16.4/watchOS 9.4, signed profiles are non-debug, the phone profile permits
+  production APNs, and `EXUpdatesEnabled=false`. Watch alerts mirror the phone;
+  no independent Watch APNs registration was added.
+- Submitted this exact store build once with `--no-auto-testflight-setup`:
+  [submission 31f9012f-642a-496e-b4df-9fdb1535a84e](https://expo.dev/accounts/expo4chao/projects/little-days/submissions/31f9012f-642a-496e-b4df-9fdb1535a84e).
+  EAS submission finished successfully at **12:26:26 UTC**. Apple readback shows
+  **VALID**, internal **READY_FOR_BETA_TESTING**, external
+  **READY_FOR_BETA_SUBMISSION**, uploaded at **12:24:39 UTC**. This is successful
+  upload/processing, not a claim that every tester has access. No tester groups
+  were created/modified and no public App Store release was requested.
+
+No Azure/API/SQL deployment or push activation is included in this TestFlight
+release. Family remote alerts remain disabled pending protected server credentials
+and approved rollout scope; care reminders use the existing phone scheduler and
+Apple mirroring. After Apple processing, install over the existing app and check
+the 150 mL start/finish selection, Crown adjustment and notification instructions
+on paired hardware. Physical-device results remain a separate acceptance step.
+
+If build 33 is not offered in a tester's TestFlight app:
+
+1. Open **App Store Connect → My Little Days (6809826484) → TestFlight → iOS →
+   0.2.1 (33)** and verify processing remains VALID and export-compliance information
+   is complete. Do not submit another copy of the same build.
+2. Select the intended **existing internal testing group** and add build 33 using
+   its Builds/add-build control. Confirm that group's testers can see the build.
+   Do not create a new group or add unintended recipients.
+3. For external testers, select the intended existing external group and build 33,
+   complete the already-approved Beta App Review contact/login information if
+   requested, and submit for beta review. Wait for approval/availability before
+   reporting external access; no public App Store release is needed.
+4. Update in TestFlight over the existing installation, then update the companion
+   on the paired Watch. Never uninstall/clear records merely to reveal a new build.
