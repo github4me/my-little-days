@@ -288,17 +288,12 @@ export default function PlayLearning({
   }
   return (
     <View style={{ gap: 16 }}>
-      {sharedMode ? (
+      {sharedMode && !sharedPlay ? (
         <T raw style={{ color: c.muted, fontSize: 12 }}>
-          {sharedPlay
-            ? text(
-                "早教设置和打卡与家庭共享。管理员选择活动；成员可打卡并取消自己添加的打卡，管理员可管理全部打卡。",
-                "Play settings and check-ins are shared with your family. The admin chooses activities. Members can add or undo their own check-ins; the admin can manage all check-ins.",
-              )
-            : text(
-                "日常照护记录与家庭共享。当前服务尚不支持共享早教设置和打卡，可先阅读活动指南。",
-                "Daily care records are shared. This server does not yet support shared play settings or check-ins; activity guides remain available to read.",
-              )}
+          {text(
+            "日常照护记录与家庭共享。当前服务尚不支持共享早教设置和打卡，可先阅读活动指南。",
+            "Daily care records are shared. This server does not yet support shared play settings or check-ins; activity guides remain available to read.",
+          )}
         </T>
       ) : null}
       <Modal
@@ -480,14 +475,14 @@ export default function PlayLearning({
         }}
         options={[
           {
-            value: "today",
-            icon: "activities",
-            label: text("早教活动", "Play activities"),
-          },
-          {
             value: "care",
             icon: "care",
             label: text("日常照护", "Daily care"),
+          },
+          {
+            value: "today",
+            icon: "activities",
+            label: text("早教活动", "Play"),
           },
           {
             value: "choose",
@@ -819,7 +814,7 @@ export default function PlayLearning({
               {mode === "choose"
                 ? text(
                     "按月龄浏览并选择，勾选后自动保存，所选项目会显示在「早教活动」。可跨月龄选择，参考范围不符时会提示。",
-                    "Browse by age and choose activities. Selections save automatically and appear in Play activities. You can choose other ages; a prompt flags activities outside your baby's reference age.",
+                    "Browse by age and choose activities. Selections save automatically and appear in Play. You can choose other ages; a prompt flags activities outside your baby's reference age.",
                   )
                 : text(
                     "给家长参考的亲子早教活动，不是宝宝的屏幕课程。先读步骤，再放下手机陪伴。做过可自愿打卡，不必全部完成。",
@@ -862,6 +857,18 @@ export default function PlayLearning({
           </HelpDisclosure>
         </>
       )}
+      {sharedMode && sharedPlay ? (
+        <HelpDisclosure
+          title={text("家庭共享说明与参考", "Family sharing help & references")}
+        >
+          <T raw style={{ color: c.muted, fontSize: 12 }}>
+            {text(
+              "早教设置和打卡与家庭共享。管理员选择活动；成员可打卡并取消自己添加的打卡，管理员可管理全部打卡。",
+              "Play settings and check-ins are shared with your family. The admin chooses activities. Members can add or undo their own check-ins; the admin can manage all check-ins.",
+            )}
+          </T>
+        </HelpDisclosure>
+      ) : null}
     </View>
   );
 }

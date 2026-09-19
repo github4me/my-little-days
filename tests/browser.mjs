@@ -1121,8 +1121,8 @@ for (const title of [
 // Daily care is a separate history, not a daily play checkbox.
 await page.getByRole("button", { name: "Daily care", exact: true }).click();
 const playControls = [
-  "Play activities",
   "Daily care",
+  "Play",
   "Play settings",
   "Temp",
   "Bath",

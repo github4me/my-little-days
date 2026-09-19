@@ -336,9 +336,31 @@ test("play help starts collapsed and retains the mode-specific intro and referen
   assert.deepEqual(world.calls, []);
 });
 
-test("shared capability notices and expanded activity safety remain outside secondary help", async () => {
+test("sharing explanation is collapsed below content while capability and safety notices stay visible", async () => {
   const world = fixture();
   await world.ready();
+  assert.ok(
+    !world
+      .visibleText()
+      .includes("Play settings and check-ins are shared with your family"),
+  );
+  assert.equal(
+    world.node("Family sharing help & references").props["aria-expanded"],
+    false,
+  );
+  const nodes = world.render();
+  assert.ok(
+    nodes.indexOf(world.node("Daily care")) < nodes.indexOf(world.node("Play")),
+  );
+  assert.ok(
+    nodes.indexOf(world.node("Play")) <
+      nodes.indexOf(world.node("Play settings")),
+  );
+  assert.ok(
+    nodes.indexOf(world.node("Family sharing help & references")) >
+      nodes.indexOf(world.node("Play help & references")),
+  );
+  await world.press("Family sharing help & references");
   assert.ok(
     world
       .visibleText()
@@ -365,7 +387,7 @@ test("shared capability notices and expanded activity safety remain outside seco
 test("large-text play section controls reflow without reducing label size", async () => {
   const world = fixture(true, { width: 390, fontScale: 2 });
   await world.ready();
-  for (const label of ["Play activities", "Daily care", "Play settings"]) {
+  for (const label of ["Daily care", "Play", "Play settings"]) {
     const option = world.node(label);
     assert.equal(option.props.style.flexBasis, "100%");
     assert.ok(
