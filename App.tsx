@@ -212,6 +212,11 @@ function BabyApp({
   const stateRef = useRef<State | null>(null),
     lock = useRef(false);
   const privateDataGeneration = useRef(0);
+  useEffect(() => {
+    if (!sleepNotice) return;
+    const timer = setTimeout(() => setSleepNotice(""), 5000);
+    return () => clearTimeout(timer);
+  }, [sleepNotice]);
   const family = useFamilyPilot();
   const familyPush = useFamilyPush(family, () => setTab("records"));
   useWidgetHomeLink(() => {
@@ -1598,6 +1603,10 @@ function BabyApp({
                 birthDate={state.profile.birthDate}
                 now={now}
                 careRecords={state.careRecords ?? []}
+                supplementsEnabled={
+                  !family.sharedMode ||
+                  family.fullSnapshot?.careSchemaVersion === 2
+                }
                 onSaveCare={async (record, baseVersion) => {
                   if (family.sharedMode) {
                     await family.saveRecord("care", record, baseVersion);

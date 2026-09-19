@@ -87,6 +87,7 @@ const english: Record<string, string> = {
   喂奶: "Feed",
   喂养: "Feed",
   开始: "Start",
+  开始计时: "Start timer",
   停止: "Stop",
   确认结束喂养: "Finish feed",
   "结束时间：{time} · 时长：{duration}":

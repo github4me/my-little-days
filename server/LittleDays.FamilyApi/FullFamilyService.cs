@@ -88,7 +88,7 @@ public sealed partial class FamilyService
     public async Task<FullFamilySnapshot> FullSnapshot(PilotIdentity user, Guid familyId, CancellationToken ct) =>
         (await ConditionalFullSnapshot(user, familyId, null, ct)).Snapshot!;
 
-    public Task<ConditionalSnapshot<FullFamilySnapshot>> ConditionalFullSnapshot(PilotIdentity user, Guid familyId, string? ifNoneMatch, CancellationToken ct) => FamilyTransaction(familyId, async () =>
+    public Task<ConditionalSnapshot<FullFamilySnapshot>> ConditionalFullSnapshot(PilotIdentity user, Guid familyId, string? ifNoneMatch, CancellationToken ct, int careSchemaVersion = 2) => FamilyTransaction(familyId, async () =>
     {
         var grant = await RequireGrant(user, familyId, null, ct);
         var family = await Family(familyId, ct);
@@ -96,9 +96,9 @@ public sealed partial class FamilyService
         await ExpireInvitations(family, ct);
         // The capability is current host configuration, not part of a family's
         // data revision. A gate change must invalidate a cached enabled result.
-        var etag = $"\"v2-extras1-watch{(config.Family.EnforceSingleActiveTimers ? 1 : 0)}:{config.Family.HistoryId:D}:{Revision(family)}:{grant.Id:D}\"";
+        var etag = $"\"v2-extras1-care{careSchemaVersion}-watch{(config.Family.EnforceSingleActiveTimers ? 1 : 0)}:{config.Family.HistoryId:D}:{Revision(family)}:{grant.Id:D}\"";
         if (ifNoneMatch == etag) return new ConditionalSnapshot<FullFamilySnapshot>(etag, null);
-        return new ConditionalSnapshot<FullFamilySnapshot>(etag, await FullSnapshotData(family, grant, ct, expire: false));
+        return new ConditionalSnapshot<FullFamilySnapshot>(etag, (await FullSnapshotData(family, grant, ct, expire: false)).ForCareSchema(careSchemaVersion));
     }, ct);
 
     public Task<FeedReceipt> ApplyFullRecord(PilotIdentity user, Guid familyId, FullRecordOperation operation, CancellationToken ct)

@@ -15,6 +15,9 @@ const paths = {
   oral: "M12 4C5-1 2 4 5 12c1 3 1 9 4 9 2 0 1-7 3-7s1 7 3 7c3 0 3-6 4-9 3-8 0-13-7-8Z M12 4l3 1",
   nails:
     "M8 17a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z M22 17a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z M7 15 19 2 M17 15 5 2",
+  supplement: "M9 3h6v4H9z M9 7l-2 3v10h10V10l-2-3 M7 12h10 M10 16h4 M12 14v4",
+  forehead:
+    "M8 22v-4c-3-2-4-5-4-8a7 7 0 0 1 14 0l3 4h-3v3c0 2-2 3-5 3v2 M14 7h3 M15.5 5.5v3",
 } as const;
 
 export type PlayIconKind = keyof typeof paths;

@@ -19,6 +19,40 @@ public sealed class FullDomainTests
         Json("""{"id":"local-milestone","type":"milestone","start":"2026-09-01T10:00:00Z","title":"First smile","note":"A milestone"}""")
     ];
     public static JsonElement Care() => Json("""{"id":"care-id","kind":"temperature","time":"2026-09-01T10:00:00Z","temperature":36.789,"method":"armpit","note":"Care note"}""");
+    public static JsonElement Supplement() => Json("""{"id":"supp-id","kind":"supplement","time":"2026-09-01T10:00:00Z","supplements":["vitamin-d","probiotics","other"],"otherSupplement":"Prescribed product","note":"Given as advised"}""");
+
+    [Fact]
+    public void SupplementsValidateChoicesNamesAndSeedRoundTrip()
+    {
+        FullDomainValidation.CareRecord(Supplement());
+        Assert.Equal(Supplement().GetRawText(), Assert.Single(FullDomainValidation.Seed(Seed(care: [Supplement()])).CareRecords).GetRawText());
+        foreach (var choices in new[] { "[]", "[\"vitamin-d\",\"vitamin-d\"]", "[\"unknown\"]", "[42]", "null", "[\"vitamin-d\"]" })
+        {
+            var invalid = JsonNode.Parse(Supplement().GetRawText())!;
+            invalid["supplements"] = JsonNode.Parse(choices);
+            Assert.Throws<ApiException>(() => FullDomainValidation.CareRecord(Json(invalid.ToJsonString())));
+        }
+        foreach (var name in new[] { "", "  ", new string('x', 101) })
+        {
+            var invalid = JsonNode.Parse(Supplement().GetRawText())!;
+            invalid["otherSupplement"] = name;
+            Assert.Throws<ApiException>(() => FullDomainValidation.CareRecord(Json(invalid.ToJsonString())));
+        }
+    }
+
+    [Fact]
+    public void OldClientCareProjectionOmitsSupplementsWithoutMutatingStoredSnapshot()
+    {
+        var author = Guid.NewGuid();
+        var original = new FullFamilySnapshot(2, new("Baby", "", "unspecified"), [],
+            [new(Care(), "version", author, author), new(Supplement(), "version", author, author)],
+            null!, Guid.NewGuid(), "1", [], [], [], null);
+        var legacy = original.ForCareSchema(1);
+        Assert.Equal(1, legacy.CareSchemaVersion);
+        Assert.Equal("temperature", Assert.Single(legacy.CareRecords).Record.GetProperty("kind").GetString());
+        Assert.Equal(2, original.CareRecords.Length);
+        Assert.Same(original, original.ForCareSchema(2));
+    }
     public static JsonElement Profile() => Json("""{"name":"宝宝 Luna","birthDate":"2026-01-15","sex":"female"}""");
     public static JsonElement Seed(string[]? emails = null, JsonElement[]? entries = null, JsonElement[]? care = null)
     {

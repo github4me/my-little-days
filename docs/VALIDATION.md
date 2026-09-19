@@ -2,6 +2,18 @@
 
 > 以下按日期保留各轮实际验证结果，不是当前功能或发布状态清单。2026-09-16 的头像、提醒、早教共享及五人名额范围见[共享资料说明](FAMILY-EXTRAS.md)，已完成的数据库/API 与 preview 发布见[运行手册证据](AZURE-MANUAL-SETUP-RUNBOOK.md#shared-extras-release-evidence-16-september-2026)。较早的本机准备、虚构数据试点及旧邀请上限描述只适用于当时版本。两部 iPhone 的激活/恢复、照片显示、实际通知、真实删除与恢复演练仍需独立验收，不能由这些本机测试或发布结果推定通过。
 
+## 喂养保存、照护补充剂及导航 · 2026-09-19（本机实现，未发布）
+
+- 喂养可只填开始时间后「保存记录」，不再自动开始计时；「开始计时」为独立次要操作，填写结束时间后隐藏。编辑正在计时的记录且未填结束时间时保留计时。
+- 不足一分钟睡眠的误触提示 5 秒后消失；额温选项改为图标，保留辅助名称及选中后的文字说明。底栏顺序为今天、照护、记录、成长、我的。
+- 日常照护加入补充剂多选：维生素 D（VD）、益生菌排前两项，其后为铁、复合维生素、其他；均不默认选中。其他需填写名称，记录可保存、编辑、重启恢复。建议、注意事项与来源位于历史下方的默认折叠区，不提供自动剂量或每日必服清单。医学内容依据 [RCH 维生素 D](https://www.rch.org.au/kidsinfo/fact_sheets/Vitamin_D/)、[NIH NCCIH 益生菌](https://www.nccih.nih.gov/health/probiotics-usefulness-and-safety)及 [Pregnancy, Birth and Baby](https://www.pregnancybirthbaby.org.au/children/feeding-and-nutrition/children-and-vitamins)，2026-09-19 查阅。
+- `npm run verify`：类型检查及 581 项测试通过。最后的复选框 web ARIA 修正与按钮间距调整后，类型检查及 22 项表单/照护测试再次通过。保存数据与勾选状态分别验证；React Native Web 不转发旧 `accessibilityState.checked`，因此显式提供 `aria-checked`，未放宽测试。
+- Web 导出、完整浏览器回归通过，包括新记录 ID 精确识别、开始时间单独保存、结束时间上限、5 秒提示、多选保存/编辑/重启与默认折叠。布局脚本覆盖 320/390/768px、中英、浅深色及更高对比度，生成 24 张隔离截图；人工检查了新多选、参考区、额温图标及喂养动作。未连接真实家庭或改写原有预览截图。
+- .NET：API 155 项及 migrator 9 项通过；无隔离 SQL 测试连接，API 100 项与 migrator 23 项 SQL 测试跳过，包含新增的补充剂幂等写入、旧版投影与跨版本 ETag 集成场景。不是生产数据库验收。
+- iOS Hermes JavaScript 导出通过（`work/care-refinements-ios`）；仅为资源包验证，不是签名构建或 TestFlight 提交。
+- 家庭 API 增加 care schema 2 的协商及兼容投影。旧版客户端继续读取已支持的类别，不显示补充剂；新客户端对旧 API 禁用共享补充剂并说明原因。本机离线记录不受此限制。无需 SQL 迁移，必须先发布兼容 API，再发布 app；详见 [API 合约](FAMILY-API-CONTRACT.md#supplement-compatibility-19-september-2026-implementation-deployment-separate)与运行手册。
+- **仍需真机**：iPhone 浅/深色、键盘打开时的完整表单、较大 Dynamic Type、VoiceOver 的额温名称与复选状态、通知/Watch/Widget 原有行为无回归、SQLite 重启恢复、两部授权测试设备的新旧版本兼容同步。本轮没有 commit、push、Azure 部署或 TestFlight 构建/提交。
+
 ## 冷启动验证与重连修复 · 2026-09-17
 
 - `npm run verify` 通过：TypeScript 及 420 项测试，0 失败。包含 128 项实际控制器测试、19 项原生认证模拟和 13 项 API 边界测试；新增冷启动静默重试、到期/撤权立即保护、登出中止、401 正文卡住、已知 4xx 状态保留、内外认证超时竞态与迟到令牌隔离覆盖。

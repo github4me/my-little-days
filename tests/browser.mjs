@@ -15,6 +15,8 @@ const context = await browser.newContext({
   timezoneId: "Australia/Melbourne",
 });
 const page = await context.newPage();
+const screenshotDir = process.env.SCREENSHOT_OUTPUT_DIR ?? "docs";
+await fs.mkdir(screenshotDir, { recursive: true });
 page.setDefaultTimeout(8000);
 async function chooseEnglish() {
   const expand = page.getByRole("button", { name: "展开语言", exact: true });
@@ -199,7 +201,7 @@ await page.reload();
 await page.getByText("QQ的小日子", { exact: true }).waitFor();
 assert.equal(await page.getByText("● 仅此设备", { exact: true }).count(), 0);
 await page.evaluate(() => document.fonts.ready);
-await page.screenshot({ path: "docs/home-preview.png" });
+await page.screenshot({ path: path.join(screenshotDir, "home-preview.png") });
 await page.getByRole("tab", { name: "记录", exact: true }).click();
 for (const label of [
   "测量",
@@ -261,7 +263,9 @@ assert.ok(
   "record type choices should be icon cards on one row",
 );
 await page.evaluate(() => document.fonts.ready);
-await page.screenshot({ path: "docs/records-preview.png" });
+await page.screenshot({
+  path: path.join(screenshotDir, "records-preview.png"),
+});
 await page.getByRole("button", { name: "时长", exact: true }).click();
 const recordUnitOptions = await Promise.all(
   ["mL", "时长"].map((name) =>
@@ -372,7 +376,7 @@ await page
   })
   .waitFor();
 await page.evaluate(() => document.fonts.ready);
-await page.screenshot({ path: "docs/growth-preview.png" });
+await page.screenshot({ path: path.join(screenshotDir, "growth-preview.png") });
 assert.equal(
   (
     await page.evaluate(() =>
@@ -549,7 +553,7 @@ await page.getByRole("tab", { name: "Today", exact: true }).click();
 await page.getByText("QQ's little days", { exact: true }).waitFor();
 await assertNoUntranslatedChinese("Today");
 await page.evaluate(() => document.fonts.ready);
-await page.screenshot({ path: "docs/night-preview.png" });
+await page.screenshot({ path: path.join(screenshotDir, "night-preview.png") });
 await page.getByRole("tab", { name: "Growth", exact: true }).click();
 await page.getByText("Growth charts", { exact: true }).waitFor();
 await page
@@ -741,7 +745,7 @@ assert.equal(
 );
 await page.getByLabel("Close editor", { exact: true }).click();
 await page.getByRole("button", { name: "+ Add", exact: true }).first().click();
-await page.getByRole("button", { name: "Start", exact: true }).click();
+await page.getByRole("button", { name: "Start timer", exact: true }).click();
 await page.getByRole("button", { name: "Stop", exact: true }).waitFor();
 const runningFeed = await page.evaluate(() =>
   JSON.parse(localStorage.getItem("little-days-v1")).entries.find(
@@ -790,7 +794,9 @@ await page
   .getByText(`实际奶量：${runningFeed.amount + 5} mL`, { exact: true })
   .waitFor();
 await page.waitForTimeout(350); // Let the modal's opening fade finish for visual review.
-await page.screenshot({ path: "D:/Temp/little-days-finish-feed.png" });
+await page.screenshot({
+  path: path.join(screenshotDir, "little-days-finish-feed.png"),
+});
 await page.evaluate(() => {
   const original = Storage.prototype.setItem;
   Storage.prototype.setItem = function (key, value) {
@@ -1123,6 +1129,7 @@ const playControls = [
   "Wash",
   "Teeth",
   "Nails",
+  "Supplements",
 ];
 const iconPaths = [];
 for (const name of playControls) {
@@ -2224,6 +2231,9 @@ await page.getByText("Sleeping now", { exact: true }).waitFor();
 await page.getByRole("button", { name: "Awake", exact: true }).click();
 await page.getByText(/This sleep lasted less than 1 minute/).waitFor();
 await assertNoUntranslatedChinese("live sleep feedback and today's totals");
+await page
+  .getByText(/This sleep lasted less than 1 minute/)
+  .waitFor({ state: "hidden", timeout: 6500 });
 
 // Suggested feeding ends never go past now, including across midnight.
 // Saving a feed started in the current minute must preserve valid seconds.
@@ -2233,6 +2243,11 @@ for (const [now, startDate, startTime, expectedEnd] of [
   ["2026-09-17T23:55:45+10:00", "2026-09-17", "23:50", "23:55"],
 ]) {
   await page.clock.setFixedTime(new Date(now));
+  const existingIds = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem("little-days-v1")).entries.map(
+      (entry) => entry.id,
+    ),
+  );
   await page
     .getByRole("button", { name: "+ Add", exact: true })
     .first()
@@ -2256,15 +2271,127 @@ for (const [now, startDate, startTime, expectedEnd] of [
   await page
     .getByLabel("Close editor", { exact: true })
     .waitFor({ state: "detached" });
-  const savedFeed = await page.evaluate(() =>
-    JSON.parse(localStorage.getItem("little-days-v1")).entries.find(
-      (entry) => entry.type === "feed",
-    ),
+  const savedFeed = await page.evaluate(
+    (ids) =>
+      JSON.parse(localStorage.getItem("little-days-v1")).entries.find(
+        (entry) => entry.type === "feed" && !ids.includes(entry.id),
+      ),
+    existingIds,
   );
   assert.ok(savedFeed.end);
   assert.ok(Date.parse(savedFeed.end) <= Date.parse(now));
   assert.ok(Date.parse(savedFeed.end) >= Date.parse(savedFeed.start));
 }
+// Start-only feeding is a completed record unless Start timer is chosen.
+const beforeStartOnly = await page.evaluate(() =>
+  JSON.parse(localStorage.getItem("little-days-v1")).entries.map(
+    (entry) => entry.id,
+  ),
+);
+await page.getByRole("button", { name: "+ Add", exact: true }).first().click();
+await page.getByRole("button", { name: "Start timer", exact: true }).waitFor();
+await page.getByRole("button", { name: "Save record", exact: true }).click();
+await page
+  .getByLabel("Close editor", { exact: true })
+  .waitFor({ state: "detached" });
+const startOnlyFeed = await page.evaluate(
+  (ids) =>
+    JSON.parse(localStorage.getItem("little-days-v1")).entries.find(
+      (entry) => entry.type === "feed" && !ids.includes(entry.id),
+    ),
+  beforeStartOnly,
+);
+assert.equal(startOnlyFeed.end, undefined);
+assert.equal(startOnlyFeed.feedRunning, undefined);
+
+await page.getByRole("tab", { name: "Care", exact: true }).click();
+await page.getByRole("button", { name: "Daily care", exact: true }).click();
+const forehead = page.getByRole("button", { name: "Forehead", exact: true });
+assert.equal(await forehead.locator("svg").count(), 1);
+assert.equal((await forehead.innerText()).trim(), "");
+await forehead.click();
+await page.getByText("Selected: Forehead", { exact: true }).waitFor();
+await page.getByRole("button", { name: "Supplements", exact: true }).click();
+const supplementHelp = page.getByRole("button", {
+  name: "Supplement guidance & references",
+  exact: true,
+});
+assert.equal(await supplementHelp.getAttribute("aria-expanded"), "false");
+assert.deepEqual(
+  await page
+    .getByRole("checkbox")
+    .evaluateAll((nodes) =>
+      nodes.map((node) => node.getAttribute("aria-label")),
+    ),
+  ["Vitamin D (VD)", "Probiotics", "Iron", "Multivitamin", "Other"],
+);
+assert.equal(await page.getByRole("checkbox", { checked: true }).count(), 0);
+assert.equal(await page.getByRole("checkbox", { checked: false }).count(), 5);
+await page
+  .getByRole("checkbox", { name: "Vitamin D (VD)", exact: true })
+  .click();
+await page.getByRole("checkbox", { name: "Probiotics", exact: true }).click();
+await page.getByRole("checkbox", { name: "Other", exact: true }).click();
+await page
+  .getByLabel("Other supplement name", { exact: true })
+  .fill("Synthetic product");
+await page.getByLabel("Care notes", { exact: true }).fill("As advised");
+await page
+  .getByRole("button", { name: "Save care record", exact: true })
+  .click();
+await page.getByText("Care record saved", { exact: true }).waitFor();
+const savedSupplement = await page.evaluate(() =>
+  JSON.parse(localStorage.getItem("little-days-v1")).careRecords.find(
+    (record) => record.kind === "supplement",
+  ),
+);
+assert.deepEqual(savedSupplement.supplements, [
+  "vitamin-d",
+  "probiotics",
+  "other",
+]);
+assert.equal(savedSupplement.otherSupplement, "Synthetic product");
+await page
+  .getByRole("button", { name: "Edit care record", exact: true })
+  .click();
+await page.getByText("Edit care record", { exact: true }).waitFor();
+for (const name of ["Vitamin D (VD)", "Probiotics", "Other"])
+  await page
+    .getByRole("checkbox", { name, exact: true, checked: true })
+    .waitFor();
+assert.equal(
+  await page.getByLabel("Other supplement name", { exact: true }).inputValue(),
+  "Synthetic product",
+);
+await page.getByRole("checkbox", { name: "Other", exact: true }).click();
+await page
+  .getByRole("button", { name: "Save care record", exact: true })
+  .click();
+await page.getByText("Care record saved", { exact: true }).waitFor();
+const updatedSupplement = await page.evaluate(() =>
+  JSON.parse(localStorage.getItem("little-days-v1")).careRecords.find(
+    (record) => record.kind === "supplement",
+  ),
+);
+assert.equal(updatedSupplement.id, savedSupplement.id);
+assert.deepEqual(updatedSupplement.supplements, ["vitamin-d", "probiotics"]);
+assert.equal(updatedSupplement.otherSupplement, undefined);
+await supplementHelp.click();
+await page
+  .getByText(/Probiotics: effects depend on the strain and condition/)
+  .waitFor();
+await assertNoUntranslatedChinese("supplement guidance");
+await page.reload();
+await page.getByRole("tab", { name: "照护", exact: true }).click();
+await page.getByRole("button", { name: "日常照护", exact: true }).click();
+await page.getByRole("button", { name: "补充剂", exact: true }).click();
+await page.getByText("维生素 D（VD） · 益生菌", { exact: true }).waitFor();
+assert.equal(
+  await page
+    .getByRole("button", { name: "补充剂建议、注意事项与参考", exact: true })
+    .getAttribute("aria-expanded"),
+  "false",
+);
 assert.deepEqual(errors, []);
 console.log(
   "PASS: existing local flows, calendar/history, dark/narrow layout, bilingual family/account and live sleep/today summaries, preserved local history.",

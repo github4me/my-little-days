@@ -444,7 +444,7 @@ export default function EntryEditor({
       </View>
     );
   };
-  async function save() {
+  async function save(startFeedTimer = false) {
     if (saving.current) return;
     saving.current = true;
     setBusy(true);
@@ -474,7 +474,8 @@ export default function EntryEditor({
         throw new Error(t("请填写已经发生的时间"));
       if (entry.type === "feed") {
         delete result.feedRunning;
-        if (!hasEnd) result.feedRunning = true;
+        if (!hasEnd && (startFeedTimer || entry.feedRunning))
+          result.feedRunning = true;
         if (bottle) {
           if (!amount.trim()) throw new Error(t("请填写实际喝奶量"));
           result.amount = Number(amount);
@@ -781,15 +782,13 @@ export default function EntryEditor({
                 accessibilityLabel={t(
                   busy
                     ? "正在保存"
-                    : entry.type === "feed" && !hasEnd
-                      ? "开始"
-                      : entry.type === "sleep" && !hasEnd
-                        ? "保存 · 继续计时"
-                        : "保存记录",
+                    : !hasEnd && (entry.type === "sleep" || entry.feedRunning)
+                      ? "保存 · 继续计时"
+                      : "保存记录",
                 )}
                 accessibilityState={{ busy, disabled: busy }}
                 disabled={busy}
-                onPress={save}
+                onPress={() => void save()}
                 style={[
                   s.save,
                   { backgroundColor: accent, opacity: busy ? 0.6 : 1 },
@@ -800,15 +799,34 @@ export default function EntryEditor({
                 ) : (
                   <Text style={[s.saveText, { color: palette.onPrimary }]}>
                     {t(
-                      entry.type === "feed" && !hasEnd
-                        ? "开始"
-                        : entry.type === "sleep" && !hasEnd
-                          ? "保存 · 继续计时"
-                          : "保存记录",
+                      !hasEnd && (entry.type === "sleep" || entry.feedRunning)
+                        ? "保存 · 继续计时"
+                        : "保存记录",
                     )}
                   </Text>
                 )}
               </Pressable>
+              {entry.type === "feed" && !hasEnd && !entry.feedRunning ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={t("开始计时")}
+                  accessibilityState={{ busy, disabled: busy }}
+                  disabled={busy}
+                  onPress={() => void save(true)}
+                  style={[
+                    s.save,
+                    {
+                      backgroundColor: palette.soft,
+                      opacity: busy ? 0.6 : 1,
+                      marginTop: 10,
+                    },
+                  ]}
+                >
+                  <Text style={[s.saveText, { color: accent }]}>
+                    {t("开始计时")}
+                  </Text>
+                </Pressable>
+              ) : null}
               <Text style={[s.footer, { color: muted }]}>
                 {t(entryStorageDisclosure({ sharedMode, hasAccount }))}
               </Text>

@@ -28,7 +28,7 @@ public sealed record FamilySnapshot(FamilySummary Family, Guid HistoryId, string
 public sealed record FeedOperation(Guid OperationId, Guid RecordId, Guid MembershipId, Guid HistoryId,
     string Kind, string? BaseVersion, SharedFeedInput? Feed);
 public sealed record FeedReceipt(Guid OperationId, Guid HistoryId, string Revision);
-public sealed record FullFamilyCapabilities(int SchemaVersion, string[] RecordKinds, int MaxSeedBytes, int ExtrasSchemaVersion = 1);
+public sealed record FullFamilyCapabilities(int SchemaVersion, string[] RecordKinds, int MaxSeedBytes, int ExtrasSchemaVersion = 1, int CareSchemaVersion = 2);
 public sealed record FullFamilyProfile(string Name, string BirthDate, string Sex);
 public sealed record SharedEntry(JsonElement Entry, string Version, Guid RecordedBy, Guid LastEditedBy);
 public sealed record SharedCareRecord(JsonElement Record, string Version, Guid RecordedBy, Guid LastEditedBy);
@@ -36,7 +36,17 @@ public sealed record SharedExtraRecord(JsonElement Record, string Version, Guid 
 public sealed record FullFamilySnapshot(int SchemaVersion, FullFamilyProfile Profile,
     SharedEntry[] Entries, SharedCareRecord[] CareRecords, FamilySummary Family, Guid HistoryId, string Revision,
     FamilyMember[] Members, FamilyInvitation[] Invitations, SharedFeed[] Feeds, OwnershipTransfer? OwnershipTransfer,
-    int ExtrasSchemaVersion = 1, SharedExtraRecord[]? ExtraRecords = null, bool WatchRecordingEnabled = false);
+    int ExtrasSchemaVersion = 1, SharedExtraRecord[]? ExtraRecords = null, bool WatchRecordingEnabled = false, int CareSchemaVersion = 2)
+{
+    // Legacy apps reject new care kinds. Omit them from the old representation,
+    // never relabel them or delete the underlying records. Existing per-record
+    // operations/version checks still protect all writes.
+    public FullFamilySnapshot ForCareSchema(int version) => version == 2 ? this : this with
+    {
+        CareSchemaVersion = 1,
+        CareRecords = CareRecords.Where(item => item.Record.GetProperty("kind").GetString() != "supplement").ToArray()
+    };
+}
 public sealed record CreateFullFamilyRequest(Guid OperationId, string ConsentRevision, JsonElement Seed, bool DeclinePendingInvitations = false);
 public sealed record CreateFullFamilyResult(Guid OperationId, Guid FamilyId, Guid MembershipId, Guid HistoryId, string SeedDigest, FullFamilySnapshot Snapshot);
 public sealed record FullRecordOperation(Guid OperationId, string RecordId, Guid MembershipId, Guid HistoryId,

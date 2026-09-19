@@ -1889,3 +1889,33 @@ If EAS cannot configure the new capabilities/profile unattended:
   notes/review information if requested, and submit for Beta App Review. Preserve
   the existing tester audience and wait for Apple's approval before claiming
   external availability. No Azure, SQL, Entra or notification settings were changed.
+
+### Supplement care rollout — prepared 19 September 2026, not deployed
+
+The new Daily care category requires the compatible API as well as the app update.
+No new Azure/Entra/Apple setting, permission, database migration or recurring cost
+is required. The existing environment contains production data.
+
+1. In GitHub → this repository → Actions → existing family API deployment, select
+   the approved release branch and reviewed immutable revision using the existing
+   release procedure. Deploy the API before releasing the new mobile app. Preserve
+   the current SQL Basic target and the disabled infrastructure-apply gates.
+2. On the configured family API, using an authorized test account, verify
+   `GET /v2/capabilities` returns `careSchemaVersion: 2`. For its own family, verify
+   `GET /v2/families/{id}/snapshot` with `X-LittleDays-Care-Schema: 2` returns care
+   schema 2. Without that header it must return schema 1, omit supplements from the
+   representation only, and use a different ETag. Never log family payloads/tokens
+   or modify a real family's records to test compatibility.
+3. Use the existing Expo **production**, store-distribution TestFlight procedure
+   after verifying its resolved configuration. The current build 34 and disabled
+   OTA settings are unchanged by this implementation task. Physical iOS checks:
+   VD/Probiotics multi-selection, Other name, local save/restart, family offline
+   save and later sync on authorized test devices, and an older app still reading
+   its supported record categories. Complete the new checks in `VALIDATION.md`.
+
+Expected result: new clients can share supplements; old clients continue to read
+their supported records without seeing supplements. If the API has not yet been
+updated, shared supplement controls stay disabled with an explanation. Once
+supplements exist, do not revert to an API that rejects that record kind; use a
+forward-compatible correction. See `FAMILY-API-CONTRACT.md` for the representation
+and data bounds. Deployment and physical acceptance are still outstanding.

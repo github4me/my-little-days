@@ -10,6 +10,7 @@ export type SharedRecord<T> = {
 } & T;
 export type FullFamilySnapshot = FamilySnapshot & {
   schemaVersion: 2;
+  careSchemaVersion?: 1 | 2;
   // Older APIs omit this. Only explicit server timer enforcement enables the
   // additional Watch writer; ordinary iPhone recording remains compatible.
   watchRecordingEnabled?: boolean;
@@ -21,6 +22,7 @@ export type FullFamilySnapshot = FamilySnapshot & {
 };
 export type FamilyCapabilities = {
   schemaVersion: 2;
+  careSchemaVersion?: 1 | 2;
   recordKinds: string[];
   maxSeedBytes: number;
   extrasSchemaVersion?: 1;

@@ -13,9 +13,9 @@ import type { light } from "./palette";
 
 export const appTabs = [
   { key: "today", label: "今天" },
+  { key: "play", label: "照护" },
   { key: "records", label: "记录" },
   { key: "growth", label: "成长" },
-  { key: "play", label: "照护" },
   { key: "settings", label: "我的" },
 ] as const;
 export type AppTab = (typeof appTabs)[number]["key"];

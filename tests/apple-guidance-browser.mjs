@@ -16,8 +16,8 @@ const scenarios = [
 ];
 const copy = {
   en: {
-    tabs: ["Today", "Records", "Growth", "Care", "More"],
-    titles: ["Baby's little days", "Records", "Growth", "Care", "More"],
+    tabs: ["Today", "Care", "Records", "Growth", "More"],
+    titles: ["Baby's little days", "Care", "Records", "Growth", "More"],
     add: "+ Add",
     close: "Close editor",
     amount: "Amount fed",
@@ -40,6 +40,10 @@ const copy = {
     careTime: "Care time",
     careNotes: "Care notes",
     careSave: "Save care record",
+    supplements: "Supplements",
+    supplementHelp: "Supplement guidance & references",
+    supplementOther: "Other",
+    supplementName: "Other supplement name",
     expandProfile: "Expand baby profile",
     expandLanguage: "Expand Language",
     collapseLanguage: "Collapse Language",
@@ -48,8 +52,8 @@ const copy = {
     selectedTheme: { light: "Light", dark: "Dark" },
   },
   zh: {
-    tabs: ["今天", "记录", "成长", "照护", "我的"],
-    titles: ["宝宝的小日子", "记录", "成长", "照护", "我的"],
+    tabs: ["今天", "照护", "记录", "成长", "我的"],
+    titles: ["宝宝的小日子", "照护", "记录", "成长", "我的"],
     add: "＋记录",
     close: "关闭记录编辑",
     amount: "实际喝奶量",
@@ -70,6 +74,10 @@ const copy = {
     careTime: "照护时间",
     careNotes: "照护备注",
     careSave: "保存照护记录",
+    supplements: "补充剂",
+    supplementHelp: "补充剂建议、注意事项与参考",
+    supplementOther: "其他",
+    supplementName: "其他补充剂名称",
     expandProfile: "展开宝宝档案",
     expandLanguage: "展开语言",
     collapseLanguage: "收起语言",
@@ -288,7 +296,7 @@ try {
     await page.screenshot({ path: path.join(output, `editor-${name}.png`) });
     await close.click();
 
-    await select(3);
+    await select(1);
     await page.getByRole("button", { name: words.daily, exact: true }).click();
     const temperature = page.getByLabel(words.temperatureField, {
       exact: true,
@@ -371,6 +379,42 @@ try {
     );
     await noPageOverflow();
     await page.screenshot({ path: path.join(output, `care-${name}.png`) });
+    await page
+      .getByRole("button", { name: words.supplements, exact: true })
+      .click();
+    const supplementHelp = page.getByRole("button", {
+      name: words.supplementHelp,
+      exact: true,
+    });
+    assert.equal(await supplementHelp.getAttribute("aria-expanded"), "false");
+    const checkboxes = page.getByRole("checkbox");
+    assert.equal(await checkboxes.count(), 5);
+    for (let index = 0; index < 5; index++)
+      await bounded(checkboxes.nth(index), `supplement checkbox ${index}`, 44);
+    await checkboxes.nth(0).click();
+    await checkboxes.nth(1).click();
+    await page
+      .getByRole("checkbox", { name: words.supplementOther, exact: true })
+      .click();
+    const custom = page.getByLabel(words.supplementName, { exact: true });
+    await custom.fill(language === "en" ? "Synthetic product" : "示例产品");
+    await bounded(custom, "custom supplement name", 44);
+    await bounded(
+      page.getByRole("button", { name: words.careSave, exact: true }),
+      "supplement save",
+      44,
+    );
+    await noPageOverflow();
+    await checkboxes.nth(0).scrollIntoViewIfNeeded();
+    await page.screenshot({
+      path: path.join(output, `supplements-${name}.png`),
+    });
+    await bounded(supplementHelp, "supplement help", 44);
+    await supplementHelp.click();
+    await noPageOverflow();
+    await page.screenshot({
+      path: path.join(output, `supplement-help-${name}.png`),
+    });
     assert.deepEqual(pageErrors, [], name);
     console.log(
       `PASS ${name}: five-tab labels/selection, keyboard navigation, settings disclosures, focused editor/care forms, ${contrast} colors, bounded controls.`,
@@ -378,7 +422,7 @@ try {
     await context.close();
   }
   console.log(
-    `PASS: 16 isolated browser captures; no external requests were allowed (${blockedExternalRequests} blocked). Native accessibility and keyboard acceptance remains separate.`,
+    `PASS: 24 isolated browser captures; no external requests were allowed (${blockedExternalRequests} blocked). Native accessibility and keyboard acceptance remains separate.`,
   );
 } finally {
   await browser.close();

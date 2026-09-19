@@ -840,6 +840,10 @@ const errorMessages: Record<string, FamilyMessageKey> = {
 };
 
 export function familyErrorMessage(locale: AppLocale, code: string): string {
+  if (code === "supplement_sharing_unavailable")
+    return locale === "zh-CN"
+      ? "家庭服务尚未支持补充剂记录，请更新 API 后刷新。原本机资料不会因此清理。"
+      : "Supplement sharing needs an API update. Refresh after updating. Your personal data will not be cleared.";
   if (code === "extras_sharing_unavailable")
     return locale === "zh-CN"
       ? "服务尚未支持照片、提醒和早教共享，请先更新数据库与 API，再刷新重试。原本机资料不会因此清理。"

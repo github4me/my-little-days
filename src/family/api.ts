@@ -112,6 +112,9 @@ export async function familyRequest<T>(
         headers: {
           Authorization: `Bearer ${token}`,
           Accept: "application/json",
+          ...(path.startsWith("/v2/")
+            ? { "X-LittleDays-Care-Schema": "2" }
+            : {}),
           ...(body === undefined ? {} : { "Content-Type": "application/json" }),
         },
         body: body === undefined ? undefined : JSON.stringify(body),

@@ -92,3 +92,33 @@ test("care entry time checks calendar dates, future entries and birth boundary",
   ])
     assert.throws(() => careTime(date, time, now, "2026-07-01"));
 });
+
+test("supplements round trip with multiple choices and custom name without doses", () => {
+  const supplement = {
+    id: "supp-1",
+    kind: "supplement",
+    time: record.time,
+    note: "Given as advised",
+    supplements: ["vitamin-d", "probiotics", "iron", "other"],
+    otherSupplement: "Custom product",
+  };
+  assert.deepEqual(validateCareRecord(supplement), supplement);
+  const state = { ...initialState, careRecords: [supplement] };
+  assert.deepEqual(validateState(JSON.parse(JSON.stringify(state))), state);
+  for (const supplements of [
+    undefined,
+    [],
+    ["vitamin-d", "vitamin-d"],
+    ["unknown"],
+    [42],
+    "vitamin-d",
+  ])
+    assert.throws(() => validateCareRecord({ ...supplement, supplements }));
+  for (const otherSupplement of [undefined, "", "  ", "x".repeat(101)])
+    assert.throws(() => validateCareRecord({ ...supplement, otherSupplement }));
+  assert.throws(() =>
+    validateCareRecord({ ...supplement, supplements: ["vitamin-d"] }),
+  );
+  assert.throws(() => validateCareRecord({ ...supplement, kind: "bath" }));
+  assert.throws(() => validateCareRecord({ ...supplement, dose: 400 }));
+});

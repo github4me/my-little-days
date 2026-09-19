@@ -96,6 +96,7 @@ export default function PlayLearning({
   onSaveCare,
   onDeleteCare,
   sharedMode = false,
+  supplementsEnabled = !sharedMode,
   careVersions,
   canEditCare,
   sharedPlay,
@@ -106,6 +107,7 @@ export default function PlayLearning({
   onSaveCare: (record: CareRecord, baseVersion?: string) => Promise<void>;
   onDeleteCare: (id: string, baseVersion?: string) => Promise<void>;
   sharedMode?: boolean;
+  supplementsEnabled?: boolean;
   careVersions?: Record<string, string>;
   canEditCare?: (id: string) => boolean;
   sharedPlay?: {
@@ -496,6 +498,7 @@ export default function PlayLearning({
       />
       {mode === "care" ? (
         <DailyCare
+          supplementsEnabled={supplementsEnabled}
           records={careRecords}
           birthDate={birthDate}
           now={now}

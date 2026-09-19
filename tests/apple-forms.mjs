@@ -311,6 +311,39 @@ test("native optional end time is a switch; web retains the existing form action
   assert.ok(web.action("+ 记录结束时间（可选）"));
 });
 
+test("feed Save records a start-only feed; Start timer explicitly starts timing", async () => {
+  for (const [label, running] of [
+    ["保存记录", undefined],
+    ["开始计时", true],
+  ]) {
+    const screen = fixture("EntryEditor");
+    screen.action(label).props.onPress();
+    await Promise.resolve();
+    assert.equal(screen.saved().end, undefined);
+    assert.equal(screen.saved().feedRunning, running);
+    assert.equal(screen.saved().amount, 120);
+  }
+  const screen = fixture("EntryEditor");
+  screen.byLabel("记录结束时间").props.onValueChange(true);
+  screen.render();
+  assert.equal(screen.action("开始计时"), undefined);
+  screen.action("保存记录").props.onPress();
+  await Promise.resolve();
+  assert.ok(screen.saved().end);
+  assert.equal(screen.saved().feedRunning, undefined);
+});
+
+test("editing an ongoing feed keeps its timer unless an end is supplied", async () => {
+  const screen = fixture("EntryEditor");
+  screen.props.entry = { ...screen.props.entry, feedRunning: true };
+  screen.render();
+  assert.equal(screen.action("开始计时"), undefined);
+  screen.action("保存 · 继续计时").props.onPress();
+  await Promise.resolve();
+  assert.equal(screen.saved().feedRunning, true);
+  assert.equal(screen.saved().end, undefined);
+});
+
 test("large type editor permits wrapping instead of clipping choice labels", () => {
   const screen = fixture("EntryEditor", "ios", 2);
   assert.equal(

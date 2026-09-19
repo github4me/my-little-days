@@ -110,6 +110,10 @@ test("all five tabs retain labels, selected states, comfortable targets and iOS 
   const f = fixture();
   assert.equal(f.controls.length, 5);
   assert.deepEqual(
+    f.controls.map((control) => control.props.nativeID),
+    ["tab-today", "tab-play", "tab-records", "tab-growth", "tab-settings"],
+  );
+  assert.deepEqual(
     f.controls.map((node) => node.props.accessibilityState.selected),
     [true, false, false, false, false],
   );
@@ -148,7 +152,7 @@ test("web uses roving keyboard focus; Android and web labels are not capped", ()
   f.controls[2].props.onKeyDown(event("Home"));
   f.controls[2].props.onKeyDown(event("End"));
   f.controls[2].props.onKeyDown(event("x"));
-  assert.deepEqual(f.selections, ["settings", "records", "today", "settings"]);
+  assert.deepEqual(f.selections, ["settings", "play", "today", "settings"]);
   assert.deepEqual(focused, [4, 1, 0, 4]);
   assert.equal(prevented, 4);
   f.announce("today", "Today", false);

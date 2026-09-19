@@ -10,7 +10,9 @@ function clientBoundary() {
   const callbacks: Array<() => void> = [];
   const diagnostics: unknown[] = [];
   let now = 0;
-  let request: { url: string; signal: AbortSignal } | undefined;
+  let request:
+    | { url: string; signal: AbortSignal; headers: Record<string, string> }
+    | undefined;
   let delayed = false;
   let delayedBody = false;
   let requestCount = 0;
@@ -60,9 +62,12 @@ function clientBoundary() {
     clearTimeout(id: number) {
       cancelled.push(id);
     },
-    fetch: async (url: string, options: { signal: AbortSignal }) => {
+    fetch: async (
+      url: string,
+      options: { signal: AbortSignal; headers: Record<string, string> },
+    ) => {
       requestCount++;
-      request = { url, signal: options.signal };
+      request = { url, signal: options.signal, headers: options.headers };
       if (delayed)
         await new Promise((_, reject) =>
           options.signal.addEventListener("abort", () =>
@@ -110,6 +115,23 @@ function clientBoundary() {
     },
   };
 }
+
+test("v2 requests opt into supplement-compatible snapshots without changing v1", async () => {
+  const client = clientBoundary();
+  for (const path of [
+    "/v2/capabilities",
+    "/v2/families",
+    "/v2/families/family-a/snapshot",
+  ]) {
+    await client.api.familyRequest(path);
+    assert.equal(client.request()?.headers["X-LittleDays-Care-Schema"], "2");
+  }
+  await client.api.familyRequest("/v1/me");
+  assert.equal(
+    client.request()?.headers["X-LittleDays-Care-Schema"],
+    undefined,
+  );
+});
 
 test("family snapshots and avatar uploads retain a bounded two-minute transfer window", async () => {
   const cases: Array<[string, unknown, number]> = [

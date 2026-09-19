@@ -1775,6 +1775,12 @@ export function useFamilyPilot() {
           snapshot = current.current.snapshot;
         if (!isFullSnapshot(snapshot))
           throw new Error("full_sharing_unavailable");
+        if (
+          collection === "care" &&
+          (value as CareRecord).kind === "supplement" &&
+          snapshot.careSchemaVersion !== 2
+        )
+          throw new Error("supplement_sharing_unavailable");
         const op: RecordOperation = {
           operationId: randomUUID(),
           recordId: value.id,
@@ -1849,7 +1855,7 @@ export function useFamilyPilot() {
           throw new Error("already_in_family");
         if (seed.extrasSchemaVersion !== 1 || !Array.isArray(seed.extraRecords))
           throw new Error("owner_source_changed");
-        requireExtraCapabilities(
+        const capabilities = requireExtraCapabilities(
           await familyRequest<FamilyCapabilities>(
             "/v2/capabilities",
             undefined,
@@ -1857,6 +1863,13 @@ export function useFamilyPilot() {
           ),
         );
         const checked = JSON.parse(serializeOwnerSeed(seed)) as OwnerSeedDraft;
+        if (
+          checked.source.careRecords?.some(
+            (record) => record.kind === "supplement",
+          ) &&
+          capabilities.careSchemaVersion !== 2
+        )
+          throw new Error("supplement_sharing_unavailable");
         await mutate(
           "/v2/families",
           {

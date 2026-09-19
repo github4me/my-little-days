@@ -165,13 +165,25 @@ function fixture(platform = "ios", overrides = {}) {
       nodes.find(
         (node) => node.type === "Pressable" && content(node) === label,
       ),
+    save: () =>
+      nodes.find(
+        (node) =>
+          node.type === "Button" && node.props.label === "Save care record",
+      ),
     keyboardDismissals: () => keyboardDismissals,
   };
 }
 
 test("every care category opens themed native wheels without saving the draft", () => {
   const screen = fixture();
-  for (const kind of ["Temp", "Bath", "Wash", "Teeth", "Nails"]) {
+  for (const kind of [
+    "Temp",
+    "Bath",
+    "Wash",
+    "Teeth",
+    "Nails",
+    "Supplements",
+  ]) {
     screen.control(kind).props.onPress();
     screen.render();
     screen.control("Care time").props.onPress();
@@ -195,7 +207,52 @@ test("every care category opens themed native wheels without saving the draft", 
       "10:04",
     );
   }
-  assert.equal(screen.keyboardDismissals(), 5);
+  assert.equal(screen.keyboardDismissals(), 6);
+});
+
+test("supplements support multiple explicit choices, custom text and editing", async () => {
+  let saved;
+  const screen = fixture("ios", {
+    onSave: async (record) => {
+      saved = record;
+    },
+  });
+  screen.control("Supplements").props.onPress();
+  screen.render();
+  for (const label of ["Vitamin D (VD)", "Probiotics", "Other"]) {
+    assert.equal(screen.control(label).props.accessibilityState.checked, false);
+    assert.equal(screen.control(label).props["aria-checked"], false);
+    screen.control(label).props.onPress();
+    screen.render();
+    assert.equal(screen.control(label).props.accessibilityState.checked, true);
+    assert.equal(screen.control(label).props["aria-checked"], true);
+  }
+  screen.field("Other supplement name").props.onChange("Prescribed product");
+  screen.render();
+  screen.save().props.onPress();
+  await Promise.resolve();
+  assert.equal(saved.kind, "supplement");
+  assert.deepEqual(
+    [...saved.supplements],
+    ["vitamin-d", "probiotics", "other"],
+  );
+  assert.equal(saved.otherSupplement, "Prescribed product");
+  screen.props.records = [saved];
+  screen.render();
+  screen.control("Edit care record").props.onPress();
+  screen.render();
+  assert.equal(
+    screen.field("Other supplement name").props.value,
+    "Prescribed product",
+  );
+  assert.equal(
+    screen.control("Probiotics").props.accessibilityState.checked,
+    true,
+  );
+  const olderService = fixture("ios", { sharedMode: true });
+  olderService.control("Supplements").props.onPress();
+  olderService.render();
+  assert.equal(olderService.save().props.disabled, true);
 });
 
 test("Done commits the draft while reopening after cancellation uses the unchanged time", () => {

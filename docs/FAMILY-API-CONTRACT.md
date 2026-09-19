@@ -6,7 +6,7 @@ Current full-history schema is version 2, with shared extras schema version 1. T
 
 | Method and path | Result |
 | --- | --- |
-| `GET /v2/capabilities` | `{schemaVersion:2,recordKinds:["feed","diaper","sleep","growth","milestone","care"],maxSeedBytes:33554432,extrasSchemaVersion:1}` |
+| `GET /v2/capabilities` | `{schemaVersion:2,recordKinds:["feed","diaper","sleep","growth","milestone","care"],maxSeedBytes:33554432,extrasSchemaVersion:1,careSchemaVersion:2}` |
 | `POST /v2/families` | Atomic owner setup and full snapshot |
 | `GET /v2/families/{familyId}/snapshot` | Authorized full snapshot; supports `If-None-Match` |
 | `POST /v2/families/{familyId}/record-operations` | Versioned entry/care/extra create, update or delete |
@@ -81,6 +81,7 @@ Mobile activation waits for validation and durable storage of the authorized ful
 ```text
 {
   schemaVersion: 2,
+  careSchemaVersion: 1 | 2,
   profile: {name, birthDate, sex},
   entries: [{entry: Entry, version, recordedBy, lastEditedBy}],
   careRecords: [{record: CareRecord, version, recordedBy, lastEditedBy}],
@@ -98,6 +99,14 @@ Mobile activation waits for validation and durable storage of the authorized ful
 Full clients consume entries, careRecords and extraRecords; empty feeds preserves the common lifecycle shape. Role is owner or caregiver. Author/editor are server-assigned account GUIDs. Record version and full profileVersion are opaque base64 SQL rowversions. Revision is an opaque decimal string. ProfileVersion can change after other family mutations; refresh and review before replacing a stale profile operation. Avatar bytes are included in full snapshots, so large avatars increase transfer and cache size.
 
 Owners receive invitation administration and ended membership history. Caregivers receive active members, null member emails and no invitations. Invitation expiry advances revision before computing the ETag. The ETag includes schema/history/revision/membership; authorization always precedes a possible 304 response.
+
+#### Supplement compatibility (19 September 2026 implementation; deployment separate)
+
+New clients send `X-LittleDays-Care-Schema: 2` on v2 requests. The snapshot and owner-creation response then include supplement records and `careSchemaVersion: 2`. Missing/unsupported request versions receive the legacy care representation (`careSchemaVersion: 1`), excluding supplements only from that response. This preserves older clients' strict validators: records are not relabelled, deleted or rewritten. Older apps cannot view supplements; update the app to view them. Both representations retain the same authorization and per-record conflict checks.
+
+Snapshot ETags include the negotiated care version, and the response varies on `X-LittleDays-Care-Schema`, so a legacy cached response cannot cause a false 304 for a supplement-capable request. Capability discovery advertises version 2. The new app gates shared supplement writes on the snapshot capability, and checks capabilities before uploading a seed containing supplements. Against an older service, existing recording stays available but shared supplements remain disabled with an explanation; personal offline logging remains available.
+
+Deploy this API before the corresponding app release. No SQL migration is needed: bounded supplement data uses the existing care-record JSON collection. Do not roll the API back to a version that rejects supplements after they have been stored, or downgrade a device containing new local records. Use a forward-compatible fix instead; never delete supplements to make an older validator pass.
 
 ### Record and profile operations
 
@@ -140,8 +149,9 @@ All three profile fields are required. Only the owner can update them. Success r
 | Diaper | wet, dirty, mixed |
 | Growth | At least one measurement: weight 0.1–200, length 10–250, head 10–100 |
 | Milestone | Nonblank title, up to 200 characters |
-| Care kind | temperature, bath, wash, oral, nails |
+| Care kind | temperature, bath, wash, oral, nails, supplement |
 | Temperature | 25–45; method armpit, ear, forehead, rectal or other |
+| Supplements | `supplements`: 1–5 unique values from `vitamin-d`, `probiotics`, `iron`, `multivitamin`, `other`; `otherSupplement`: required nonblank name, at most 100 characters, only with `other` |
 
 Decimal values retain precision without the legacy two-decimal restriction. Unknown/duplicate domain JSON fields and caller-supplied authors fail. The domain parser retains its historical per-collection validation ceiling, but the service now enforces a tighter **10,000 total record IDs per family across collections**, including ordinary tombstones. Aggregate ceilings also limit stored record JSON to 64 MiB (SQL UTF-16 bytes) and serialized snapshots to 32 MiB, with reserved envelope/member space. A seed below its upload-size ceiling can still exceed these aggregate limits. [Server limits](../server/README.md#limits-and-concurrency) document request, membership, operation-ledger and rate limits.
 

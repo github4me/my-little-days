@@ -11,6 +11,28 @@ public sealed class AvailabilitySqlTests(SqlFixture sql) : IClassFixture<SqlFixt
         new(Guid.NewGuid(), "family-sharing-v1", FullDomainTests.Seed()), default));
 
     [SqlFact]
+    public async Task SupplementRecordsSurviveLegacyProjectionAndInvalidateConditionalRepresentation()
+    {
+        var s = new Scenario(sql);
+        var created = await Create(s);
+        var record = FullDomainTests.Json("""{"id":"supplement-compat","kind":"supplement","time":"2026-09-01T00:00:00Z","note":"Synthetic","supplements":["vitamin-d","probiotics"]}""");
+        var op = new FullRecordOperation(Guid.NewGuid(), "supplement-compat", created.MembershipId, created.HistoryId, "create", "care", null, null, record);
+        var receipt = await s.Call(x => x.ApplyFullRecord(s.Owner, created.FamilyId, op, default));
+        Assert.Equal(receipt, await s.Call(x => x.ApplyFullRecord(s.Owner, created.FamilyId, op, default)));
+        var legacy = await s.Call(x => x.ConditionalFullSnapshot(s.Owner, created.FamilyId, null, default, 1));
+        Assert.Equal(1, legacy.Snapshot!.CareSchemaVersion);
+        Assert.DoesNotContain(legacy.Snapshot.CareRecords, x => x.Record.GetProperty("kind").GetString() == "supplement");
+        var current = await s.Call(x => x.ConditionalFullSnapshot(s.Owner, created.FamilyId, legacy.ETag, default, 2));
+        Assert.Equal(2, current.Snapshot!.CareSchemaVersion);
+        Assert.NotEqual(legacy.ETag, current.ETag);
+        Assert.Single(current.Snapshot.CareRecords, x => x.Record.GetProperty("id").GetString() == "supplement-compat");
+        Assert.Null((await s.Call(x => x.ConditionalFullSnapshot(s.Owner, created.FamilyId, current.ETag, default, 2))).Snapshot);
+        Assert.NotNull((await s.Call(x => x.ConditionalFullSnapshot(s.Owner, created.FamilyId, current.ETag, default, 1))).Snapshot);
+        await using var db = sql.Open();
+        Assert.False((await db.FamilyRecords.SingleAsync(x => x.FamilyId == created.FamilyId && x.Id == "supplement-compat")).Deleted);
+    }
+
+    [SqlFact]
     public async Task AuthorizedUnchangedSnapshotDoesNotReadRecordBodiesOrSizeAggregates()
     {
         var s = new Scenario(sql);

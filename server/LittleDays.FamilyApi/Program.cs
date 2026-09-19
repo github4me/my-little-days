@@ -229,7 +229,9 @@ fullApi.MapPost("/families", (HttpContext context, CreateFullFamilyRequest reque
     FullCreation(context, request, service, ct)).RequireRateLimiting("sensitive");
 fullApi.MapGet("/families/{familyId:guid}/snapshot", async (Guid familyId, HttpContext context, FamilyService service, CancellationToken ct) =>
 {
-    var result = await service.ConditionalFullSnapshot(PublicIdentityAdmission.Get(context), familyId, context.Request.Headers.IfNoneMatch.ToString(), ct);
+    var result = await service.ConditionalFullSnapshot(PublicIdentityAdmission.Get(context), familyId, context.Request.Headers.IfNoneMatch.ToString(), ct,
+        context.Request.Headers["X-LittleDays-Care-Schema"] == "2" ? 2 : 1);
+    context.Response.Headers.Vary = "X-LittleDays-Care-Schema";
     context.Response.Headers.ETag = result.ETag;
     return result.Snapshot is null ? Results.StatusCode(304) : Results.Json(result.Snapshot, FamilyAvailability.SnapshotJson);
 });
@@ -239,8 +241,12 @@ fullApi.MapPost("/families/{familyId:guid}/profile", (Guid familyId, HttpContext
     service.UpdateFullProfile(PublicIdentityAdmission.Get(context), familyId, request, ct));
 app.Run();
 
-static async Task<IResult> FullCreation(HttpContext context, CreateFullFamilyRequest request, FamilyService service, CancellationToken ct) =>
-    Results.Json(await service.CreateFullFamily(PublicIdentityAdmission.Get(context), request, ct), FamilyAvailability.SnapshotJson);
+static async Task<IResult> FullCreation(HttpContext context, CreateFullFamilyRequest request, FamilyService service, CancellationToken ct)
+{
+    var result = await service.CreateFullFamily(PublicIdentityAdmission.Get(context), request, ct);
+    return Results.Json(result with { Snapshot = result.Snapshot.ForCareSchema(
+        context.Request.Headers["X-LittleDays-Care-Schema"] == "2" ? 2 : 1) }, FamilyAvailability.SnapshotJson);
+}
 
 static async Task Error(HttpContext context, int status, string code)
 {

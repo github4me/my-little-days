@@ -77,6 +77,12 @@ export function validateFullSnapshot(
     throw new Error("full_sharing_unavailable");
   revision(value.revision);
   if (
+    value.careSchemaVersion !== undefined &&
+    value.careSchemaVersion !== 1 &&
+    value.careSchemaVersion !== 2
+  )
+    throw new Error("invalid_response");
+  if (
     value.watchRecordingEnabled !== undefined &&
     typeof value.watchRecordingEnabled !== "boolean"
   )
@@ -107,6 +113,11 @@ export function validateFullSnapshot(
     ...metadata(item),
     record: validateCareRecord(item.record),
   }));
+  if (
+    value.careSchemaVersion !== 2 &&
+    careRecords.some((item) => item.record.kind === "supplement")
+  )
+    throw new Error("supplement_sharing_unavailable");
   const hasExtras =
     value.extrasSchemaVersion !== undefined || value.extraRecords !== undefined;
   if (
@@ -193,6 +204,11 @@ export function enqueueRecord(
   if ((state.records ?? []).length >= 200) throw new Error("queue_full");
   if (operation.entry) validateEntry(operation.entry);
   if (operation.careRecord) validateCareRecord(operation.careRecord);
+  if (
+    operation.careRecord?.kind === "supplement" &&
+    snapshot.careSchemaVersion !== 2
+  )
+    throw new Error("supplement_sharing_unavailable");
   if (operation.collection === "extra") {
     const existingExtra = snapshot.extraRecords?.find(
       (item) => item.record.id === operation.recordId,

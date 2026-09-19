@@ -119,7 +119,7 @@ public static partial class FullDomainValidation
 
     public static void CareRecord(JsonElement record)
     {
-        var kind = Choice(Property(record, "kind"), "temperature", "bath", "wash", "oral", "nails");
+        var kind = Choice(Property(record, "kind"), "temperature", "bath", "wash", "oral", "nails", "supplement");
         Text(Property(record, "id"), 128);
         Instant(Property(record, "time"));
         Text(Property(record, "note"), 10000, true);
@@ -128,6 +128,15 @@ public static partial class FullDomainValidation
             Fields(record, "id", "kind", "time", "note", "temperature", "method");
             Number(Property(record, "temperature"), 25, 45);
             Choice(Property(record, "method"), "armpit", "ear", "forehead", "rectal", "other");
+        }
+        else if (kind == "supplement")
+        {
+            Fields(record, "id", "kind", "time", "note", "supplements", "otherSupplement");
+            var supplements = Array(Property(record, "supplements"), 5)
+                .Select(value => Choice(value, "vitamin-d", "probiotics", "iron", "multivitamin", "other")).ToArray();
+            if (supplements.Length == 0 || supplements.Distinct(StringComparer.Ordinal).Count() != supplements.Length) Invalid();
+            if (supplements.Contains("other")) Text(Property(record, "otherSupplement"), 100);
+            else if (record.TryGetProperty("otherSupplement", out _)) Invalid();
         }
         else Fields(record, "id", "kind", "time", "note");
     }

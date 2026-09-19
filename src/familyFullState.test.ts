@@ -131,6 +131,48 @@ const operation = (entry: Entry): RecordOperation => ({
   membershipId: "grant",
   historyId: "history",
 });
+
+test("supplement sharing requires explicit capability and survives offline queue/reload", () => {
+  const value = snapshot();
+  const op: RecordOperation = {
+    operationId: "supp-op",
+    recordId: "supp-record",
+    collection: "care",
+    kind: "create",
+    membershipId: "grant",
+    historyId: "history",
+    careRecord: {
+      id: "supp-record",
+      kind: "supplement",
+      time: start,
+      note: "",
+      supplements: ["vitamin-d", "probiotics"],
+    },
+  };
+  assert.throws(
+    () => enqueueRecord(applyFullSnapshot(emptyPilotState(), value), op),
+    /supplement_sharing_unavailable/,
+  );
+  value.careSchemaVersion = 2;
+  const queued = enqueueRecord(applyFullSnapshot(emptyPilotState(), value), op);
+  const restored = parseStoredPilot(JSON.stringify(queued));
+  assert.deepEqual(
+    projectedFullState(restored)?.careRecords?.find(
+      (r) => r.id === "supp-record",
+    ),
+    op.careRecord,
+  );
+  value.careRecords.push({ ...metadata, record: op.careRecord! });
+  assert.deepEqual(
+    validateFullSnapshot(value).careRecords[1].record,
+    op.careRecord,
+  );
+  delete value.careSchemaVersion;
+  assert.throws(
+    () => validateFullSnapshot(value),
+    /supplement_sharing_unavailable/,
+  );
+});
 test("full snapshot preserves all domain fields, numeric precision, source IDs and independent running sleeps", () => {
   const result = validateFullSnapshot(snapshot());
   assert.deepEqual(result, snapshot());

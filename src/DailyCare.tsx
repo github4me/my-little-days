@@ -14,7 +14,12 @@ import DateTimePicker, {
 } from "@react-native-community/datetimepicker";
 import { Button, Card, Field, T, Theme } from "./ui";
 import { useI18n } from "./i18n";
-import { CareRecord, validateCareRecord, makeId } from "./domain";
+import {
+  CareRecord,
+  SupplementKind,
+  validateCareRecord,
+  makeId,
+} from "./domain";
 import {
   careOptions,
   careTime,
@@ -22,6 +27,7 @@ import {
   defaultTemperatureMethod,
   defaultTemperatureInput,
   parseTemperatureInput,
+  supplementOptions,
 } from "./care";
 import PlayIcon from "./PlayIcon";
 import HelpDisclosure from "./HelpDisclosure";
@@ -39,6 +45,7 @@ export default function DailyCare({
   onSave,
   onDelete,
   sharedMode = false,
+  supplementsEnabled = !sharedMode,
   versions = {},
   canEdit = () => true,
 }: {
@@ -48,6 +55,7 @@ export default function DailyCare({
   onSave: (record: CareRecord, baseVersion?: string) => Promise<void>;
   onDelete: (id: string, baseVersion?: string) => Promise<void>;
   sharedMode?: boolean;
+  supplementsEnabled?: boolean;
   versions?: Record<string, string>;
   canEdit?: (id: string) => boolean;
 }) {
@@ -59,6 +67,8 @@ export default function DailyCare({
   const text = (zh: string, en: string) => (locale === "en-US" ? en : zh);
   const [kind, setKind] = useState<CareRecord["kind"]>("temperature");
   const [temperature, setTemperature] = useState(defaultTemperatureInput);
+  const [supplements, setSupplements] = useState<SupplementKind[]>([]);
+  const [otherSupplement, setOtherSupplement] = useState("");
   const [method, setMethod] = useState<CareRecord["method"]>(
     defaultTemperatureMethod,
   );
@@ -193,6 +203,8 @@ export default function DailyCare({
     setPicker(null);
     setTemperature(defaultTemperatureInput);
     setMethod(defaultTemperatureMethod);
+    setSupplements([]);
+    setOtherSupplement("");
     setNote("");
     setEditing(null);
     editingVersion.current = undefined;
@@ -201,6 +213,7 @@ export default function DailyCare({
   }
   async function save() {
     if (lock.current) return;
+    if (kind === "supplement" && !supplementsEnabled) return;
     if (editing && !canEdit(editing)) {
       setMessage({
         zh: "你只能修改自己创建的记录；管理员可以修改所有记录。",
@@ -220,12 +233,27 @@ export default function DailyCare({
         ...(kind === "temperature"
           ? { temperature: parseTemperatureInput(temperature), method }
           : {}),
+        ...(kind === "supplement"
+          ? {
+              supplements,
+              ...(supplements.includes("other")
+                ? { otherSupplement: otherSupplement.trim() }
+                : {}),
+            }
+          : {}),
       });
     } catch {
-      setMessage({
-        zh: "请检查日期、时间和读数；体温需为 25–45°C 并选择测量方式，时间不能晚于现在或早于出生。",
-        en: "Check the date, time and reading. Temperature must be 25–45°C with a measurement method; time cannot be in the future or before birth.",
-      });
+      setMessage(
+        kind === "supplement"
+          ? {
+              zh: "请选择至少一种补充剂；选择其他时请填写名称（最多 100 字），并检查日期和时间。",
+              en: "Select at least one supplement. For Other, enter a name (up to 100 characters), and check the date and time.",
+            }
+          : {
+              zh: "请检查日期、时间和读数；体温需为 25–45°C 并选择测量方式，时间不能晚于现在或早于出生。",
+              en: "Check the date, time and reading. Temperature must be 25–45°C with a measurement method; time cannot be in the future or before birth.",
+            },
+      );
       return;
     }
     lock.current = true;
@@ -278,7 +306,7 @@ export default function DailyCare({
       <View
         style={{
           flexDirection: "row",
-          flexWrap: largeText ? "wrap" : "nowrap",
+          flexWrap: "wrap",
           gap: 5,
         }}
       >
@@ -288,6 +316,7 @@ export default function DailyCare({
             accessibilityRole="button"
             accessibilityLabel={copy(o.label)}
             accessibilityState={{ selected: kind === o.id, disabled: busy }}
+            aria-pressed={kind === o.id}
             disabled={busy}
             onPress={() => {
               setKind(o.id);
@@ -298,7 +327,8 @@ export default function DailyCare({
             }}
             style={{
               flex: 1,
-              ...(largeText ? { flexBasis: "44%", flexGrow: 1 } : {}),
+              flexBasis: largeText ? "44%" : "30%",
+              flexGrow: 1,
               minWidth: 0,
               minHeight: 62,
               paddingVertical: 8,
@@ -372,6 +402,8 @@ export default function DailyCare({
                     disabled: busy,
                   }}
                   aria-pressed={method === m.id}
+                  accessibilityShowsLargeContentViewer={Platform.OS === "ios"}
+                  accessibilityLargeContentTitle={copy(m.label)}
                   disabled={busy}
                   onPress={() => setMethod(m.id)}
                   style={{
@@ -389,15 +421,90 @@ export default function DailyCare({
                     backgroundColor: method === m.id ? c.soft : c.bg,
                   }}
                 >
-                  <T raw style={{ fontSize: 12, textAlign: "center" }}>
-                    {copy(m.label)}
-                  </T>
+                  {m.id === "forehead" ? (
+                    <PlayIcon kind="forehead" color={c.primary} />
+                  ) : (
+                    <T raw style={{ fontSize: 12, textAlign: "center" }}>
+                      {copy(m.label)}
+                    </T>
+                  )}
                 </Pressable>
               ))}
             </View>
+            {method === "forehead" ? (
+              <T raw style={{ fontSize: 12, color: c.muted }}>
+                {text("已选择：额温", "Selected: Forehead")}
+              </T>
+            ) : null}
           </>
         ) : null}
-        {"safety" in option ? (
+        {kind === "supplement" ? (
+          <View style={{ gap: 10 }}>
+            <T raw style={{ fontSize: 13, color: c.muted }}>
+              {copy(option.hint)}
+            </T>
+            {!supplementsEnabled ? (
+              <T raw accessibilityRole="alert">
+                {text(
+                  "家庭服务尚未支持补充剂记录，更新服务并刷新后可用。",
+                  "Supplement sharing needs a service update. Refresh after the update to enable it.",
+                )}
+              </T>
+            ) : null}
+            {supplementOptions.map((item) => {
+              const checked = supplements.includes(item.id);
+              return (
+                <Pressable
+                  key={item.id}
+                  accessibilityRole="checkbox"
+                  accessibilityLabel={copy(item.label)}
+                  aria-checked={checked}
+                  aria-disabled={busy || !supplementsEnabled}
+                  accessibilityState={{
+                    checked,
+                    disabled: busy || !supplementsEnabled,
+                  }}
+                  disabled={busy || !supplementsEnabled}
+                  onPress={() =>
+                    setSupplements((selected) =>
+                      checked
+                        ? selected.filter((value) => value !== item.id)
+                        : [...selected, item.id],
+                    )
+                  }
+                  style={{
+                    minHeight: 44,
+                    padding: 10,
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 10,
+                    borderRadius: 10,
+                    borderWidth: 1,
+                    borderColor: checked ? c.primary : c.line,
+                    backgroundColor: checked ? c.soft : c.bg,
+                  }}
+                >
+                  <T raw accessible={false} style={{ color: c.primary }}>
+                    {checked ? "☑" : "☐"}
+                  </T>
+                  <T raw style={{ flex: 1 }}>
+                    {copy(item.label)}
+                  </T>
+                </Pressable>
+              );
+            })}
+            {supplements.includes("other") ? (
+              <Field
+                label={text("其他补充剂名称", "Other supplement name")}
+                value={otherSupplement}
+                onChange={setOtherSupplement}
+                maxLength={100}
+                editable={!busy && supplementsEnabled}
+              />
+            ) : null}
+          </View>
+        ) : null}
+        {"safety" in option && kind !== "supplement" ? (
           <T raw style={{ fontSize: 13, color: c.muted, lineHeight: 20 }}>
             {copy(option.safety)}
           </T>
@@ -436,7 +543,7 @@ export default function DailyCare({
         />
         <Button
           label={text("保存照护记录", "Save care record")}
-          disabled={busy}
+          disabled={busy || (kind === "supplement" && !supplementsEnabled)}
           onPress={() => void save()}
         />
         {editing ? (
@@ -492,7 +599,19 @@ export default function DailyCare({
                 <T raw style={{ fontSize: 14, fontWeight: "600" }}>
                   {r.kind === "temperature"
                     ? `${r.temperature}°C · ${copy(temperatureMethods.find((m) => m.id === r.method)!.label)}`
-                    : copy(option.label)}
+                    : r.kind === "supplement"
+                      ? r
+                          .supplements!.map((id) =>
+                            id === "other"
+                              ? r.otherSupplement
+                              : copy(
+                                  supplementOptions.find(
+                                    (item) => item.id === id,
+                                  )!.label,
+                                ),
+                          )
+                          .join(" · ")
+                      : copy(option.label)}
                 </T>
                 <T raw style={{ fontSize: 12, color: c.muted }}>
                   {new Date(r.time).toLocaleString(locale, {
@@ -520,6 +639,8 @@ export default function DailyCare({
                     r.temperature === undefined ? "" : String(r.temperature),
                   );
                   setMethod(r.method);
+                  setSupplements(r.supplements ?? []);
+                  setOtherSupplement(r.otherSupplement ?? "");
                   setNote(r.note);
                   setMessage(null);
                 }}
@@ -602,8 +723,59 @@ export default function DailyCare({
       </View>
       <HelpDisclosure
         key={kind}
-        title={text("记录说明与参考", "Recording help & references")}
+        title={
+          kind === "supplement"
+            ? text(
+                "补充剂建议、注意事项与参考",
+                "Supplement guidance & references",
+              )
+            : text("记录说明与参考", "Recording help & references")
+        }
       >
+        {kind === "supplement" ? (
+          <>
+            <T raw style={{ fontSize: 15, lineHeight: 22 }}>
+              {text(
+                "维生素 D（VD）：是否需要补充取决于喂养方式、配方奶摄入量及缺乏风险；请按当地儿科医生建议选择适龄产品和剂量，不要把列表当作每日必服清单。",
+                "Vitamin D (VD): need depends on feeding, formula intake and deficiency risk. Ask your baby's clinician about an age-appropriate product and dose; this list is not a daily checklist.",
+              )}
+            </T>
+            <T raw style={{ fontSize: 15, lineHeight: 22 }}>
+              {text(
+                "益生菌：效果与菌株及具体情况有关，不是所有宝宝都需要。早产、重病或免疫功能受损的宝宝可能有严重感染风险，使用前应咨询医生。",
+                "Probiotics: effects depend on the strain and condition; they are not needed by every baby. Premature, seriously ill or immunocompromised babies may be at risk of serious infection. Consult their clinician before use.",
+              )}
+            </T>
+            <T raw style={{ fontSize: 15, lineHeight: 22 }}>
+              {text(
+                "铁及复合维生素：仅按医生评估或处方给予。注意产品成分重叠，核对浓度与实际用量；不要叠加相同成分或因漏服自行加倍。记录不代替专业建议，也不代表给药提醒。",
+                "Iron and multivitamins: give only following clinical assessment or prescription. Check overlapping ingredients, concentration and the amount given. Do not double up ingredients or missed doses. Logging is not medical advice or a dosing reminder.",
+              )}
+            </T>
+            {[
+              {
+                label: "Vitamin D · Royal Children's Hospital",
+                url: "https://www.rch.org.au/kidsinfo/fact_sheets/Vitamin_D/",
+              },
+              {
+                label: "Probiotics · NIH NCCIH",
+                url: "https://www.nccih.nih.gov/health/probiotics-usefulness-and-safety",
+              },
+            ].map((source) => (
+              <Pressable
+                key={source.url}
+                accessibilityRole="link"
+                accessibilityLabel={source.label}
+                onPress={() => void openSource(source.url)}
+                style={{ minHeight: 44, justifyContent: "center" }}
+              >
+                <T raw style={{ color: c.primary, fontSize: 15 }}>
+                  {source.label} ↗
+                </T>
+              </Pressable>
+            ))}
+          </>
+        ) : null}
         <T raw style={{ fontSize: 15, color: c.muted, lineHeight: 22 }}>
           {text(
             "记录实际做过的照护，不是每日任务。测温、洗澡等记录会保留历史，填写后点保存才生效。",
