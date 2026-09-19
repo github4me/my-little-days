@@ -1973,3 +1973,32 @@ and data bounds. Deployment and physical acceptance are still outstanding.
 - Physical iOS SQLite, VoiceOver/Dynamic Type, keyboard, supplement family
   synchronization and older-client acceptance remain unverified. See
   `VALIDATION.md`; cloud success is not a physical-device acceptance result.
+
+### Care and record refinements — TestFlight build 36, 19 September 2026
+
+- Reviewed app source: `6bc595f706cd1d83c9d3a587e03d3548b087ddb3` on
+  `feature/family-invitations`, committed and pushed through the GitHub plugin.
+  Includes Care ordering/Chinese labels, temperature-method icons, seven-date
+  history pagination, and minute-precision duration labels. No API/SQL deployment.
+- `npm run verify`, web export and browser regression passed. Production public
+  URL, Entra tenant/client/scope and demo `0` were read back before building.
+  No environment, credentials, tester-group or infrastructure settings changed.
+- EAS CLI 24.7.0 used an isolated source stage with both `EAS_NO_VCS=1` and
+  `EAS_PROJECT_ROOT` set. All 186 files matched the inspected archive; unrelated
+  local drafts and data were excluded. Production/STORE, version/runtime 0.2.1,
+  OTA disabled and the existing three Apple signing profiles were retained.
+- Build `dd872de3-9ced-4940-89d2-ca4d6cad13b8` finished at
+  **2026-09-19 04:27:00 UTC** as **0.2.1 (36)**. macOS native model tests:
+  20 Watch and 5 Widget tests passed. IPA inspection passed for bundle IDs,
+  versions, Store profiles, signed entitlements/App Groups and disabled OTA.
+  This is artifact inspection, not independent signature verification.
+  SHA-256: `502A83E0B134C00F5B8A59F0106CCBA35CF8BA970A9FCA97678AA5F6F218052A`.
+- Exact-build submission `03a5e241-3896-452c-b1ef-8961d7f4f2f9` targets existing
+  App Store Connect app `6809826484`, using production and
+  `--no-auto-testflight-setup`. Apple readback confirms build 36 **VALID**,
+  internal **IN_BETA_TESTING**, external **READY_FOR_BETA_SUBMISSION**.
+  EAS submission subsequently confirmed **FINISHED**. External beta review was
+  not submitted by this operation.
+- When available, update via TestFlight over the existing installation; do not
+  uninstall. Physical iPhone layout, VoiceOver/Dynamic Type, Watch and Widget
+  acceptance remain device checks. No public App Store release was requested.
