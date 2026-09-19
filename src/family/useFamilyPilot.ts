@@ -1248,6 +1248,36 @@ export function useFamilyPilot() {
     }
     return sync();
   }
+  async function refreshActiveTimer(type: "sleep" | "feed") {
+    const e = epoch.current;
+    const before = verifiedSnapshots.current;
+    const previous = current.current.snapshot;
+    if (!previous || !who.current || current.current.transition)
+      return { refreshed: false, activeId: null as string | null };
+    const origin = originForSnapshot(previous);
+    await refreshNow();
+    const stillCurrent =
+      isCurrent(e) &&
+      verified.current &&
+      !current.current.transition &&
+      who.current?.user.id === origin.userId &&
+      !who.current.accountDeletion &&
+      matchesOrigin(origin, current.current.snapshot);
+    // A connectivity failure can leave the same verified snapshot in place,
+    // which is safe for offline-first recording. A changed account, grant,
+    // family or history is different: the caller must not continue its save
+    // against whatever sharing context became current while this request ran.
+    if (!stillCurrent) throw new Error("membership_changed");
+    const active = projectedFullState(current.current)?.entries.find((entry) =>
+      type === "sleep"
+        ? entry.type === "sleep" && !entry.end
+        : entry.type === "feed" && !!entry.feedRunning && !entry.end,
+    );
+    return {
+      refreshed: verifiedSnapshots.current > before,
+      activeId: active?.id ?? null,
+    };
+  }
   async function action<T>(
     task: (e: number) => Promise<T>,
     allowTransition = false,
@@ -2155,6 +2185,7 @@ export function useFamilyPilot() {
         }
       }, true),
     refresh: () => refreshNow(),
+    refreshActiveTimer,
     refreshForNotification: async (): Promise<boolean> => {
       const e = epoch.current;
       const before = verifiedSnapshots.current;

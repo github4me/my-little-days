@@ -116,6 +116,8 @@ function fixture(file, props, { fontScale = 1, failMail = false } = {}) {
               }),
             };
           if (name === "./RecordsCalendar") return "RecordsCalendar";
+          if (name === "./RecordActionButton")
+            return load("src/RecordActionButton.tsx");
           if (name === "./recordRange") return load("src/recordRange.ts");
           throw new Error(`Unexpected dependency ${name}`);
         },
@@ -245,10 +247,20 @@ test("record actions have 44-point targets and announced readonly state; notes s
     assert.ok(button);
     assert.equal(button.props.disabled, true);
     assert.equal(button.props.accessibilityState.disabled, true);
-    assert.ok(
-      button.props.style.minWidth >= 44 && button.props.style.minHeight >= 44,
-    );
+    const style = button.props.style({ pressed: false });
+    assert.ok(style.width >= 44 && style.height >= 44);
+    assert.ok(button.props.accessibilityHint);
   }
+  assert.equal(
+    screen
+      .nodes()
+      .filter(
+        (node) =>
+          node.type === "T" &&
+          ["编辑", "删除"].includes(node.props.children?.join?.("")),
+      ).length,
+    0,
+  );
   const noteNode = screen
     .nodes()
     .find((node) => node.type === "T" && node.props.children.includes(note));

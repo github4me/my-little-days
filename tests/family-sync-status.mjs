@@ -34,6 +34,60 @@ const conflict = (id = "operation-a") => ({
     },
   },
 });
+const activeTimerConflict = (type = "sleep", id = `operation-${type}`) => ({
+  ...conflict(id),
+  error: "active_timer_conflict",
+  operation: {
+    operationId: id,
+    recordId: `attempted-${type}`,
+    kind: "create",
+    collection: "entry",
+    entry: {
+      id: `attempted-${type}`,
+      type,
+      start: "2026-09-19T21:57:00.000Z",
+      note: "",
+      ...(type === "feed"
+        ? { amount: 150, feedKind: "formula", feedRunning: true }
+        : {}),
+    },
+  },
+});
+
+function fullSnapshotWithActiveTimer(type = "sleep") {
+  const entry = {
+    id: `active-${type}`,
+    type,
+    start: "2026-09-19T21:56:00.000Z",
+    note: "",
+    ...(type === "feed"
+      ? { amount: 150, feedKind: "formula", feedRunning: true }
+      : {}),
+  };
+  return {
+    family: { id: origin.familyId, membershipId: origin.membershipId },
+    historyId: origin.historyId,
+    members: [
+      {
+        id: "starter-user",
+        displayName: "Yao Huang",
+        email: null,
+        role: "caregiver",
+        membershipId: "starter-membership",
+        status: "active",
+        endedAt: null,
+      },
+    ],
+    entries: [
+      {
+        entry,
+        version: "4",
+        recordedBy: "starter-user",
+        lastEditedBy: "starter-user",
+      },
+    ],
+  };
+}
 
 function fixture(overrides = {}, locale = "en") {
   let active = "",
@@ -291,6 +345,51 @@ test("preserved changes are under the bilingual section title named by the notic
     assert.equal(heading?.props.children, title);
     assert.match(world.text(), /Preserved note/);
   }
+});
+
+test("an active sleep conflict identifies the winning timer and its starter in the banner and details", () => {
+  const timerConflict = activeTimerConflict("sleep");
+  const world = fixture({
+    recordConflicts: [timerConflict],
+    fullSnapshot: fullSnapshotWithActiveTimer("sleep"),
+  });
+  world.render();
+  assert.match(world.text(), /Yao Huang started the sleep timer at/);
+  assert.match(world.text(), /still ongoing/);
+  assert.match(world.text(), /Return to Today to finish/);
+  assert.doesNotMatch(world.text(), /Some changes could not be shared/);
+  world.render("FamilySyncDetails");
+  assert.match(world.text(), /Yao Huang started the sleep timer at/);
+  assert.equal(world.buttons("Discard this change").length, 1);
+});
+
+test("active feeding conflicts are localized and fall back without exposing an unverified snapshot", () => {
+  const timerConflict = activeTimerConflict("feed");
+  const verified = fixture(
+    {
+      recordConflicts: [timerConflict],
+      fullSnapshot: fullSnapshotWithActiveTimer("feed"),
+    },
+    "zh-CN",
+  );
+  verified.render();
+  assert.match(verified.text(), /Yao Huang 已于 .* 开始喂养计时/);
+  assert.match(verified.text(), /返回“今天”可结束现有计时/);
+
+  const unverified = fixture(
+    {
+      ready: false,
+      recordConflicts: [timerConflict],
+      fullSnapshot: fullSnapshotWithActiveTimer("feed"),
+    },
+    "zh-CN",
+  );
+  unverified.render();
+  assert.doesNotMatch(unverified.text(), /Yao Huang/);
+  assert.match(unverified.text(), /发送时，家庭中已有同类的喂养或睡眠计时/);
+  assert.match(unverified.text(), /如果计时仍在进行/);
+  assert.doesNotMatch(unverified.text(), /另一位家庭成员/);
+  assert.doesNotMatch(unverified.text(), /且仍在进行/);
 });
 
 test("dismissed conflict remains reachable in details; only confirmed discard calls the controller", async () => {

@@ -23,11 +23,23 @@ dotnet run --project server/LittleDays.DatabaseMigrator -- --apply
 
 ## New migrations
 
-Add the next uniquely numbered `Scripts/0006_Description.sql`; never modify applied scripts. Update the version contract in `SchemaVerifier` when intentionally changing checked objects. Use plain transaction-compatible SQL with optional `GO` separators. SQL variable substitution is disabled. Include table-specific runtime grants when adding a table used by the API. The runtime must never receive schema control or journal access. New object types needing additional CREATE permissions require separate bootstrap review.
+Add the next uniquely numbered `Scripts/0008_Description.sql`; never modify applied scripts. Update the version contract in `SchemaVerifier` when intentionally changing checked objects. Use plain transaction-compatible SQL with optional `GO` separators. SQL variable substitution is disabled. Include table-specific runtime grants when adding a table used by the API. The runtime must never receive schema control or journal access. New object types needing additional CREATE permissions require separate bootstrap review.
 
 `0001_LegacySchemaBaseline.sql` freezes the three historical EF migrations. `0002_VerifyBaselineAndRuntimeGrants.sql` checks key schema invariants and grants runtime DML. `0003_FamilySharedExtras.sql` adds shared-photo, reminder and play-record constraint support without replacing existing data. `0004_FamilyAvailabilityBounds.sql` adds completed-purge bookkeeping and indexing for bounded cleanup; deploy it before the security-hardened API. Historical EF source remains excluded from the API build and is compiled only into adoption tests. Future migrations belong here, not in EF's migration folder.
 
 `0005_QueryIndexesAndOperationCounts.sql` adds selective inbox/history/erasure indexes, the covering purge index and a transactionally maintained receipt counter. It preserves the receipt primary key and all retry history; runtime can only read counters. Backfill locks receipt writes until the transaction installs the trigger and commits. Existing bootstrap permissions are sufficient. See [scaling and deployment notes](../../docs/DATABASE-SCALING-2026-09-17.md); deploy SQL before the matching API and never bypass the trigger in future bulk imports.
+
+`0006_FamilyPushAndTimerIndex.sql` adds the opt-in family push queues,
+installation metadata and the computed/indexed active-timer discriminator. It
+preserves existing timers and leaves all push and single-timer rollout gates off
+until operators explicitly enable them.
+
+`0007_TimerEndAttribution.sql` adds nullable
+`FamilyRecords.TimerEndedBy` and filtered index
+`IX_FamilyRecords_TimerEndedBy`. Existing records remain unchanged and therefore
+have null attribution. Apply it before the compatible API, then release the
+client; do not remove the column as a rollback mechanism. The version-7 catalog
+check verifies both the nullable column and index.
 
 Run both backend test projects with actual disposable SQL Server:
 
@@ -36,4 +48,4 @@ $env:FAMILY_TEST_SQL_CONNECTION = 'Server=localhost;Database=master;Integrated S
 dotnet test server/LittleDays.slnx --configuration Release
 ```
 
-Tests create/drop only generated test databases. SQL tests explicitly skip if no test connection is provided. They cover fresh initialization, reruns, checksum tampering, transactions, locking, legacy adoption, unknown schemas and migration/runtime permission separation. Local SQL tests do not verify live Azure OIDC, firewall propagation or customer authentication.
+Tests create/drop only generated test databases. SQL tests explicitly skip if no test connection is provided. They cover fresh initialization, reruns, checksum tampering, transactions, locking, legacy adoption, unknown schemas, timer-attribution upgrade/catalog checks and migration/runtime permission separation. Local SQL tests do not verify live Azure OIDC, firewall propagation or customer authentication.

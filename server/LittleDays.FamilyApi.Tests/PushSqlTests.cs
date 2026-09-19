@@ -166,6 +166,38 @@ public sealed class PushSqlTests(SqlFixture sql) : IClassFixture<SqlFixture>
     }
 
     [SqlFact]
+    public async Task PendingDeletionForTimerEnderSuppressesPushAfterLaterEditorChanges()
+    {
+        var s = new Setup(sql); await s.Initialize();
+        await s.Call(x => x.RegisterPush(s.Scenario.Owner, Guid.NewGuid(),
+            PushTests.Registration(s.Config.Push, s.OwnerGrant, s.Config.Family.HistoryId,
+                PushTests.Secret()), default));
+        var operation = s.Record("feed") with { MembershipId = s.MemberGrant.MembershipId };
+        await s.Call(x => x.ApplyFullRecord(s.Scenario.Caregiver, s.OwnerGrant.Id, operation, default));
+        await using (var db = sql.Open())
+        {
+            var record = await db.FamilyRecords.SingleAsync(x => x.FamilyId == s.OwnerGrant.Id && x.Id == operation.RecordId);
+            record.RecordedBy = s.Scenario.Owner.ObjectId;
+            record.LastEditedBy = s.Scenario.Owner.ObjectId;
+            record.TimerEndedBy = s.Scenario.Caregiver.ObjectId;
+            db.AccountDeletions.Add(new AccountDeletionRow
+            {
+                UserId = s.Scenario.Caregiver.ObjectId,
+                OperationId = Guid.NewGuid(),
+                RequestedAt = s.Clock.Now,
+                ReceiptHash = new string('A', 64)
+            });
+            await db.SaveChangesAsync();
+        }
+
+        Assert.Equal(0, await s.Process());
+        Assert.Empty(s.Gateway.Sent);
+        await using var verification = sql.Open();
+        Assert.All(await verification.NotificationSummaryBuckets.Where(x => x.FamilyId == s.OwnerGrant.Id).ToArrayAsync(),
+            x => Assert.Equal("cancelled", x.State));
+    }
+
+    [SqlFact]
     public async Task FailedEditRollsBackBothNewNoticeAndCancellationOfPreviousNotice()
     {
         var s = new Setup(sql); await s.Initialize();

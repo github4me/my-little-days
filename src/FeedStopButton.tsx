@@ -5,9 +5,13 @@ import { Button } from "./ui";
 export default function FeedStopButton({
   onPress,
   disabled,
+  label = "停止",
+  secondary = false,
 }: {
   onPress: () => void;
   disabled: boolean;
+  label?: string;
+  secondary?: boolean;
 }) {
   const opacity = useRef(new Animated.Value(1)).current;
   useEffect(() => {
@@ -50,7 +54,12 @@ export default function FeedStopButton({
   }, [opacity]);
   return (
     <Animated.View style={{ opacity }}>
-      <Button label="停止" disabled={disabled} onPress={onPress} />
+      <Button
+        label={label}
+        secondary={secondary}
+        disabled={disabled}
+        onPress={onPress}
+      />
     </Animated.View>
   );
 }

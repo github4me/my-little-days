@@ -51,6 +51,7 @@ public sealed class FullDomainTests
         Assert.Equal(1, legacy.CareSchemaVersion);
         Assert.Equal("temperature", Assert.Single(legacy.CareRecords).Record.GetProperty("kind").GetString());
         Assert.Equal(2, original.CareRecords.Length);
+        Assert.False(original.CrossMemberTimerCompletionEnabled);
         Assert.Same(original, original.ForCareSchema(2));
     }
     public static JsonElement Profile() => Json("""{"name":"宝宝 Luna","birthDate":"2026-01-15","sex":"female"}""");

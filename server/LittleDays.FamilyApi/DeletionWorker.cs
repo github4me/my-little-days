@@ -92,7 +92,7 @@ public sealed class DeletionProcessor(PilotDatabase db, PilotConfiguration confi
                     DELETE TOP (1000) e FROM dbo.FamilyNotificationEvents e
                     WHERE e.ActorUserId={userId} OR EXISTS(SELECT 1 FROM dbo.FamilyRecords r
                         WHERE r.FamilyId=e.FamilyId AND r.Collection='entry' AND r.IdHash=e.RecordIdHash
-                        AND (r.RecordedBy={userId} OR r.LastEditedBy={userId}));
+                        AND (r.RecordedBy={userId} OR r.LastEditedBy={userId} OR r.TimerEndedBy={userId}));
                     """, ct);
             }, ct), ct)) return false;
             await service.Transaction(async () =>
@@ -104,6 +104,7 @@ public sealed class DeletionProcessor(PilotDatabase db, PilotConfiguration confi
                 var emails = memberEmails.Append(bindingEmail ?? "").Append(job.PendingEmail ?? "").Where(x => x.Length > 0).Distinct().ToArray();
                 var familyIds = await db.Feeds.Where(x => x.RecordedBy == job.UserId || x.LastEditedBy == job.UserId).Select(x => x.FamilyId)
                     .Union(db.FamilyRecords.Where(x => x.RecordedBy == job.UserId || x.LastEditedBy == job.UserId).Select(x => x.FamilyId))
+                    .Union(db.FamilyRecords.Where(x => x.TimerEndedBy == job.UserId).Select(x => x.FamilyId))
                     .Union(db.Memberships.Where(x => x.UserId == job.UserId).Select(x => x.FamilyId))
                     .Union(db.Invitations.Where(x => x.RecipientUserId == job.UserId || emails.Contains(x.Email)).Select(x => x.FamilyId))
                     .Union(db.OwnershipTransfers.Where(x => x.FromUserId == job.UserId || x.ToUserId == job.UserId).Select(x => x.FamilyId))
@@ -112,6 +113,12 @@ public sealed class DeletionProcessor(PilotDatabase db, PilotConfiguration confi
                 // safer than claiming an edited note was erased by zeroing its attribution.
                 await db.Feeds.Where(x => x.RecordedBy == job.UserId || x.LastEditedBy == job.UserId).ExecuteDeleteAsync(ct);
                 await db.FamilyRecords.Where(x => x.RecordedBy == job.UserId || x.LastEditedBy == job.UserId).ExecuteDeleteAsync(ct);
+                // Timer completion is attribution, not ownership of the record. If
+                // another member subsequently edited the completed record, erase the
+                // deleting account's remaining opaque attribution without broadening
+                // the established authored/last-edited content deletion policy.
+                await db.FamilyRecords.Where(x => x.TimerEndedBy == job.UserId)
+                    .ExecuteUpdateAsync(s => s.SetProperty(x => x.TimerEndedBy, (Guid?)null), ct);
                 await db.Invitations.Where(x => x.RecipientUserId == job.UserId || emails.Contains(x.Email)).ExecuteDeleteAsync(ct);
                 await db.OwnershipTransfers.Where(x => x.FromUserId == job.UserId || x.ToUserId == job.UserId).ExecuteDeleteAsync(ct);
                 if (await db.Operations.AnyAsync(x => x.UserId == job.UserId, ct))

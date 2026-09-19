@@ -12,6 +12,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import Svg, { Rect } from "react-native-svg";
 import CareIcon from "./CareIcon";
+import RecordActionButton from "./RecordActionButton";
 import { Entry, summarize } from "./domain";
 import { Button, Card, T, Theme, row } from "./ui";
 import { elapsed, formatDate, formatTime, t, useI18n } from "./i18n";
@@ -810,17 +811,29 @@ export default function RecordsCalendar({
                     </T>
                   )}
                 </ScrollView>
-                <Button
-                  label="编辑记录"
-                  disabled={canEdit && !canEdit(selectedEntry.id)}
-                  onPress={() => act(() => onEdit(selectedEntry))}
-                />
-                <Button
-                  label="删除记录"
-                  disabled={canEdit && !canEdit(selectedEntry.id)}
-                  secondary
-                  onPress={() => act(() => onDelete(selectedEntry))}
-                />
+                <View
+                  style={{
+                    flexDirection: "row",
+                    justifyContent: "flex-end",
+                    alignItems: "center",
+                    gap: 8,
+                  }}
+                >
+                  <RecordActionButton
+                    action="edit"
+                    accessibilityLabel={t("编辑记录")}
+                    accessibilityHint={t("打开记录编辑界面")}
+                    disabled={canEdit && !canEdit(selectedEntry.id)}
+                    onPress={() => act(() => onEdit(selectedEntry))}
+                  />
+                  <RecordActionButton
+                    action="delete"
+                    accessibilityLabel={t("删除记录")}
+                    accessibilityHint={t("打开删除确认")}
+                    disabled={canEdit && !canEdit(selectedEntry.id)}
+                    onPress={() => act(() => onDelete(selectedEntry))}
+                  />
+                </View>
               </>
             )}
           </View>

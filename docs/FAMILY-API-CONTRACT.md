@@ -83,10 +83,11 @@ Mobile activation waits for validation and durable storage of the authorized ful
   schemaVersion: 2,
   careSchemaVersion: 1 | 2,
   profile: {name, birthDate, sex},
-  entries: [{entry: Entry, version, recordedBy, lastEditedBy}],
+  entries: [{entry: Entry, version, recordedBy, lastEditedBy, endedBy}],
   careRecords: [{record: CareRecord, version, recordedBy, lastEditedBy}],
   extrasSchemaVersion: 1,
   extraRecords: [{record: FamilyExtraRecord, version, recordedBy, lastEditedBy}],
+  crossMemberTimerCompletionEnabled: boolean,
   family: {id, babyName, role, membershipId, babyBirthDate, profileVersion},
   historyId, revision,
   members: [{id, displayName, email, role, membershipId, status, endedAt}],
@@ -97,6 +98,10 @@ Mobile activation waits for validation and durable storage of the authorized ful
 ```
 
 Full clients consume entries, careRecords and extraRecords; empty feeds preserves the common lifecycle shape. Role is owner or caregiver. Author/editor are server-assigned account GUIDs. Record version and full profileVersion are opaque base64 SQL rowversions. Revision is an opaque decimal string. ProfileVersion can change after other family mutations; refresh and review before replacing a stale profile operation. Avatar bytes are included in full snapshots, so large avatars increase transfer and cache size.
+
+`endedBy` is a nullable account GUID. It is set when an active sleep or feed timer is finished, including when a different active family member finishes it; older completed records and non-timer entries have null. `recordedBy` remains the timer starter and `lastEditedBy` remains the most recent editor. Later ordinary edits to a completed timer do not replace `endedBy`, so clients can show who started and who finished it alongside the entry's start and end timestamps.
+
+`crossMemberTimerCompletionEnabled` is true only when the serving API enforces the narrow completion contract. Clients must treat a missing or false value as unsupported and keep cross-member completion controls disabled; author and owner behavior remains available under the ordinary permission rules. The flag is represented in the snapshot ETag so an API rollback cannot reuse a cached enabled response.
 
 Owners receive invitation administration and ended membership history. Caregivers receive active members, null member emails and no invitations. Invitation expiry advances revision before computing the ETag. The ETag includes schema/history/revision/membership; authorization always precedes a possible 304 response.
 
@@ -121,7 +126,11 @@ Deploy this API before the corresponding app release. No SQL migration is needed
 
 Create omits baseVersion; update/delete uses the exact last-read record version. Create/update supplies only the selected collection payload, with its ID exactly matching recordId. Delete supplies no payload. Entry/care source ID spelling/case/trailing spaces are preserved; IDs need not be GUIDs. Extra IDs cannot have surrounding whitespace or control characters. Ordinary deletion tombstones prevent ID reuse. Separate records may overlap in time, including independent active timers.
 
-Owners can edit/delete any record; caregivers only their original contributions. The singleton extras `avatar`, `play-selection` and `reminder-settings` are owner-only for all mutations. An extra's kind cannot change. Editing never changes the original author. An accepted no-op update still advances rowversion. Success returns `{operationId,historyId,revision}`; refresh to obtain the new versions.
+Owners can edit/delete any record; caregivers ordinarily edit/delete only their original contributions. There is one narrow timer exception: any active family member may update another member's currently active sleep or feed entry to finish that same timer. The update must preserve the ID, type, start, note and, for feeds, feed kind; it may add the end timestamp and finalize a bottle amount. It cannot change the starter's other content, reopen a timer or convert it to another entry kind. The server keeps `recordedBy`, sets `endedBy` and `lastEditedBy` to the finishing account, and applies the usual base-version check, so concurrent attempts resolve as one success and `412 record_changed` for a stale attempt. The completed entry retains both timestamps and both participant identities.
+
+A cross-member stop always uses that auditable active-to-completed update, including when a sleep has run for less than 60 seconds. It creates a completed sleep entry with its end timestamp and `endedBy`; there is no cross-member timer-deletion exception. Delete remains limited to the existing record author or owner permission, supplies no payload and cannot be authorized merely by active family membership. Ordinary record editing and deletion permissions are otherwise unchanged.
+
+The singleton extras `avatar`, `play-selection` and `reminder-settings` are owner-only for all mutations. An extra's kind cannot change. Editing never changes the original author. An accepted no-op update still advances rowversion. Success returns `{operationId,historyId,revision}`; refresh to obtain the new versions.
 
 Extra kinds are `avatar` (validated JPEG/PNG/HEIC/WebP data URL or null, at most 12 MiB decoded), `play-selection` (included/excluded activity IDs), `play-checkin` (day/activity ID), `reminder` (rule settings and an absolute `onceAt` for one-time rules), and `reminder-settings` (saved form settings or null). Singleton IDs equal their kind. See [the typed extra contract](../src/family/extras.ts) and [server validation](../server/LittleDays.FamilyApi/FamilyExtraValidation.cs) for exact fields and bounds. The avatar is the selected baby image, not the device photo library. Reminder rules are shared, while each device separately enables and schedules notification delivery.
 
@@ -178,13 +187,15 @@ Grant-scoped mutations carry operationId/membershipId/historyId. Removal also ca
 
 The total active-member limit defaults to six (one admin plus five others) and caps older larger configuration values at six. Active non-admin members and distinct live pending invitations reserve the five other places; an invitation for an already active member cannot reserve another place. Replacing an existing live invitation adds no place. Decline, revocation, expiry or departure releases capacity. New creation/invitation/acceptance checks run inside the serialized transaction; existing over-limit members/history are not deleted. Ownership transfer retains the same family, records and original authors, and ordinary departure/removal retains accepted contributions.
 
-`POST /v1/account-deletion-status` is intentionally unauthenticated; `{deletionId,receiptSecret}` returns only deletion ID/status/request time for a matching secret. Account deletion uses `{operationId,receiptSecret}` and cannot delete an account that still owns an open family.
+`POST /v1/account-deletion-status` is intentionally unauthenticated; `{deletionId,receiptSecret}` returns only deletion ID/status/request time for a matching secret. Account deletion uses `{operationId,receiptSecret}` and cannot delete an account that still owns an open family. Existing creator/last-editor deletion rules are unchanged. If the deleted account is referenced only as `endedBy` on a surviving completed timer, cleanup clears that attribution and advances the affected family revision rather than deleting the record solely because that account finished it. Pending deletion also makes a related notification ineligible.
 
 ## Compatibility and errors
 
 Migration preserves legacy families as schema 1. V2 snapshot/record/profile calls reject them with `409 family_schema_unsupported`; legacy bottle/profile writes similarly reject full families. Full clients must not silently convert/project legacy snapshots. V1 lifecycle operations support either schema.
 
 Shared extras require DbUp migration `0003_FamilySharedExtras.sql` before the compatible API and mobile update. It expands existing record constraints without replacing history. Optional extras fields preserve existing seed/operation fingerprints; current mobile activation requires extras capability and never silently drops personal extras to join an older service.
+
+Durable timer-finish attribution requires additive DbUp migration `0007_TimerEndAttribution.sql` before the compatible API. It adds nullable `FamilyRecords.TimerEndedBy` and its filtered lookup index without rewriting existing records; pre-migration completed timers therefore remain unattributed. Deploy in the order migration, compatible API, then client. Do not down-migrate the column to roll back an app or API issue.
 
 Durable operation IDs bind the account and request fingerprint. Record/profile requests bind current history and membership. Rejoining creates a new grant; old queued work cannot apply. Restored histories invalidate old operations. Retry lost responses with the same durable operation; review conflicts before issuing replacements.
 

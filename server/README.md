@@ -117,6 +117,30 @@ Full snapshots expose `watchRecordingEnabled` from this current guard setting,
 and include it in their ETag. Clients must require an explicit true before family
 Watch writes; an omitted/false value does not permit an unguarded fallback.
 
+### Cross-member timer completion
+
+Apply additive migration `0007_TimerEndAttribution.sql` before deploying the API
+that supports cross-member timer completion. It adds nullable
+`FamilyRecords.TimerEndedBy` plus a filtered lookup index and does not rewrite
+existing rows. A current active family member may finish another member's live
+sleep or feed only through the same versioned active-to-completed entry update.
+The ID, type, start, note and feed kind stay fixed; a bottle amount may be
+finalized. The snapshot keeps the starter in `recordedBy`, exposes the finisher in
+nullable `endedBy`, and keeps the entry start/end timestamps. Ordinary caregiver
+edits remain limited to their own contributions, while owner permissions are
+unchanged. A stale simultaneous finish returns `record_changed`. Snapshots expose
+`crossMemberTimerCompletionEnabled: true`; clients must require explicit true,
+because older or mocked snapshots default to false. The capability is part of
+the ETag so rollback refreshes cannot retain a cached enabled state.
+
+A cross-member stop always uses that same versioned completion update, including
+when a sleep has run for less than 60 seconds. It preserves a completed entry and
+records the finisher in `endedBy`. Delete remains limited to the existing author
+or owner permission; active family membership never authorizes deletion of
+another member's timer. This capability has no new environment gate; the existing
+`Family:EnforceSingleActiveTimers` switch independently controls whether new
+simultaneous family timers are rejected.
+
 No Apple/Expo credentials, Azure resources or feature gates are changed by adding
 this code. Manual environment/release steps belong in the existing runbook.
 
@@ -176,11 +200,11 @@ Ordinary family transactions acquire the shared global lifecycle barrier, then a
 
 Deploy additive DbUp `0004_FamilyAvailabilityBounds.sql` before this API. Closed-family cleanup handles bounded batches and marks completed purges so old families are not repeatedly scanned for deletion. Whole-history account cleanup remains a global lifecycle operation; measure its latency before larger-scale use. Review existing family sizes before deploying new limits; no migration silently deletes over-limit content. Restore safety is **not fully implemented**: `Recovery__Blocked=true` blocks all `/v1` and `/v2` routes and pauses new cleanup, but operators must stop/drain existing work and independently reconcile a restored target before reopening. Follow the [security remediation checklist](../docs/SECURITY-REMEDIATION-2026-09-17.md).
 
-Records use SQL rowversions and immutable original authors. Owners can edit/delete any record, caregivers their own. Profile updates and singleton extras (`avatar`, `play-selection`, `reminder-settings`) are owner-only; profile updates require the current profile version. Retrying operations checks request fingerprint, history and applicable membership. Snapshot authorization precedes ETag evaluation. Caregivers do not receive member email addresses or invitation administration.
+Records use SQL rowversions and immutable original authors. Owners can edit/delete any record, caregivers their own, apart from the narrow active-to-finished timer transition described above. Profile updates and singleton extras (`avatar`, `play-selection`, `reminder-settings`) are owner-only; profile updates require the current profile version. Retrying operations checks request fingerprint, history and applicable membership. Snapshot authorization precedes ETag evaluation. Caregivers do not receive member email addresses or invitation administration.
 
 ## Deletion and operating boundaries
 
-An owner must transfer ownership or close the family before account deletion. Ordinary departure retains contributions. Closing immediately revokes family access, then purges full and legacy content. Account deletion purges records created or last edited by that account, membership/invitation/operation data, then permanently deletes its directory identity. Transient job email is cleared after SQL cleanup. Minimal security/status tombstones prevent token/retry resurrection.
+An owner must transfer ownership or close the family before account deletion. Ordinary departure retains contributions. Closing immediately revokes family access, then purges full and legacy content. Account deletion purges records created or last edited by that account, membership/invitation/operation data, then permanently deletes its directory identity. If a surviving record references the account only through `TimerEndedBy`, cleanup clears that attribution and advances the family revision rather than deleting the record solely for end attribution. Pending deletion suppresses notification delivery for records attributed to that account as creator, current editor or timer finisher. Transient job email is cleared after SQL cleanup. Minimal security/status tombstones prevent token/retry resurrection.
 
 Deletion completion uses a device-held secret receipt and does not require a surviving login. Directory deletion authorizes only a durable job awaiting identity deletion. Credential rotation, retention/restore policy and live Graph behavior require operational validation; see [directory cleanup and release gates](../docs/AZURE-FAMILY-SETUP.md#7-record-acceptance-and-operational-evidence).
 

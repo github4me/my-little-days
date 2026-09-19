@@ -612,6 +612,10 @@ const messages = {
     "此记录已被其他成员修改。最新版本已保留，你的修改留在私人待检查内容中。",
     "Another member changed this feed. The latest version stays and your change is kept privately for review.",
   ],
+  errorActiveTimerConflict: [
+    "发送时，家庭中已有同类的喂养或睡眠计时。你这次开始未共享，已保留在本机。刷新“今天”查看当前状态；如果计时仍在进行，可在那里结束。",
+    "When this change was sent, a family feeding or sleep timer of the same type already existed. Your attempted start was not shared and is preserved on this device. Refresh Today to see its current status; if it is still running, you can finish it there.",
+  ],
   errorProfileChanged: [
     "宝宝资料已被更新。请刷新并检查最新资料，再修改和保存。",
     "The baby profile has changed. Refresh and check the latest profile before editing and saving again.",
@@ -785,6 +789,7 @@ const errorMessages: Record<string, FamilyMessageKey> = {
   invitation_unavailable: "errorInvitationUnavailable",
   invitation_already_created: "errorInvitationCreated",
   record_changed: "errorRecordChanged",
+  active_timer_conflict: "errorActiveTimerConflict",
   profile_changed: "errorProfileChanged",
   transfer_unavailable: "errorTransferUnavailable",
   transfer_pending: "errorTransferPending",

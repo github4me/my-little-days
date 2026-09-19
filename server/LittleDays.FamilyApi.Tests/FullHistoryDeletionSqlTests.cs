@@ -14,25 +14,41 @@ public sealed class FullHistoryDeletionSqlTests(SqlFixture sql) : IClassFixture<
         var caregiver = await s.Accept(await s.Invite(family.Id));
         await using (var db = sql.Open())
         {
+            var now = DateTimeOffset.UtcNow;
             db.FamilyRecords.AddRange(
                 Record(family.Id, "entry", "authored", s.Caregiver.ObjectId, s.Owner.ObjectId),
                 Record(family.Id, "care", "edited", s.Owner.ObjectId, s.Caregiver.ObjectId),
-                Record(family.Id, "entry", "retained", s.Owner.ObjectId, s.Owner.ObjectId));
+                Record(family.Id, "entry", "retained", s.Owner.ObjectId, s.Owner.ObjectId),
+                Record(family.Id, "entry", "ended-only", s.Owner.ObjectId, s.Owner.ObjectId,
+                    s.Caregiver.ObjectId));
+            db.FamilyNotificationEvents.Add(new FamilyNotificationEventRow
+            {
+                Id = Guid.NewGuid(), FamilyId = family.Id, HistoryId = s.Config.Family.HistoryId,
+                ActorUserId = s.Owner.ObjectId, OperationId = Guid.NewGuid(), Category = "sleep",
+                RecordIdHash = Hash("ended-only"), CreatedAt = now, NotBeforeAt = now,
+                ExpiresAt = now.AddHours(24)
+            });
             await db.SaveChangesAsync();
         }
         await s.Call(x => x.Leave(s.Caregiver, family.Id, s.Context(caregiver), default));
-        await using (var db = sql.Open()) Assert.Equal(3, await db.FamilyRecords.CountAsync(x => x.FamilyId == family.Id));
+        await using (var db = sql.Open()) Assert.Equal(4, await db.FamilyRecords.CountAsync(x => x.FamilyId == family.Id));
         var deletion = await s.Call(x => x.DeleteAccount(s.Caregiver, Request(), default));
+        long beforeCleanup;
         await using (var db = sql.Open())
         {
             var authorization = new DurableAccountDeletionAuthorization(db);
             Assert.False(await authorization.HasPendingRequestAsync(s.Caregiver.ObjectId, default));
+            Assert.True((await db.FamilyNotificationEvents.SingleAsync(x => x.FamilyId == family.Id)).Cancelled);
+            beforeCleanup = (await db.Families.SingleAsync(x => x.Id == family.Id)).Revision;
         }
         var provider = new UnconfiguredAccountIdentityDeletion();
         await using (var db = sql.Open()) Assert.False(await new DeletionProcessor(db, s.Config, TimeProvider.System, provider).Process(default));
         await using (var db = sql.Open())
         {
-            Assert.Equal("retained", (await db.FamilyRecords.SingleAsync(x => x.FamilyId == family.Id)).Id);
+            var retained = await db.FamilyRecords.Where(x => x.FamilyId == family.Id).OrderBy(x => x.Id).ToArrayAsync();
+            Assert.Equal(["ended-only", "retained"], retained.Select(x => x.Id));
+            Assert.All(retained, x => Assert.Null(x.TimerEndedBy));
+            Assert.Equal(beforeCleanup + 1, (await db.Families.SingleAsync(x => x.Id == family.Id)).Revision);
             var job = await db.AccountDeletions.SingleAsync(x => x.OperationId == deletion.DeletionId);
             Assert.Equal("awaiting_identity_deletion", job.Status);
             Assert.Null(job.PendingEmail);
@@ -94,12 +110,15 @@ public sealed class FullHistoryDeletionSqlTests(SqlFixture sql) : IClassFixture<
         }
     }
 
-    private static FamilyRecordRow Record(Guid familyId, string collection, string id, Guid author, Guid editor) => new()
+    private static FamilyRecordRow Record(Guid familyId, string collection, string id, Guid author, Guid editor,
+        Guid? endedBy = null) => new()
     {
         FamilyId = familyId, Collection = collection, Id = id,
-        IdHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(id))),
-        RecordJson = "{\"private\":\"content\"}", RecordedBy = author, LastEditedBy = editor
+        IdHash = Hash(id),
+        RecordJson = "{\"private\":\"content\"}", RecordedBy = author, LastEditedBy = editor,
+        TimerEndedBy = endedBy
     };
+    private static string Hash(string id) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(id)));
     private static DeleteAccountRequest Request() => new(Guid.NewGuid(), Guid.NewGuid().ToString("N") + Guid.NewGuid().ToString("N"));
     private sealed class CompleteDeletion : IAccountIdentityDeletion
     {

@@ -82,6 +82,8 @@ const english: Record<string, string> = {
   "结束：{date} · {time}": "Ended: {date} · {time}",
   编辑记录: "Edit record",
   删除记录: "Delete record",
+  打开记录编辑界面: "Opens the record editor",
+  打开删除确认: "Opens a confirmation before deleting",
   成长: "Growth",
   照护: "Care",
   喂奶: "Feed",
@@ -136,6 +138,10 @@ const english: Record<string, string> = {
   醒了: "Awake",
   睡了: "Sleep",
   睡眠计时状态无效: "This sleep timer is no longer running.",
+  "已同步到家庭中正在进行的睡眠，未创建重复计时。":
+    "An ongoing family sleep was synced. No duplicate timer was created.",
+  "已同步到家庭中正在进行的喂养，未创建重复计时。":
+    "An ongoing family feed was synced. No duplicate timer was created.",
   "本次睡眠不足 1 分钟，已按误触取消，不计入记录。如需保留，请补录睡眠。":
     "This sleep lasted less than 1 minute and was cancelled as an accidental tap. It will not count as a record. Use Add past sleep to keep it.",
   "＋记录": "+ Add",

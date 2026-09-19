@@ -8,14 +8,22 @@ export type SharedRecord<T> = {
   recordedBy: string;
   lastEditedBy: string;
 } & T;
+export type SharedEntryRecord = SharedRecord<{ entry: Entry }> & {
+  // Set by the service only when a running feed or sleep is finished. Older
+  // snapshots omit it, so the client must keep the field optional.
+  endedBy?: string | null;
+};
 export type FullFamilySnapshot = FamilySnapshot & {
   schemaVersion: 2;
   careSchemaVersion?: 1 | 2;
   // Older APIs omit this. Only explicit server timer enforcement enables the
   // additional Watch writer; ordinary iPhone recording remains compatible.
   watchRecordingEnabled?: boolean;
+  // Older APIs omit this. Cross-member timer completion must stay disabled
+  // until the server explicitly advertises the narrow permission.
+  crossMemberTimerCompletionEnabled?: boolean;
   profile: State["profile"];
-  entries: SharedRecord<{ entry: Entry }>[];
+  entries: SharedEntryRecord[];
   careRecords: SharedRecord<{ record: CareRecord }>[];
   extrasSchemaVersion?: 1;
   extraRecords?: SharedRecord<{ record: FamilyExtraRecord }>[];

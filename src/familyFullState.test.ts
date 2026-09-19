@@ -31,6 +31,7 @@ const metadata = {
 function snapshot(): FullFamilySnapshot {
   return {
     schemaVersion: 2,
+    crossMemberTimerCompletionEnabled: true,
     historyId: "history",
     revision: "1",
     family: {
@@ -181,6 +182,19 @@ test("full snapshot preserves all domain fields, numeric precision, source IDs a
       .length,
     6,
   );
+});
+test("full snapshot preserves timer end attribution and rejects malformed attribution", () => {
+  const value = snapshot();
+  value.entries[0].endedBy = "caregiver";
+  assert.equal(validateFullSnapshot(value).entries[0].endedBy, "caregiver");
+  (value.entries[0] as { endedBy?: unknown }).endedBy = "";
+  assert.throws(() => validateFullSnapshot(value), /invalid_response/);
+  (value.entries[0] as { endedBy?: unknown }).endedBy = 42;
+  assert.throws(() => validateFullSnapshot(value), /invalid_response/);
+  (
+    value as { crossMemberTimerCompletionEnabled?: unknown }
+  ).crossMemberTimerCompletionEnabled = "yes";
+  assert.throws(() => validateFullSnapshot(value), /invalid_response/);
 });
 test("full capability and snapshot gate rejects legacy or partial domains", () => {
   assert.throws(
@@ -387,6 +401,7 @@ test("accepted sleep create promotes a stable delete only after a sufficiently f
     membershipId: "grant",
     historyId: "history",
   });
+  assert.equal(promoted.records![0].timerCompletion, undefined);
   assert.equal(promoted.records![0].sleepFollowUp, undefined);
   assert.equal(
     projectedFullState(promoted)?.entries.some((e) => e.id === "new-sleep"),
@@ -449,7 +464,7 @@ test("sleep completion never overwrites an intervening remote edit or deletion",
     assert.equal(recordsForSend(result, result).length, 0);
   }
 });
-test("sleep follow-up is rejected across grants, for forbidden records, and on malformed local data", () => {
+test("sleep follow-up is rejected across grants and on malformed local data", () => {
   const pending = enqueueSleepFinish(
     pendingSleep(),
     "new-sleep",
@@ -467,7 +482,48 @@ test("sleep follow-up is rejected across grants, for forbidden records, and on m
   forbidden.entries[1].recordedBy = "someone-else";
   assert.equal(
     canControlSleep(applyFullSnapshot(emptyPilotState(), forbidden), "sleep"),
-    false,
+    true,
+  );
+  const crossMember = enqueueSleepFinish(
+    applyFullSnapshot(emptyPilotState(), forbidden),
+    "sleep",
+    stopped(120_000),
+    "cross-member-stop",
+  );
+  assert.equal(crossMember.records![0].timerCompletion, "sleep");
+  assert.equal(crossMember.records![0].operation.entry?.end, stopped(120_000));
+  const crossMemberQuickStop = enqueueSleepFinish(
+    applyFullSnapshot(emptyPilotState(), forbidden),
+    "sleep",
+    stopped(30_000),
+    "cross-member-quick-stop",
+  );
+  assert.equal(crossMemberQuickStop.records![0].operation.kind, "update");
+  assert.equal(
+    crossMemberQuickStop.records![0].operation.entry?.end,
+    stopped(30_000),
+  );
+  const olderApi = { ...forbidden };
+  delete olderApi.crossMemberTimerCompletionEnabled;
+  const olderState = applyFullSnapshot(emptyPilotState(), olderApi);
+  assert.equal(canControlSleep(olderState, "sleep"), false);
+  assert.throws(
+    () =>
+      enqueueSleepFinish(
+        olderState,
+        "sleep",
+        stopped(120_000),
+        "unsupported-cross-member-stop",
+      ),
+    /record_forbidden/,
+  );
+  assert.throws(
+    () =>
+      enqueueRecord(
+        applyFullSnapshot(emptyPilotState(), forbidden),
+        operation({ ...forbidden.entries[1].entry, note: "not allowed" }),
+      ),
+    /record_forbidden/,
   );
   assert.throws(
     () =>
@@ -560,7 +616,7 @@ test("feed follow-up becomes a fresh versioned update after the original receipt
     assert.equal(promoted.records![0].feedFollowUp, undefined);
   }
 });
-test("feed finish rejects stale dialog versions, forbidden changes and malformed durable follow-ups", () => {
+test("feed finish rejects stale dialog versions and malformed durable follow-ups", () => {
   const value = snapshot();
   value.entries[0].entry = { ...value.entries[0].entry, feedRunning: true };
   const base = applyFullSnapshot(emptyPilotState(), value);
@@ -591,8 +647,18 @@ test("feed finish rejects stale dialog versions, forbidden changes and malformed
   value.entries[0].recordedBy = "other";
   assert.equal(
     canControlFeed(applyFullSnapshot(emptyPilotState(), value), "feed"),
-    false,
+    true,
   );
+  const crossMember = enqueueFeedFinish(
+    applyFullSnapshot(emptyPilotState(), value),
+    "feed",
+    stopped(120_000),
+    90,
+    "cross-member-feed-stop",
+    metadata.version,
+  );
+  assert.equal(crossMember.records![0].timerCompletion, "feed");
+  assert.equal(crossMember.records![0].operation.entry?.amount, 90);
   const followUp = enqueueFeedFinish(
     pendingFeed(),
     "new-feed",

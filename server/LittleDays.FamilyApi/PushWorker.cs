@@ -81,7 +81,8 @@ public sealed class PushProcessor(PilotDatabase db, PilotConfiguration config, T
                 where delivery.BucketId == row.Id && !entry.Cancelled && entry.ExpiresAt > now && entry.NotBeforeAt <= now &&
                     entry.HistoryId == row.HistoryId && entry.FamilyId == row.FamilyId && entry.ActorUserId != row.RecipientUserId &&
                     permitted.Contains(entry.Category) && !record.Deleted &&
-                    !db.AccountDeletions.Any(x => x.UserId == record.RecordedBy || x.UserId == record.LastEditedBy)
+                    !db.AccountDeletions.Any(x => x.UserId == record.RecordedBy || x.UserId == record.LastEditedBy ||
+                        x.UserId == record.TimerEndedBy)
                 select entry.Id).AnyAsync(ct);
             if (!eligible) { row.State = "cancelled"; return null; }
             if (installation.NextSendAt > now)

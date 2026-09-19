@@ -406,6 +406,15 @@ export function parseStoredPilot(raw: string | null): PilotState {
       !["pending", "accepted", "failed"].includes(q.status)
     )
       throw new Error("local_data_invalid");
+  for (const q of state.records ?? [])
+    if (
+      q.timerCompletion !== undefined &&
+      (!["sleep", "feed"].includes(q.timerCompletion) ||
+        q.operation.collection !== "entry" ||
+        q.operation.kind !== "update" ||
+        q.operation.entry?.type !== q.timerCompletion)
+    )
+      throw new Error("local_data_invalid");
   for (const q of state.records ?? []) {
     if (q.sleepFollowUp === undefined && q.feedFollowUp === undefined) continue;
     try {

@@ -284,15 +284,82 @@ function BabyApp({
   const deleteVersion = useRef<string | undefined>(undefined);
   const versionFor = (id: string) =>
     family.fullSnapshot?.entries.find((r) => r.entry.id === id)?.version;
+  const familyMemberName = (id?: string | null) =>
+    family.fullSnapshot?.members.find((member) => member.id === id)
+      ?.displayName ??
+    (resolveLocale(language) === "zh-CN"
+      ? "曾加入的家庭成员"
+      : "Former family member");
   const authorLabel = (id: string) => {
     const record = family.fullSnapshot?.entries.find((r) => r.entry.id === id);
-    const name =
-      family.fullSnapshot?.members.find((m) => m.id === record?.recordedBy)
-        ?.displayName ??
-      (resolveLocale(language) === "zh-CN" ? "家庭成员" : "Family member");
-    return resolveLocale(language) === "zh-CN"
-      ? `记录人：${name}`
-      : `Recorded by ${name}`;
+    const locale = resolveLocale(language);
+    if (!record) {
+      const pendingStart = family.recordPending.find(
+        (item) =>
+          item.operation.recordId === id &&
+          item.operation.kind === "create" &&
+          !!item.operation.entry,
+      );
+      const pendingEntry = pendingStart?.operation.entry;
+      if (pendingEntry && family.user) {
+        const starter =
+          family.user.displayName || familyMemberName(family.user.id);
+        const stoppedAt =
+          pendingStart.sleepFollowUp?.stoppedAt ??
+          pendingStart.feedFollowUp?.stoppedAt;
+        if (stoppedAt)
+          return locale === "zh-CN"
+            ? `记录人：${starter} · ${time(stoppedAt)} 结束（等待同步）`
+            : `Recorded by ${starter} · Ended at ${time(stoppedAt)} (waiting to sync)`;
+        return locale === "zh-CN"
+          ? `${starter} 于 ${time(pendingEntry.start)} 开始 · 仍在进行（等待同步）`
+          : `Started by ${starter} at ${time(pendingEntry.start)} · Ongoing (waiting to sync)`;
+      }
+      return locale === "zh-CN"
+        ? "记录人：家庭成员"
+        : "Recorded by a family member";
+    }
+    const starter = familyMemberName(record.recordedBy);
+    const pendingCompletion = family.recordPending.find(
+      (item) =>
+        item.operation.recordId === id &&
+        !!item.timerCompletion &&
+        !!item.operation.entry?.end,
+    );
+    const pendingEnderId = family.user?.id;
+    if (pendingCompletion?.operation.entry?.end && pendingEnderId) {
+      const endedAt = time(pendingCompletion.operation.entry.end);
+      if (pendingEnderId !== record.recordedBy) {
+        const ender =
+          family.user?.displayName ?? familyMemberName(pendingEnderId);
+        return locale === "zh-CN"
+          ? `开始：${starter} · ${time(record.entry.start)}　结束：${ender} · ${endedAt}（等待同步）`
+          : `Started by ${starter} · ${time(record.entry.start)} · Ended by ${ender} · ${endedAt} (waiting to sync)`;
+      }
+      return locale === "zh-CN"
+        ? `记录人：${starter} · ${endedAt} 结束（等待同步）`
+        : `Recorded by ${starter} · Ended at ${endedAt} (waiting to sync)`;
+    }
+    const isRunning =
+      (record.entry.type === "sleep" && !record.entry.end) ||
+      (record.entry.type === "feed" &&
+        !!record.entry.feedRunning &&
+        !record.entry.end);
+    if (isRunning)
+      return locale === "zh-CN"
+        ? `${starter} 于 ${time(record.entry.start)} 开始 · 仍在进行`
+        : `Started by ${starter} at ${time(record.entry.start)} · Ongoing`;
+    if (
+      record.endedBy &&
+      record.endedBy !== record.recordedBy &&
+      record.entry.end
+    ) {
+      const ender = familyMemberName(record.endedBy);
+      return locale === "zh-CN"
+        ? `开始：${starter} · ${time(record.entry.start)}　结束：${ender} · ${time(record.entry.end)}`
+        : `Started by ${starter} · ${time(record.entry.start)} · Ended by ${ender} · ${time(record.entry.end)}`;
+    }
+    return locale === "zh-CN" ? `记录人：${starter}` : `Recorded by ${starter}`;
   };
   function beginEditor(entry: Entry) {
     if (family.sharedMode && !family.canEditRecord("entry", entry.id)) return;
@@ -485,6 +552,32 @@ function BabyApp({
         editVersion.current?.id === e.id ? editVersion.current : null;
       if (draft && draft.context !== familyContext)
         throw new Error("membership_changed");
+      const previous = family.fullSnapshot?.entries.find(
+        (record) => record.entry.id === e.id,
+      )?.entry;
+      const startingTimer: "sleep" | "feed" | null =
+        e.type === "sleep" &&
+        !e.end &&
+        (!previous || previous.type !== "sleep" || !!previous.end)
+          ? "sleep"
+          : e.type === "feed" &&
+              !!e.feedRunning &&
+              !e.end &&
+              (!previous || previous.type !== "feed" || !previous.feedRunning)
+            ? "feed"
+            : null;
+      if (startingTimer) {
+        const currentTimer = await family.refreshActiveTimer(startingTimer);
+        if (currentTimer.activeId) {
+          setEditor(null);
+          setMessage(
+            startingTimer === "sleep"
+              ? "已同步到家庭中正在进行的睡眠，未创建重复计时。"
+              : "已同步到家庭中正在进行的喂养，未创建重复计时。",
+          );
+          return;
+        }
+      }
       await family.saveRecord(
         "entry",
         e,
@@ -514,6 +607,13 @@ function BabyApp({
       return;
     }
     const finished = finishLiveSleep(active, stoppedAt);
+    const sharedRecord = family.fullSnapshot?.entries.find(
+      (record) => record.entry.id === active.id,
+    );
+    const completedByDifferentMember =
+      family.sharedMode &&
+      !!sharedRecord &&
+      sharedRecord.recordedBy !== family.user?.id;
     if (family.sharedMode) await family.finishSleep(active.id, stoppedAt);
     else {
       const current = stateRef.current!;
@@ -532,7 +632,7 @@ function BabyApp({
     }
     if (activeFamilyContext.current !== context) return;
     setMessage("");
-    if (!finished)
+    if (!finished && !completedByDifferentMember)
       setSleepNotice(
         "本次睡眠不足 1 分钟，已按误触取消，不计入记录。如需保留，请补录睡眠。",
       );
@@ -620,7 +720,9 @@ function BabyApp({
                 (!pending &&
                   !!server &&
                   (familyState.snapshot?.family.role === "owner" ||
-                    server.recordedBy === family.user?.id)) ||
+                    server.recordedBy === family.user?.id ||
+                    familyState.snapshot?.crossMemberTimerCompletionEnabled ===
+                      true)) ||
                 (!!pending &&
                   familyState.receipts.some(
                     (receipt) =>
@@ -810,17 +912,9 @@ function BabyApp({
   const owned = (id: string) =>
     family.fullSnapshot?.entries.find((r) => r.entry.id === id)?.recordedBy ===
     family.user?.id;
-  const activeCandidates = entries.filter(
-    (e) =>
-      e.type === "sleep" &&
-      !e.end &&
-      (!family.sharedMode || family.canControlSleep(e.id)),
-  );
+  const activeCandidates = entries.filter((e) => e.type === "sleep" && !e.end);
   const feedCandidates = entries.filter(
-    (e) =>
-      e.type === "feed" &&
-      e.feedRunning &&
-      (!family.sharedMode || family.canControlFeed(e.id)),
+    (e) => e.type === "feed" && e.feedRunning,
   );
   const active =
     activeCandidates.find((e) => owned(e.id)) ?? activeCandidates[0];
@@ -1321,11 +1415,29 @@ function BabyApp({
                                     })
                                   : "还没有记录，轻点开始"}
                           </T>
+                          {((type === "feed" && activeFeed) ||
+                            (type === "sleep" && active)) &&
+                          family.sharedMode ? (
+                            <T
+                              raw
+                              style={{
+                                marginTop: 2,
+                                fontSize: 11,
+                                lineHeight: 16,
+                                color: c.muted,
+                              }}
+                            >
+                              {authorLabel(
+                                type === "feed" ? activeFeed!.id : active!.id,
+                              )}
+                            </T>
+                          ) : null}
                         </View>
                         {type === "feed" && activeFeed ? (
                           <FeedStopButton
                             disabled={
                               busy ||
+                              family.busy ||
                               (family.sharedMode &&
                                 !family.canControlFeed(activeFeed.id))
                             }
@@ -1342,15 +1454,21 @@ function BabyApp({
                               })
                             }
                           />
+                        ) : type === "sleep" && active ? (
+                          <FeedStopButton
+                            label="醒了"
+                            secondary
+                            disabled={
+                              busy ||
+                              family.busy ||
+                              (family.sharedMode &&
+                                !family.canControlSleep(active.id))
+                            }
+                            onPress={() => void act(() => toggleSleep(active))}
+                          />
                         ) : (
                           <Button
-                            label={
-                              type === "sleep"
-                                ? active
-                                  ? "醒了"
-                                  : "睡了"
-                                : "＋记录"
-                            }
+                            label={type === "sleep" ? "睡了" : "＋记录"}
                             disabled={busy || (type === "sleep" && family.busy)}
                             secondary
                             style={largeType ? { width: "100%" } : undefined}

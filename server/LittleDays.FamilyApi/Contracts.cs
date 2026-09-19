@@ -30,13 +30,15 @@ public sealed record FeedOperation(Guid OperationId, Guid RecordId, Guid Members
 public sealed record FeedReceipt(Guid OperationId, Guid HistoryId, string Revision);
 public sealed record FullFamilyCapabilities(int SchemaVersion, string[] RecordKinds, int MaxSeedBytes, int ExtrasSchemaVersion = 1, int CareSchemaVersion = 2);
 public sealed record FullFamilyProfile(string Name, string BirthDate, string Sex);
-public sealed record SharedEntry(JsonElement Entry, string Version, Guid RecordedBy, Guid LastEditedBy);
+public sealed record SharedEntry(JsonElement Entry, string Version, Guid RecordedBy, Guid LastEditedBy,
+    Guid? EndedBy = null);
 public sealed record SharedCareRecord(JsonElement Record, string Version, Guid RecordedBy, Guid LastEditedBy);
 public sealed record SharedExtraRecord(JsonElement Record, string Version, Guid RecordedBy, Guid LastEditedBy);
 public sealed record FullFamilySnapshot(int SchemaVersion, FullFamilyProfile Profile,
     SharedEntry[] Entries, SharedCareRecord[] CareRecords, FamilySummary Family, Guid HistoryId, string Revision,
     FamilyMember[] Members, FamilyInvitation[] Invitations, SharedFeed[] Feeds, OwnershipTransfer? OwnershipTransfer,
-    int ExtrasSchemaVersion = 1, SharedExtraRecord[]? ExtraRecords = null, bool WatchRecordingEnabled = false, int CareSchemaVersion = 2)
+    int ExtrasSchemaVersion = 1, SharedExtraRecord[]? ExtraRecords = null, bool WatchRecordingEnabled = false,
+    int CareSchemaVersion = 2, bool CrossMemberTimerCompletionEnabled = false)
 {
     // Legacy apps reject new care kinds. Omit them from the old representation,
     // never relabel them or delete the underlying records. Existing per-record

@@ -14,7 +14,8 @@ internal static class SchemaVerifier
     [
         "0001_LegacySchemaBaseline.sql", "0002_VerifyBaselineAndRuntimeGrants.sql",
         "0003_FamilySharedExtras.sql", "0004_FamilyAvailabilityBounds.sql",
-        "0005_QueryIndexesAndOperationCounts.sql", "0006_FamilyPushAndTimerIndex.sql"
+        "0005_QueryIndexesAndOperationCounts.sql", "0006_FamilyPushAndTimerIndex.sql",
+        "0007_TimerEndAttribution.sql"
     ];
 
     internal static int Version(IEnumerable<string> applied) => applied
@@ -36,7 +37,8 @@ internal static class SchemaVerifier
     private sealed record Index(string Table, string Name, string[] Keys, bool Unique = false,
         string? Filter = null, string[]? Includes = null, bool Primary = false);
 
-    private sealed record Column(int Type, int Length, int? Precision = null, int? Scale = null);
+    private sealed record Column(int Type, int Length, int? Precision = null, int? Scale = null,
+        bool Nullable = false);
 
     private static void VerifyColumns(Func<IDbCommand> factory, int version, int legacyStage)
     {
@@ -69,6 +71,8 @@ internal static class SchemaVerifier
             expected[("PushDeliveries", "EventId")] = new(36, 16);
             expected[("PushDeliveries", "BucketId")] = new(36, 16);
         }
+        if (version >= 7)
+            expected[("FamilyRecords", "TimerEndedBy")] = new(36, 16, Nullable: true);
         using var command = factory();
         command.CommandText = """
             SELECT t.name, c.name, c.system_type_id, c.max_length, c.precision, c.scale, c.is_nullable, c.is_computed
@@ -82,7 +86,8 @@ internal static class SchemaVerifier
             if (!expected.Remove(key, out var column)) continue;
             if (Convert.ToInt32(rows.GetValue(2)) != column.Type || Convert.ToInt32(rows.GetValue(3)) != column.Length ||
                 column.Precision is { } precision && Convert.ToInt32(rows.GetValue(4)) != precision ||
-                column.Scale is { } scale && Convert.ToInt32(rows.GetValue(5)) != scale || rows.GetBoolean(6) || rows.GetBoolean(7))
+                column.Scale is { } scale && Convert.ToInt32(rows.GetValue(5)) != scale ||
+                rows.GetBoolean(6) != column.Nullable || rows.GetBoolean(7))
                 Fail(key.Item1, key.Item2, "critical column type, precision, nullability or computed state differs");
         }
         if (expected.Count != 0)
@@ -174,6 +179,9 @@ internal static class SchemaVerifier
                 new("NotificationSummaryBuckets", "IX_NotificationSummaryBuckets_ExpiresAt", ["ExpiresAt"]),
                 new("FamilyRecords", "IX_FamilyRecords_FamilyId_ActiveTimerKind", ["FamilyId", "ActiveTimerKind"])
             ]);
+        if (version >= 7)
+            indexes.Add(new("FamilyRecords", "IX_FamilyRecords_TimerEndedBy", ["TimerEndedBy"],
+                Filter: "TimerEndedBy IS NOT NULL"));
         return indexes;
     }
 

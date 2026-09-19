@@ -122,6 +122,10 @@ export function useFamilyDemo(scenario: FamilyDemoScenario): ReturnType<
     signIn: () => run({ type: "sign-in" }),
     signOut: () => run({ type: "sign-out" }),
     refresh: () => run({ type: "refresh" }),
+    refreshActiveTimer: async () => ({
+      refreshed: true,
+      activeId: null,
+    }),
     refreshForNotification: async () => false,
     createFamily: (babyName) => run({ type: "create-family", babyName }),
     acceptInvitation: (id) => run({ type: "accept-invitation", id }),

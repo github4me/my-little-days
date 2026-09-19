@@ -96,7 +96,7 @@ public sealed partial class FamilyService
         await ExpireInvitations(family, ct);
         // The capability is current host configuration, not part of a family's
         // data revision. A gate change must invalidate a cached enabled result.
-        var etag = $"\"v2-extras1-care{careSchemaVersion}-watch{(config.Family.EnforceSingleActiveTimers ? 1 : 0)}:{config.Family.HistoryId:D}:{Revision(family)}:{grant.Id:D}\"";
+        var etag = $"\"v2-extras1-care{careSchemaVersion}-watch{(config.Family.EnforceSingleActiveTimers ? 1 : 0)}-cross-timer1:{config.Family.HistoryId:D}:{Revision(family)}:{grant.Id:D}\"";
         if (ifNoneMatch == etag) return new ConditionalSnapshot<FullFamilySnapshot>(etag, null);
         return new ConditionalSnapshot<FullFamilySnapshot>(etag, (await FullSnapshotData(family, grant, ct, expire: false)).ForCareSchema(careSchemaVersion));
     }, ct);
@@ -119,10 +119,10 @@ public sealed partial class FamilyService
             if (operation.Kind != "delete") await CheckCapacity(familyId, ct);
             var idHash = RecordIdHash(operation.RecordId);
             var row = await db.FamilyRecords.SingleOrDefaultAsync(x => x.FamilyId == familyId && x.Collection == operation.Collection && x.IdHash == idHash, ct);
-            if (operation.Collection == "entry" && value is not null) await GuardActiveTimer(familyId, operation.RecordId, value.Value, ct);
             if (operation.Kind == "create")
             {
                 if (row is not null) throw new ApiException(412, "record_changed");
+                if (operation.Collection == "entry") await GuardActiveTimer(familyId, operation.RecordId, value!.Value, ct);
                 await CheckRecordBudget(familyId, null, json!, ct);
                 row = NewRecord(familyId, operation.Collection, value!.Value, user.ObjectId, json);
                 db.FamilyRecords.Add(row);
@@ -132,21 +132,27 @@ public sealed partial class FamilyService
             {
                 if (row is null || row.Deleted || Convert.ToBase64String(row.Version) != operation.BaseVersion)
                     throw new ApiException(412, "record_changed");
-                if (grant.Role != "owner" && row.RecordedBy != user.ObjectId) throw new ApiException(403, "record_forbidden");
+                var previous = ReadRecord(row);
+                var timerCompletion = operation.Collection == "entry" && value is not null &&
+                    IsTimerCompletion(previous, value.Value);
+                if (grant.Role != "owner" && row.RecordedBy != user.ObjectId &&
+                    !(timerCompletion && IsPureTimerCompletion(previous, value!.Value)))
+                    throw new ApiException(403, "record_forbidden");
                 if (operation.Collection == "extra" && value is not null &&
-                    ReadRecord(row).GetProperty("kind").GetString() != value.Value.GetProperty("kind").GetString()) Invalid();
+                    previous.GetProperty("kind").GetString() != value.Value.GetProperty("kind").GetString()) Invalid();
+                if (operation.Collection == "entry" && value is not null)
+                    await GuardActiveTimer(familyId, operation.RecordId, value.Value, ct);
                 if (operation.Kind != "delete") await CheckRecordBudget(familyId, row, json!, ct);
                 row.LastEditedBy = user.ObjectId;
                 if (operation.Kind == "delete")
                 {
-                    row.Deleted = true; row.RecordJson = "{}";
+                    row.Deleted = true; row.RecordJson = "{}"; row.TimerEndedBy = null;
                     if (operation.Collection == "entry") await CancelRecordPush(familyId, operation.RecordId, ct);
                 }
                 else
                 {
                     if (operation.Collection == "entry")
                     {
-                        var previous = ReadRecord(row);
                         var affectsPush = PushPolicy.Categories.Contains(previous.GetProperty("type").GetString()!) ||
                             PushPolicy.Categories.Contains(value!.Value.GetProperty("type").GetString()!);
                         if (affectsPush && !JsonElement.DeepEquals(previous, value!.Value))
@@ -156,6 +162,8 @@ public sealed partial class FamilyService
                             await CancelRecordPush(familyId, operation.RecordId, ct);
                             await QueueRecordPush(user, family, operation, value.Value, ct);
                         }
+                        if (timerCompletion) row.TimerEndedBy = user.ObjectId;
+                        else if (!PreservesTimerCompletion(previous, value!.Value)) row.TimerEndedBy = null;
                     }
                     row.RecordJson = json!;
                 }
@@ -205,14 +213,15 @@ public sealed partial class FamilyService
         var transfer = await db.OwnershipTransfers.SingleOrDefaultAsync(x => x.FamilyId == family.Id && x.Status == "pending", ct);
         var snapshot = new FullFamilySnapshot(2, new(family.BabyName, family.BabyBirthDate ?? "", family.BabySex),
             records.Where(x => x.Collection == "entry").OrderBy(x => x.Id, StringComparer.Ordinal)
-                .Select(x => new SharedEntry(ReadRecord(x), Convert.ToBase64String(x.Version), x.RecordedBy, x.LastEditedBy)).ToArray(),
+                .Select(x => new SharedEntry(ReadRecord(x), Convert.ToBase64String(x.Version), x.RecordedBy, x.LastEditedBy,
+                    x.TimerEndedBy)).ToArray(),
             records.Where(x => x.Collection == "care").OrderBy(x => x.Id, StringComparer.Ordinal)
                 .Select(x => new SharedCareRecord(ReadRecord(x), Convert.ToBase64String(x.Version), x.RecordedBy, x.LastEditedBy)).ToArray(),
             Summary(family, grant), config.Family.HistoryId, Revision(family), members.Select(x => Member(x, grant.Role == "owner")).ToArray(),
             invitations.Select(Invitation).ToArray(), [], transfer is null ? null : Transfer(transfer), 1,
             records.Where(x => x.Collection == "extra").OrderBy(x => x.Id, StringComparer.Ordinal)
                 .Select(x => new SharedExtraRecord(ReadRecord(x), Convert.ToBase64String(x.Version), x.RecordedBy, x.LastEditedBy)).ToArray(),
-            config.Family.EnforceSingleActiveTimers);
+            config.Family.EnforceSingleActiveTimers, CrossMemberTimerCompletionEnabled: true);
         return FamilyAvailability.RequireResponseBudget(snapshot);
     }
 
@@ -280,6 +289,35 @@ public sealed partial class FamilyService
     private static string RecordJson(string collection, JsonElement value) =>
         JsonSerializer.Serialize(value, collection == "extra" ? FamilyAvailability.SnapshotJson : Json);
     private static string RecordIdHash(string id) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(id)));
+
+    private static bool IsTimerCompletion(JsonElement previous, JsonElement next)
+    {
+        var kind = PushPolicy.ActiveTimer(previous);
+        return kind is not null && next.GetProperty("type").GetString() == kind &&
+            PushPolicy.ActiveTimer(next) is null && next.TryGetProperty("end", out _);
+    }
+
+    private static bool IsPureTimerCompletion(JsonElement previous, JsonElement next)
+    {
+        if (!IsTimerCompletion(previous, next)) return false;
+        static bool Same(JsonElement left, JsonElement right, string name) =>
+            left.TryGetProperty(name, out var one) && right.TryGetProperty(name, out var two) &&
+            JsonElement.DeepEquals(one, two);
+        if (!Same(previous, next, "id") || !Same(previous, next, "type") ||
+            !Same(previous, next, "start") || !Same(previous, next, "note")) return false;
+        if (previous.GetProperty("type").GetString() == "sleep") return true;
+        // Finishing a bottle feed may replace its provisional amount with the
+        // measured amount. All other feed content belongs to the starter.
+        return Same(previous, next, "feedKind");
+    }
+
+    private static bool IsCompletedTimer(JsonElement value) =>
+        value.GetProperty("type").GetString() is "sleep" or "feed" && value.TryGetProperty("end", out _);
+
+    private static bool PreservesTimerCompletion(JsonElement previous, JsonElement next) =>
+        IsCompletedTimer(previous) && IsCompletedTimer(next) &&
+        previous.GetProperty("type").GetString() == next.GetProperty("type").GetString();
+
     private static JsonElement ReadRecord(FamilyRecordRow row)
     {
         using var json = JsonDocument.Parse(row.RecordJson);

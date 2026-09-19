@@ -84,9 +84,16 @@ function fixture({ fontScale = 1, isDark = false } = {}) {
         if (name === "@react-native-community/datetimepicker")
           return "DateTimePicker";
         if (name === "react-native-svg")
-          return { __esModule: true, default: "Svg", Rect: "Rect" };
+          return {
+            __esModule: true,
+            default: "Svg",
+            Path: "Path",
+            Rect: "Rect",
+          };
         if (name === "./AccessibleModal") return "Modal";
         if (name === "./CareIcon") return "CareIcon";
+        if (name === "./RecordActionButton")
+          return load("src/RecordActionButton.tsx");
         if (name === "./ui")
           return { Theme: {}, Button: "Button", Card: "Card", T: "T", row: {} };
         if (name === "./domain")
@@ -172,6 +179,33 @@ test("accessible calendar list preserves selected date and type filters", () => 
   screen.press("回到今天");
   assert.equal(screen.list().length, 1);
   assert.equal(screen.list()[0].props.key, "today-6");
+});
+
+test("calendar record details use icon actions with descriptive accessibility", () => {
+  const screen = fixture();
+  screen.chart()[0].props.onPress();
+  screen.render();
+  for (const [label, action, hint] of [
+    ["编辑记录", "edit", "打开记录编辑界面"],
+    ["删除记录", "delete", "打开删除确认"],
+  ]) {
+    const control = screen
+      .nodes()
+      .find((node) => node.props.accessibilityLabel === label);
+    assert.ok(control, label);
+    assert.equal(control.props.action, action);
+    assert.equal(control.props.accessibilityHint, hint);
+  }
+  assert.equal(
+    screen
+      .nodes()
+      .filter(
+        (node) =>
+          node.type === "Button" &&
+          ["编辑记录", "删除记录"].includes(node.props.label),
+      ).length,
+    0,
+  );
 });
 
 test("native date picker derives its appearance from the semantic theme", () => {

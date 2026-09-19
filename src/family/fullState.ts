@@ -13,6 +13,7 @@ import type {
   FeedReceipt,
   FullFamilySnapshot,
   RecordOperation,
+  SharedEntryRecord,
   SharedRecord,
 } from "./contracts";
 import {
@@ -35,6 +36,9 @@ export type QueuedRecord = {
   status: "pending" | "accepted" | "failed";
   error?: string;
   receiptRevision?: string;
+  // Only enqueueTimerFinish can create this marker. A fresh snapshot rechecks
+  // the exact active-to-finished transition before the operation may send.
+  timerCompletion?: "sleep" | "feed";
   // The original operation may already be on the server. Keep its ID and
   // payload immutable until its receipt and an authorized snapshot arrive.
   sleepFollowUp?: { operationId: string; stoppedAt: string };
@@ -87,6 +91,11 @@ export function validateFullSnapshot(
     typeof value.watchRecordingEnabled !== "boolean"
   )
     throw new Error("invalid_response");
+  if (
+    value.crossMemberTimerCompletionEnabled !== undefined &&
+    typeof value.crossMemberTimerCompletionEnabled !== "boolean"
+  )
+    throw new Error("invalid_response");
   const profile = validateState({
     schemaVersion: 1,
     profile: value.profile,
@@ -105,10 +114,19 @@ export function validateFullSnapshot(
       lastEditedBy: record.lastEditedBy,
     };
   };
-  const entries = value.entries.map((item) => ({
-    ...metadata(item),
-    entry: validateEntry(item.entry),
-  }));
+  const entries = value.entries.map((item) => {
+    if (
+      item.endedBy !== undefined &&
+      item.endedBy !== null &&
+      (typeof item.endedBy !== "string" || !item.endedBy)
+    )
+      throw new Error("invalid_response");
+    return {
+      ...metadata(item),
+      ...(item.endedBy ? { endedBy: item.endedBy } : {}),
+      entry: validateEntry(item.entry),
+    };
+  });
   const careRecords = value.careRecords.map((item) => ({
     ...metadata(item),
     record: validateCareRecord(item.record),
@@ -169,9 +187,10 @@ export function canEditRecord(
     record.recordedBy === originForSnapshot(snapshot).userId
   );
 }
-export function enqueueRecord(
+function enqueueRecordOperation(
   state: PilotState,
   operation: RecordOperation,
+  timerCompletion?: "sleep" | "feed",
 ): PilotState {
   const snapshot = state.snapshot;
   if (!isFullSnapshot(snapshot)) throw new Error("full_sharing_unavailable");
@@ -190,7 +209,10 @@ export function enqueueRecord(
             (r) => r.record.id === operation.recordId,
           );
   if (operation.kind !== "create" && !record) throw new Error("record_changed");
-  if (!canEditRecord(snapshot, operation.collection, operation.recordId))
+  if (
+    !timerCompletion &&
+    !canEditRecord(snapshot, operation.collection, operation.recordId)
+  )
     throw new Error("record_forbidden");
   if (
     (state.records ?? []).some(
@@ -240,19 +262,22 @@ export function enqueueRecord(
         origin: originForSnapshot(snapshot),
         operation: JSON.parse(JSON.stringify(operation)),
         status: "pending",
+        ...(timerCompletion ? { timerCompletion } : {}),
       },
     ],
   };
 }
 
+export function enqueueRecord(
+  state: PilotState,
+  operation: RecordOperation,
+): PilotState {
+  return enqueueRecordOperation(state, operation);
+}
+
 function controllableEntry(state: PilotState, id: string): Entry | undefined {
   const snapshot = state.snapshot;
-  if (
-    state.transition ||
-    !isFullSnapshot(snapshot) ||
-    !canEditRecord(snapshot, "entry", id)
-  )
-    return undefined;
+  if (state.transition || !isFullSnapshot(snapshot)) return undefined;
   const queued = (state.records ?? []).find(
     (q) =>
       q.operation.collection === "entry" &&
@@ -260,13 +285,21 @@ function controllableEntry(state: PilotState, id: string): Entry | undefined {
       q.status !== "failed" &&
       matchesOrigin(q.origin, snapshot),
   );
-  return queued
-    ? queued.operation.kind !== "delete" &&
+  if (queued)
+    return queued.operation.kind !== "delete" &&
       !queued.sleepFollowUp &&
       !queued.feedFollowUp
       ? queued.operation.entry
-      : undefined
-    : snapshot.entries.find((r) => r.entry.id === id)?.entry;
+      : undefined;
+  const record = snapshot.entries.find((item) => item.entry.id === id);
+  if (
+    record &&
+    snapshot.family.role !== "owner" &&
+    record.recordedBy !== originForSnapshot(snapshot).userId &&
+    snapshot.crossMemberTimerCompletionEnabled !== true
+  )
+    return undefined;
+  return record?.entry;
 }
 export function canControlSleep(state: PilotState, id: string): boolean {
   const entry = controllableEntry(state, id);
@@ -320,8 +353,6 @@ function enqueueTimerFinish(
   const snapshot = state.snapshot;
   if (!isFullSnapshot(snapshot)) throw new Error("full_sharing_unavailable");
   if (state.transition) throw new Error("transition_pending");
-  if (!canEditRecord(snapshot, "entry", id))
-    throw new Error("record_forbidden");
   const queued = (state.records ?? []).find(
     (q) =>
       q.operation.collection === "entry" &&
@@ -339,9 +370,15 @@ function enqueueTimerFinish(
   const entry = queued?.operation.entry ?? record?.entry;
   if (
     !entry ||
-    !(type === "sleep" ? canControlSleep(state, id) : canControlFeed(state, id))
+    (type === "sleep"
+      ? entry.type !== "sleep" || !!entry.end
+      : entry.type !== "feed" || !entry.feedRunning || !!entry.end)
   )
     throw new Error("record_changed");
+  if (
+    !(type === "sleep" ? canControlSleep(state, id) : canControlFeed(state, id))
+  )
+    throw new Error("record_forbidden");
   if (
     (baseVersion !== undefined && record?.version !== baseVersion) ||
     (expectedEntry && !sameEntry(entry, expectedEntry)) ||
@@ -351,9 +388,12 @@ function enqueueTimerFinish(
       record?.lastEditedBy !== originForSnapshot(snapshot).userId)
   )
     throw new Error("record_changed");
+  const crossMember =
+    !!record && record.recordedBy !== originForSnapshot(snapshot).userId;
   const finished =
     type === "sleep"
-      ? finishLiveSleep(entry, stoppedAt)
+      ? (finishLiveSleep(entry, stoppedAt) ??
+        (crossMember ? validateEntry({ ...entry, end: stoppedAt }) : null))
       : finishLiveFeed(entry, stoppedAt, amount);
   if (
     !operationId ||
@@ -388,16 +428,20 @@ function enqueueTimerFinish(
       ),
     };
   }
-  return enqueueRecord(state, {
-    operationId,
-    recordId: id,
-    collection: "entry",
-    kind: finished ? "update" : "delete",
-    baseVersion: record!.version,
-    membershipId: snapshot.family.membershipId,
-    historyId: snapshot.historyId,
-    ...(finished ? { entry: finished } : {}),
-  });
+  return enqueueRecordOperation(
+    state,
+    {
+      operationId,
+      recordId: id,
+      collection: "entry",
+      kind: finished ? "update" : "delete",
+      baseVersion: record!.version,
+      membershipId: snapshot.family.membershipId,
+      historyId: snapshot.historyId,
+      ...(finished ? { entry: finished } : {}),
+    },
+    finished ? type : undefined,
+  );
 }
 
 function sameEntry(left: Entry, right: Entry) {
@@ -439,6 +483,13 @@ function promoteTimerFinish(
     {
       origin: q.origin,
       status: "pending",
+      ...(finished
+        ? {
+            timerCompletion: q.sleepFollowUp
+              ? ("sleep" as const)
+              : ("feed" as const),
+          }
+        : {}),
       operation: {
         operationId: followUp.operationId,
         recordId: q.operation.recordId,
@@ -451,6 +502,55 @@ function promoteTimerFinish(
       },
     },
   ];
+}
+
+function activeEntryRecord(
+  snapshot: FullFamilySnapshot,
+  operation: RecordOperation,
+): SharedEntryRecord | undefined {
+  if (operation.collection !== "entry") return undefined;
+  const record = snapshot.entries.find(
+    (item) => item.entry.id === operation.recordId,
+  );
+  if (!record || record.version !== operation.baseVersion) return undefined;
+  if (
+    snapshot.family.role !== "owner" &&
+    record.recordedBy !== originForSnapshot(snapshot).userId &&
+    snapshot.crossMemberTimerCompletionEnabled !== true
+  )
+    return undefined;
+  return record;
+}
+
+function sameTimerFields(previous: Entry, next: Entry, type: "sleep" | "feed") {
+  if (
+    previous.id !== next.id ||
+    previous.type !== type ||
+    next.type !== type ||
+    previous.start !== next.start ||
+    previous.note !== next.note
+  )
+    return false;
+  return type === "sleep" || previous.feedKind === next.feedKind;
+}
+
+function isTimerCompletionOperation(
+  snapshot: FullFamilySnapshot,
+  operation: RecordOperation,
+  type: "sleep" | "feed",
+) {
+  const record = activeEntryRecord(snapshot, operation);
+  const previous = record?.entry;
+  if (!previous || previous.type !== type || previous.end) return false;
+  const next = operation.entry;
+  if (
+    operation.kind !== "update" ||
+    !next?.end ||
+    next.feedRunning ||
+    !sameTimerFields(previous, next, type)
+  )
+    return false;
+  return type === "sleep" || previous.feedRunning === true;
 }
 export function applyFullSnapshot(
   state: PilotState,
@@ -468,6 +568,13 @@ export function applyFullSnapshot(
         revision(snapshot.revision) >= revision(q.receiptRevision)
       )
         return promoteTimerFinish(q, snapshot);
+      if (q.timerCompletion) {
+        if (
+          !isTimerCompletionOperation(snapshot, q.operation, q.timerCompletion)
+        )
+          return [{ ...q, status: "failed", error: "record_changed" }];
+        return [q];
+      }
       if (
         !canEditRecord(snapshot, q.operation.collection, q.operation.recordId)
       )

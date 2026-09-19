@@ -66,6 +66,7 @@ function fixture() {
       schema: 2,
       snapshot: {
         schemaVersion: 2,
+        crossMemberTimerCompletionEnabled: true,
         profile: { name: "Baby", birthDate: "", sex: "unspecified" },
         entries: [],
         careRecords: [],
@@ -487,6 +488,14 @@ function makeWorld({ offline = true, queued = false } = {}) {
               version: world.server.revision,
               recordedBy: found?.recordedBy ?? world.identity.user.id,
               lastEditedBy: world.identity.user.id,
+              ...(collection === "entries" &&
+              found?.entry &&
+              !found.entry.end &&
+              operation.entry?.end
+                ? { endedBy: world.identity.user.id }
+                : found?.endedBy
+                  ? { endedBy: found.endedBy }
+                  : {}),
             });
           const receipt = {
             operationId: operation.operationId,
@@ -3128,6 +3137,112 @@ const liveSleep = {
   start: "2026-09-01T01:00:00.000Z",
   note: "",
 };
+test("timer preflight finds an active sleep before either member can queue a duplicate", async () => {
+  for (const recordedBy of ["other-user", "user-a"]) {
+    const world = makeWorld({ offline: false });
+    const c = await boot(world);
+    try {
+      world.server.entries = [
+        {
+          entry: liveSleep,
+          version: "1",
+          recordedBy,
+          lastEditedBy: recordedBy,
+        },
+      ];
+      world.server.revision = "2";
+      const result = await c.result().refreshActiveTimer("sleep");
+      assert.equal(result.refreshed, true, recordedBy);
+      assert.equal(result.activeId, liveSleep.id, recordedBy);
+      assert.equal(c.result().canControlSleep(liveSleep.id), true, recordedBy);
+      assert.equal(world.recordsSent.length, 0, recordedBy);
+    } finally {
+      c.unmount();
+    }
+  }
+});
+test("timer preflight distinguishes an offline snapshot from a changed sharing context", async () => {
+  const world = makeWorld({ offline: false });
+  const c = await boot(world);
+  try {
+    world.snapshotOffline = true;
+    const offline = await c.result().refreshActiveTimer("sleep");
+    assert.equal(offline.refreshed, false);
+    assert.equal(offline.activeId, null);
+
+    world.snapshotOffline = false;
+    let replaceGrant = true;
+    world.beforeIdentify = async () => {
+      if (!replaceGrant) return;
+      replaceGrant = false;
+      const family = {
+        ...world.identity.families[0],
+        id: "family-b",
+        membershipId: "grant-b",
+      };
+      world.identity.families = [family];
+      world.server = {
+        ...world.server,
+        family,
+        historyId: "history-b",
+        revision: "0",
+        entries: [],
+        members: [
+          {
+            ...world.server.members[0],
+            membershipId: "grant-b",
+          },
+        ],
+      };
+    };
+    const attemptedStart = { ...liveSleep, id: "new-family-sleep" };
+    await assert.rejects(async () => {
+      await c.result().refreshActiveTimer("sleep");
+      await c.result().saveRecord("entry", attemptedStart);
+    }, /membership_changed/);
+    assert.equal(c.result().fullSnapshot?.family.id, "family-b");
+    assert.equal(c.result().fullSnapshot?.family.membershipId, "grant-b");
+    assert.equal(world.server.entries.length, 0);
+    assert.equal(world.recordsSent.length, 0);
+    assert.equal(
+      c
+        .result()
+        .sharedState.entries.some((entry) => entry.id === attemptedStart.id),
+      false,
+    );
+  } finally {
+    c.unmount();
+  }
+});
+test("a caregiver can finish another member's active sleep without gaining ordinary edit permission", async () => {
+  const world = makeWorld({ offline: false });
+  world.server.family.role = "caregiver";
+  world.server.members[0].role = "caregiver";
+  world.server.entries = [
+    {
+      entry: liveSleep,
+      version: "1",
+      recordedBy: "other-user",
+      lastEditedBy: "other-user",
+    },
+  ];
+  const c = await boot(world);
+  try {
+    assert.equal(c.result().canEditRecord("entry", liveSleep.id), false);
+    assert.equal(c.result().canControlSleep(liveSleep.id), true);
+    await c.result().finishSleep(liveSleep.id, "2026-09-01T01:02:00.000Z");
+    await until(
+      () => world.recordsSent.length === 1 && !c.result().syncing,
+      "cross-member sleep finish",
+    );
+    assert.equal(world.recordsSent[0].operation.kind, "update");
+    assert.equal(world.server.entries[0].recordedBy, "other-user");
+    assert.equal(world.server.entries[0].endedBy, world.identity.user.id);
+    assert.equal(world.server.entries[0].entry.end, "2026-09-01T01:02:00.000Z");
+  } finally {
+    c.unmount();
+  }
+});
 test("live sleep controls project start and quick discard without waiting for the API", async () => {
   const world = makeWorld({ offline: false });
   const receipt = deferred();

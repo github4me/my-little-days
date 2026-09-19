@@ -28,16 +28,93 @@ function sharingText(text: string) {
     .replaceAll("pilot", "family sharing");
 }
 
-function IssueMessages({ issues }: { issues: FamilySyncIssue[] }) {
+function conflictOperationId(issue: FamilySyncIssue) {
+  if (!issue.kind.endsWith("conflict")) return null;
+  try {
+    const key = JSON.parse(issue.key);
+    return Array.isArray(key) && typeof key[1] === "string" ? key[1] : null;
+  } catch {
+    return null;
+  }
+}
+
+function reviewableRecordConflicts(pilot: Pilot) {
+  const snapshot = pilot.fullSnapshot;
+  if (
+    pilot.authStatus !== "authenticated" ||
+    !pilot.ready ||
+    pilot.transitionPending ||
+    !snapshot ||
+    !pilot.user
+  )
+    return [];
+  return pilot.recordConflicts.filter(
+    (item) =>
+      item.origin.userId === pilot.user!.id &&
+      item.origin.familyId === snapshot.family.id &&
+      item.origin.membershipId === snapshot.family.membershipId &&
+      item.origin.historyId === snapshot.historyId,
+  );
+}
+
+function timerConflictMessage(
+  item: QueuedRecord,
+  pilot: Pilot,
+  locale: AppLocale,
+) {
+  const kind = item.operation.entry?.type;
+  const snapshot = pilot.fullSnapshot;
+  if ((kind !== "feed" && kind !== "sleep") || !snapshot)
+    return familyErrorMessage(locale, "active_timer_conflict");
+  const active = snapshot.entries.find(({ entry }) =>
+    kind === "sleep"
+      ? entry.type === "sleep" && !entry.end
+      : entry.type === "feed" && entry.feedRunning === true && !entry.end,
+  );
+  if (!active) return familyErrorMessage(locale, "active_timer_conflict");
+  const starter =
+    snapshot.members.find((member) => member.id === active.recordedBy)
+      ?.displayName || fullFamilyMessage(locale, "memberFallback");
+  const startedAt = new Date(active.entry.start);
+  if (!Number.isFinite(startedAt.getTime()))
+    return familyErrorMessage(locale, "active_timer_conflict");
+  const time = startedAt.toLocaleTimeString(
+    locale === "zh-CN" ? "zh-CN" : "en-AU",
+    { hour: "2-digit", minute: "2-digit" },
+  );
+  if (locale === "zh-CN")
+    return `${starter} 已于 ${time} 开始${kind === "sleep" ? "睡眠" : "喂养"}计时，目前仍在进行。你这次开始未共享，已保留在本机。返回“今天”可结束现有计时。`;
+  return `${starter} started the ${kind === "sleep" ? "sleep" : "feeding"} timer at ${time}, and it is still ongoing. Your new timer was not shared and is preserved on this device. Return to Today to finish the ongoing timer.`;
+}
+
+function IssueMessages({
+  issues,
+  pilot,
+}: {
+  issues: FamilySyncIssue[];
+  pilot: Pilot;
+}) {
   const { locale } = useI18n();
-  const hasConflicts = issues.some((issue) => issue.kind.endsWith("conflict"));
+  const conflicts = issues.filter((issue) => issue.kind.endsWith("conflict"));
+  const activeTimerConflicts = conflicts.filter(
+    (issue) => issue.code === "active_timer_conflict",
+  );
+  const hasOtherConflicts = conflicts.some(
+    (issue) => issue.code !== "active_timer_conflict",
+  );
+  const reviewable = reviewableRecordConflicts(pilot);
   return (
     <>
       {issues
         .filter(
           (issue) =>
             (issue.kind === "error" || issue.kind === "notice") &&
-            !(hasConflicts && issue.code === "change_not_shared"),
+            !(conflicts.length && issue.code === "change_not_shared") &&
+            !(
+              activeTimerConflicts.length &&
+              issue.kind === "error" &&
+              issue.code === "active_timer_conflict"
+            ),
         )
         .map((issue) => (
           <T raw key={issue.key}>
@@ -48,7 +125,22 @@ function IssueMessages({ issues }: { issues: FamilySyncIssue[] }) {
             )}
           </T>
         ))}
-      {hasConflicts ? (
+      {activeTimerConflicts.map((issue) => {
+        const operationId = conflictOperationId(issue);
+        const item = operationId
+          ? reviewable.find(
+              (conflict) => conflict.operation.operationId === operationId,
+            )
+          : undefined;
+        return (
+          <T raw key={`active:${issue.key}`}>
+            {item
+              ? timerConflictMessage(item, pilot, locale)
+              : familyErrorMessage(locale, "active_timer_conflict")}
+          </T>
+        );
+      })}
+      {hasOtherConflicts ? (
         <T raw>
           {locale === "zh-CN"
             ? "部分修改未能共享，已保留在此设备上。请查看最新记录，再决定如何处理。"
@@ -109,7 +201,7 @@ export function FamilySyncBanner({
           </Pressable>
         </View>
         <View accessibilityLiveRegion="polite" style={styles.stack}>
-          <IssueMessages issues={issues} />
+          <IssueMessages issues={issues} pilot={pilot} />
         </View>
         <Button
           secondary
@@ -180,15 +272,7 @@ export function FamilySyncDetails({ pilot }: { pilot: Pilot }) {
     !pilot.transitionPending &&
     !!snapshot &&
     !!pilot.user;
-  const recordConflicts = canReview
-    ? pilot.recordConflicts.filter(
-        (item) =>
-          item.origin.userId === pilot.user!.id &&
-          item.origin.familyId === snapshot!.family.id &&
-          item.origin.membershipId === snapshot!.family.membershipId &&
-          item.origin.historyId === snapshot!.historyId,
-      )
-    : [];
+  const recordConflicts = canReview ? reviewableRecordConflicts(pilot) : [];
   const selected =
     discard &&
     recordConflicts.find(
@@ -211,9 +295,11 @@ export function FamilySyncDetails({ pilot }: { pilot: Pilot }) {
           {fullFamilyMessage(locale, "sharingIssuesTitle")}
         </T>
         <View accessibilityLiveRegion="polite" style={styles.stack}>
-          <IssueMessages issues={issues} />
+          <IssueMessages issues={issues} pilot={pilot} />
         </View>
-        {recordConflicts.length ? (
+        {recordConflicts.some(
+          (item) => item.error !== "active_timer_conflict",
+        ) ? (
           <T raw style={{ color: c.muted }}>
             {locale === "zh-CN"
               ? "这些修改不会自动重发。请回到记录页面，重新打开最新记录查看后修改。丢弃只会删除此设备上保留的修改，不会更改家庭已共享的记录。"
@@ -228,11 +314,13 @@ export function FamilySyncDetails({ pilot }: { pilot: Pilot }) {
             <T raw style={{ fontWeight: "600" }}>
               {recordDescription(item, locale)}
             </T>
-            <T raw>
-              {sharingText(
-                familyErrorMessage(locale, item.error ?? "record_changed"),
-              )}
-            </T>
+            {item.error === "active_timer_conflict" ? null : (
+              <T raw>
+                {sharingText(
+                  familyErrorMessage(locale, item.error ?? "record_changed"),
+                )}
+              </T>
+            )}
             {item.operation.entry?.note || item.operation.careRecord?.note ? (
               <T raw style={{ color: c.muted }}>
                 {item.operation.entry?.note ?? item.operation.careRecord?.note}

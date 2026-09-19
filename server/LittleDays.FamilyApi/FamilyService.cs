@@ -322,7 +322,7 @@ public sealed partial class FamilyService(PilotDatabase db, PilotConfiguration c
             .ExecuteUpdateAsync(s => s.SetProperty(x => x.State, "cancelled"), ct);
         await db.FamilyNotificationEvents.Where(e => e.ActorUserId == user.ObjectId || db.FamilyRecords.Any(r =>
             r.FamilyId == e.FamilyId && r.Collection == "entry" && r.IdHash == e.RecordIdHash &&
-            (r.RecordedBy == user.ObjectId || r.LastEditedBy == user.ObjectId)))
+            (r.RecordedBy == user.ObjectId || r.LastEditedBy == user.ObjectId || r.TimerEndedBy == user.ObjectId)))
             .ExecuteUpdateAsync(s => s.SetProperty(x => x.Cancelled, true), ct);
         foreach (var grant in await db.Memberships.Where(x => x.UserId == user.ObjectId && x.Active).ToArrayAsync(ct))
         {

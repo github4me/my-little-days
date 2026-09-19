@@ -5,6 +5,7 @@ import { Entry, summarize } from "./domain";
 import { Theme, T, Card, Chips, row } from "./ui";
 import { elapsed, formatDate, formatTime, t } from "./i18n";
 import RecordsCalendar from "./RecordsCalendar";
+import RecordActionButton from "./RecordActionButton";
 import type { RecordView } from "./recordCalendar";
 import {
   recordRangeStart,
@@ -733,8 +734,8 @@ function BarRecords({
                               flexWrap: "wrap",
                             }}
                           >
-                            <Pressable
-                              accessibilityRole="button"
+                            <RecordActionButton
+                              action="edit"
                               accessibilityLabel={t("编辑{kind}", {
                                 kind: t(
                                   kind === "feed"
@@ -744,25 +745,12 @@ function BarRecords({
                                       : "尿布",
                                 ),
                               })}
+                              accessibilityHint={t("打开记录编辑界面")}
                               onPress={() => onEdit(e)}
                               disabled={canEdit && !canEdit(e.id)}
-                              accessibilityState={{
-                                disabled: !!canEdit && !canEdit(e.id),
-                              }}
-                              style={{
-                                minHeight: 44,
-                                minWidth: 44,
-                                justifyContent: "center",
-                                paddingHorizontal: 8,
-                                paddingVertical: 8,
-                              }}
-                            >
-                              <T style={{ fontSize: 15, color: c.primary }}>
-                                编辑
-                              </T>
-                            </Pressable>
-                            <Pressable
-                              accessibilityRole="button"
+                            />
+                            <RecordActionButton
+                              action="delete"
                               accessibilityLabel={t("删除{kind}", {
                                 kind: t(
                                   kind === "feed"
@@ -772,23 +760,10 @@ function BarRecords({
                                       : "尿布",
                                 ),
                               })}
+                              accessibilityHint={t("打开删除确认")}
                               onPress={() => onDelete(e)}
                               disabled={canEdit && !canEdit(e.id)}
-                              accessibilityState={{
-                                disabled: !!canEdit && !canEdit(e.id),
-                              }}
-                              style={{
-                                minHeight: 44,
-                                minWidth: 44,
-                                justifyContent: "center",
-                                paddingHorizontal: 8,
-                                paddingVertical: 8,
-                              }}
-                            >
-                              <T style={{ fontSize: 15, color: c.danger }}>
-                                删除
-                              </T>
-                            </Pressable>
+                            />
                           </View>
                         </View>
                       </View>

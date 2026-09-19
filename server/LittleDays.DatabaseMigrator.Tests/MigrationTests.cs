@@ -90,7 +90,7 @@ public sealed class MigrationTests
         Assert.ThrowsAny<Exception>(() => db.Runner(scripts: [new(scripts[0].Name, scripts[0].Contents + "\n-- changed"), scripts[1]]).Pending());
         Assert.ThrowsAny<Exception>(() => db.Runner(scripts: [scripts[1]]).Pending());
         Assert.ThrowsAny<Exception>(() => db.Runner(scripts: [new("0000_Earlier.sql", "SELECT 1"), .. scripts]).Pending());
-        var extended = scripts.Append(new SqlScript("0007_AddExample.sql", "CREATE TABLE dbo.Example(Id int NOT NULL);")).ToArray();
+        var extended = scripts.Append(new SqlScript("0008_AddExample.sql", "CREATE TABLE dbo.Example(Id int NOT NULL);")).ToArray();
         db.Runner(scripts: extended).Apply();
         Assert.Equal(MigrationRunner.Scripts().Count + 1, await db.Count("SELECT COUNT(*) FROM dbo.DatabaseMigrations"));
         Assert.Empty(db.Runner(scripts: extended).Pending());
@@ -100,7 +100,7 @@ public sealed class MigrationTests
     public async Task FailureRollsBackSchemaDataAndJournalAndCanRetry()
     {
         await using var db = await TestDatabase.Create();
-        var fail = new SqlScript("0007_Failure.sql", "CREATE TABLE dbo.Example(Id int); INSERT dbo.Example VALUES (1); THROW 51000, 'Synthetic failure', 1;");
+        var fail = new SqlScript("0008_Failure.sql", "CREATE TABLE dbo.Example(Id int); INSERT dbo.Example VALUES (1); THROW 51000, 'Synthetic failure', 1;");
         Assert.ThrowsAny<Exception>(() => db.Runner(scripts: [.. MigrationRunner.Scripts(), fail]).Apply());
         Assert.Equal(0, await db.Count("SELECT COUNT(*) FROM sys.tables WHERE is_ms_shipped=0"));
         db.Runner().Apply();
@@ -225,6 +225,7 @@ public sealed class MigrationTests
     [InlineData(3)]
     [InlineData(4)]
     [InlineData(5)]
+    [InlineData(6)]
     public async Task CatalogChecksAllowEveryApprovedPendingUpgrade(int applied)
     {
         await using var db = await TestDatabase.Create();
@@ -283,7 +284,7 @@ public sealed class MigrationTests
     {
         await using var db = await TestDatabase.Create();
         db.Runner().Apply();
-        var scripts = MigrationRunner.Scripts().Append(new SqlScript("0007_Drift.sql",
+        var scripts = MigrationRunner.Scripts().Append(new SqlScript("0008_Drift.sql",
             "CREATE TABLE dbo.Example(Id int); DROP INDEX IX_Operations_FamilyId ON dbo.Operations;")).ToArray();
         var error = Assert.ThrowsAny<Exception>(() => db.Runner(scripts: scripts).Apply());
         Assert.Contains("Schema verification failed", error.ToString(), StringComparison.Ordinal);
