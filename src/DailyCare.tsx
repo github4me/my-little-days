@@ -388,8 +388,8 @@ export default function DailyCare({
             <View
               style={{
                 flexDirection: "row",
-                flexWrap: largeText ? "wrap" : "nowrap",
-                gap: 4,
+                flexWrap: "wrap",
+                gap: 8,
               }}
             >
               {temperatureMethods.map((m) => (
@@ -407,12 +407,13 @@ export default function DailyCare({
                   disabled={busy}
                   onPress={() => setMethod(m.id)}
                   style={{
-                    flex: 1,
-                    ...(largeText ? { flexBasis: "44%", flexGrow: 1 } : {}),
-                    minWidth: 0,
-                    minHeight: 44,
-                    paddingVertical: 8,
-                    paddingHorizontal: 3,
+                    flexBasis: largeText ? "100%" : "30%",
+                    flexGrow: 1,
+                    minWidth: 80,
+                    minHeight: 88,
+                    paddingVertical: 16,
+                    paddingHorizontal: 8,
+                    gap: 6,
                     justifyContent: "center",
                     alignItems: "center",
                     borderRadius: 10,
@@ -421,21 +422,22 @@ export default function DailyCare({
                     backgroundColor: method === m.id ? c.soft : c.bg,
                   }}
                 >
-                  {m.id === "forehead" ? (
-                    <PlayIcon kind="forehead" color={c.primary} />
-                  ) : (
-                    <T raw style={{ fontSize: 12, textAlign: "center" }}>
-                      {copy(m.label)}
-                    </T>
-                  )}
+                  <PlayIcon kind={m.id} color={c.primary} size={30} />
+                  <T raw style={{ fontSize: 12, textAlign: "center" }}>
+                    {copy(m.label)}
+                  </T>
+                  {method === m.id ? (
+                    <View style={{ position: "absolute", top: 4, right: 4 }}>
+                      <PlayIcon kind="check" color={c.primary} size={16} />
+                    </View>
+                  ) : null}
                 </Pressable>
               ))}
             </View>
-            {method === "forehead" ? (
-              <T raw style={{ fontSize: 12, color: c.muted }}>
-                {text("已选择：额温", "Selected: Forehead")}
-              </T>
-            ) : null}
+            <T raw style={{ fontSize: 12, color: c.muted }}>
+              {text("已选择：", "Selected: ")}
+              {copy(temperatureMethods.find((m) => m.id === method)!.label)}
+            </T>
           </>
         ) : null}
         {kind === "supplement" ? (

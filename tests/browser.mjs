@@ -2308,9 +2308,17 @@ await page.getByRole("tab", { name: "Care", exact: true }).click();
 await page.getByRole("button", { name: "Daily care", exact: true }).click();
 const forehead = page.getByRole("button", { name: "Forehead", exact: true });
 assert.equal(await forehead.locator("svg").count(), 1);
-assert.equal((await forehead.innerText()).trim(), "");
+assert.equal((await forehead.innerText()).trim(), "Forehead");
+for (const name of ["Armpit", "Ear", "Forehead", "Rectal", "Other"]) {
+  const option = page.getByRole("button", { name, exact: true });
+  assert.ok((await option.locator("svg").count()) >= 1);
+  assert.equal((await option.innerText()).trim(), name);
+}
 await forehead.click();
 await page.getByText("Selected: Forehead", { exact: true }).waitFor();
+await forehead.locator("..").screenshot({
+  path: path.join(screenshotDir, "temperature-method-icons.png"),
+});
 await page.getByRole("button", { name: "Supplements", exact: true }).click();
 const supplementHelp = page.getByRole("button", {
   name: "Supplement guidance & references",
