@@ -1919,3 +1919,57 @@ updated, shared supplement controls stay disabled with an explanation. Once
 supplements exist, do not revert to an API that rejects that record kind; use a
 forward-compatible correction. See `FAMILY-API-CONTRACT.md` for the representation
 and data bounds. Deployment and physical acceptance are still outstanding.
+
+### Care and supplements release 35 — 19 September 2026 (Sydney)
+
+- App/API source frozen at **531c3097a1a94e917a5f329fd870014a40e285a4** on
+  `feature/family-invitations`, committed/pushed with the GitHub plugin.
+  Unrelated local infrastructure drafts, instructions and screenshots were excluded.
+- [Push CI 35414263823](https://github.com/github4me/my-little-days/actions/runs/35414263823)
+  passed. Cloud API tests: **255 passed, 0 skipped**; migrator tests:
+  **67 passed, 0 skipped**. The TypeScript/browser job also passed.
+- [API deployment 35414547061](https://github.com/github4me/my-little-days/actions/runs/35414547061)
+  succeeded for that same SHA. Existing `family-database` and `family-pilot`
+  environments remain limited to the release branch; neither has a required
+  reviewer/wait timer configured. No protection setting was changed.
+- Live schema/checksum/catalog verification succeeded with **0 pending scripts**;
+  no schema migration was added or applied. Temporary rule
+  `github-db-35414547061-1` was removed. Readback confirmed the administrator IP
+  rule remains, and SQL `little-days-family` remains **Basic (5 DTU), Online**.
+  Existing infrastructure-apply gates were not touched.
+- Azure active deployment `0efc37ee-eb1b-4a0f-9cb6-6594205a1f5e` completed
+  successfully. Public `/health/live` returned **200**, and an unauthenticated
+  `/v2/capabilities` request returned **401**. This does not demonstrate a
+  signed-in family round trip; the authorized-account schema-2/legacy ETag checks
+  above still need device acceptance without altering real family data.
+- Rechecked Expo **production** project/account variables: expected API URL,
+  Entra customer tenant/mobile client/scope, demo **0** and no account override.
+  Store distribution, app/runtime **0.2.1**, OTA disabled, existing Apple team
+  **A9974KXQ4G** and all three existing Store profiles were preserved.
+- Packaging lesson: `EAS_NO_VCS=1` alone still discovers a parent Git root.
+  Attempt `a49896a9-6031-458c-8409-9df00d9972cc` failed before compilation
+  because the staged project path was not in its uploaded archive; it produced no
+  IPA or Apple submission. For an isolated stage, also set **EAS_PROJECT_ROOT to
+  its resolved absolute path**. Run `eas build:inspect --stage archive` and
+  compare the exact file allowlist/content before building. The corrected upload
+  contained **186 reviewed files**, with no local drafts; cloud project root is
+  `.`. Only the staged build number changes from 34 to **35**.
+- [Build 416d39d6-ee5c-402e-877c-956b863fbbcb](https://expo.dev/accounts/expo4chao/projects/little-days/builds/416d39d6-ee5c-402e-877c-956b863fbbcb)
+  finished at **19 September 2026, 02:13:34 UTC** as **0.2.1 (35)**.
+  **20 Watch and 5 Widget native model tests passed** on its macOS host.
+  IPA inspection verified all three bundle IDs, version/build numbers, Store
+  profiles, signed team/application identifiers, disabled debug access, phone and
+  Widget App Groups, Widget extension point and disabled Expo OTA. This is artifact
+  inspection, not independent cryptographic signature verification.
+  IPA SHA-256: `5C7C44EF6BE65F52AB696C448B20EC2C4BD2D60844E3EBDE28E12B9AF3DF92F6`.
+- Submitted that exact build to existing App Store Connect app **6809826484**
+  using the production profile and `--no-auto-testflight-setup`.
+  [Submission 194d9d0a-6ada-4cfc-86ba-89de38a73d1e](https://expo.dev/accounts/expo4chao/projects/little-days/submissions/194d9d0a-6ada-4cfc-86ba-89de38a73d1e)
+  finished successfully. Apple readback confirms build 35 **VALID**, internal
+  **IN_BETA_TESTING**, external **READY_FOR_BETA_SUBMISSION**. Existing internal
+  testers can update via TestFlight without uninstalling. External Beta review
+  was not submitted by this operation; no new tester group or public App Store
+  release was created. Repository `app.json` is aligned to build **35**.
+- Physical iOS SQLite, VoiceOver/Dynamic Type, keyboard, supplement family
+  synchronization and older-client acceptance remain unverified. See
+  `VALIDATION.md`; cloud success is not a physical-device acceptance result.
