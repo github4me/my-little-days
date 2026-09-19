@@ -477,12 +477,12 @@ export default function PlayLearning({
           {
             value: "care",
             icon: "care",
-            label: text("日常照护", "Daily care"),
+            label: text("日常", "Daily care"),
           },
           {
             value: "today",
             icon: "activities",
-            label: text("早教活动", "Play"),
+            label: text("早教", "Play"),
           },
           {
             value: "choose",
@@ -813,7 +813,7 @@ export default function PlayLearning({
             <T raw style={{ color: c.muted, fontSize: 13, lineHeight: 20 }}>
               {mode === "choose"
                 ? text(
-                    "按月龄浏览并选择，勾选后自动保存，所选项目会显示在「早教活动」。可跨月龄选择，参考范围不符时会提示。",
+                    "按月龄浏览并选择，勾选后自动保存，所选项目会显示在「早教」。可跨月龄选择，参考范围不符时会提示。",
                     "Browse by age and choose activities. Selections save automatically and appear in Play. You can choose other ages; a prompt flags activities outside your baby's reference age.",
                   )
                 : text(

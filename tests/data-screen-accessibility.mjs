@@ -141,6 +141,80 @@ function fixture(file, props, { fontScale = 1, failMail = false } = {}) {
   return { render, nodes: () => nodes };
 }
 
+test("record history reveals seven date groups at a time and resets on filter changes", () => {
+  const screen = fixture("src/Records.tsx", {
+    view: "bars",
+    entries: Array.from({ length: 22 }, (_, index) => ({
+      id: `feed-${index}`,
+      type: "feed",
+      start: new Date(2026, 8, 19 - index, 9).toISOString(),
+      amount: 60,
+    })),
+    now: new Date(2026, 8, 19, 12).getTime(),
+    onEdit() {},
+    onDelete() {},
+  });
+  const button = (label) =>
+    screen.nodes().find((node) => node.props.accessibilityLabel === label);
+  const days = () =>
+    screen
+      .nodes()
+      .filter((node) =>
+        ["展开当日明细", "收起当日明细"].includes(
+          node.props.accessibilityLabel,
+        ),
+      ).length;
+  const changeRange = (value) => {
+    screen
+      .nodes()
+      .find(
+        (node) =>
+          node.type === "Chips" &&
+          node.props.options.some((option) => option.value === "all"),
+      )
+      .props.onChange(value);
+    screen.render();
+  };
+  changeRange("all");
+  assert.equal(days(), 7);
+  for (const expected of [14, 21, 22]) {
+    const more = button(`更多：显示前 ${expected === 22 ? 1 : 7} 天`);
+    assert.ok(more);
+    assert.ok(more.props.style({ pressed: false }).minHeight >= 44);
+    more.props.onPress();
+    screen.render();
+    assert.equal(days(), expected);
+  }
+  assert.ok(!button("更多：显示前 7 天"));
+  assert.ok(!button("更多：显示前 1 天"));
+  button("收起历史日期").props.onPress();
+  screen.render();
+  assert.equal(days(), 7);
+  assert.ok(!button("收起历史日期"));
+  button("更多：显示前 7 天").props.onPress();
+  screen.render();
+  changeRange("1m");
+  assert.equal(days(), 7);
+  button("更多：显示前 7 天").props.onPress();
+  screen.render();
+  const changeKind = (value) => {
+    screen
+      .nodes()
+      .find(
+        (node) =>
+          node.type === "Chips" &&
+          node.props.options.some((option) => option.value === "feed"),
+      )
+      .props.onChange(value);
+    screen.render();
+  };
+  changeKind("diaper");
+  assert.equal(days(), 0);
+  assert.ok(!button("更多：显示前 7 天"));
+  changeKind("feed");
+  assert.equal(days(), 7);
+});
+
 test("record actions have 44-point targets and announced readonly state; notes stay complete", () => {
   const note =
     "A long note remains fully readable rather than being cut off after one line.";

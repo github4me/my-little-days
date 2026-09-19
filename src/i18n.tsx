@@ -342,6 +342,7 @@ const english: Record<string, string> = {
   "显示 {count} 条历史记录": "Show {count} earlier records",
   收起历史记录: "Hide earlier records",
   "显示 {count} 天历史记录": "Show {count} earlier days",
+  "更多：显示前 {count} 天": "More: show {count} earlier days",
   收起历史日期: "Hide earlier days",
   展开当日明细: "Show day details",
   收起当日明细: "Hide day details",

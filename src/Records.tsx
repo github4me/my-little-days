@@ -99,7 +99,10 @@ function Bars({
               textAnchor="middle"
               fill={c.muted}
             >
-              {b.label ?? b.value.toFixed(0)}
+              {b.label ??
+                (unit === "小时"
+                  ? elapsed(Math.round(b.value * 3600000))
+                  : b.value.toFixed(0))}
             </Label>
           ) : null}
         </React.Fragment>
@@ -273,7 +276,7 @@ function BarRecords({
     [kind, setKind] = useState<Kind>("feed"),
     [unit, setUnit] = useState("mL"),
     [range, setRange] = useState<RecordRange>("7d"),
-    [historyExpanded, setHistoryExpanded] = useState(false),
+    [visibleDayCount, setVisibleDayCount] = useState(7),
     [expandedDays, setExpandedDays] = useState<Set<string>>(() => new Set()),
     [expandedDayEntries, setExpandedDayEntries] = useState<Set<string>>(
       () => new Set(),
@@ -338,9 +341,8 @@ function BarRecords({
   const rangeDays = days.filter(
     (day) => day.date >= rangeStart && day.date <= new Date(now),
   );
-  const recentDays = rangeDays.slice(0, 7);
-  const olderDayCount = rangeDays.length - recentDays.length;
-  const visibleDays = historyExpanded ? rangeDays : recentDays;
+  const visibleDays = rangeDays.slice(0, visibleDayCount);
+  const nextDayCount = Math.min(7, rangeDays.length - visibleDays.length);
   const perDay = (date: Date, events: Entry[]) => {
     const end = new Date(date);
     end.setDate(end.getDate() + 1);
@@ -395,7 +397,7 @@ function BarRecords({
         ]}
         onChange={(v) => {
           setKind(v as Kind);
-          setHistoryExpanded(false);
+          setVisibleDayCount(7);
           setExpandedDays(new Set());
           setExpandedDayEntries(new Set());
         }}
@@ -410,7 +412,7 @@ function BarRecords({
             options={ranges}
             onChange={(next) => {
               setRange(next as RecordRange);
-              setHistoryExpanded(false);
+              setVisibleDayCount(7);
               setExpandedDays(new Set());
               setExpandedDayEntries(new Set());
             }}
@@ -842,16 +844,13 @@ function BarRecords({
           </View>
         );
       })}
-      {olderDayCount > 0 ? (
+      {nextDayCount > 0 ? (
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={
-            historyExpanded
-              ? t("收起历史日期")
-              : t("显示 {count} 天历史记录", { count: olderDayCount })
-          }
-          accessibilityState={{ expanded: historyExpanded }}
-          onPress={() => setHistoryExpanded((expanded) => !expanded)}
+          accessibilityLabel={t("更多：显示前 {count} 天", {
+            count: nextDayCount,
+          })}
+          onPress={() => setVisibleDayCount((count) => count + 7)}
           style={({ pressed }) => ({
             minHeight: 44,
             minWidth: 44,
@@ -865,9 +864,27 @@ function BarRecords({
           })}
         >
           <T style={{ color: c.primary, fontSize: 13, fontWeight: "700" }}>
-            {historyExpanded
-              ? t("收起历史日期")
-              : t("显示 {count} 天历史记录", { count: olderDayCount })}
+            {t("更多：显示前 {count} 天", { count: nextDayCount })}
+          </T>
+        </Pressable>
+      ) : null}
+      {visibleDayCount > 7 && rangeDays.length > 7 ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t("收起历史日期")}
+          onPress={() => setVisibleDayCount(7)}
+          style={({ pressed }) => ({
+            minHeight: 44,
+            minWidth: 44,
+            paddingHorizontal: 12,
+            paddingVertical: 8,
+            alignSelf: "flex-start",
+            justifyContent: "center",
+            opacity: pressed ? 0.72 : 1,
+          })}
+        >
+          <T style={{ color: c.primary, fontSize: 13, fontWeight: "700" }}>
+            收起历史日期
           </T>
         </Pressable>
       ) : null}

@@ -112,7 +112,7 @@ await page
   .getByText("尚未设置有效的出生日期，无法判断是否适龄。", { exact: true })
   .waitFor();
 await page.getByRole("button", { name: "仍然加入", exact: true }).click();
-await page.getByRole("button", { name: "早教活动", exact: true }).click();
+await page.getByRole("button", { name: "早教", exact: true }).click();
 await page
   .getByRole("button", { name: "查看轻声唱一小段", exact: true })
   .waitFor();
@@ -235,7 +235,7 @@ await page
 await page.getByText("距上次 3小时1分", { exact: true }).waitFor();
 assert.equal(
   await page
-    .getByRole("button", { name: "显示 1 天历史记录", exact: true })
+    .getByRole("button", { name: "更多：显示前 1 天", exact: true })
     .count(),
   0,
 );
@@ -365,6 +365,14 @@ assert.equal(
 );
 await page.getByRole("button", { name: "睡眠", exact: true }).click();
 await page.getByText("1 段睡眠 · 3小时1分", { exact: true }).waitFor();
+await page
+  .getByRole("button", { name: "展开当日明细", exact: true })
+  .first()
+  .click();
+await page
+  .locator("svg text")
+  .filter({ hasText: /^3小时1分$/ })
+  .waitFor();
 await page.getByRole("tab", { name: "成长", exact: true }).click();
 assert.equal(await page.getByText("小小里程碑", { exact: true }).count(), 0);
 assert.equal(await page.getByText("日常趋势", { exact: true }).count(), 0);
@@ -893,7 +901,7 @@ await page
     checked: true,
   })
   .waitFor();
-await page.getByRole("button", { name: "早教活动", exact: true }).click();
+await page.getByRole("button", { name: "早教", exact: true }).click();
 assert.equal(await page.getByRole("button", { name: /^查看/ }).count(), 7);
 assert.equal(
   await page
@@ -1020,7 +1028,7 @@ await page
 await page
   .getByRole("checkbox", { name: "选择早教活动：看看黑白卡", checked: true })
   .waitFor();
-await page.getByRole("button", { name: "早教活动", exact: true }).click();
+await page.getByRole("button", { name: "早教", exact: true }).click();
 // Check-ins remain independent of selection and persist across reload and midnight.
 await page
   .getByRole("checkbox", { name: "今天做过：看看黑白卡", exact: true })
@@ -1052,7 +1060,7 @@ await page.getByRole("button", { name: "设置早教", exact: true }).click();
 await page
   .getByRole("checkbox", { name: "选择早教活动：看看黑白卡", exact: true })
   .click();
-await page.getByRole("button", { name: "早教活动", exact: true }).click();
+await page.getByRole("button", { name: "早教", exact: true }).click();
 await page
   .getByRole("checkbox", { name: "今天做过：看看黑白卡", checked: true })
   .waitFor();
@@ -1424,7 +1432,7 @@ await page.evaluate(() => {
 });
 await page.reload();
 await page.getByRole("tab", { name: "照护", exact: true }).click();
-await page.getByRole("button", { name: "日常照护", exact: true }).click();
+await page.getByRole("button", { name: "日常", exact: true }).click();
 assert.equal(
   await page.getByRole("button", { name: "删除照护记录", exact: true }).count(),
   5,
@@ -1459,7 +1467,7 @@ await page
   .getByRole("button", { name: "确认替换当前数据", exact: true })
   .click();
 await page.getByRole("tab", { name: "照护", exact: true }).click();
-await page.getByRole("button", { name: "日常照护", exact: true }).click();
+await page.getByRole("button", { name: "日常", exact: true }).click();
 assert.equal(
   await page.getByRole("button", { name: "删除照护记录", exact: true }).count(),
   5,
@@ -1473,7 +1481,7 @@ assert.deepEqual(
 await page.evaluate(() => localStorage.setItem("little-days-v1-dark", "true"));
 await page.reload();
 await page.getByRole("tab", { name: "照护", exact: true }).click();
-await page.getByRole("button", { name: "日常照护", exact: true }).click();
+await page.getByRole("button", { name: "日常", exact: true }).click();
 await context.setOffline(true);
 await page
   .getByRole("textbox", { name: "体温 · °C", exact: true })
@@ -2391,7 +2399,7 @@ await page
 await assertNoUntranslatedChinese("supplement guidance");
 await page.reload();
 await page.getByRole("tab", { name: "照护", exact: true }).click();
-await page.getByRole("button", { name: "日常照护", exact: true }).click();
+await page.getByRole("button", { name: "日常", exact: true }).click();
 await page.getByRole("button", { name: "补充剂", exact: true }).click();
 await page.getByText("维生素 D（VD） · 益生菌", { exact: true }).waitFor();
 assert.equal(
