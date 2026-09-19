@@ -2002,3 +2002,120 @@ and data bounds. Deployment and physical acceptance are still outstanding.
 - When available, update via TestFlight over the existing installation; do not
   uninstall. Physical iPhone layout, VoiceOver/Dynamic Type, Watch and Widget
   acceptance remain device checks. No public App Store release was requested.
+
+## Cross-member timer completion and record icons — deployed 19 September 2026
+
+This change has no new Azure resource, Entra registration, secret or environment
+setting. It requires the additive database migration, compatible API and client
+to be released in that order. The release below used that order and kept the
+existing SQL Basic database, API hosting, Entra identities, Apple credentials,
+tester groups and Expo production variables unchanged.
+
+Release evidence:
+
+- App/API source was frozen at
+  `1f05670d176d215b3485c6e619ad7293d228fa1b` on
+  `feature/family-invitations`. The first CI run exposed SQL Server binding the
+  new index before the new column in the same batch. The additive, not-yet-live
+  migration was corrected with a `GO` separator; no applied migration was
+  rewritten. [CI run 35445318746](https://github.com/github4me/my-little-days/actions/runs/35445318746)
+  then passed all frontend/browser checks, API **260/260** and migrator
+  **72/72** real-SQL tests with zero skips.
+- [Deployment 35445602502](https://github.com/github4me/my-little-days/actions/runs/35445602502)
+  applied the sole pending `0007_TimerEndAttribution.sql`, removed its temporary
+  runner-IP firewall rule and deployed the matching API. A same-SHA idempotency
+  [run 35446063155](https://github.com/github4me/my-little-days/actions/runs/35446063155)
+  explicitly reported **Pending database scripts: 0** twice, accepted the live
+  catalog/checksums, removed its temporary firewall rule and redeployed without
+  errors or warnings. OneDeploy `11d1fced-7325-4db4-bb3f-2c04ba514839` was
+  complete and active. Public `/health/live` returned **200** with
+  `{"status":"ok"}`; unauthenticated `/v2/capabilities` returned **401**.
+  This is liveness/auth-boundary evidence, not a signed-in SQL-backed family
+  round trip.
+- Expo production project variables were read back with the expected API URL,
+  Entra tenant/client/scope and demo `0`; account scope had no overrides. The
+  isolated exact-SHA upload contained **272** files matching the inspected
+  archive byte-for-byte. Store distribution, runtime/app version **0.2.1**,
+  disabled OTA, Apple team `A9974KXQ4G` and the existing phone, Watch and Widget
+  profiles were retained.
+- [EAS build fad6fe5e-6a78-473d-af13-7d043cf40573](https://expo.dev/accounts/expo4chao/projects/little-days/builds/fad6fe5e-6a78-473d-af13-7d043cf40573)
+  finished as **0.2.1 (37)** at `2026-09-19T13:36:50Z`. Native model checks
+  passed: Watch **20/20**, Widget **5/5**; Xcode validated both embedded targets
+  and archived successfully. IPA inspection passed all three bundle IDs,
+  versions, Store profiles, signed team/application identifiers, disabled debug
+  access, phone/Widget App Groups, Widget extension point and disabled Expo OTA.
+  This is artifact inspection, not independent cryptographic signature
+  verification. IPA SHA-256:
+  `87BC5F47BD0BE96079D27500442827AEB28C3357A842CA97A32A1F046B1651D8`.
+- Exact-build [submission e35b6eef-b914-4d74-81cf-9903cf365440](https://expo.dev/accounts/expo4chao/projects/little-days/submissions/e35b6eef-b914-4d74-81cf-9903cf365440)
+  finished successfully for existing App Store Connect app `6809826484` using
+  `--no-auto-testflight-setup`. Apple readback confirms build 37 **VALID**,
+  internal **IN_BETA_TESTING** and external **READY_FOR_BETA_SUBMISSION**. No
+  tester group, external Beta submission or public App Store release was changed.
+- Physical two-account timer completion, iPhone/Watch/Widget UI, VoiceOver,
+  Dynamic Type and keyboard acceptance remain outstanding. Use disposable test
+  accounts for the checks below; do not exercise destructive flows on real
+  family data. Expo Doctor also reported the existing top-level splash-schema
+  warning and ten SDK patch-version mismatches; they did not block the archive
+  and were not broadened into this release.
+
+1. **Freeze and verify one source revision.** Run the backend tests with a
+   disposable SQL Server, including the v6-to-v7 migration/catalog tests and the
+   cross-member completion, sub-minute completion, concurrency and account-cleanup
+   tests.
+   Review `0007_TimerEndAttribution.sql` without changing any already journaled
+   migration. The expected change is one nullable
+   `dbo.FamilyRecords.TimerEndedBy uniqueidentifier` column and one filtered
+   `IX_FamilyRecords_TimerEndedBy` index; it must not rewrite existing records.
+2. **Apply migration 0007 first.** In GitHub Actions, use the existing **Deploy
+   family API and database** workflow and protected `family-database` environment
+   on the approved release branch/SHA. Keep the existing hosting-tenant OIDC and
+   SQL Basic database configuration; add no credential to source, logs or mobile
+   configuration. The database stage must finish before API deployment. Read back
+   `dbo.DatabaseMigrations`, confirm the exact 0007 journal checksum from the
+   reviewed artifact, verify the nullable column and filtered index in the SQL
+   catalog, and rerun DbUp `--check`. Expected result: version-7 catalog accepted
+   and **zero pending scripts**. Remove only the temporary runner firewall rule
+   created by that workflow and confirm the pre-existing rules/tier remain.
+3. **Deploy the matching API second.** Promote the same SHA through the existing
+   protected `family-pilot` environment. There is no new feature flag to add;
+   retain the existing `Family__EnforceSingleActiveTimers` value because that
+   separate guard controls new competing timers, not who may finish one. Verify
+   App Service deployment state, `/health/live`, authenticated readiness and an
+   authorized v2 snapshot. Expected snapshot behavior: entry objects include
+   nullable `endedBy` and `crossMemberTimerCompletionEnabled` is explicitly
+   `true`; old/non-timer rows remain null and no private payload is emitted in
+   logs. Confirm the ETag includes the capability generation. A missing/false
+   flag must keep client cross-member controls disabled. A health 200 alone is
+   not signed-in SQL-backed acceptance.
+4. **Release the compatible client last.** Before starting a timer, refresh the
+   family snapshot and present an already-running timer as in progress with the
+   starter's member name. Finishing another member's timer must send a normal
+   versioned update that preserves ID/type/start/note/feed kind and adds the end
+   (plus a finalized bottle amount when applicable). The same completion update
+   applies when sleep has run for less than 60 seconds; it must retain the
+   completed entry and `endedBy`. Never delete another member's timer—delete
+   remains available only under the existing record-author or owner permission.
+   Reuse the identical update and operation ID after an ambiguous result, and do
+   not infer permission from stale local state.
+5. **Accept on two disposable family accounts/devices.** Have account A start a
+   sleep and feed, then account B refresh and finish each. Verify both clients show
+   A as starter, B as finisher and the same start/end timestamps. Verify a later
+   permitted edit does not replace `endedBy`, a simultaneous second finish gets
+   `record_changed`, and a new timer can start after completion. Confirm B cannot
+   change A's start, note, type or feed kind. For a sleep under 60 seconds, verify
+   B's stop still creates a completed entry with B in `endedBy`; verify B cannot
+   delete A's timer at any duration. Exercise offline/reconnect and both
+   English/Chinese UI without using a real family's records.
+6. **Verify privacy cleanup with disposable data only.** Where a deleted test
+   account remains solely in `TimerEndedBy` after another editor has superseded
+   `LastEditedBy`, confirm cleanup preserves the completed record, clears
+   `endedBy`, advances family revision and suppresses related pending push work.
+   Existing creator/current-editor deletion rules remain unchanged. Never run
+   account deletion against a real family as a release test.
+
+If the API or client needs rollback, leave migration 0007 in place: the nullable
+column is backward-compatible and existing rows were not rewritten. Roll back to
+a reviewed API/client that ignores the extra field, keep migration checks at zero
+pending, and use a forward-compatible correction. Do not drop the column/index or
+erase timer history to restore an older build.

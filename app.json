@@ -32,7 +32,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.littledays.babylog",
-      "buildNumber": "36",
+      "buildNumber": "37",
       "runtimeVersion": {
         "policy": "appVersion"
       },
