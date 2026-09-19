@@ -60,7 +60,7 @@ const copy = {
     notes: "备注",
     save: /^(开始|保存记录)$/,
     local: "仅保存在这台设备 · 无需联网",
-    daily: "日常照护",
+    daily: "日常",
     temperature: "体温",
     temperatureField: "体温 · °C",
     careHelp: "记录说明与参考",
