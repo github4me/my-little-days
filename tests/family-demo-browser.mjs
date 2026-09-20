@@ -431,7 +431,7 @@ async function accountInvitationPlacementFlow(page, zh, dark, width) {
   const deleteBox = await deleteAccount.boundingBox();
   const signOutBox = await signOut.boundingBox();
   assert.ok(deleteBox && signOutBox && deleteBox.y > signOutBox.y);
-  const deletionCard = deleteAccount.locator("..");
+  const deletionCard = deleteAccount.locator("../..");
   assert.ok(
     await page.evaluate(
       ({ account, deletion }) =>
