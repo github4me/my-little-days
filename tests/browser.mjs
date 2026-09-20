@@ -204,7 +204,6 @@ assert.equal(await page.getByText("● 仅此设备", { exact: true }).count(), 
 await page.evaluate(() => document.fonts.ready);
 await page.screenshot({ path: path.join(screenshotDir, "home-preview.png") });
 await page.getByRole("tab", { name: "记录", exact: true }).click();
-await page.getByRole("heading", { name: /^今天 · / }).waitFor();
 for (const label of [
   "测量",
   "里程碑",
@@ -870,6 +869,7 @@ assert.ok(
 assert.equal(finishedFeed.start, runningFeed.start);
 assert.ok(Date.parse(finishedFeed.end) >= Date.parse(finishedFeed.start));
 await page.getByRole("tab", { name: "记录", exact: true }).click();
+await page.getByRole("heading", { name: /^今天 · / }).waitFor();
 await page.getByRole("button", { name: "编辑喂奶", exact: true }).waitFor();
 assert.equal(
   await page.getByRole("button", { name: "编辑喂奶", exact: true }).count(),

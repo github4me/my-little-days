@@ -1542,6 +1542,7 @@ function BabyApp({
                           accessibilityRole="button"
                           accessibilityLabel={t(label)}
                           accessibilityState={{ selected }}
+                          aria-selected={selected}
                           key={value}
                           onPress={() => setMetric(value)}
                           style={({ pressed }) => [
