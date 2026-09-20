@@ -2119,3 +2119,63 @@ column is backward-compatible and existing rows were not rewritten. Roll back to
 a reviewed API/client that ignores the extra field, keep migration checks at zero
 pending, and use a forward-compatible correction. Do not drop the column/index or
 erase timer history to restore an older build.
+## Independent feed and sleep synchronization — TestFlight build 38, 20 September 2026
+
+- App source was frozen at
+  `fa6571abeda47d42906a2231e4dea70a4c77e72f` on
+  `feature/family-invitations`. Feed and sleep now project their start/finish
+  locally before network confirmation, reconcile authority in the background,
+  and conflict only with another active timer of the same kind. A feed and a
+  sleep may overlap; later valid edits no longer make an already-acknowledged
+  completion look unconfirmed. No API, SQL, Azure or Entra deployment was needed:
+  the deployed API already enforces its active-timer guard per record kind and
+  the server change in this revision is regression coverage only.
+- The first push [CI run 35490989131](https://github.com/github4me/my-little-days/actions/runs/35490989131)
+  passed API/real-SQL integration and all checks except one pre-existing browser
+  assertion whose DOM depth had not been updated when the standalone account
+  deletion action became an icon. Test-only commit
+  `19a023ea3478f4260888e5247780cfc53ced185e` corrected that locator; final
+  [CI run 35491348539](https://github.com/github4me/my-little-days/actions/runs/35491348539)
+  passed both **TypeScript and browser** and **API and SQL integration** jobs.
+  Local verification also passed `npm run verify`, the full family demo browser
+  matrix, iOS export and the .NET test build. SQL-dependent local cases were not
+  executed without a disposable connection; CI supplied the real-SQL result.
+- Expo production project values were read back before building: the expected
+  production API URL, Entra tenant/client/scope and demo `0`, with no account-level
+  production overrides. The production profile remained STORE distribution on
+  channel `production`, runtime/app version **0.2.1**, with OTA disabled. Existing
+  Apple team `A9974KXQ4G`, certificate and the phone, Watch and Widget Store
+  profiles were reused; no credential was created or replaced.
+- [EAS build 01defad9-0af7-465c-8c57-44afe80dbcae](https://expo.dev/accounts/expo4chao/projects/little-days/builds/01defad9-0af7-465c-8c57-44afe80dbcae)
+  finished successfully at `2026-09-20T05:18:49.067Z` as **0.2.1 (38)** from
+  the exact app source SHA above (fingerprint
+  `5a6e602267d1dc9c14601170412c7e842e97edf0`). Xcode validated the embedded
+  Watch and Widget targets and the Store archive succeeded.
+- Downloaded IPA inspection verified phone `com.littledays.babylog`, Watch
+  `com.littledays.babylog.watchkitapp` and Widget
+  `com.littledays.babylog.widget`, all at **0.2.1 (38)**. Watch names the phone
+  companion; Widget uses `com.apple.widgetkit-extension`. Embedded Store profiles
+  match the team/application identifiers, have debug access disabled and Beta
+  reporting enabled; phone push is `production`, and phone/Widget share exactly
+  `group.com.littledays.babylog.widgets`. This is artifact/profile inspection,
+  not independent cryptographic signature validation or physical-device
+  acceptance. IPA SHA-256:
+  `7A4181D8A2B99BA350663C46A1AD177D1EA29D9D3E790BE73A7A05991F653B9A`.
+- Submitted that exact build ID, never `latest`, to existing App Store Connect app
+  `6809826484` with the production profile and
+  `--no-auto-testflight-setup`.
+  [Submission 99823ae3-4190-4828-96f3-864efb7cb350](https://expo.dev/accounts/expo4chao/projects/little-days/submissions/99823ae3-4190-4828-96f3-864efb7cb350)
+  finished at `2026-09-20T05:26:41.227Z`. Apple readback shows build 38
+  **VALID**, internal **IN_BETA_TESTING** and external
+  **READY_FOR_BETA_SUBMISSION**. Existing internal testers can update without
+  uninstalling. No tester group, external Beta review or public App Store release
+  was changed.
+- Repository `app.json` is aligned to build **38**. No unrelated product feature
+  or dependency is included; separately drafted work remains outside these commits.
+- Physical acceptance remains outstanding: use two disposable family accounts to
+  start feed and sleep in both orders, overlap the two kinds, finish each from the
+  same and a different member, and exercise offline/reconnect and a genuine
+  same-kind race in Chinese and English. Confirm immediate local feedback changes
+  to confirmed/pending/conflict truthfully and both clients converge to the same
+  starter, finisher and timestamps. Do not test destructive flows on real family
+  data or uninstall a data-bearing app.
