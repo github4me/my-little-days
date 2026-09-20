@@ -77,14 +77,36 @@ public sealed class PushTests
         var family = new FamilySummary(Guid.NewGuid(), "Test", "caregiver", Guid.NewGuid(), null, "");
         var request = Registration(settings, family, Guid.NewGuid(), Secret());
         PushPolicy.Validate(request, id, settings);
+        foreach (var locale in PushPolicy.SupportedLocales)
+            PushPolicy.Validate(request with { Locale = locale }, id, settings);
+        PushPolicy.Validate(request with { Locale = "zh" }, id, settings); // Legacy client compatibility.
         Assert.Throws<ApiException>(() => PushPolicy.Validate(request with { InstallationSecret = "short" }, id, settings));
         Assert.Throws<ApiException>(() => PushPolicy.Validate(request with { Categories = ["feed", "feed"] }, id, settings));
         Assert.Throws<ApiException>(() => PushPolicy.Validate(request with { Categories = ["growth"] }, id, settings));
         Assert.Throws<ApiException>(() => PushPolicy.Validate(request with { ProjectId = Guid.NewGuid() }, id, settings));
         Assert.Throws<ApiException>(() => PushPolicy.Validate(request with { ExpoPushToken = "https://example.test" }, id, settings));
+        Assert.Throws<ApiException>(() => PushPolicy.Validate(request with { Locale = "pt-BR" }, id, settings));
         Assert.True(PushPolicy.SecretMatches(request.InstallationSecret, PushPolicy.Hash(request.InstallationSecret)));
         Assert.False(PushPolicy.SecretMatches(Secret(), PushPolicy.Hash(request.InstallationSecret)));
         Assert.Equal(7, PushPolicy.CategoryMask(["feed", "diaper", "sleep"]));
+    }
+
+    [Fact]
+    public void PushContentUsesCanonicalLocalesWithLegacyChineseAndEnglishFallbacks()
+    {
+        var english = ExpoPushGateway.Content("en");
+        Assert.Equal(12, PushPolicy.SupportedLocales.Length);
+        Assert.All(PushPolicy.SupportedLocales, locale =>
+        {
+            var content = ExpoPushGateway.Content(locale);
+            Assert.False(string.IsNullOrWhiteSpace(content.Title));
+            Assert.False(string.IsNullOrWhiteSpace(content.Body));
+        });
+        Assert.Equal(ExpoPushGateway.Content("zh-Hans"), ExpoPushGateway.Content("zh"));
+        Assert.Equal(english, ExpoPushGateway.Content("pt-BR"));
+        Assert.NotEqual(english.Body, ExpoPushGateway.Content("ja").Body);
+        Assert.All(PushPolicy.SupportedLocales.Where(locale => !locale.StartsWith("zh", StringComparison.Ordinal)),
+            locale => Assert.NotEqual(ExpoPushGateway.Content("zh-Hans").Body, ExpoPushGateway.Content(locale).Body));
     }
 
     [Fact]

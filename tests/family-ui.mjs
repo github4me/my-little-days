@@ -211,7 +211,22 @@ function fixture(
           return { SafeAreaView: "SafeAreaView" };
         if (name === "@react-native-community/datetimepicker")
           return () => null;
-        if (name === "../i18n") return { useI18n: () => ({ locale }) };
+        if (name === "../i18n")
+          return (() => {
+            const localize = (zh, en, values, target = locale) =>
+              (target === "zh-CN" || target === "zh-Hans" ? zh : en).replace(
+                /\{(\w+)\}/g,
+                (_, key) => String(values?.[key] ?? `{${key}}`),
+              );
+            return {
+              localize,
+              useI18n: () => ({
+                locale,
+                formattingLocale: locale === "zh-CN" ? "zh-CN" : "en-US",
+                localize,
+              }),
+            };
+          })();
         if (name === "../ui" || name === "./ui") return ui;
         if (name === "../AccessibleModal") return "Modal";
         if (name === "../NativeDateTimeField") return "NativeDateTimeField";

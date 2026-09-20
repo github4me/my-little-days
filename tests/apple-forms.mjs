@@ -161,8 +161,16 @@ function fixture(component, platform = "ios", fontScale = 1, overrides = {}) {
           return { Theme: {}, T: "T", Button: "Button", Field: "Field" };
         if (name === "./i18n")
           return {
+            formatEditableNumber: (value) => String(value),
+            formatNumber: (value) => String(value),
+            parseLocalizedNumber: (value) => Number(value),
             t: translate,
-            useI18n: () => ({ locale: "zh-CN", t: translate }),
+            useI18n: () => ({
+              locale: "zh-Hans",
+              formattingLocale: "zh-CN",
+              localize: (zh) => zh,
+              t: translate,
+            }),
             elapsed: () => "16 min",
             formatTime: () => "10:20",
           };

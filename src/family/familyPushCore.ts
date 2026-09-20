@@ -1,7 +1,14 @@
+import { SUPPORTED_LOCALES, type SupportedLocale } from "../locales";
+
 // Push registration is not account authorization. Keep pending requests durable:
 // a lost HTTP response must replay the original operation, not advance a binding.
 export const pushCategories = ["feed", "diaper", "sleep"] as const;
 export type PushCategory = (typeof pushCategories)[number];
+export const pushLocales = SUPPORTED_LOCALES;
+export type PushLocale = SupportedLocale;
+// `zh` is accepted only for an already deployed v1 API that did not advertise
+// locale capabilities. New APIs and registrations use canonical app locale IDs.
+export type PushRegistrationLocale = PushLocale | "zh";
 export type PushScope = {
   userId: string;
   familyId: string;
@@ -23,7 +30,7 @@ export type PushRequest = {
   expoPushToken?: string;
   projectId?: string;
   platform?: "ios" | "android";
-  locale?: "zh" | "en";
+  locale?: PushRegistrationLocale;
   enabled?: boolean;
   categories?: PushCategory[];
   familyId?: string;
@@ -43,6 +50,7 @@ export type PushRegistration = {
   desiredCategories: PushCategory[];
   expiresAt: string;
   token: string | null;
+  locale: PushRegistrationLocale | null;
   pending: { kind: "register" | "unregister"; body: PushRequest } | null;
 };
 export type PushCapabilities = {
@@ -50,6 +58,9 @@ export type PushCapabilities = {
   eventCreationEnabled: boolean;
   categories: PushCategory[];
   projectId: string | null;
+  // Capability lists may contain locales added by a newer API. Older clients
+  // validate the wire format, then intersect the list with their own catalog.
+  supportedLocales?: string[];
 };
 export const samePushScope = (a: PushScope | null, b: PushScope | null) =>
   !!a &&
@@ -74,12 +85,52 @@ export function validCategories(value: unknown): value is PushCategory[] {
     value.every((v) => pushCategories.includes(v))
   );
 }
+export function validPushLocale(value: unknown): value is PushLocale {
+  return (
+    typeof value === "string" &&
+    (pushLocales as readonly string[]).includes(value)
+  );
+}
+export function validPushRegistrationLocale(
+  value: unknown,
+): value is PushRegistrationLocale {
+  return value === "zh" || validPushLocale(value);
+}
+const capabilityLocale = /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/;
+export function validPushLocales(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.length <= 64 &&
+    new Set(value).size === value.length &&
+    value.every(
+      (locale) =>
+        typeof locale === "string" &&
+        locale.length <= 35 &&
+        capabilityLocale.test(locale),
+    ) &&
+    value.includes("en")
+  );
+}
+export function pushRegistrationLocale(
+  locale: PushLocale,
+  supportedLocales: readonly string[] | undefined,
+): PushRegistrationLocale {
+  if (supportedLocales?.includes(locale)) return locale;
+  // A missing list identifies the legacy en/zh capability response. Only
+  // actual Chinese locales use its Chinese bucket; every other locale is English.
+  if (!supportedLocales && (locale === "zh-Hans" || locale === "zh-Hant"))
+    return "zh";
+  return "en";
+}
 export function readPushRegistration(
   raw: string | null,
   binding: string,
 ): PushRegistration | null {
   if (raw === null) return null;
-  let s: PushRegistration;
+  let s: PushRegistration & {
+    locale?: PushRegistrationLocale | null;
+  };
   try {
     s = JSON.parse(raw);
   } catch {
@@ -99,7 +150,11 @@ export function readPushRegistration(
     !validCategories(s.categories) ||
     !validCategories(s.desiredCategories) ||
     !Number.isFinite(Date.parse(s.expiresAt)) ||
-    (s.token !== null && (typeof s.token !== "string" || s.token.length > 300))
+    (s.token !== null &&
+      (typeof s.token !== "string" || s.token.length > 300)) ||
+    (s.locale !== undefined &&
+      s.locale !== null &&
+      !validPushRegistrationLocale(s.locale))
   )
     throw new Error("push_storage_invalid");
   if (s.pending !== null) {
@@ -121,11 +176,11 @@ export function readPushRegistration(
           p.body.expoPushToken.length > 300 ||
           !uuid.test(p.body.projectId ?? "") ||
           !["ios", "android"].includes(p.body.platform ?? "") ||
-          !["zh", "en"].includes(p.body.locale ?? "")))
+          !validPushRegistrationLocale(p.body.locale)))
     )
       throw new Error("push_storage_invalid");
   }
-  return s;
+  return { ...s, locale: s.locale ?? null };
 }
 export function acceptPushReply(
   s: PushRegistration,
@@ -155,6 +210,7 @@ export function acceptPushReply(
     categories: r.categories,
     expiresAt: r.expiresAt,
     token: p.kind === "register" && r.enabled ? p.body.expoPushToken! : null,
+    locale: p.kind === "register" ? p.body.locale! : s.locale,
     pending: null,
   };
 }

@@ -114,7 +114,16 @@ function fixture(platform = "ios", overrides = {}) {
               ["Button", "Card", "Field", "T"].map((name) => [name, name]),
             ),
           };
-        if (name === "./i18n") return { useI18n: () => ({ locale: "en-US" }) };
+        if (name === "./i18n")
+          return {
+            formatEditableNumber: (value) => String(value),
+            formatNumber: (value) => String(value),
+            useI18n: () => ({
+              locale: "en",
+              formattingLocale: "en-US",
+              localize: (_zh, en) => en,
+            }),
+          };
         if (name === "./domain")
           return {
             makeId: () => "care-new",

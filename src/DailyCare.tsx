@@ -14,7 +14,7 @@ import DateTimePicker, {
   type DateTimePickerEvent,
 } from "@react-native-community/datetimepicker";
 import { Button, Card, Field, T, Theme } from "./ui";
-import { useI18n } from "./i18n";
+import { formatEditableNumber, formatNumber, useI18n } from "./i18n";
 import {
   CareRecord,
   SupplementKind,
@@ -63,11 +63,12 @@ export default function DailyCare({
   const c = useContext(Theme);
   const { fontScale } = useWindowDimensions();
   const largeText = fontScale > 1.3;
-  const { locale } = useI18n();
-  const copy = (w: LearningText) => (locale === "en-US" ? w.en : w.zh);
-  const text = (zh: string, en: string) => (locale === "en-US" ? en : zh);
+  const { formattingLocale, localize: text } = useI18n();
+  const copy = (w: LearningText) => text(w.zh, w.en);
   const [kind, setKind] = useState<CareRecord["kind"]>("temperature");
-  const [temperature, setTemperature] = useState(defaultTemperatureInput);
+  const [temperature, setTemperature] = useState(() =>
+    formatEditableNumber(Number(defaultTemperatureInput), formattingLocale),
+  );
   const [supplements, setSupplements] = useState<SupplementKind[]>([]);
   const [otherSupplement, setOtherSupplement] = useState("");
   const [method, setMethod] = useState<CareRecord["method"]>(
@@ -193,7 +194,7 @@ export default function DailyCare({
       mode={picker.mode}
       display={Platform.OS === "ios" ? "spinner" : "default"}
       themeVariant={c.isDark ? "dark" : "light"}
-      locale={locale}
+      locale={formattingLocale}
       is24Hour
       minimumDate={birthDate ? new Date(`${birthDate}T00:00:00`) : undefined}
       maximumDate={new Date(now)}
@@ -202,7 +203,9 @@ export default function DailyCare({
   ) : null;
   function reset() {
     setPicker(null);
-    setTemperature(defaultTemperatureInput);
+    setTemperature(
+      formatEditableNumber(Number(defaultTemperatureInput), formattingLocale),
+    );
     setMethod(defaultTemperatureMethod);
     setSupplements([]);
     setOtherSupplement("");
@@ -351,10 +354,9 @@ export default function DailyCare({
       </View>
       <Card style={{ padding: 14, gap: 12 }}>
         <T raw style={{ fontWeight: "700" }}>
-          {text(
-            editing ? "编辑照护记录" : "记录一次照护",
-            editing ? "Edit care record" : "Record a care session",
-          )}
+          {editing
+            ? text("编辑照护记录", "Edit care record")
+            : text("记录一次照护", "Record a care session")}
         </T>
         {kind === "temperature" ? (
           <>
@@ -370,8 +372,15 @@ export default function DailyCare({
             />
             <T raw style={{ fontSize: 12, color: c.muted }}>
               {text(
-                "预填 36.8°C，并非测量结果，请按实际读数修改；支持小数点或逗号。",
-                "36.8°C is prefilled, not a measurement. Adjust to the actual reading; a decimal point or comma is accepted.",
+                "预填 {value}°C，并非测量结果，请按实际读数修改；支持小数点或逗号。",
+                "{value}°C is prefilled, not a measurement. Adjust to the actual reading; a decimal point or comma is accepted.",
+                {
+                  value: formatNumber(
+                    Number(defaultTemperatureInput),
+                    {},
+                    formattingLocale,
+                  ),
+                },
               )}
             </T>
             <T raw style={{ fontSize: 13, lineHeight: 20, fontWeight: "600" }}>
@@ -601,7 +610,7 @@ export default function DailyCare({
               <View style={{ flex: 1, minWidth: largeText ? "100%" : 0 }}>
                 <T raw style={{ fontSize: 14, fontWeight: "600" }}>
                   {r.kind === "temperature"
-                    ? `${r.temperature}°C · ${copy(temperatureMethods.find((m) => m.id === r.method)!.label)}`
+                    ? `${formatNumber(r.temperature!, {}, formattingLocale)}°C · ${copy(temperatureMethods.find((m) => m.id === r.method)!.label)}`
                     : r.kind === "supplement"
                       ? r
                           .supplements!.map((id) =>
@@ -617,7 +626,7 @@ export default function DailyCare({
                       : copy(option.label)}
                 </T>
                 <T raw style={{ fontSize: 12, color: c.muted }}>
-                  {new Date(r.time).toLocaleString(locale, {
+                  {new Date(r.time).toLocaleString(formattingLocale, {
                     year: "numeric",
                     month: "2-digit",
                     day: "2-digit",
@@ -642,7 +651,9 @@ export default function DailyCare({
                   setDate(playDayKey(new Date(r.time)));
                   setTime(new Date(r.time).toTimeString().slice(0, 5));
                   setTemperature(
-                    r.temperature === undefined ? "" : String(r.temperature),
+                    r.temperature === undefined
+                      ? ""
+                      : formatEditableNumber(r.temperature, formattingLocale),
                   );
                   setMethod(r.method);
                   setSupplements(r.supplements ?? []);
@@ -697,14 +708,15 @@ export default function DailyCare({
         ))}
         {history.length > 5 ? (
           <Button
-            label={text(
+            label={
               expanded
-                ? "收起照护历史"
-                : `展开更早的 ${history.length - 5} 条照护记录`,
-              expanded
-                ? "Collapse care history"
-                : `Show ${history.length - 5} older care records`,
-            )}
+                ? text("收起照护历史", "Collapse care history")
+                : text(
+                    "展开更早的 {count} 条照护记录",
+                    "Show {count} older care records",
+                    { count: history.length - 5 },
+                  )
+            }
             secondary
             onPress={() => setExpanded(!expanded)}
           />
@@ -812,14 +824,15 @@ export default function DailyCare({
           </T>
         </Pressable>
         <T raw style={{ fontSize: 12, color: c.muted }}>
-          {text(
-            sharedMode
-              ? "照护记录保存到家庭服务器，不允许本机导出；每天可记多次，不替代医疗评估。"
-              : "照护历史保存在本机并包含在记录备份中；每天可记多次，不替代医疗评估。",
-            sharedMode
-              ? "Care records are saved to the family server; local export is unavailable. Multiple sessions per day are supported; this is not a medical assessment."
-              : "Care history stays locally and is included in record backups. Multiple sessions per day are supported; this is not a medical assessment.",
-          )}
+          {sharedMode
+            ? text(
+                "照护记录保存到家庭服务器，不允许本机导出；每天可记多次，不替代医疗评估。",
+                "Care records are saved to the family server; local export is unavailable. Multiple sessions per day are supported; this is not a medical assessment.",
+              )
+            : text(
+                "照护历史保存在本机并包含在记录备份中；每天可记多次，不替代医疗评估。",
+                "Care history stays locally and is included in record backups. Multiple sessions per day are supported; this is not a medical assessment.",
+              )}
         </T>
       </HelpDisclosure>
       {Platform.OS === "ios" && picker ? (

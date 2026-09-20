@@ -14,6 +14,20 @@ const scope = {
   historyId: id(4),
 };
 const projectId = id(99);
+const supportedLocales = [
+  "en",
+  "zh-Hans",
+  "zh-Hant",
+  "fr",
+  "de",
+  "hi",
+  "it",
+  "ja",
+  "ko",
+  "es",
+  "th",
+  "vi",
+];
 const plain = (x) => JSON.parse(JSON.stringify(x));
 function deferred() {
   let resolve;
@@ -36,9 +50,14 @@ function world() {
     replies: new Map(),
     counter: 100,
     drop: false,
+    dropBeforeApply: false,
     diskFail: false,
     allowed: true,
     capabilities: true,
+    supportedLocales,
+    rejectCanonicalLocale: false,
+    platform: "ios",
+    channels: [],
     user: id(1),
     tokenWait: null,
     tokenAsked: false,
@@ -65,6 +84,10 @@ function fixture(w = world()) {
     },
     "expo-notifications": {
       IosAuthorizationStatus: { PROVISIONAL: 3 },
+      AndroidImportance: { DEFAULT: 3 },
+      setNotificationChannelAsync: async (channelId, settings) => {
+        w.channels.push({ channelId, ...plain(settings) });
+      },
       getPermissionsAsync: async () => ({ granted: w.allowed }),
       requestPermissionsAsync: async () => ({ granted: w.allowed }),
       getExpoPushTokenAsync: async () => {
@@ -77,7 +100,8 @@ function fixture(w = world()) {
       randomUUID: () => id(++w.counter),
       getRandomBytesAsync: async (n) => new Uint8Array(n).fill(42),
     },
-    "react-native": { Platform: { OS: "ios" } },
+    "react-native": { Platform: { OS: w.platform } },
+    "../locales": { SUPPORTED_LOCALES: supportedLocales },
     "../../app.json": { expo: { extra: { eas: { projectId } } } },
     "./config": {
       familyConfig: { apiUrl: "https://test.invalid", tenantId: id(88) },
@@ -94,8 +118,17 @@ function fixture(w = world()) {
             eventCreationEnabled: w.capabilities,
             projectId: w.capabilities ? projectId : null,
             categories: ["feed", "diaper", "sleep"],
+            ...(w.supportedLocales === undefined
+              ? {}
+              : { supportedLocales: w.supportedLocales }),
           };
         const install = route.split("/")[4];
+        if (
+          w.rejectCanonicalLocale &&
+          method === "PUT" &&
+          !["en", "zh"].includes(body.locale)
+        )
+          throw new ApiError("invalid_input", 422);
         if (
           w.failure &&
           body.expectedGeneration > 0 &&
@@ -109,6 +142,10 @@ function fixture(w = world()) {
                 body.operationId,
             "request persisted before send",
           );
+          if (w.dropBeforeApply) {
+            w.dropBeforeApply = false;
+            throw new Error("network_unavailable");
+          }
           w.replies.set(body.operationId, {
             operationId: body.operationId,
             installationId: install,
@@ -282,6 +319,99 @@ test("canonical category order avoids unnecessary generation changes", async () 
   await api.configureFamilyPush(true, ["sleep", "feed"], "en");
   await api.configureFamilyPush(true, ["feed", "sleep"], "en");
   assert.equal(w.calls.filter((c) => c.method === "PUT").length, 1);
+});
+test("canonical locale changes renew registration and legacy APIs never map non-Chinese locales to Chinese", async () => {
+  const current = fixture();
+  await current.api.configureFamilyPush(true, ["feed"], "fr");
+  await current.api.configureFamilyPush(true, ["feed"], "ja");
+  const canonical = current.w.calls.filter((call) => call.method === "PUT");
+  assert.deepEqual(
+    canonical.map((call) => call.body.locale),
+    ["fr", "ja"],
+  );
+  assert.equal(JSON.parse(current.w.storage).locale, "ja");
+
+  for (const [locale, expected] of [
+    ["de", "en"],
+    ["zh-Hant", "zh"],
+  ]) {
+    const legacy = world();
+    legacy.supportedLocales = undefined;
+    const { api, w } = fixture(legacy);
+    await api.configureFamilyPush(true, ["feed"], locale);
+    assert.equal(
+      w.calls.find((call) => call.method === "PUT").body.locale,
+      expected,
+    );
+  }
+});
+test("future capability locales do not disable registration for an older client", async () => {
+  const w = world();
+  w.supportedLocales = [...supportedLocales, "pt-BR"];
+  const { api } = fixture(w);
+  const result = await api.configureFamilyPush(true, ["feed"], "fr");
+  assert.equal(result.enabled, true);
+  assert.equal(w.calls.find((call) => call.method === "PUT").body.locale, "fr");
+});
+test("Android creates the family notification channel in the selected locale", async () => {
+  const w = world();
+  w.platform = "android";
+  const { api } = fixture(w);
+  await api.configureFamilyPush(true, ["feed"], "ja");
+  assert.deepEqual(w.channels, [
+    { channelId: "family-entries", name: "家族の記録", importance: 3 },
+  ]);
+  assert.equal(
+    w.calls.find((call) => call.method === "PUT").body.platform,
+    "android",
+  );
+});
+test("API rollback discards an unapplied canonical pending request and retries the legacy locale", async () => {
+  const w = world();
+  w.dropBeforeApply = true;
+  const { api } = fixture(w);
+  await assert.rejects(
+    api.configureFamilyPush(true, ["feed"], "fr"),
+    /network_unavailable/,
+  );
+  assert.equal(JSON.parse(w.storage).pending.body.locale, "fr");
+
+  w.supportedLocales = undefined;
+  w.rejectCanonicalLocale = true;
+  const result = await api.configureFamilyPush(true, ["feed"], "fr");
+  assert.equal(result.enabled, true);
+  const puts = w.calls.filter((call) => call.method === "PUT");
+  assert.deepEqual(
+    puts.map((call) => call.body.locale),
+    ["fr", "fr", "en"],
+  );
+  assert.equal(JSON.parse(w.storage).pending, null);
+  assert.equal(JSON.parse(w.storage).locale, "en");
+});
+test("opt-out clears a rollback-rejected pending request and revokes the established binding", async () => {
+  const w = world();
+  const { api } = fixture(w);
+  await api.configureFamilyPush(true, ["feed"], "en");
+  w.dropBeforeApply = true;
+  await assert.rejects(
+    api.configureFamilyPush(true, ["feed"], "fr"),
+    /network_unavailable/,
+  );
+  assert.equal(JSON.parse(w.storage).pending.body.locale, "fr");
+
+  w.supportedLocales = undefined;
+  w.rejectCanonicalLocale = true;
+  const result = await api.configureFamilyPush(false, ["feed"], "fr");
+  assert.equal(result.enabled, false);
+  assert.equal(result.pending, false);
+  const stored = JSON.parse(w.storage);
+  assert.equal(stored.desiredEnabled, false);
+  assert.equal(stored.pending, null);
+  assert.equal(stored.generation, 2);
+  assert.equal(
+    w.calls.filter((call) => call.route.endsWith("/unregister")).length,
+    1,
+  );
 });
 test("definitive rejected registration does not prevent revoking the established binding", async () => {
   for (const code of [

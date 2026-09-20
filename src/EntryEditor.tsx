@@ -25,7 +25,7 @@ import Modal from "./AccessibleModal";
 import { selectPalette } from "./palette";
 import { useAccessibilityPreferences } from "./accessibilityPreferences";
 import { Entry, makeId, validateEntry } from "./domain";
-import { t, useI18n } from "./i18n";
+import { formatEditableNumber, parseLocalizedNumber, t, useI18n } from "./i18n";
 import { entryStorageDisclosure } from "./entryStorageDisclosure";
 import { feedAmountPresets, formulaFeedingSource } from "./feedAmountPresets";
 
@@ -148,22 +148,31 @@ export default function EntryEditor({
   sharedMode?: boolean;
   hasAccount?: boolean;
 }) {
+  const { formattingLocale } = useI18n();
   const [draft, setDraft] = useState(entry);
   const initialEnd = useRef(entry.end ?? new Date().toISOString());
   const [start, setStart] = useState(localFields(entry.start));
   const [end, setEnd] = useState(localFields(initialEnd.current));
   const [hasEnd, setHasEnd] = useState(!!entry.end);
   const feedEndInitialized = useRef(!!entry.end);
-  const [amount, setAmount] = useState(String(entry.amount ?? 120));
+  const [amount, setAmount] = useState(() =>
+    formatEditableNumber(entry.amount ?? 120, formattingLocale),
+  );
   const [sourceError, setSourceError] = useState(false);
   const [weight, setWeight] = useState(
-    entry.weight === undefined ? "" : String(entry.weight),
+    entry.weight === undefined
+      ? ""
+      : formatEditableNumber(entry.weight, formattingLocale),
   );
   const [length, setLength] = useState(
-    entry.length === undefined ? "" : String(entry.length),
+    entry.length === undefined
+      ? ""
+      : formatEditableNumber(entry.length, formattingLocale),
   );
   const [head, setHead] = useState(
-    entry.head === undefined ? "" : String(entry.head),
+    entry.head === undefined
+      ? ""
+      : formatEditableNumber(entry.head, formattingLocale),
   );
   const [picker, setPicker] = useState<{
     target: "start" | "end";
@@ -174,7 +183,6 @@ export default function EntryEditor({
     [error, setError] = useState("");
   const saving = useRef(false);
   const { highContrast } = useAccessibilityPreferences();
-  const { locale } = useI18n();
   const { fontScale } = useWindowDimensions();
   const largeText = fontScale > 1.3;
   const palette = selectPalette(dark, highContrast);
@@ -478,16 +486,19 @@ export default function EntryEditor({
           result.feedRunning = true;
         if (bottle) {
           if (!amount.trim()) throw new Error(t("请填写实际喝奶量"));
-          result.amount = Number(amount);
+          result.amount = parseLocalizedNumber(amount, formattingLocale);
         } else delete result.amount;
       }
       if (entry.type === "growth") {
         delete result.weight;
         delete result.length;
         delete result.head;
-        if (weight.trim()) result.weight = Number(weight);
-        if (length.trim()) result.length = Number(length);
-        if (head.trim()) result.head = Number(head);
+        if (weight.trim())
+          result.weight = parseLocalizedNumber(weight, formattingLocale);
+        if (length.trim())
+          result.length = parseLocalizedNumber(length, formattingLocale);
+        if (head.trim())
+          result.head = parseLocalizedNumber(head, formattingLocale);
       }
       await onSave(validateEntry(result));
     } catch (e) {
@@ -573,8 +584,12 @@ export default function EntryEditor({
                         {quickAmounts.amounts.map((n) =>
                           chip(
                             `${n} mL`,
-                            amount === String(n),
-                            () => setAmount(String(n)),
+                            amount ===
+                              formatEditableNumber(n, formattingLocale),
+                            () =>
+                              setAmount(
+                                formatEditableNumber(n, formattingLocale),
+                              ),
                             [s.amountChip, largeText && s.largeChoice],
                           ),
                         )}
@@ -883,7 +898,7 @@ export default function EntryEditor({
                   mode={picker.mode}
                   display={Platform.OS === "ios" ? "spinner" : "default"}
                   themeVariant={dark ? "dark" : "light"}
-                  locale={locale}
+                  locale={formattingLocale}
                   is24Hour
                   onChange={onPickerChange}
                 />

@@ -1,4 +1,5 @@
 import type { Entry } from "../domain";
+import type { SupportedLocale } from "../locales";
 import type { FamilyExtraRecord } from "./extras";
 
 // Browser previews do not schedule or persist family notifications.
@@ -17,6 +18,7 @@ export async function syncFamilyReminders(
   _origin: string,
   _records: readonly FamilyExtraRecord[],
   _entries: readonly Entry[],
+  _locale: SupportedLocale = "en",
 ): Promise<void> {}
 export async function clearFamilyReminders(): Promise<void> {}
 export async function suspendFamilyReminders(): Promise<void> {}

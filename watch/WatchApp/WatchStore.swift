@@ -12,8 +12,23 @@ final class WatchStore: NSObject, ObservableObject, WCSessionDelegate {
   private let maximumCommands = 1_000
   private var inFlight = Set<String>()
 
-  var chinese: Bool { disk.context?.language == "zh" || (disk.context?.language == nil && Locale.current.language.languageCode?.identifier == "zh") }
-  func text(_ en: String, _ zh: String) -> String { chinese ? zh : en }
+  var localeIdentifier: String {
+    WatchLocale.resolve(locale: disk.context?.locale, language: disk.context?.language)
+  }
+  var formattingLocaleIdentifier: String {
+    WatchLocale.resolveFormatting(locale: disk.context?.locale,
+      language: disk.context?.language, formattingLocale: disk.context?.formattingLocale)
+  }
+  var locale: Locale { Locale(identifier: formattingLocaleIdentifier) }
+  private var localizer: WatchLocalizer {
+    WatchLocalizer(identifier: localeIdentifier, formattingIdentifier: formattingLocaleIdentifier)
+  }
+  func text(_ key: String, _ arguments: CVarArg...) -> String {
+    localizer.string(key, arguments: arguments)
+  }
+  func plural(_ key: String, count: Int) -> String {
+    localizer.plural(key, count: count)
+  }
   var ready: Bool { storageAvailable && disk.context?.isValid(at: Date()) == true }
   var entries: [WatchEntry] { disk.visibleEntries() }
   var activeFeed: WatchEntry? { entries.first { $0.type == "feed" } }
@@ -30,13 +45,13 @@ final class WatchStore: NSObject, ObservableObject, WCSessionDelegate {
   func rejectionMessage(_ code: String?) -> String {
     switch code {
     case "invalid_record_time", "before_birth_date", "invalid_watch_command":
-      return text("Not added. Check your clock and record values, then record again.", "未添加。请检查时间及记录内容后重新记录。")
+      return text("error.invalid_record")
     case "membership_changed", "context-changed":
-      return text("Not applied to the previous workspace. Open the iPhone app to reconnect.", "未应用到之前的资料。请打开 iPhone 应用重新连接。")
+      return text("error.context_changed")
     case "running_sleep", "running_feed":
-      return text("Another timer already exists. Refresh the iPhone app before trying again.", "已有其他计时。请刷新 iPhone 应用后重试。")
+      return text("error.timer_exists")
     default:
-      return text("This record was not shared. Review the pending change on iPhone.", "此记录未共享。请在 iPhone 上查看待处理修改。")
+      return text("error.not_shared")
     }
   }
 
@@ -49,7 +64,7 @@ final class WatchStore: NSObject, ObservableObject, WCSessionDelegate {
       }
       storageAvailable = true
     } catch {
-      notice = text("Storage unavailable. Open Little Days on iPhone.", "储存暂不可用。请打开 iPhone 上的小日子。")
+      notice = text("error.storage_unavailable")
     }
     if WCSession.isSupported() {
       WCSession.default.delegate = self
@@ -81,15 +96,15 @@ final class WatchStore: NSObject, ObservableObject, WCSessionDelegate {
 
   private func enqueue(_ kind: String, entry: WatchEntry, stoppedAt: Date? = nil, amount: Double? = nil, initialMilkAmount: Int? = nil) -> Bool {
     guard ready, let context = disk.context else {
-      notice = text("Open Little Days on iPhone to verify access.", "请打开 iPhone 上的小日子以验证访问权限。")
+      notice = text("error.verify_access")
       return false
     }
     guard disk.outbox.count < maximumCommands else {
-      notice = text("Watch storage is full. Open the iPhone app to sync first.", "手表待同步记录已满。请先打开 iPhone 应用同步。")
+      notice = text("error.storage_full")
       return false
     }
     if kind != "create" && entry.canControl == false {
-      notice = text("This timer needs the iPhone app before you can change it here.", "此计时需要先在 iPhone 上确认，才能在手表更改。")
+      notice = text("error.timer_requires_iphone")
       return false
     }
     let dependency = disk.outbox.last { $0.command.recordId == entry.id && $0.command.kind == "create" && !$0.terminal && $0.receipt?.status != "rejected" }?.id ?? entry.pendingOperationId
@@ -111,12 +126,12 @@ final class WatchStore: NSObject, ObservableObject, WCSessionDelegate {
     do {
       try persist(value)
       WKInterfaceDevice.current().play(.success)
-      notice = text("Saved on Watch", "已保存在手表")
+      notice = text("notice.saved")
       flush()
       return true
     } catch {
       // Do not project a timer or confirm save if durable persistence failed.
-      notice = text("Couldn't save. Your record was not added. Try again.", "保存失败，记录尚未添加。请重试。")
+      notice = text("error.save_failed")
       WKInterfaceDevice.current().play(.failure)
       return false
     }
@@ -144,12 +159,12 @@ final class WatchStore: NSObject, ObservableObject, WCSessionDelegate {
     if let entry = activeSleep {
       let now = Date()
       guard now >= entry.startedAt else {
-        notice = text("Check your Watch clock, then try again.", "请检查手表时间后重试。")
+        notice = text("error.watch_clock")
         return false
       }
       let result = enqueue("finish-sleep", entry: entry, stoppedAt: now)
       if result && now.timeIntervalSince(entry.startedAt) < 60 {
-        notice = text("Under one minute: sleep cancelled; no completed sleep will be kept.", "不足一分钟：已取消睡眠，不保留已完成的睡眠记录。")
+        notice = text("notice.short_sleep_cancelled")
       }
       return result
     }
@@ -241,7 +256,7 @@ final class WatchStore: NSObject, ObservableObject, WCSessionDelegate {
         if session.isReachable { session.sendMessage(["receiptReceived": json], replyHandler: { _ in }, errorHandler: nil) }
       }
     }
-    catch { notice = text("Couldn't save sync status. Your pending records are retained.", "同步状态保存失败。待同步记录仍保留。") }
+    catch { notice = text("error.sync_status_save_failed") }
   }
 
   nonisolated func session(_ session: WCSession, activationDidCompleteWith activationState: WCSessionActivationState, error: Error?) {

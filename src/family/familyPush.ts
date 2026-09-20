@@ -1,4 +1,4 @@
-import type { PushCategory, PushScope } from "./familyPushCore";
+import type { PushCategory, PushLocale, PushScope } from "./familyPushCore";
 export type FamilyPushView = {
   supported: boolean;
   enabled: boolean;
@@ -20,12 +20,12 @@ export async function loadFamilyPush(): Promise<FamilyPushView> {
 export async function configureFamilyPush(
   _enabled: boolean,
   _categories: PushCategory[],
-  _locale: "zh" | "en",
+  _locale: PushLocale,
 ): Promise<FamilyPushView> {
   throw new Error("native_required");
 }
 export async function reconcileFamilyPush(
-  _locale: "zh" | "en",
+  _locale: PushLocale,
 ): Promise<FamilyPushView> {
   return unsupportedPush;
 }

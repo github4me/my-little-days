@@ -48,6 +48,14 @@ public sealed record PushRegistrationResult(Guid OperationId, Guid InstallationI
 public static class PushPolicy
 {
     public static readonly string[] Categories = ["feed", "diaper", "sleep"];
+    public static readonly string[] SupportedLocales =
+        ["en", "zh-Hans", "zh-Hant", "fr", "de", "hi", "it", "ja", "ko", "es", "th", "vi"];
+    public static bool IsSupportedLocale(string? locale) =>
+        locale == "zh" || locale is not null && SupportedLocales.Contains(locale, StringComparer.Ordinal);
+    // `zh` is the only legacy registration ID. Unknown persisted values fail
+    // safely to English instead of being interpreted as Chinese.
+    public static string DeliveryLocale(string? locale) => locale == "zh" ? "zh-Hans" :
+        locale is not null && SupportedLocales.Contains(locale, StringComparer.Ordinal) ? locale : "en";
     public static int CategoryMask(IEnumerable<string> categories) => categories.Aggregate(0, (mask, category) =>
         mask | category switch { "feed" => 1, "diaper" => 2, "sleep" => 4, _ => 0 });
     public static string[] ReadCategories(int mask) => Categories.Where(x => (CategoryMask([x]) & mask) != 0).ToArray();
@@ -63,7 +71,7 @@ public static class PushPolicy
     {
         ValidateSecret(installationId, value.OperationId, value.InstallationSecret, value.ExpectedGeneration);
         if (value.ExpoPushToken is null || !Regex.IsMatch(value.ExpoPushToken, "^(Expo|Exponent)PushToken\\[[A-Za-z0-9_-]{10,200}\\]$") ||
-            value.ProjectId != settings.ProjectId || value.Platform is not ("ios" or "android") || value.Locale is not ("en" or "zh") ||
+            value.ProjectId != settings.ProjectId || value.Platform is not ("ios" or "android") || !IsSupportedLocale(value.Locale) ||
             value.Categories is null || value.Categories.Length > 3 || value.Categories.Distinct().Count() != value.Categories.Length ||
             value.Categories.Any(x => !Categories.Contains(x)) || value.Enabled && value.Categories.Length == 0 ||
             value.FamilyId == Guid.Empty || value.MembershipId == Guid.Empty || value.HistoryId == Guid.Empty)

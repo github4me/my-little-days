@@ -1,2 +1,11 @@
-"Today's care" = "今日照护";
-"Today's recorded milk, nappy changes and sleep. Tap to open Today." = "今日已记录奶量、尿布次数和睡眠时长。轻点打开今天页面。";
+"widget.gallery.name" = "今日照护";
+"widget.gallery.description" = "今日已记录奶量、尿布次数和睡眠时长。轻点打开今天页面。";
+"widget.today" = "今日";
+"widget.milk" = "奶量";
+"widget.nappies" = "尿布";
+"widget.sleep" = "睡眠";
+"widget.recorded_sleep" = "已记录睡眠";
+"widget.unit.ml" = "mL";
+"widget.unit.hour_short" = "小时";
+"widget.updated" = "更新于 ";
+"widget.empty" = "打开小日子\n查看今日记录";

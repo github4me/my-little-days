@@ -1,4 +1,4 @@
-import type { AppLocale } from "../i18n";
+import { localize, type AppLocale } from "../i18n";
 
 const messages = {
   errorWatchPending: [
@@ -377,7 +377,7 @@ const messages = {
     "You will lose access to every family test record, including your own. Family cache, drafts and unsent changes on this device will be deleted. Records already accepted by the service stay with the family. Rejoining requires a new invitation. Your original offline baby records are unaffected.",
   ],
   activeMember: ["当前成员", "Active"],
-  leftMember: ["已离开", "Left"],
+  leftMember: ["已离开", "Former member"],
   removedMember: ["已移除", "Removed"],
   endedAt: ["结束访问：{time}", "Access ended {time}"],
   profile: ["测试宝宝资料", "Test baby profile"],
@@ -777,10 +777,8 @@ export function familyMessage(
   key: FamilyMessageKey,
   values: Record<string, string | number> = {},
 ): string {
-  return messages[key][locale === "zh-CN" ? 0 : 1].replace(
-    /\{(\w+)\}/g,
-    (_, name: string) => String(values[name] ?? ""),
-  );
+  const [chinese, english] = messages[key];
+  return localize(chinese, english, values, locale);
 }
 
 const errorMessages: Record<string, FamilyMessageKey> = {
@@ -851,13 +849,19 @@ const errorMessages: Record<string, FamilyMessageKey> = {
 
 export function familyErrorMessage(locale: AppLocale, code: string): string {
   if (code === "supplement_sharing_unavailable")
-    return locale === "zh-CN"
-      ? "家庭服务尚未支持补充剂记录，请更新 API 后刷新。原本机资料不会因此清理。"
-      : "Supplement sharing needs an API update. Refresh after updating. Your personal data will not be cleared.";
+    return localize(
+      "家庭服务尚未支持补充剂记录，请更新 API 后刷新。原本机资料不会因此清理。",
+      "Supplement sharing needs an API update. Refresh after updating. Your personal data will not be cleared.",
+      undefined,
+      locale,
+    );
   if (code === "extras_sharing_unavailable")
-    return locale === "zh-CN"
-      ? "服务尚未支持照片、提醒和早教共享，请先更新数据库与 API，再刷新重试。原本机资料不会因此清理。"
-      : "Photo, reminder and play sharing require the database and API update. Refresh after updating. Existing personal data will not be cleared by this error.";
+    return localize(
+      "服务尚未支持照片、提醒和早教共享，请先更新数据库与 API，再刷新重试。原本机资料不会因此清理。",
+      "Photo, reminder and play sharing require the database and API update. Refresh after updating. Existing personal data will not be cleared by this error.",
+      undefined,
+      locale,
+    );
   if (code.startsWith("legacy_reminder_"))
     return familyMessage(locale, "ownerLegacyReminderError");
   if (
@@ -869,27 +873,51 @@ export function familyErrorMessage(locale: AppLocale, code: string): string {
   )
     return familyMessage(locale, "ownerExtraReadError");
   if (code === "family_schema_unsupported")
-    return locale === "zh-CN"
-      ? "此家庭的数据格式暂不受当前应用支持。请联系家庭管理员处理；你可以在“我的账户”中退出登录。本机个人资料不会因此删除。"
-      : "This family’s data format is not supported by this app. Contact the family admin for help; you can sign out from My account. Your personal data on this device will not be deleted by this error.";
+    return localize(
+      "此家庭的数据格式暂不受当前应用支持。请联系家庭管理员处理；你可以在“我的账户”中退出登录。本机个人资料不会因此删除。",
+      "This family’s data format is not supported by this app. Contact the family admin for help; you can sign out from My account. Your personal data on this device will not be deleted by this error.",
+      undefined,
+      locale,
+    );
   if (code === "full_sharing_unavailable")
-    return locale === "zh-CN"
-      ? "服务或家庭尚未支持完整记录。请更新服务后重试。"
-      : "The service or family does not support complete records yet. Update the service and retry.";
+    return localize(
+      "服务或家庭尚未支持完整记录。请更新服务后重试。",
+      "The service or family does not support complete records yet. Update the service and retry.",
+      undefined,
+      locale,
+    );
   if (code === "running_timers")
     return familyMessage(locale, "ownerTimerError");
   if (code === "identity_not_supported")
-    return locale === "zh-CN"
-      ? "此账户不可访问家庭服务。已清除此设备的家庭缓存。"
-      : "This account cannot access family services. Family data cached on this device has been cleared.";
+    return localize(
+      "此账户不可访问家庭服务。已清除此设备的家庭缓存。",
+      "This account cannot access family services. Family data cached on this device has been cleared.",
+      undefined,
+      locale,
+    );
   if (code === "refresh_required")
-    return locale === "zh-CN"
-      ? "请联网刷新家庭权限后继续。"
-      : "Connect and refresh family access to continue.";
+    return localize(
+      "请联网刷新家庭权限后继续。",
+      "Connect and refresh family access to continue.",
+      undefined,
+      locale,
+    );
   return fullFamilyMessage(locale, errorMessages[code] ?? "errorGeneric");
 }
 
 const fullMessages: Partial<Record<FamilyMessageKey, [string, string]>> = {
+  createConsent: [
+    "我了解创建家庭会将此昵称及我主动保存的记录发送到家庭共享服务，并与家庭成员共享。",
+    "I understand that creating a family sends this name and records I explicitly save to the family sharing service and shares them with family members.",
+  ],
+  profileDescription: [
+    "只有管理员可以修改家庭宝宝资料。当前宝宝头像会与家庭成员共享。",
+    "Only the admin can change the family baby profile. The current baby photo is shared with family members.",
+  ],
+  errorNetwork: [
+    "暂时无法连接家庭共享服务。已保存的修改留在此设备，连接恢复后会重试。",
+    "The family sharing service cannot be reached. Saved changes stay on this device and will retry when a connection is available.",
+  ],
   noticeSignedOut: [
     "已退出登录，此设备上的家庭数据和登录信息已清除。已共享记录仍保留在家庭中。",
     "Signed out. Family data and sign-in details have been cleared from this device. Shared records remain with the family.",
@@ -1049,14 +1077,16 @@ export function fullFamilyMessage(
   values?: Record<string, string | number>,
 ): string {
   const pair = fullMessages[key];
-  if (!pair)
-    return familyMessage(locale, key, values)
-      .replaceAll("试点", "家庭共享")
-      .replaceAll("pilot", "family sharing");
-  let value = pair[locale === "zh-CN" ? 0 : 1];
-  for (const [name, replacement] of Object.entries(values ?? {}))
-    value = value.replaceAll(`{${name}}`, String(replacement));
-  return value;
+  if (!pair) {
+    const [chinese, english] = messages[key];
+    return localize(
+      chinese.replaceAll("试点", "家庭共享"),
+      english.replaceAll("pilot", "family sharing"),
+      values,
+      locale,
+    );
+  }
+  return localize(pair[0], pair[1], values, locale);
 }
 
 const noticeMessages: Record<string, FamilyMessageKey> = {

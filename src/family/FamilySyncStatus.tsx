@@ -2,7 +2,7 @@ import React, { useContext, useEffect, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, View } from "react-native";
 import Modal from "../AccessibleModal";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useI18n, type AppLocale } from "../i18n";
+import { localize, useI18n, type AppLocale } from "../i18n";
 import { Button, Card, T, Theme } from "../ui";
 import {
   familyErrorMessage,
@@ -61,6 +61,7 @@ function timerConflictMessage(
   item: QueuedRecord,
   pilot: Pilot,
   locale: AppLocale,
+  formattingLocale: string,
 ) {
   const kind = item.operation.entry?.type;
   const snapshot = pilot.fullSnapshot;
@@ -78,19 +79,30 @@ function timerConflictMessage(
   const startedAt = new Date(active.entry.start);
   if (!Number.isFinite(startedAt.getTime()))
     return familyErrorMessage(locale, "active_timer_conflict");
-  const time = startedAt.toLocaleTimeString(
-    locale === "zh-CN" ? "zh-CN" : "en-AU",
-    { hour: "2-digit", minute: "2-digit" },
+  const time = startedAt.toLocaleTimeString(formattingLocale, {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  return localize(
+    "{starter} 已于 {time} 开始{kind}计时，目前仍在进行。你这次开始未共享，已保留在本机。返回“今天”可结束现有计时。",
+    "{starter} started the {kind} timer at {time}, and it is still ongoing. Your new timer was not shared and is preserved on this device. Return to Today to finish the ongoing timer.",
+    {
+      starter,
+      time,
+      kind:
+        kind === "sleep"
+          ? localize("睡眠", "sleep", undefined, locale)
+          : localize("喂养", "feeding", undefined, locale),
+    },
+    locale,
   );
-  if (locale === "zh-CN")
-    return `${starter} 已于 ${time} 开始${kind === "sleep" ? "睡眠" : "喂养"}计时，目前仍在进行。你这次开始未共享，已保留在本机。返回“今天”可结束现有计时。`;
-  return `${starter} started the ${kind === "sleep" ? "sleep" : "feeding"} timer at ${time}, and it is still ongoing. Your new timer was not shared and is preserved on this device. Return to Today to finish the ongoing timer.`;
 }
 
 function timerAlreadyFinishedMessage(
   item: QueuedRecord,
   pilot: Pilot,
   locale: AppLocale,
+  formattingLocale: string,
 ) {
   const kind = item.timerCompletion ?? item.operation.entry?.type;
   const record = pilot.fullSnapshot?.entries.find(
@@ -110,13 +122,24 @@ function timerAlreadyFinishedMessage(
   const endedAt = new Date(record.entry.end);
   if (!Number.isFinite(endedAt.getTime()))
     return familyErrorMessage(locale, "timer_already_finished");
-  const time = endedAt.toLocaleTimeString(
-    locale === "zh-CN" ? "zh-CN" : "en-AU",
-    { hour: "2-digit", minute: "2-digit" },
+  const time = endedAt.toLocaleTimeString(formattingLocale, {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  return localize(
+    "{finisher} 已于 {time} 结束由 {starter} 开始的{kind}计时。最新家庭记录已保留；你选择的结束时间没有覆盖它，并保留在本机供检查。",
+    "{finisher} finished the {kind} timer started by {starter} at {time}. The latest family record is kept; your chosen end time did not overwrite it and remains on this device for review.",
+    {
+      finisher,
+      starter,
+      time,
+      kind:
+        kind === "sleep"
+          ? localize("睡眠", "sleep", undefined, locale)
+          : localize("喂养", "feeding", undefined, locale),
+    },
+    locale,
   );
-  if (locale === "zh-CN")
-    return `${finisher} 已于 ${time} 结束由 ${starter} 开始的${kind === "sleep" ? "睡眠" : "喂养"}计时。最新家庭记录已保留；你选择的结束时间没有覆盖它，并保留在本机供检查。`;
-  return `${finisher} finished the ${kind === "sleep" ? "sleep" : "feeding"} timer started by ${starter} at ${time}. The latest family record is kept; your chosen end time did not overwrite it and remains on this device for review.`;
 }
 
 function IssueMessages({
@@ -126,7 +149,7 @@ function IssueMessages({
   issues: FamilySyncIssue[];
   pilot: Pilot;
 }) {
-  const { locale } = useI18n();
+  const { locale, formattingLocale, localize: text } = useI18n();
   const conflicts = issues.filter((issue) => issue.kind.endsWith("conflict"));
   const activeTimerConflicts = conflicts.filter(
     (issue) => issue.code === "active_timer_conflict",
@@ -177,7 +200,7 @@ function IssueMessages({
         return (
           <T raw key={`active:${issue.key}`}>
             {item
-              ? timerConflictMessage(item, pilot, locale)
+              ? timerConflictMessage(item, pilot, locale, formattingLocale)
               : familyErrorMessage(locale, "active_timer_conflict")}
           </T>
         );
@@ -192,16 +215,22 @@ function IssueMessages({
         return (
           <T raw key={`finished:${issue.key}`}>
             {item
-              ? timerAlreadyFinishedMessage(item, pilot, locale)
+              ? timerAlreadyFinishedMessage(
+                  item,
+                  pilot,
+                  locale,
+                  formattingLocale,
+                )
               : familyErrorMessage(locale, "timer_already_finished")}
           </T>
         );
       })}
       {hasOtherConflicts ? (
         <T raw>
-          {locale === "zh-CN"
-            ? "部分修改未能共享，已保留在此设备上。请查看最新记录，再决定如何处理。"
-            : "Some changes could not be shared and are preserved on this device. Review the latest records before deciding what to do."}
+          {text(
+            "部分修改未能共享，已保留在此设备上。请查看最新记录，再决定如何处理。",
+            "Some changes could not be shared and are preserved on this device. Review the latest records before deciding what to do.",
+          )}
         </T>
       ) : null}
     </>
@@ -216,7 +245,7 @@ export function FamilySyncBanner({
   onOpenFamily: () => void;
 }) {
   const c = useContext(Theme);
-  const { locale } = useI18n();
+  const { localize: text } = useI18n();
   const [presentation, setPresentation] = useState(initialSyncPresentation);
   const current = updateSyncPresentation(presentation, pilot);
   const issues = visibleSyncIssues(current, pilot);
@@ -230,22 +259,18 @@ export function FamilySyncBanner({
       <Card style={styles.card}>
         <View style={styles.headingRow}>
           <T raw style={styles.heading}>
-            {locale === "zh-CN"
-              ? "家庭共享需要处理"
-              : "Family sharing needs attention"}
+            {text("家庭共享需要处理", "Family sharing needs attention")}
           </T>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={
-              locale === "zh-CN"
-                ? "关闭家庭共享提示"
-                : "Dismiss family sharing notice"
-            }
-            accessibilityHint={
-              locale === "zh-CN"
-                ? "仅隐藏提示；未发送修改和冲突草稿会保留。"
-                : "Hides this notice. Unsent changes and preserved drafts are kept."
-            }
+            accessibilityLabel={text(
+              "关闭家庭共享提示",
+              "Dismiss family sharing notice",
+            )}
+            accessibilityHint={text(
+              "仅隐藏提示；未发送修改和冲突草稿会保留。",
+              "Hides this notice. Unsent changes and preserved drafts are kept.",
+            )}
             onPress={() => setPresentation(dismissSyncIssues(current, pilot))}
             style={({ pressed }) => [
               styles.close,
@@ -262,7 +287,7 @@ export function FamilySyncBanner({
         </View>
         <Button
           secondary
-          label={locale === "zh-CN" ? "查看家庭共享" : "Review family sharing"}
+          label={text("查看家庭共享", "Review family sharing")}
           onPress={onOpenFamily}
         />
       </Card>
@@ -288,33 +313,43 @@ const recordLabels: Record<string, [string, string]> = {
   "reminder-settings": ["提醒设置", "Reminder settings"],
 };
 
-function recordDescription(item: QueuedRecord, locale: AppLocale) {
+function recordDescription(
+  item: QueuedRecord,
+  locale: AppLocale,
+  formattingLocale: string,
+) {
   const { operation } = item;
-  const index = locale === "zh-CN" ? 0 : 1;
   const kind =
     operation.entry?.type ??
     operation.careRecord?.kind ??
     operation.extraRecord?.kind;
-  const label = kind ? recordLabels[kind]?.[index] : null;
+  const labelPair = kind ? recordLabels[kind] : null;
+  const label = labelPair
+    ? localize(labelPair[0], labelPair[1], undefined, locale)
+    : null;
   const action =
     operation.kind === "delete"
-      ? ["删除", "Delete"][index]
+      ? localize("删除", "Delete", undefined, locale)
       : operation.kind === "create"
-        ? ["新增", "Create"][index]
-        : ["修改", "Edit"][index];
+        ? localize("新增", "Create", undefined, locale)
+        : localize("修改", "Edit", undefined, locale);
   const time = operation.entry?.start ?? operation.careRecord?.time;
   const displayedTime =
     time && Number.isFinite(Date.parse(time))
-      ? new Date(time).toLocaleString(locale === "zh-CN" ? "zh-CN" : "en-AU")
+      ? new Date(time).toLocaleString(formattingLocale)
       : null;
-  return [action, label ?? ["记录", "Record"][index], displayedTime]
+  return [
+    action,
+    label ?? localize("记录", "Record", undefined, locale),
+    displayedTime,
+  ]
     .filter(Boolean)
     .join(" · ");
 }
 
 export function FamilySyncDetails({ pilot }: { pilot: Pilot }) {
   const c = useContext(Theme);
-  const { locale } = useI18n();
+  const { locale, formattingLocale, localize: text } = useI18n();
   const [discard, setDiscard] = useState<{
     operationId: string;
     origin: string;
@@ -358,9 +393,10 @@ export function FamilySyncDetails({ pilot }: { pilot: Pilot }) {
           (item) => item.error !== "active_timer_conflict",
         ) ? (
           <T raw style={{ color: c.muted }}>
-            {locale === "zh-CN"
-              ? "这些修改不会自动重发。请回到记录页面，重新打开最新记录查看后修改。丢弃只会删除此设备上保留的修改，不会更改家庭已共享的记录。"
-              : "These changes will not retry automatically. Return to your records and reopen the latest record to review and edit it. Discarding removes only the preserved change on this device; shared family records stay unchanged."}
+            {text(
+              "这些修改不会自动重发。请回到记录页面，重新打开最新记录查看后修改。丢弃只会删除此设备上保留的修改，不会更改家庭已共享的记录。",
+              "These changes will not retry automatically. Return to your records and reopen the latest record to review and edit it. Discarding removes only the preserved change on this device; shared family records stay unchanged.",
+            )}
           </T>
         ) : null}
         {recordConflicts.map((item) => (
@@ -369,7 +405,7 @@ export function FamilySyncDetails({ pilot }: { pilot: Pilot }) {
             style={[styles.conflict, { borderColor: c.line }]}
           >
             <T raw style={{ fontWeight: "600" }}>
-              {recordDescription(item, locale)}
+              {recordDescription(item, locale, formattingLocale)}
             </T>
             {item.error === "active_timer_conflict" ||
             item.error === "timer_already_finished" ? null : (
@@ -422,7 +458,7 @@ export function FamilySyncDetails({ pilot }: { pilot: Pilot }) {
               </T>
               {selected ? (
                 <T raw style={{ color: c.muted }}>
-                  {recordDescription(selected, locale)}
+                  {recordDescription(selected, locale, formattingLocale)}
                 </T>
               ) : null}
               {discardError ? (

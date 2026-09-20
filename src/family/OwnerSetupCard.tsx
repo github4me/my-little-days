@@ -80,7 +80,7 @@ export default function OwnerSetupCard({
   onDiscard,
 }: OwnerSetupCardProps) {
   const c = useContext(Theme);
-  const { locale } = useI18n();
+  const { locale, formattingLocale, localize: text } = useI18n();
   const m = (key: FamilyMessageKey) =>
     mode === "full"
       ? fullFamilyMessage(locale, key)
@@ -368,19 +368,19 @@ export default function OwnerSetupCard({
                     {review.extrasSchemaVersion === 1 ? (
                       <View style={{ gap: 8 }}>
                         <T raw style={{ fontWeight: "600" }}>
-                          {locale === "zh-CN"
-                            ? "同时共享的资料"
-                            : "Also shared with your family"}
+                          {text(
+                            "同时共享的资料",
+                            "Also shared with your family",
+                          )}
                         </T>
                         {review.extraRecords?.map((record) =>
                           record.kind === "avatar" && record.dataUrl ? (
                             <Image
                               key={record.id}
-                              accessibilityLabel={
-                                locale === "zh-CN"
-                                  ? "待共享的宝宝头像"
-                                  : "Baby photo to share"
-                              }
+                              accessibilityLabel={text(
+                                "待共享的宝宝头像",
+                                "Baby photo to share",
+                              )}
                               source={{ uri: record.dataUrl }}
                               style={{
                                 width: 72,
@@ -400,22 +400,32 @@ export default function OwnerSetupCard({
                           return (
                             <>
                               {body(
-                                locale === "zh-CN"
-                                  ? `宝宝头像 ${counts.avatar} 张 · 提醒 ${counts.reminders} 条 · 早教打卡 ${counts.playCheckins} 条`
-                                  : `${counts.avatar} baby photo · ${counts.reminders} reminders · ${counts.playCheckins} play check-ins`,
+                                text(
+                                  "宝宝头像 {avatar} 张 · 提醒 {reminders} 条 · 早教打卡 {playCheckins} 条",
+                                  "{avatar} baby photo · {reminders} reminders · {playCheckins} play check-ins",
+                                  counts,
+                                ),
                               )}
                               {selection?.kind === "play-selection"
                                 ? body(
-                                    locale === "zh-CN"
-                                      ? `早教设置：默认按月龄推荐，手动选入 ${selection.selection.included.length} 项、排除 ${selection.selection.excluded.length} 项。`
-                                      : `Play settings: age-based defaults, ${selection.selection.included.length} manually included and ${selection.selection.excluded.length} excluded.`,
+                                    text(
+                                      "早教设置：默认按月龄推荐，手动选入 {included} 项、排除 {excluded} 项。",
+                                      "Play settings: age-based defaults, {included} manually included and {excluded} excluded.",
+                                      {
+                                        included:
+                                          selection.selection.included.length,
+                                        excluded:
+                                          selection.selection.excluded.length,
+                                      },
+                                    ),
                                   )
                                 : null}
                               {counts.reminderSettings
                                 ? body(
-                                    locale === "zh-CN"
-                                      ? "包含上次保存的提醒表单设置。"
-                                      : "Includes the last saved reminder form settings.",
+                                    text(
+                                      "包含上次保存的提醒表单设置。",
+                                      "Includes the last saved reminder form settings.",
+                                    ),
                                   )
                                 : null}
                             </>
@@ -430,10 +440,14 @@ export default function OwnerSetupCard({
                             >
                               {record.settings.title} ·{" "}
                               {record.onceAt
-                                ? new Date(record.onceAt).toLocaleString()
+                                ? new Date(record.onceAt).toLocaleString(
+                                    formattingLocale,
+                                  )
                                 : record.settings.mode === "daily"
                                   ? record.settings.dailyTime
-                                  : `${record.settings.minutes} min`}
+                                  : text("{minutes} 分钟", "{minutes} min", {
+                                      minutes: record.settings.minutes,
+                                    })}
                             </T>
                           ) : null,
                         )}

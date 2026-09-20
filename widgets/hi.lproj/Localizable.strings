@@ -1,0 +1,11 @@
+"widget.gallery.name" = "आज की देखभाल";
+"widget.gallery.description" = "आज दर्ज दूध, डायपर बदलाव और नींद। आज का पेज खोलने के लिए टैप करें।";
+"widget.today" = "आज";
+"widget.milk" = "दूध";
+"widget.nappies" = "डायपर";
+"widget.sleep" = "नींद";
+"widget.recorded_sleep" = "दर्ज नींद";
+"widget.unit.ml" = "mL";
+"widget.unit.hour_short" = "घं.";
+"widget.updated" = "अपडेट: ";
+"widget.empty" = "आज अपडेट करने के लिए\nLittle Days खोलें";

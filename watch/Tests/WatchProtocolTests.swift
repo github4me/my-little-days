@@ -9,6 +9,29 @@ final class WatchProtocolTests: XCTestCase {
       totals: .init(feedMl: 0, feedCount: 0, diaperCount: 0, sleepMinutes: 0))
   }
 
+  func testCanonicalLocalePrefersNewFieldAndKeepsLegacyFallbacks() throws {
+    XCTAssertEqual(WatchLocale.supported.count, 12)
+    XCTAssertEqual(WatchLocale.canonical("zh_TW"), "zh-Hant")
+    XCTAssertEqual(WatchLocale.canonical("fr-CA"), "fr")
+    XCTAssertEqual(WatchLocale.resolve(locale: "ja", language: "en"), "ja")
+    XCTAssertEqual(WatchLocale.resolve(locale: nil, language: "zh"), "zh-Hans")
+    XCTAssertEqual(WatchLocale.resolve(locale: "unsupported", language: "en"), "en")
+    XCTAssertEqual(WatchLocale.resolveFormatting(locale: "fr", language: "en",
+      formattingLocale: "fr-CA"), "fr-CA")
+    XCTAssertEqual(WatchLocale.resolveFormatting(locale: "fr", language: "en",
+      formattingLocale: "en-US"), "fr-FR", "A mismatched region cannot override the catalog language")
+    XCTAssertEqual(WatchLocale.resolveFormatting(locale: nil, language: nil,
+      formattingLocale: nil, system: Locale(identifier: "en-GB")), "en-GB")
+    XCTAssertEqual(WatchLocale.resolveFormatting(locale: "en", language: "en",
+      formattingLocale: nil, system: Locale(identifier: "en-US")), "en-AU",
+      "Old phone contexts retain the app's established English default")
+
+    let encoded = try JSONEncoder().encode(context())
+    let decoded = try JSONDecoder().decode(WatchContext.self, from: encoded)
+    XCTAssertNil(decoded.locale, "Version 1 contexts without locale must still decode")
+    XCTAssertNil(decoded.formattingLocale)
+  }
+
   func testContextExpiresAndOldSnapshotsCannotCrossInvalidation() {
     let current = context()
     XCTAssertTrue(current.isValid(at: WatchClock.date("2026-09-19T11:59:59Z")!))

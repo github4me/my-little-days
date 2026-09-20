@@ -1,0 +1,11 @@
+"widget.gallery.name" = "Heutige Pflege";
+"widget.gallery.description" = "Heute erfasste Milch, Windelwechsel und Schlaf. Tippe, um Heute zu öffnen.";
+"widget.today" = "Heute";
+"widget.milk" = "Milch";
+"widget.nappies" = "Windeln";
+"widget.sleep" = "Schlaf";
+"widget.recorded_sleep" = "Erfasster Schlaf";
+"widget.unit.ml" = "mL";
+"widget.unit.hour_short" = "Std.";
+"widget.updated" = "Aktualisiert: ";
+"widget.empty" = "Little Days öffnen,\num Heute zu aktualisieren";

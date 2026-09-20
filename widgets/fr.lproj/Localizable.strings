@@ -1,0 +1,11 @@
+"widget.gallery.name" = "Soins du jour";
+"widget.gallery.description" = "Lait, changements de couche et sommeil enregistrés aujourd’hui. Touchez pour ouvrir Aujourd’hui.";
+"widget.today" = "Aujourd’hui";
+"widget.milk" = "Lait";
+"widget.nappies" = "Couches";
+"widget.sleep" = "Sommeil";
+"widget.recorded_sleep" = "Sommeil enregistré";
+"widget.unit.ml" = "mL";
+"widget.unit.hour_short" = "h";
+"widget.updated" = "Mis à jour à ";
+"widget.empty" = "Ouvrez Little Days\npour actualiser aujourd’hui";

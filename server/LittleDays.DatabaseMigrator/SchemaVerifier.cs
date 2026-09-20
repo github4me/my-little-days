@@ -15,7 +15,7 @@ internal static class SchemaVerifier
         "0001_LegacySchemaBaseline.sql", "0002_VerifyBaselineAndRuntimeGrants.sql",
         "0003_FamilySharedExtras.sql", "0004_FamilyAvailabilityBounds.sql",
         "0005_QueryIndexesAndOperationCounts.sql", "0006_FamilyPushAndTimerIndex.sql",
-        "0007_TimerEndAttribution.sql"
+        "0007_TimerEndAttribution.sql", "0008_WidenPushLocale.sql"
     ];
 
     internal static int Version(IEnumerable<string> applied) => applied
@@ -65,6 +65,7 @@ internal static class SchemaVerifier
                 expected[(table, "Id")] = new(36, 16);
             expected[("PushInstallations", "SecretHash")] = new(167, 64);
             expected[("PushInstallations", "ProtectedToken")] = new(167, 1024);
+            expected[("PushInstallations", "Locale")] = new(167, version >= 8 ? 16 : 2);
             expected[("PushInstallations", "Generation")] = new(56, 4);
             expected[("NotificationSummaryBuckets", "BucketKey")] = new(167, 64);
             expected[("NotificationSummaryBuckets", "Generation")] = new(56, 4);

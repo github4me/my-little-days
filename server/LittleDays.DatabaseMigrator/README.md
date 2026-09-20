@@ -23,7 +23,7 @@ dotnet run --project server/LittleDays.DatabaseMigrator -- --apply
 
 ## New migrations
 
-Add the next uniquely numbered `Scripts/0008_Description.sql`; never modify applied scripts. Update the version contract in `SchemaVerifier` when intentionally changing checked objects. Use plain transaction-compatible SQL with optional `GO` separators. SQL variable substitution is disabled. Include table-specific runtime grants when adding a table used by the API. The runtime must never receive schema control or journal access. New object types needing additional CREATE permissions require separate bootstrap review.
+Add the next uniquely numbered `Scripts/0009_Description.sql`; never modify applied scripts. Update the version contract in `SchemaVerifier` when intentionally changing checked objects. Use plain transaction-compatible SQL with optional `GO` separators. SQL variable substitution is disabled. Include table-specific runtime grants when adding a table used by the API. The runtime must never receive schema control or journal access. New object types needing additional CREATE permissions require separate bootstrap review.
 
 `0001_LegacySchemaBaseline.sql` freezes the three historical EF migrations. `0002_VerifyBaselineAndRuntimeGrants.sql` checks key schema invariants and grants runtime DML. `0003_FamilySharedExtras.sql` adds shared-photo, reminder and play-record constraint support without replacing existing data. `0004_FamilyAvailabilityBounds.sql` adds completed-purge bookkeeping and indexing for bounded cleanup; deploy it before the security-hardened API. Historical EF source remains excluded from the API build and is compiled only into adoption tests. Future migrations belong here, not in EF's migration folder.
 
@@ -41,6 +41,13 @@ have null attribution. Apply it before the compatible API, then release the
 client; do not remove the column as a rollback mechanism. The version-7 catalog
 check verifies both the nullable column and index.
 
+`0008_WidenPushLocale.sql` widens `PushInstallations.Locale` from
+`varchar(2)` to `varchar(16)` without rewriting installation identities,
+generations or opt-in state. Apply this additive migration before deploying an
+API that accepts canonical locale IDs such as `zh-Hant`; the previous API
+continues to work against the widened column. The version-8 catalog check
+verifies the new length. Do not narrow the column during rollback.
+
 Run both backend test projects with actual disposable SQL Server:
 
 ```powershell
@@ -48,4 +55,4 @@ $env:FAMILY_TEST_SQL_CONNECTION = 'Server=localhost;Database=master;Integrated S
 dotnet test server/LittleDays.slnx --configuration Release
 ```
 
-Tests create/drop only generated test databases. SQL tests explicitly skip if no test connection is provided. They cover fresh initialization, reruns, checksum tampering, transactions, locking, legacy adoption, unknown schemas, timer-attribution upgrade/catalog checks and migration/runtime permission separation. Local SQL tests do not verify live Azure OIDC, firewall propagation or customer authentication.
+Tests create/drop only generated test databases. SQL tests explicitly skip if no test connection is provided. They cover fresh initialization, reruns, checksum tampering, transactions, locking, legacy adoption, unknown schemas, timer-attribution and push-locale upgrade/catalog checks, and migration/runtime permission separation. Local SQL tests do not verify live Azure OIDC, firewall propagation or customer authentication.

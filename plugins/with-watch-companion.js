@@ -5,8 +5,24 @@ const Jimp = require("jimp-compact");
 const { withDangerousMod, withXcodeProject } = require("expo/config-plugins");
 
 const TARGET_NAME = "LittleDaysWatch";
+const LOCALES = [
+  "en",
+  "zh-Hans",
+  "zh-Hant",
+  "fr",
+  "de",
+  "hi",
+  "it",
+  "ja",
+  "ko",
+  "es",
+  "th",
+  "vi",
+];
+const STRINGSDICT_LOCALES = ["en", "fr", "de", "it", "es"];
 const SOURCE_FILES = [
   "WatchProtocol.swift",
+  "WatchLocalization.swift",
   "WatchStore.swift",
   "LittleDaysWatchApp.swift",
 ];
@@ -58,6 +74,27 @@ async function copyWatchFiles(projectRoot, platformRoot, options) {
       path.join(destination, filename),
     );
   }
+  for (const locale of LOCALES) {
+    const localized = path.join(destination, `${locale}.lproj`);
+    fs.mkdirSync(localized, { recursive: true });
+    fs.copyFileSync(
+      path.join(projectRoot, `watch/${locale}.lproj/Localizable.strings`),
+      path.join(localized, "Localizable.strings"),
+    );
+    fs.copyFileSync(
+      path.join(projectRoot, `watch/${locale}.lproj/InfoPlist.strings`),
+      path.join(localized, "InfoPlist.strings"),
+    );
+    const stringsdict = path.join(
+      projectRoot,
+      `watch/${locale}.lproj/Localizable.stringsdict`,
+    );
+    if (fs.existsSync(stringsdict))
+      fs.copyFileSync(
+        stringsdict,
+        path.join(localized, "Localizable.stringsdict"),
+      );
+  }
   fs.writeFileSync(
     path.join(destination, "Info.plist"),
     plist.build({
@@ -70,7 +107,7 @@ async function copyWatchFiles(projectRoot, platformRoot, options) {
       CFBundlePackageType: "APPL",
       CFBundleShortVersionString: "$(MARKETING_VERSION)",
       CFBundleVersion: "$(CURRENT_PROJECT_VERSION)",
-      CFBundleLocalizations: ["en", "zh-Hans", "zh-Hant"],
+      CFBundleLocalizations: LOCALES,
       ITSAppUsesNonExemptEncryption: false,
       WKApplication: true,
       WKCompanionAppBundleIdentifier: options.parentBundleIdentifier,
@@ -120,9 +157,74 @@ async function copyWatchFiles(projectRoot, platformRoot, options) {
   return destination;
 }
 
+function ensureKnownRegions(root) {
+  root.knownRegions ??= [];
+  for (const locale of LOCALES) {
+    if (!root.knownRegions.some((value) => unquote(value) === locale))
+      root.knownRegions.push(locale);
+  }
+}
+
+function ensureLocalizedResource(
+  project,
+  objects,
+  groupId,
+  targetId,
+  basename,
+  locales,
+  fileType,
+) {
+  let child = objects.PBXGroup[groupId].children.find(
+    (item) => item.comment === basename,
+  );
+  let variant = child?.value;
+  if (!variant || !objects.PBXVariantGroup?.[variant]) {
+    variant = project.generateUuid();
+    objects.PBXVariantGroup ??= {};
+    objects.PBXVariantGroup[variant] = {
+      isa: "PBXVariantGroup",
+      name: basename,
+      sourceTree: '"<group>"',
+      children: [],
+    };
+    objects.PBXVariantGroup[`${variant}_comment`] = basename;
+    child = { value: variant, comment: basename };
+    objects.PBXGroup[groupId].children.push(child);
+  }
+  const variantGroup = objects.PBXVariantGroup[variant];
+  for (const locale of locales) {
+    if (variantGroup.children.some((item) => item.comment === locale)) continue;
+    const file = project.generateUuid();
+    objects.PBXFileReference[file] = {
+      isa: "PBXFileReference",
+      lastKnownFileType: fileType,
+      name: locale,
+      path: `"${locale}.lproj/${basename}"`,
+      sourceTree: '"<group>"',
+    };
+    objects.PBXFileReference[`${file}_comment`] = locale;
+    variantGroup.children.push({ value: file, comment: locale });
+  }
+  const alreadyBuilt = Object.entries(objects.PBXBuildFile).some(
+    ([id, value]) => !id.endsWith("_comment") && value?.fileRef === variant,
+  );
+  if (!alreadyBuilt) {
+    const file = {
+      uuid: project.generateUuid(),
+      fileRef: variant,
+      basename,
+      group: "Resources",
+      target: targetId,
+    };
+    project.addToPbxBuildFileSection(file);
+    project.addToPbxResourcesBuildPhase(file);
+  }
+}
+
 function ensureWatchTarget(project, options) {
   const objects = project.hash.project.objects;
   const root = project.getFirstProject().firstProject;
+  ensureKnownRegions(root);
   // addTarget/addTargetDependency assume these sections already exist.
   for (const section of [
     "PBXBuildFile",
@@ -195,6 +297,33 @@ function ensureWatchTarget(project, options) {
     project.addToPbxBuildFileSection(asset);
     project.addToPbxResourcesBuildPhase(asset);
   }
+  ensureLocalizedResource(
+    project,
+    objects,
+    groupId,
+    target.uuid,
+    "Localizable.strings",
+    LOCALES,
+    "text.plist.strings",
+  );
+  ensureLocalizedResource(
+    project,
+    objects,
+    groupId,
+    target.uuid,
+    "InfoPlist.strings",
+    LOCALES,
+    "text.plist.strings",
+  );
+  ensureLocalizedResource(
+    project,
+    objects,
+    groupId,
+    target.uuid,
+    "Localizable.stringsdict",
+    STRINGSDICT_LOCALES,
+    "text.plist.stringsdict",
+  );
 
   const configList =
     objects.XCConfigurationList[target.pbxNativeTarget.buildConfigurationList];
@@ -309,3 +438,4 @@ module.exports.watchOptions = watchOptions;
 module.exports.declareCredentials = declareCredentials;
 module.exports.copyWatchFiles = copyWatchFiles;
 module.exports.ensureWatchTarget = ensureWatchTarget;
+module.exports.LOCALES = LOCALES;

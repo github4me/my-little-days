@@ -1,2 +1,11 @@
-"Today's care" = "Today's care";
-"Today's recorded milk, nappy changes and sleep. Tap to open Today." = "Today's recorded milk, nappy changes and sleep. Tap to open Today.";
+"widget.gallery.name" = "Today's care";
+"widget.gallery.description" = "Today's recorded milk, nappy changes and sleep. Tap to open Today.";
+"widget.today" = "Today";
+"widget.milk" = "Milk";
+"widget.nappies" = "Nappies";
+"widget.sleep" = "Sleep";
+"widget.recorded_sleep" = "Recorded sleep";
+"widget.unit.ml" = "mL";
+"widget.unit.hour_short" = "h";
+"widget.updated" = "Updated ";
+"widget.empty" = "Open Little Days\nto update today";

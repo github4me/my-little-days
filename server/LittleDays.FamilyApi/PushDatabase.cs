@@ -19,7 +19,7 @@ public sealed partial class PilotDatabase
             e.Property(x => x.ProtectedToken).HasMaxLength(1024).IsUnicode(false);
             e.Property(x => x.Environment).HasMaxLength(32).IsUnicode(false);
             e.Property(x => x.Platform).HasMaxLength(7).IsUnicode(false);
-            e.Property(x => x.Locale).HasMaxLength(2).IsUnicode(false);
+            e.Property(x => x.Locale).HasMaxLength(16).IsUnicode(false);
             e.Property(x => x.LastRequestHash).HasMaxLength(64).IsUnicode(false);
             e.HasIndex(x => new { x.ProjectId, x.Environment, x.TokenHash }).IsUnique().HasFilter("[TokenHash] IS NOT NULL");
             e.HasIndex(x => new { x.UserId, x.Enabled });

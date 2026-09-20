@@ -3,10 +3,13 @@ import {
   Image,
   Platform,
   Pressable,
+  ScrollView,
+  StyleSheet,
   Switch,
   View,
   useWindowDimensions,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
 import { State, validateState } from "./domain";
 import { Theme, T, Card, Field, Button, Chips, row, heading } from "./ui";
@@ -26,10 +29,17 @@ import {
 } from "./reminders";
 import { type ReminderMode, type ReminderSettings } from "./reminderSettings";
 import { copyAvatarFile, deleteAvatarFile } from "./avatar";
-import { t, useI18n, type LanguagePreference } from "./i18n";
+import {
+  LOCALE_REGISTRY,
+  localeDefinition,
+  t,
+  useI18n,
+  type LanguagePreference,
+} from "./i18n";
 import type { RecordView } from "./recordCalendar";
 import NativeDateTimeField from "./NativeDateTimeField";
 import RecordActionButton from "./RecordActionButton";
+import Modal from "./AccessibleModal";
 
 const reminderKindLabels = {
   feed: "喂养",
@@ -130,10 +140,9 @@ export default function Settings({
   onOpenFamily: () => void;
 }) {
   const c = useContext(Theme);
-  const { locale } = useI18n();
+  const { localize: copy } = useI18n();
   const { fontScale } = useWindowDimensions();
   const largeText = fontScale > 1.3;
-  const copy = (zh: string, en: string) => (locale === "en-US" ? en : zh);
   const [profileDirty, setProfileDirty] = useState(false);
   const draftProfileVersion = useRef(profileVersion);
   const sharing = useRef(sharedMode);
@@ -144,6 +153,7 @@ export default function Settings({
   const [busy, setBusy] = useState(false),
     lock = useRef(false),
     mounted = useRef(true);
+  const [languagePickerOpen, setLanguagePickerOpen] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
   const [error, setError] = useState(""),
     [message, setMessage] = useState("");
@@ -567,90 +577,204 @@ export default function Settings({
           </Pressable>
         </Card>
       ) : null}
-      <SettingsSection title="语言" busy={busy}>
-        <T style={{ color: c.muted, fontSize: 13 }}>
-          跟随系统语言，或在这里固定选择显示语言。
-        </T>
-        <View style={{ flexDirection: largeText ? "column" : "row", gap: 8 }}>
-          {[
+      <Card style={{ paddingVertical: 4, gap: 0 }}>
+        <Pressable
+          testID="language-picker-row"
+          accessibilityRole="button"
+          accessibilityLabel={`${t("语言")}，${
+            language === "system"
+              ? t("跟随系统")
+              : localeDefinition(language).autonym
+          }`}
+          accessibilityHint={t("跟随系统语言，或在这里固定选择显示语言。")}
+          accessibilityState={{ expanded: languagePickerOpen, disabled: busy }}
+          aria-expanded={languagePickerOpen}
+          disabled={busy}
+          onPress={() => setLanguagePickerOpen(true)}
+          style={({ pressed }) => [
+            row,
             {
-              value: "system" as const,
-              icon: "⌘",
-              label: "自动",
-              accessibilityLabel: "跟随系统",
+              minHeight: 56,
+              paddingVertical: 8,
+              opacity: pressed || busy ? 0.7 : 1,
             },
-            {
-              value: "zh" as const,
-              icon: "中",
-              label: "中文",
-              accessibilityLabel: "简体中文",
-            },
-            {
-              value: "en" as const,
-              icon: "A",
-              label: "English",
-              accessibilityLabel: "English",
-            },
-          ].map(({ value, icon, label, accessibilityLabel }) => {
-            const selected = language === value;
-            return (
+          ]}
+        >
+          <T style={{ flex: 1, minWidth: 0, fontSize: 18, fontWeight: "700" }}>
+            语言
+          </T>
+          <T
+            raw
+            numberOfLines={largeText ? undefined : 1}
+            style={{
+              maxWidth: largeText ? "55%" : "48%",
+              color: c.muted,
+              fontSize: 15,
+              textAlign: "right",
+            }}
+          >
+            {language === "system"
+              ? t("跟随系统")
+              : localeDefinition(language).autonym}
+          </T>
+          <T
+            raw
+            accessibilityElementsHidden
+            style={{ color: c.muted, fontSize: 22 }}
+          >
+            ›
+          </T>
+        </Pressable>
+      </Card>
+      <Modal
+        visible={languagePickerOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => {
+          if (!busy) setLanguagePickerOpen(false);
+        }}
+      >
+        <View
+          style={{
+            flex: 1,
+            justifyContent: "flex-end",
+            backgroundColor: "rgba(0,0,0,0.4)",
+          }}
+        >
+          <Pressable
+            accessible={false}
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+            disabled={busy}
+            onPress={() => setLanguagePickerOpen(false)}
+            style={StyleSheet.absoluteFill}
+          />
+          <SafeAreaView
+            edges={["bottom"]}
+            style={{
+              width: "100%",
+              maxWidth: 720,
+              maxHeight: "88%",
+              alignSelf: "center",
+              backgroundColor: c.elevated,
+              borderTopLeftRadius: 22,
+              borderTopRightRadius: 22,
+              overflow: "hidden",
+            }}
+          >
+            <View
+              style={{
+                ...row,
+                minHeight: 56,
+                paddingHorizontal: 20,
+                borderBottomWidth: 1,
+                borderBottomColor: c.line,
+              }}
+            >
+              <T
+                accessibilityRole="header"
+                style={{ flex: 1, fontSize: 20, fontWeight: "700" }}
+              >
+                语言
+              </T>
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel={t(accessibilityLabel)}
-                accessibilityState={{ selected, disabled: busy }}
+                accessibilityLabel={t("完成")}
                 disabled={busy}
-                key={value}
-                onPress={() =>
-                  void run(async () => {
-                    await onLanguageChange(value as LanguagePreference);
-                    setMessage(t("语言已保存"));
-                  })
-                }
-                style={({ pressed }) => [
-                  {
-                    flex: 1,
-                    minWidth: 0,
-                    minHeight: 66,
-                    borderRadius: 16,
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: 2,
-                    paddingVertical: 8,
-                    paddingHorizontal: 8,
-                    backgroundColor: selected ? c.soft : c.card,
-                    borderWidth: 1,
-                    borderColor: selected ? c.primary : c.line,
-                    opacity: pressed || busy ? 0.7 : 1,
-                  },
-                ]}
+                onPress={() => setLanguagePickerOpen(false)}
+                style={({ pressed }) => ({
+                  minHeight: 44,
+                  minWidth: 44,
+                  alignItems: "flex-end",
+                  justifyContent: "center",
+                  opacity: pressed || busy ? 0.7 : 1,
+                })}
               >
-                <T
-                  raw
-                  style={{
-                    color: selected ? c.primary : c.muted,
-                    fontSize: 22,
-                    lineHeight: 26,
-                    fontWeight: icon === "A" ? "700" : "500",
-                  }}
-                >
-                  {icon}
-                </T>
-                <T
-                  style={{
-                    color: selected ? c.primary : c.muted,
-                    fontSize: 11,
-                    lineHeight: 15,
-                    fontWeight: selected ? "700" : "500",
-                    textAlign: "center",
-                  }}
-                >
-                  {label}
-                </T>
+                <T style={{ color: c.primary, fontWeight: "600" }}>完成</T>
               </Pressable>
-            );
-          })}
+            </View>
+            <ScrollView
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={{
+                paddingHorizontal: 20,
+                paddingBottom: 8,
+              }}
+            >
+              <View
+                testID="language-options"
+                accessibilityRole="radiogroup"
+                accessibilityLabel={t("语言")}
+              >
+                {[
+                  {
+                    value: "system" as const,
+                    label: t("跟随系统"),
+                  },
+                  ...LOCALE_REGISTRY.map((item) => ({
+                    value: item.locale,
+                    label: item.autonym,
+                  })),
+                ].map(({ value, label }, index, options) => {
+                  const selected = language === value;
+                  return (
+                    <Pressable
+                      key={value}
+                      testID={`language-option-${value}`}
+                      accessibilityRole="radio"
+                      accessibilityLabel={label}
+                      accessibilityState={{ checked: selected, disabled: busy }}
+                      aria-checked={selected}
+                      disabled={busy}
+                      onPress={() => {
+                        if (selected) {
+                          setLanguagePickerOpen(false);
+                          return;
+                        }
+                        setLanguagePickerOpen(false);
+                        void run(async () => {
+                          await onLanguageChange(value);
+                          if (!sharing.current && Platform.OS !== "web")
+                            await refresh().catch(() => {
+                              // The language is already saved. Reminder rows
+                              // can be reloaded the next time this screen opens.
+                            });
+                          setMessage(t("语言已保存"));
+                        });
+                      }}
+                      style={({ pressed }) => ({
+                        minHeight: 52,
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 12,
+                        borderBottomWidth: index === options.length - 1 ? 0 : 1,
+                        borderBottomColor: c.line,
+                        opacity: pressed || busy ? 0.7 : 1,
+                      })}
+                    >
+                      <T raw style={{ flex: 1, fontSize: 17 }}>
+                        {label}
+                      </T>
+                      <T
+                        raw
+                        accessibilityElementsHidden
+                        style={{
+                          width: 24,
+                          color: c.primary,
+                          fontSize: 20,
+                          fontWeight: "700",
+                          textAlign: "center",
+                        }}
+                      >
+                        {selected ? "✓" : ""}
+                      </T>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </ScrollView>
+          </SafeAreaView>
         </View>
-      </SettingsSection>
+      </Modal>
       <SettingsSection title="主题" busy={busy}>
         <View accessibilityRole="radiogroup" accessibilityLabel={t("主题")}>
           {(

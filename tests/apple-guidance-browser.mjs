@@ -45,8 +45,7 @@ const copy = {
     supplementOther: "Other",
     supplementName: "Other supplement name",
     expandProfile: "Expand baby profile",
-    expandLanguage: "Expand Language",
-    collapseLanguage: "Collapse Language",
+    done: "Done",
     expandTheme: "Expand Theme",
     collapseTheme: "Collapse Theme",
     selectedTheme: { light: "Light", dark: "Dark" },
@@ -79,8 +78,7 @@ const copy = {
     supplementOther: "其他",
     supplementName: "其他补充剂名称",
     expandProfile: "展开宝宝档案",
-    expandLanguage: "展开语言",
-    collapseLanguage: "收起语言",
+    done: "完成",
     expandTheme: "展开主题",
     collapseTheme: "收起主题",
     selectedTheme: { light: "浅色", dark: "深色" },
@@ -209,20 +207,10 @@ try {
       "profile disclosure",
       44,
     );
-    const languageDisclosure = page.getByRole("button", {
-      name: words.expandLanguage,
-      exact: true,
-    });
-    await languageDisclosure.click();
-    assert.equal(
-      await page
-        .getByRole("button", { name: words.collapseLanguage, exact: true })
-        .getAttribute("aria-expanded"),
-      "true",
-    );
-    await page
-      .getByRole("button", { name: words.collapseLanguage, exact: true })
-      .click();
+    const languageRow = page.getByTestId("language-picker-row");
+    await languageRow.click();
+    assert.equal(await languageRow.getAttribute("aria-expanded"), "true");
+    await page.getByRole("button", { name: words.done, exact: true }).click();
     await page
       .getByRole("button", { name: words.expandTheme, exact: true })
       .click();

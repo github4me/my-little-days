@@ -86,7 +86,14 @@ function view(overrides = {}) {
             ),
             row: {},
           };
-        if (name === "../i18n") return { useI18n: () => ({ locale: "en-US" }) };
+        if (name === "../i18n")
+          return {
+            useI18n: () => ({
+              locale: "en",
+              formattingLocale: "en-US",
+              localize: (_zh, en) => en,
+            }),
+          };
         const base = path.resolve(path.dirname(filename), name);
         return load([base + ".ts", base + ".tsx"].find(fs.existsSync));
       },

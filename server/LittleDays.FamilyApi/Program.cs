@@ -217,6 +217,7 @@ fullApi.MapGet("/push/capabilities", (HttpContext context) =>
     var allowed = config.Push.Allows(PublicIdentityAdmission.Get(context).ObjectId);
     return new { registrationEnabled = config.Push.RegistrationEnabled && allowed,
         eventCreationEnabled = config.Push.EventCreationEnabled && allowed, categories = PushPolicy.Categories,
+        supportedLocales = PushPolicy.SupportedLocales,
         projectId = config.Push.RegistrationEnabled && allowed ? (Guid?)config.Push.ProjectId : null };
 });
 fullApi.MapPut("/push/installations/{installationId:guid}", (Guid installationId, HttpContext context,

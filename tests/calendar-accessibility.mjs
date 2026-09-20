@@ -109,8 +109,13 @@ function fixture({ fontScale = 1, isDark = false } = {}) {
             t,
             elapsed: () => "30m",
             formatDate: () => "18 Sep",
+            formatNumber: (value) => String(value),
             formatTime: (value) => new Date(value).toTimeString().slice(0, 5),
-            useI18n: () => ({ locale: "en-US" }),
+            useI18n: () => ({
+              locale: "en",
+              formattingLocale: "en-US",
+              localize: (_zh, en) => en,
+            }),
           };
         if (name === "./recordCalendar") return load("src/recordCalendar.ts");
         throw new Error(`Unexpected dependency: ${name}`);

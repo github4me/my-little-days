@@ -145,7 +145,7 @@ test("family demo scenarios use fresh, fictional fixtures and do not share state
   assert.equal(demoScenarios.length, 9);
   assert.equal(demoScenarios[0].id, "first-invite");
   for (const scenario of demoScenarios) {
-    assert.ok(scenario.label.en && scenario.label["zh-CN"]);
+    assert.ok(scenario.label.en && scenario.label.zh);
     const first = createFamilyDemo(scenario.id, now);
     const second = createFamilyDemo(scenario.id, now);
     assert.deepEqual(first, second);

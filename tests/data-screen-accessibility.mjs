@@ -92,9 +92,15 @@ function fixture(file, props, { fontScale = 1, failMail = false } = {}) {
             };
           if (name === "./i18n")
             return {
+              formatNumber: (value) => String(value),
               t: (text, args) =>
                 text.replace(/\{(\w+)\}/g, (_, key) => args?.[key] ?? ""),
-              useI18n: () => ({ locale: "en-US" }),
+              useI18n: () => ({
+                locale: "en",
+                formattingLocale: "en-US",
+                localize: (_zh, en, args) =>
+                  en.replace(/\{(\w+)\}/g, (_, key) => args?.[key] ?? ""),
+              }),
               formatDate: (value) => new Date(value).toISOString().slice(0, 10),
               formatTime: () => "09:00",
               elapsed: () => "10m",

@@ -1,7 +1,10 @@
 import type { Entry } from "../domain";
+import type { SupportedLocale } from "../locales";
 import { latestFeedStart } from "../feedReminder";
 import {
   parseReminderSettings,
+  reminderRevision,
+  reminderRuleId,
   settingsFromReminderData,
   type ReminderSettings,
 } from "../reminderSettings";
@@ -11,11 +14,17 @@ export type FamilyReminderPlan = {
   recordId: string;
   title: string;
   silent: boolean;
+  locale: SupportedLocale;
+  contentVersion: number;
   trigger:
     | { type: "date"; time: number }
     | { type: "daily"; hour: number; minute: number };
   fingerprint: string;
 };
+
+// Bump whenever app-generated notification copy changes so every opted-in
+// device replaces stale content while retaining the shared rule.
+export const familyReminderContentVersion = 1;
 
 export function isFamilyReminderData(
   data: Record<string, unknown> | undefined,
@@ -59,10 +68,24 @@ export function captureScheduledReminderRecords(
 ): FamilyExtraRecord[] {
   const records: FamilyExtraRecord[] = [];
   let automatic = savedAutomatic;
-  for (const notification of [...scheduled].sort((a, b) =>
-    a.identifier.localeCompare(b.identifier),
-  )) {
+  const canonical = new Map<string, CapturedNotification>();
+  for (const notification of scheduled) {
     if (isFamilyReminderData(notification.content.data)) continue;
+    const ruleId = reminderRuleId(
+      notification.identifier,
+      notification.content.data,
+    );
+    const current = canonical.get(ruleId);
+    if (
+      !current ||
+      reminderRevision(notification.content.data) >
+        reminderRevision(current.content.data)
+    )
+      canonical.set(ruleId, notification);
+  }
+  for (const [ruleId, notification] of [...canonical.entries()].sort(
+    ([left], [right]) => left.localeCompare(right),
+  )) {
     const settings = settingsFromReminderData(
       notification.content.title ?? "",
       notification.content.data,
@@ -79,7 +102,7 @@ export function captureScheduledReminderRecords(
     if (settings.mode === "once" && !onceAt)
       throw new Error("legacy_reminder_time_unknown");
     records.push({
-      id: `reminder-${notification.identifier}`,
+      id: `reminder-${ruleId}`,
       kind: "reminder",
       settings,
       ...(onceAt ? { onceAt } : {}),
@@ -98,6 +121,7 @@ export function familyReminderPlans(
   records: readonly FamilyExtraRecord[],
   entries: readonly Entry[],
   now = Date.now(),
+  locale: SupportedLocale = "en",
 ): FamilyReminderPlan[] {
   const latestFeed = latestFeedStart([...entries]);
   const plans: FamilyReminderPlan[] = [];
@@ -125,6 +149,8 @@ export function familyReminderPlans(
       recordId: record.id,
       title: settings.title,
       silent: settings.silent,
+      locale,
+      contentVersion: familyReminderContentVersion,
       trigger,
     };
     plans.push({ ...plan, fingerprint: JSON.stringify(plan) });

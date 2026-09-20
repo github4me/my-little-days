@@ -1,0 +1,11 @@
+"widget.gallery.name" = "Cura di oggi";
+"widget.gallery.description" = "Latte, cambi pannolino e sonno registrati oggi. Tocca per aprire Oggi.";
+"widget.today" = "Oggi";
+"widget.milk" = "Latte";
+"widget.nappies" = "Pannolini";
+"widget.sleep" = "Sonno";
+"widget.recorded_sleep" = "Sonno registrato";
+"widget.unit.ml" = "mL";
+"widget.unit.hour_short" = "h";
+"widget.updated" = "Aggiornato alle ";
+"widget.empty" = "Apri Little Days\nper aggiornare oggi";

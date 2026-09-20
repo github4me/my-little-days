@@ -7,10 +7,12 @@ final class TodayWidgetSnapshotTests: XCTestCase {
     value.timeZone = TimeZone(identifier: "Australia/Sydney")!
     return value
   }
-  private func fixture(_ now: Date, milk: Double = 150) -> TodayWidgetSnapshot {
+  private func fixture(_ now: Date, milk: Double = 150, locale: String? = nil,
+    formattingLocale: String? = nil) -> TodayWidgetSnapshot {
     TodayWidgetSnapshot(schemaVersion: 1, binding: "opaque", day: TodayWidgetSnapshot.dayKey(now, calendar: calendar),
-      timeZone: calendar.timeZone.identifier, language: "en", feedMl: milk, diaperCount: 0,
-      sleepMinutes: 0, updatedAt: now, expiresAt: now.addingTimeInterval(3600))
+      timeZone: calendar.timeZone.identifier, language: "en", locale: locale,
+      formattingLocale: formattingLocale, feedMl: milk, diaperCount: 0, sleepMinutes: 0,
+      updatedAt: now, expiresAt: now.addingTimeInterval(3600))
   }
   func testZeroAndRoundTrip() throws {
     let now = ISO8601DateFormatter().date(from: "2026-09-18T00:00:00Z")!
@@ -43,6 +45,26 @@ final class TodayWidgetSnapshotTests: XCTestCase {
   func testChangesInvalidateDeduplication() {
     let now = Date()
     XCTAssertTrue(fixture(now).hasSameContent(as: fixture(now.addingTimeInterval(1))))
+    XCTAssertTrue(fixture(now).hasSameContent(as: fixture(now, locale: "en")),
+      "Adding an equivalent canonical locale does not change rendered content")
+    XCTAssertTrue(fixture(now).hasSameContent(as: fixture(now, locale: "en", formattingLocale: "en-AU")))
+    XCTAssertFalse(fixture(now).hasSameContent(as: fixture(now, locale: "en", formattingLocale: "en-US")))
+    XCTAssertFalse(fixture(now).hasSameContent(as: fixture(now, locale: "fr")))
     XCTAssertFalse(fixture(now).hasSameContent(as: fixture(now, milk: 90)))
+  }
+
+  func testLegacySnapshotDecodesAndCanonicalLocaleHandlesRegionAliases() throws {
+    let now = Date()
+    let data = try JSONEncoder().encode(fixture(now))
+    let legacy = try JSONDecoder().decode(TodayWidgetSnapshot.self, from: data)
+    XCTAssertNil(legacy.locale)
+    XCTAssertNil(legacy.formattingLocale)
+    XCTAssertEqual(legacy.resolvedLocale, "en")
+    XCTAssertEqual(legacy.resolvedFormattingLocale, "en-AU")
+    XCTAssertEqual(TodayWidgetSnapshot.canonicalLocale("zh_TW"), "zh-Hant")
+    XCTAssertEqual(TodayWidgetSnapshot.canonicalLocale("es-MX"), "es")
+    XCTAssertNil(TodayWidgetSnapshot.canonicalLocale("ar"))
+    XCTAssertEqual(TodayWidgetSnapshot.canonicalFormattingLocale("fr_CA", for: "fr"), "fr-CA")
+    XCTAssertNil(TodayWidgetSnapshot.canonicalFormattingLocale("en-US", for: "fr"))
   }
 }

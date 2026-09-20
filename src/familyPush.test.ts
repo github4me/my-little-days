@@ -5,8 +5,10 @@ import {
   allowsFamilyEntryPush,
   allowsFamilyEntryPushOpen,
   isFamilyEntryPush,
+  pushRegistrationLocale,
   readPushRegistration,
   validCategories,
+  validPushLocales,
   type PushRegistration,
 } from "./family/familyPushCore";
 const id = (n: number) =>
@@ -29,6 +31,7 @@ const state = (): PushRegistration => ({
   desiredCategories: ["feed", "diaper", "sleep"],
   expiresAt: new Date(100000).toISOString(),
   token: "ExponentPushToken[synthetic]",
+  locale: "en",
   pending: null,
 });
 const data = () => ({
@@ -72,6 +75,12 @@ test("notification taps survive preference renewal but never cross account or me
 test("push storage and categories fail closed for unsupported scope, corruption and malformed secrets", () => {
   const s = state();
   assert.deepEqual(readPushRegistration(JSON.stringify(s), "test"), s);
+  const legacy = { ...s } as Partial<PushRegistration>;
+  delete legacy.locale;
+  assert.deepEqual(readPushRegistration(JSON.stringify(legacy), "test"), {
+    ...s,
+    locale: null,
+  });
   for (const patch of [
     { secret: "short" },
     { generation: -1 },
@@ -86,6 +95,30 @@ test("push storage and categories fail closed for unsupported scope, corruption 
   assert.throws(() => readPushRegistration(JSON.stringify(s), "other-api"));
   assert.equal(validCategories(["feed", "feed"]), false);
   assert.equal(validCategories(["care"]), false);
+  assert.equal(validPushLocales(["en", "fr", "ja"]), true);
+  assert.equal(validPushLocales(["en", "fr", "fr"]), false);
+  assert.equal(validPushLocales(["en", "unknown"]), false);
+  assert.equal(
+    validPushLocales([
+      "en",
+      "zh-Hans",
+      "zh-Hant",
+      "fr",
+      "de",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "es",
+      "th",
+      "vi",
+      "pt-BR",
+    ]),
+    true,
+  );
+  assert.equal(pushRegistrationLocale("fr", undefined), "en");
+  assert.equal(pushRegistrationLocale("zh-Hant", undefined), "zh");
+  assert.equal(pushRegistrationLocale("fr", ["en", "fr"]), "fr");
 });
 test("foreground pushes require current authorized grant, binding, generation and unexpired opt-in", () => {
   const s = state();
@@ -130,6 +163,7 @@ test("registration acknowledgement must match exact pending operation and next g
       enabled: true,
       categories: ["feed"],
       expoPushToken: "new-token",
+      locale: "fr",
     },
   };
   const reply = {
@@ -143,6 +177,7 @@ test("registration acknowledgement must match exact pending operation and next g
   const next = acceptPushReply(s, reply);
   assert.equal(next.pending, null);
   assert.equal(next.token, "new-token");
+  assert.equal(next.locale, "fr");
   assert.equal(next.generation, 2);
   for (const patch of [
     { operationId: id(8) },

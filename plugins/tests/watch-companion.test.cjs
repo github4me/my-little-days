@@ -72,13 +72,34 @@ test("generated companion files match the phone version and use an opaque RGB Wa
   assert.equal(info.WKRunsIndependentlyOfCompanionApp, false);
   assert.equal(info.WKWatchOnly, false);
   assert.equal(info.CFBundleVersion, "$(CURRENT_PROJECT_VERSION)");
+  assert.deepEqual(info.CFBundleLocalizations, plugin.LOCALES);
   for (const filename of [
     "WatchProtocol.swift",
+    "WatchLocalization.swift",
     "WatchStore.swift",
     "LittleDaysWatchApp.swift",
   ]) {
     assert.ok(fs.statSync(path.join(destination, filename)).size > 0);
   }
+  for (const locale of plugin.LOCALES) {
+    assert.ok(
+      fs.statSync(path.join(destination, `${locale}.lproj/Localizable.strings`))
+        .size > 0,
+    );
+    const metadata = fs.readFileSync(
+      path.join(destination, `${locale}.lproj/InfoPlist.strings`),
+      "utf8",
+    );
+    const displayName = expoConfig.locales[locale].ios.CFBundleDisplayName;
+    assert.ok(metadata.includes(`"CFBundleDisplayName" = "${displayName}";`));
+    assert.ok(metadata.includes(`"CFBundleName" = "${displayName}";`));
+  }
+  for (const locale of ["en", "fr", "de", "it", "es"])
+    assert.ok(
+      fs.statSync(
+        path.join(destination, `${locale}.lproj/Localizable.stringsdict`),
+      ).size > 0,
+    );
   const icon = JSON.parse(
     fs.readFileSync(
       path.join(
@@ -183,7 +204,35 @@ test("real Expo template gains one modern Watch target and remains identical aft
     objects.PBXSourcesBuildPhase[
       watch.buildPhases.find((ref) => ref.comment === "Sources").value
     ];
-  assert.equal(sourcePhase.files.length, 3);
+  assert.equal(sourcePhase.files.length, 4);
+  const resourcePhase =
+    objects.PBXResourcesBuildPhase[
+      watch.buildPhases.find((ref) => ref.comment === "Resources").value
+    ];
+  assert.equal(resourcePhase.files.length, 4);
+  const variants = resourcePhase.files
+    .map((ref) => objects.PBXBuildFile[ref.value]?.fileRef)
+    .map((ref) => objects.PBXVariantGroup?.[ref])
+    .filter(Boolean);
+  assert.equal(
+    variants.find((variant) => variant.name === "Localizable.strings").children
+      .length,
+    plugin.LOCALES.length,
+  );
+  assert.equal(
+    variants.find((variant) => variant.name === "Localizable.stringsdict")
+      .children.length,
+    5,
+  );
+  assert.equal(
+    variants.find((variant) => variant.name === "InfoPlist.strings").children
+      .length,
+    plugin.LOCALES.length,
+  );
+  for (const locale of plugin.LOCALES)
+    assert.ok(
+      generated.getFirstProject().firstProject.knownRegions.includes(locale),
+    );
   for (const ref of objects.XCConfigurationList[watch.buildConfigurationList]
     .buildConfigurations) {
     const settings = objects.XCBuildConfiguration[ref.value].buildSettings;
@@ -240,9 +289,57 @@ test("native bridge and Watch use protected durable storage and never transfer a
   );
   assert.match(
     fs.readFileSync(
-      path.join(root, "watch/WatchApp/LittleDaysWatchApp.swift"),
+      path.join(root, "watch/en.lproj/Localizable.strings"),
       "utf8",
     ),
     /Open Little Days on iPhone to finish syncing/,
   );
+});
+
+test("Watch UI uses keyed resources with complete locale coverage and an English fallback", () => {
+  const phone = fs.readFileSync(path.join(root, "App.tsx"), "utf8");
+  const contract = fs.readFileSync(
+    path.join(root, "src/watchProtocol.ts"),
+    "utf8",
+  );
+  const app = fs.readFileSync(
+    path.join(root, "watch/WatchApp/LittleDaysWatchApp.swift"),
+    "utf8",
+  );
+  const store = fs.readFileSync(
+    path.join(root, "watch/WatchApp/WatchStore.swift"),
+    "utf8",
+  );
+  const localizer = fs.readFileSync(
+    path.join(root, "watch/WatchApp/WatchLocalization.swift"),
+    "utf8",
+  );
+  assert.doesNotMatch(app + store, /func text\(_ en:|\?\s*"[^\"]+"\s*:\s*"/);
+  assert.match(contract, /formattingLocale\?: string/);
+  assert.match(
+    phone,
+    /language: isChineseLocale\(locale\)[\s\S]{0,120}locale,\s*formattingLocale,\s*profile:/,
+  );
+  assert.match(localizer, /path\(forResource: "en", ofType: "lproj"\)/);
+  assert.doesNotMatch(localizer, /localizedStringWithFormat/);
+  assert.match(
+    localizer,
+    /String\(format: format\(for: key\), locale: locale, arguments: arguments\)/,
+  );
+  const keys = new Set(
+    [...(app + store).matchAll(/(?:text|plural)\("([a-z0-9_.]+)"/g)].map(
+      (match) => match[1],
+    ),
+  );
+  for (const locale of plugin.LOCALES) {
+    const resource = fs.readFileSync(
+      path.join(root, `watch/${locale}.lproj/Localizable.strings`),
+      "utf8",
+    );
+    for (const key of keys)
+      assert.match(
+        resource,
+        new RegExp(`^"${key.replaceAll(".", "\\.")}"\\s*=`, "m"),
+      );
+  }
 });

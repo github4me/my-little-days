@@ -15,7 +15,14 @@ import CareIcon from "./CareIcon";
 import RecordActionButton from "./RecordActionButton";
 import { Entry, summarize } from "./domain";
 import { Button, Card, T, Theme, row } from "./ui";
-import { elapsed, formatDate, formatTime, t, useI18n } from "./i18n";
+import {
+  elapsed,
+  formatDate,
+  formatNumber,
+  formatTime,
+  t,
+  useI18n,
+} from "./i18n";
 import {
   calendarDayKey,
   calendarItems,
@@ -56,7 +63,7 @@ function FilterIcon({ kind, color }: { kind: CalendarKind; color: string }) {
 function entryLabel(entry: Entry) {
   if (entry.type === "feed")
     return entry.amount !== undefined
-      ? `${t("喂奶")} ${entry.amount} mL`
+      ? `${t("喂奶")} ${formatNumber(entry.amount)} mL`
       : t("亲喂");
   if (entry.type === "diaper")
     return t(
@@ -86,7 +93,7 @@ export default function RecordsCalendar({
 }) {
   const c = useContext(Theme);
   const { fontScale } = useWindowDimensions();
-  const { locale } = useI18n();
+  const { localize } = useI18n();
   // A dense, time-proportional chart cannot grow every event label safely.
   // At larger reading sizes, expose the same filtered records as full rows.
   const largeText = fontScale >= 1.3;
@@ -412,8 +419,8 @@ export default function RecordsCalendar({
         ))}
       <T style={{ fontSize: 13, color: c.muted }}>
         {t("{amount} mL · {nappies} 次尿布 · 睡眠 {duration}", {
-          amount: totals.feedMl,
-          nappies: totals.diaperCount,
+          amount: formatNumber(totals.feedMl),
+          nappies: formatNumber(totals.diaperCount),
           duration: elapsed(totals.sleepMinutes * 60000),
         })}
       </T>
@@ -636,9 +643,10 @@ export default function RecordsCalendar({
       )}
       {largeText && (
         <T raw style={{ color: c.muted }}>
-          {locale === "en-US"
-            ? "For larger text, calendar records are shown in a full list below. Your selected date and filters still apply."
-            : "较大字体下，日历记录在下方完整列出。仍按所选日期和筛选条件显示。"}
+          {localize(
+            "较大字体下，日历记录在下方完整列出。仍按所选日期和筛选条件显示。",
+            "For larger text, calendar records are shown in a full list below. Your selected date and filters still apply.",
+          )}
         </T>
       )}
       <Card style={{ padding: 14, gap: 6 }}>

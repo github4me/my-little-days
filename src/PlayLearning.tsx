@@ -31,7 +31,6 @@ import {
   learningSources,
   playActivities,
   scenes,
-  words,
   type LearningText,
 } from "./learning";
 
@@ -121,10 +120,8 @@ export default function PlayLearning({
 }) {
   const c = useContext(Theme);
   const { fontScale } = useWindowDimensions();
-  const { locale } = useI18n();
-  const copy = (value: LearningText) =>
-    locale === "en-US" ? value.en : value.zh;
-  const text = (zh: string, en: string) => copy(words(zh, en));
+  const { localize: text } = useI18n();
+  const copy = (value: LearningText) => text(value.zh, value.en);
   const actualMonths = completedMonths(birthDate, new Date(now));
   const actualSupported = actualMonths !== null && actualMonths < 25;
   const [manualMonths, setManualMonths] = useState<number | null>(null);
@@ -336,15 +333,17 @@ export default function PlayLearning({
                     "No valid birth date is set, so age suitability cannot be checked.",
                   )
                 : text(
-                    `宝宝实际满 ${actualMonths} 个月，这项活动不在当前参考月龄内。`,
-                    `Your baby is ${actualMonths} completed months old. This activity is outside the current reference age.`,
+                    "宝宝实际满 {months} 个月，这项活动不在当前参考月龄内。",
+                    "Your baby is {months} completed months old. This activity is outside the current reference age.",
+                    { months: actualMonths },
                   )}
             </T>
             <T raw>
               {pendingActivity
                 ? text(
-                    `活动参考月龄：满 ${pendingActivity.min} 月至未满 ${pendingActivity.max} 月。请根据宝宝实际能力选择；是否仍要加入？`,
-                    `Activity reference age: ${pendingActivity.min} to under ${pendingActivity.max} months. Consider your child's abilities. Add it anyway?`,
+                    "活动参考月龄：满 {min} 月至未满 {max} 月。请根据宝宝实际能力选择；是否仍要加入？",
+                    "Activity reference age: {min} to under {max} months. Consider your child's abilities. Add it anyway?",
+                    { min: pendingActivity.min, max: pendingActivity.max },
                   )
                 : ""}
             </T>
@@ -384,8 +383,9 @@ export default function PlayLearning({
               ? text("正在浏览手选月龄", "Browsing a selected age group")
               : actualSupported
                 ? text(
-                    `按宝宝满 ${actualMonths} 个月推荐`,
-                    `Ideas for your baby's age: ${actualMonths} months`,
+                    "按宝宝满 {months} 个月推荐",
+                    "Ideas for your baby's age: {months} months",
+                    { months: actualMonths },
                   )
                 : actualMonths !== null && actualMonths >= 25
                   ? text(
@@ -406,10 +406,9 @@ export default function PlayLearning({
               <Pressable
                 key={band.min}
                 accessibilityRole="button"
-                accessibilityLabel={text(
-                  `${band.label} 个月`,
-                  `${band.label} months`,
-                )}
+                accessibilityLabel={text("{label} 个月", "{label} months", {
+                  label: band.label,
+                })}
                 accessibilityState={{
                   selected:
                     months !== null && months >= band.min && months < band.max,
@@ -440,7 +439,7 @@ export default function PlayLearning({
                 }}
               >
                 <T raw style={{ fontSize: 15, color: c.primary }}>
-                  {text(`${band.label} 月`, `${band.label} mo`)}
+                  {text("{label} 月", "{label} mo", { label: band.label })}
                 </T>
               </Pressable>
             ))}
@@ -536,8 +535,9 @@ export default function PlayLearning({
           ) : null}
           <T raw style={{ color: c.muted, fontSize: 12 }}>
             {text(
-              `已选 ${selectedIds.length} 项。默认随实际月龄选择；手动增减会保留。`,
-              `${selectedIds.length} selected. Defaults follow actual age; manual choices are kept.`,
+              "已选 {count} 项。默认随实际月龄选择；手动增减会保留。",
+              "{count} selected. Defaults follow actual age; manual choices are kept.",
+              { count: selectedIds.length },
             )}
           </T>
           {mode === "today" ? (
@@ -545,8 +545,9 @@ export default function PlayLearning({
               {day} ·{" "}
               {checkinsReady
                 ? text(
-                    `今天做过 ${doneToday.length} 项，自在选择就好`,
-                    `${doneToday.length} checked in today. Choose freely.`,
+                    "今天做过 {count} 项，自在选择就好",
+                    "{count} checked in today. Choose freely.",
+                    { count: doneToday.length },
                   )
                 : sharedMode
                   ? text(
@@ -594,8 +595,14 @@ export default function PlayLearning({
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel={text(
-                    `${open ? "收起" : "查看"}${a.title.zh}`,
-                    `${open ? "Hide" : "View"} ${a.title.en}`,
+                    "{action}{title}",
+                    "{action} {title}",
+                    {
+                      action: open
+                        ? text("收起", "Hide")
+                        : text("查看", "View"),
+                      title: copy(a.title),
+                    },
                   )}
                   accessibilityState={{ expanded: open }}
                   onPress={() => setExpanded(open ? null : a.id)}
@@ -629,8 +636,10 @@ export default function PlayLearning({
                     style={{ color: c.muted, fontSize: 12, lineHeight: 18 }}
                   >
                     {copy(currentScene.label)} ·{" "}
-                    {text(`约 ${a.minutes} 分钟`, `About ${a.minutes} min`)} ·{" "}
-                    {copy(a.focus)}
+                    {text("约 {minutes} 分钟", "About {minutes} min", {
+                      minutes: a.minutes,
+                    })}{" "}
+                    · {copy(a.focus)}
                   </T>
                 </Pressable>
                 {actualMonths === null ||
@@ -638,8 +647,9 @@ export default function PlayLearning({
                 actualMonths >= a.max ? (
                   <T raw style={{ fontSize: 12, color: c.muted }}>
                     {text(
-                      `参考月龄：满 ${a.min} 月至未满 ${a.max} 月，不是当前月龄推荐。`,
-                      `Reference ages: ${a.min} to under ${a.max} months; not a current-age recommendation.`,
+                      "参考月龄：满 {min} 月至未满 {max} 月，不是当前月龄推荐。",
+                      "Reference ages: {min} to under {max} months; not a current-age recommendation.",
+                      { min: a.min, max: a.max },
                     )}
                   </T>
                 ) : null}
@@ -680,8 +690,9 @@ export default function PlayLearning({
                     <Pressable
                       accessibilityRole="link"
                       accessibilityLabel={text(
-                        `参考来源：${source.label}`,
-                        `Reference: ${source.label}`,
+                        "参考来源：{source}",
+                        "Reference: {source}",
+                        { source: source.label },
                       )}
                       onPress={() => void openSource(source.url)}
                       style={{ minHeight: 44, justifyContent: "center" }}
@@ -707,8 +718,9 @@ export default function PlayLearning({
                       accessibilityRole="checkbox"
                       aria-checked={doneToday.includes(a.id)}
                       accessibilityLabel={text(
-                        `今天做过：${a.title.zh}`,
-                        `Done today: ${a.title.en}`,
+                        "今天做过：{title}",
+                        "Done today: {title}",
+                        { title: copy(a.title) },
                       )}
                       accessibilityState={{
                         checked: doneToday.includes(a.id),
@@ -739,12 +751,9 @@ export default function PlayLearning({
                         }}
                       >
                         {doneToday.includes(a.id) ? "☑ " : "□ "}
-                        {text(
-                          doneToday.includes(a.id) ? "今天已打卡" : "今天做过",
-                          doneToday.includes(a.id)
-                            ? "Checked in today"
-                            : "Done today",
-                        )}
+                        {doneToday.includes(a.id)
+                          ? text("今天已打卡", "Checked in today")
+                          : text("今天做过", "Done today")}
                       </T>
                     </Pressable>
                   ) : null}
@@ -752,8 +761,9 @@ export default function PlayLearning({
                     accessibilityRole="checkbox"
                     aria-checked={saved}
                     accessibilityLabel={text(
-                      `选择早教活动：${a.title.zh}`,
-                      `Select play activity: ${a.title.en}`,
+                      "选择早教活动：{title}",
+                      "Select play activity: {title}",
+                      { title: copy(a.title) },
                     )}
                     accessibilityState={{
                       checked: saved,
@@ -776,10 +786,9 @@ export default function PlayLearning({
                   >
                     <T raw style={{ color: c.primary, fontSize: 13 }}>
                       {saved ? "☑ " : "□ "}
-                      {text(
-                        saved ? "已选早教活动" : "加入早教活动",
-                        saved ? "Selected" : "Add to activities",
-                      )}
+                      {saved
+                        ? text("已选早教活动", "Selected")
+                        : text("加入早教活动", "Add to activities")}
                     </T>
                   </Pressable>
                 </View>

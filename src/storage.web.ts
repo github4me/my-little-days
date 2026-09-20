@@ -17,7 +17,10 @@ import {
   parseReminderSettings,
   type ReminderSettings,
 } from "./reminderSettings";
-import type { LanguagePreference } from "./i18n";
+import {
+  normalizeLanguagePreference,
+  type LanguagePreference,
+} from "./locales";
 import { parseRecordView, type RecordView } from "./recordCalendar";
 import {
   parsePlayFavorites,
@@ -143,7 +146,7 @@ export async function saveTheme(dark: boolean | null) {
 }
 export async function loadLanguage(): Promise<LanguagePreference | null> {
   const value = localStorage.getItem(KEY + "-language");
-  return value === "system" || value === "zh" || value === "en" ? value : null;
+  return normalizeLanguagePreference(value);
 }
 export async function saveLanguage(language: LanguagePreference) {
   localStorage.setItem(KEY + "-language", language);

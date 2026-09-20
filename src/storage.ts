@@ -21,7 +21,10 @@ import {
   parseReminderSettings,
   type ReminderSettings,
 } from "./reminderSettings";
-import type { LanguagePreference } from "./i18n";
+import {
+  normalizeLanguagePreference,
+  type LanguagePreference,
+} from "./locales";
 import { parseRecordView, type RecordView } from "./recordCalendar";
 import {
   parsePlayFavorites,
@@ -309,9 +312,7 @@ export async function loadLanguage(): Promise<LanguagePreference | null> {
     "SELECT value FROM app_data WHERE key = ?",
     "language",
   );
-  return row && ["system", "zh", "en"].includes(row.value)
-    ? (row.value as LanguagePreference)
-    : null;
+  return normalizeLanguagePreference(row?.value);
 }
 export async function saveLanguage(language: LanguagePreference) {
   await (

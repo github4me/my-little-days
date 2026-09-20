@@ -199,7 +199,13 @@ function wrapperWorld() {
   const load = loader({
     react,
     "react-native": { ActivityIndicator: "ActivityIndicator" },
-    "../i18n": { useI18n: () => ({ locale: "en" }) },
+    "../i18n": {
+      useI18n: () => ({
+        locale: "en",
+        formattingLocale: "en-US",
+        localize: (_zh, en) => en,
+      }),
+    },
     "../ui": { Button: "Button", Card: "Card", T: "T" },
     "./config": {
       familyConfig: {

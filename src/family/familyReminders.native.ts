@@ -2,7 +2,8 @@ import * as Notifications from "expo-notifications";
 import * as SQLite from "expo-sqlite";
 import { Platform } from "react-native";
 import type { Entry } from "../domain";
-import { t } from "../i18n";
+import { t, translate } from "../i18n";
+import type { SupportedLocale } from "../locales";
 import type { FamilyExtraRecord } from "./extras";
 import { protectFamilyStorage } from "./storageProtection";
 import {
@@ -119,20 +120,24 @@ const coordinator = new FamilyReminderCoordinator({
     const channelId = plan.silent ? "family-quiet" : "family-care";
     if (Platform.OS === "android")
       await Notifications.setNotificationChannelAsync(channelId, {
-        name: plan.silent ? t("安静提醒") : t("照护提醒"),
+        name: plan.silent
+          ? translate("安静提醒", plan.locale)
+          : translate("照护提醒", plan.locale),
         importance: Notifications.AndroidImportance.DEFAULT,
         sound: plan.silent ? null : "default",
       });
     return Notifications.scheduleNotificationAsync({
       content: {
         title: plan.title,
-        body: t("按宝宝当下的需要安排照护。"),
+        body: translate("按宝宝当下的需要安排照护。", plan.locale),
         sound: plan.silent ? false : "default",
         data: {
           familyReminder: true,
           familyOrigin: origin,
           familyFingerprint: plan.fingerprint,
           familyRecordId: plan.recordId,
+          familyLocale: plan.locale,
+          familyContentVersion: plan.contentVersion,
         },
       },
       trigger:
@@ -162,8 +167,12 @@ export function syncFamilyReminders(
   origin: string,
   records: readonly FamilyExtraRecord[],
   entries: readonly Entry[],
+  locale: SupportedLocale = "en",
 ) {
-  return coordinator.sync(origin, familyReminderPlans(records, entries));
+  return coordinator.sync(
+    origin,
+    familyReminderPlans(records, entries, Date.now(), locale),
+  );
 }
 export function shouldShowFamilyNotification(
   data: Record<string, unknown> | undefined,

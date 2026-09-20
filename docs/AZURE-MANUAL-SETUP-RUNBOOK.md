@@ -1,6 +1,6 @@
 # My Little Days: manual Azure and GitHub setup runbook
 
-Last updated: 17 September 2026 (Australia/Sydney).
+Last updated: 20 September 2026 (Australia/Sydney).
 
 This is the operator's step-by-step reference for infrastructure, SQL bootstrap, customer authentication, API settings and releases. It records known values without storing secrets. Existing names containing `pilot` are compatibility identifiers: do not rename them or create replacement resources just because the product now supports full family sharing.
 
@@ -2179,3 +2179,59 @@ erase timer history to restore an older build.
   to confirmed/pending/conflict truthfully and both clients converge to the same
   starter, finisher and timestamps. Do not test destructive flows on real family
   data or uninstall a data-bearing app.
+
+## Twelve-locale native and notification rollout — prepared 20 September 2026, not deployed
+
+This source change adds the canonical locales `en`, `zh-Hans`, `zh-Hant`, `fr`,
+`de`, `hi`, `it`, `ja`, `ko`, `es`, `th` and `vi` to phone/native metadata,
+local and family reminders, and generic family-entry push content. It does not add
+or change the optional Buy Me a Coffee feature. No Azure, SQL, Expo, Apple or live
+push setting was changed while preparing it.
+
+1. **Freeze one reviewed SHA and keep the rollout schema-first.** In the existing
+   GitHub **Deploy family API and database** workflow, apply only the immutable
+   additive `0008_WidenPushLocale.sql` to the existing `little-days-family` SQL
+   Basic database before deploying the matching API. The expected catalog change
+   is `dbo.PushInstallations.Locale varchar(16) NOT NULL`; existing `en` and `zh`
+   values and every registration/event/receipt row remain in place. Verify the
+   reviewed journal hash, `COL_LENGTH('dbo.PushInstallations','Locale') = 16`,
+   runtime CRUD grants unchanged, and **zero pending scripts** after apply. Remove
+   only the workflow's temporary runner firewall rule. Do not edit migration 0006,
+   truncate push metadata or re-enable the paused infrastructure path.
+2. **Deploy the compatible API from the same SHA.** Keep the existing push project,
+   encryption key, access token, environment, acceptance cohort and three rollout
+   gates unchanged. An authenticated `GET /v2/push/capabilities` must now return the
+   12 canonical `supportedLocales`; registration must still accept legacy `en/zh`
+   clients. Register one disposable device with a long locale such as `zh-Hant`,
+   renew it, and confirm the stored locale and generic localized provider payload.
+   An unknown locale must be rejected at registration and must fall back to English
+   if encountered only at delivery. Health alone is not this SQL-backed check.
+3. **Build and distribute a new native binary last.** `expo-localization` now embeds
+   OS-selectable locales and localized app/photo-permission resources, so disabled
+   OTA cannot deliver this part to build 38. Resolve the production EAS environment,
+   preserve Store distribution and existing Apple credentials, increment the iOS
+   build number, then inspect the archived phone, Watch and Widget locale resources
+   before submitting the exact build ID. Update through TestFlight over the existing
+   installation; do not uninstall a data-bearing app.
+4. **Complete language review before exposing a locale.** The generated phone
+   catalogs are implementation drafts, not a legal or medical translation
+   certificate. A context-safe override glossary protects known ambiguous baby-care
+   and destructive labels, but a qualified native speaker must still review the
+   full privacy, consent, account/family deletion and urgent-temperature copy for
+   each locale. Keep a locale out of the production language picker until that
+   review is recorded; do not treat passing placeholder or UI tests as approval.
+5. **Accept without destructive family flows.** On disposable accounts/devices,
+   select each supported app language and verify the native display name/photo
+   prompt, local one-off/daily/after-feed reminders, shared reminders and generic
+   family-entry push. Changing language must replace generated notification text
+   while retaining an authored reminder title, exact one-off date, daily wall-clock
+   time, silence choice and family opt-in. Confirm French/Japanese and every other
+   non-Chinese locale never receives Chinese fallback; old API capability responses
+   may use legacy `zh` only for `zh-Hans/zh-Hant`, and English for all other locales.
+   Record build/submission IDs and physical-device results separately.
+
+If the API or client must roll back, leave migration 0008 applied: widening the
+column is backward-compatible with the prior `en/zh` API. Roll back only to a
+reviewed API/client, keep the existing push gates and encryption key, require zero
+pending scripts, and ship a forward correction rather than narrowing the column or
+discarding registrations.

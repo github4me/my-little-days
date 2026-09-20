@@ -71,6 +71,7 @@ test("widget source, metadata and localized gallery copy are generated determini
   );
   assert.equal(info.LittleDaysWidgetAppGroup, options.appGroup);
   assert.equal(info.CFBundleVersion, "$(CURRENT_PROJECT_VERSION)");
+  assert.deepEqual(info.CFBundleLocalizations, widget.LOCALES);
   assert.deepEqual(
     plist.parse(
       fs.readFileSync(
@@ -92,7 +93,7 @@ test("widget source, metadata and localized gallery copy are generated determini
       "utf8",
     ),
   );
-  for (const locale of ["en", "zh-Hans", "zh-Hant"])
+  for (const locale of widget.LOCALES)
     assert.ok(
       fs.statSync(path.join(destination, `${locale}.lproj/Localizable.strings`))
         .size > 0,
@@ -142,8 +143,13 @@ test("real Expo project embeds phone, Watch and widget once with independent sou
     objects.PBXVariantGroup[
       objects.PBXBuildFile[resources.files[0].value].fileRef
     ].children.length,
-    3,
+    widget.LOCALES.length,
   );
+  const generated = xcode.project(filename).parseSync();
+  for (const locale of widget.LOCALES)
+    assert.ok(
+      generated.getFirstProject().firstProject.knownRegions.includes(locale),
+    );
   for (const ref of objects.XCConfigurationList[target.buildConfigurationList]
     .buildConfigurations) {
     const settings = objects.XCBuildConfiguration[ref.value].buildSettings;
@@ -205,4 +211,40 @@ test("widget never reads network data, receives only aggregates and clears on th
   assert.match(model, /day == Self.dayKey/);
   assert.match(model, /date < expiresAt/);
   assert.match(model, /timeZone == calendar.timeZone.identifier/);
+  assert.match(model, /var locale: String\?/);
+  assert.match(model, /var formattingLocale: String\?/);
+  assert.match(model, /resolvedLocale == other.resolvedLocale/);
+  assert.match(
+    model,
+    /resolvedFormattingLocale == other.resolvedFormattingLocale/,
+  );
+  assert.match(publisher, /context\["locale"\]/);
+  assert.match(publisher, /context\["formattingLocale"\]/);
+  assert.match(view, /LocalizedStringKey\("widget.gallery.name"\)/);
+  assert.doesNotMatch(view, /\?\s*"今日"\s*:\s*"Today"/);
+});
+
+test("widget body keys are present in every locale while gallery metadata stays system-localized", () => {
+  const view = fs.readFileSync(
+    path.join(root, "widgets/TodayWidget.swift"),
+    "utf8",
+  );
+  const keys = new Set(
+    [
+      ...view.matchAll(/(?:text|LocalizedStringKey)\("(widget\.[a-z0-9_.]+)"/g),
+    ].map((match) => match[1]),
+  );
+  for (const locale of widget.LOCALES) {
+    const resource = fs.readFileSync(
+      path.join(root, `widgets/${locale}.lproj/Localizable.strings`),
+      "utf8",
+    );
+    for (const key of keys)
+      assert.match(
+        resource,
+        new RegExp(`^"${key.replaceAll(".", "\\.")}"\\s*=`, "m"),
+      );
+  }
+  assert.match(view, /\.environment\(\\.locale, entry.locale\)/);
+  assert.match(view, /configurationDisplayName\(LocalizedStringKey/);
 });

@@ -44,8 +44,7 @@ function SampleScreen({
 
 export default function FamilyDemoScreen({ onBack }: { onBack: () => void }) {
   const c = useContext(Theme);
-  const { locale } = useI18n();
-  const zh = locale === "zh-CN";
+  const { localize } = useI18n();
   const [scenario, setScenario] = useState<FamilyDemoScenario>("first-invite");
   const [revision, setRevision] = useState(0);
   return (
@@ -73,19 +72,20 @@ export default function FamilyDemoScreen({ onBack }: { onBack: () => void }) {
             accessibilityRole="header"
             style={{ fontSize: 17, fontWeight: "700", flexShrink: 1 }}
           >
-            {zh ? "界面预览" : "UI preview"}
+            {localize("界面预览", "UI preview")}
           </T>
           <Button
-            label={zh ? "重置样例" : "Reset samples"}
+            label={localize("重置样例", "Reset samples")}
             secondary
             onPress={() => setRevision((value) => value + 1)}
             style={{ minHeight: 44, paddingHorizontal: 12 }}
           />
         </View>
         <T raw style={{ color: c.muted, fontSize: 13 }}>
-          {zh
-            ? "选择场景；可左右滑动查看更多"
-            : "Choose a scenario; swipe for more"}
+          {localize(
+            "选择场景；可左右滑动查看更多",
+            "Choose a scenario; swipe for more",
+          )}
         </T>
         <ScrollView
           horizontal
@@ -95,7 +95,7 @@ export default function FamilyDemoScreen({ onBack }: { onBack: () => void }) {
           {demoScenarios.map((item) => (
             <Button
               key={item.id}
-              label={item.label[zh ? "zh-CN" : "en"]}
+              label={localize(item.label.zh, item.label.en)}
               secondary={scenario !== item.id}
               onPress={() => {
                 setScenario(item.id);

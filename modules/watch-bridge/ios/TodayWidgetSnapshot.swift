@@ -7,6 +7,11 @@ struct TodayWidgetSnapshot: Codable, Equatable {
   let day: String
   let timeZone: String
   let language: String
+  /// Canonical app-selected locale. Optional so version 1 snapshots written by
+  /// earlier builds continue to decode.
+  var locale: String?
+  /// Regional formatting locale. Optional for version 1 snapshot compatibility.
+  var formattingLocale: String?
   let feedMl: Double
   let diaperCount: Int
   let sleepMinutes: Double
@@ -15,6 +20,63 @@ struct TodayWidgetSnapshot: Codable, Equatable {
 
   static let kind = "LittleDaysToday"
   static let filename = "today-v1.json"
+  static let supportedLocales = [
+    "en", "zh-Hans", "zh-Hant", "fr", "de", "hi",
+    "it", "ja", "ko", "es", "th", "vi",
+  ]
+  static let defaultFormattingLocales = [
+    "en": "en-AU", "zh-Hans": "zh-CN", "zh-Hant": "zh-TW",
+    "fr": "fr-FR", "de": "de-DE", "hi": "hi-IN", "it": "it-IT",
+    "ja": "ja-JP", "ko": "ko-KR", "es": "es-ES", "th": "th-TH",
+    "vi": "vi-VN",
+  ]
+
+  init(schemaVersion: Int, binding: String, day: String, timeZone: String,
+    language: String, locale: String? = nil, formattingLocale: String? = nil,
+    feedMl: Double, diaperCount: Int, sleepMinutes: Double, updatedAt: Date,
+    expiresAt: Date) {
+    self.schemaVersion = schemaVersion
+    self.binding = binding
+    self.day = day
+    self.timeZone = timeZone
+    self.language = language
+    self.locale = locale
+    self.formattingLocale = formattingLocale
+    self.feedMl = feedMl
+    self.diaperCount = diaperCount
+    self.sleepMinutes = sleepMinutes
+    self.updatedAt = updatedAt
+    self.expiresAt = expiresAt
+  }
+
+  static func canonicalLocale(_ value: String?) -> String? {
+    guard let value else { return nil }
+    let normalized = value.replacingOccurrences(of: "_", with: "-").lowercased()
+    if normalized.hasPrefix("zh-") || normalized == "zh" {
+      return normalized.contains("hant") || normalized.contains("-tw") ||
+        normalized.contains("-hk") || normalized.contains("-mo") ? "zh-Hant" : "zh-Hans"
+    }
+    let language = normalized.split(separator: "-").first.map(String.init) ?? normalized
+    return supportedLocales.first { $0.lowercased() == language }
+  }
+
+  static func canonicalFormattingLocale(_ value: String?, for catalog: String) -> String? {
+    guard let value else { return nil }
+    let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+      .replacingOccurrences(of: "_", with: "-")
+    guard !normalized.isEmpty, normalized.count <= 64,
+          canonicalLocale(normalized) == catalog else { return nil }
+    return normalized
+  }
+
+  var resolvedLocale: String {
+    Self.canonicalLocale(locale) ?? (language == "zh" ? "zh-Hans" : "en")
+  }
+
+  var resolvedFormattingLocale: String {
+    Self.canonicalFormattingLocale(formattingLocale, for: resolvedLocale)
+      ?? Self.defaultFormattingLocales[resolvedLocale] ?? "en-AU"
+  }
 
   static var localCalendar: Calendar { Calendar(identifier: .gregorian) }
 
@@ -33,7 +95,8 @@ struct TodayWidgetSnapshot: Codable, Equatable {
 
   func hasSameContent(as other: Self) -> Bool {
     binding == other.binding && day == other.day && timeZone == other.timeZone
-      && language == other.language && feedMl == other.feedMl
+      && language == other.language && resolvedLocale == other.resolvedLocale
+      && resolvedFormattingLocale == other.resolvedFormattingLocale && feedMl == other.feedMl
       && diaperCount == other.diaperCount
       && displaySleepHours == other.displaySleepHours
   }

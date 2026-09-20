@@ -20,8 +20,10 @@ build 30 lacks the Watch changes; successful compilation is not Apple acceptance
 
 - Native SwiftUI companion: milk feeds (formula, expressed-milk bottles and
   breastfeeding), nappies and sleep. Pumping is excluded. Native lists, navigation,
-  amount presets/Crown adjustment, semantic colours, English/Chinese and accessibility
-  labels. The Watch shows the date of cached totals, not yesterday's totals as today.
+  amount presets/Crown adjustment, semantic colours, all 12 supported app locales and
+  accessibility labels. The Watch shows the date of cached totals, not yesterday's
+  totals as today. Keyed native resources fall back to English; the version 1 wire
+  format retains legacy `en|zh` and adds an optional canonical locale.
 - Immediate local timer state and protected persistent commands. Sleep shorter than
   60 seconds is cancelled as a likely mistap; exactly 60 seconds remains valid.
   A saved Watch command is distinguished from phone persistence and confirmed sharing.
@@ -97,8 +99,8 @@ Device check after installing the new paired build: record a nappy with iPhone
 unreachable (count immediately +1); finish a 150 mL bottle (immediate +150 mL);
 reconnect/open iPhone (counts must not increase again); confirm the dated update
 label does not count seconds; open Notifications directly from the home menu.
-Also check a ≥60-second sleep, a <60-second cancellation, Chinese/English and
-large text on the smallest supported Watch. Do not reset/uninstall real data.
+Also check a ≥60-second sleep, a <60-second cancellation, all 12 locales and large
+text on the smallest supported Watch. Do not reset/uninstall real data.
 
 ### Milk amount interaction refinement (source only; not in build 32)
 
@@ -120,7 +122,7 @@ previously discarded selection. Breastfeeding continues without a volume field.
 
 Focused Swift tests cover persistence, pending-start projection, family/generation
 isolation, range limits and decoding old storage. Run those on a Swift-equipped
-host; physical small/large Watch, English/Chinese, Dynamic Type and VoiceOver
+host; physical small/large Watch, all 12 locales, Dynamic Type and VoiceOver
 acceptance still requires a new native TestFlight build. No API or DB change is needed.
 
 1. The Watch is a paired-phone companion, not an independent cellular client. It

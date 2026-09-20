@@ -58,9 +58,12 @@ receipt and replay before a production-connected acceptance build. TestFlight
 requires a new combined native store build, not an OTA update.
 
 The SwiftUI screens use system navigation, lists, buttons, pickers/Crown input,
-semantic colours and Dynamic Type. Chinese/English are selected from the phone
-context. Real Watch VoiceOver, font scaling, battery, keyboard-free input and
-WCSession delivery must be checked on small/large physical Watch devices.
+semantic colours and Dynamic Type. The app-selected `en`, `zh-Hans`, `zh-Hant`,
+`fr`, `de`, `hi`, `it`, `ja`, `ko`, `es`, `th` or `vi` locale is sent by the
+phone; version 1 contexts from older phones still fall back through the legacy
+`en|zh` field. Real Watch VoiceOver, font scaling, battery, keyboard-free input
+and WCSession delivery must be checked in every locale on small/large physical
+Watch devices.
 
 The Windows implementation environment has no local Swift/Xcode toolchain. EAS
 build `24af9879-54a8-4044-998a-5ce4197536b2` subsequently compiled and signed the

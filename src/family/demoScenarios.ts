@@ -23,16 +23,16 @@ import {
 export const demoScenarios = [
   {
     id: "first-invite",
-    label: { "zh-CN": "首次邀请", en: "First invitation" },
+    label: { zh: "首次邀请", en: "First invitation" },
   },
-  { id: "signed-out", label: { "zh-CN": "未登录", en: "Signed out" } },
-  { id: "invitations", label: { "zh-CN": "收到邀请", en: "Invitations" } },
-  { id: "owner", label: { "zh-CN": "管理员", en: "Admin" } },
-  { id: "member", label: { "zh-CN": "家庭成员", en: "Member" } },
-  { id: "transfer", label: { "zh-CN": "接受管理权", en: "Admin transfer" } },
-  { id: "sole-owner", label: { "zh-CN": "关闭家庭", en: "Close family" } },
-  { id: "removed", label: { "zh-CN": "已被移除", en: "Removed" } },
-  { id: "deletion", label: { "zh-CN": "删除账户", en: "Account deletion" } },
+  { id: "signed-out", label: { zh: "未登录", en: "Signed out" } },
+  { id: "invitations", label: { zh: "收到邀请", en: "Invitations" } },
+  { id: "owner", label: { zh: "管理员", en: "Admin" } },
+  { id: "member", label: { zh: "家庭成员", en: "Member" } },
+  { id: "transfer", label: { zh: "接受管理权", en: "Admin transfer" } },
+  { id: "sole-owner", label: { zh: "关闭家庭", en: "Close family" } },
+  { id: "removed", label: { zh: "已被移除", en: "Removed" } },
+  { id: "deletion", label: { zh: "删除账户", en: "Account deletion" } },
 ] as const;
 export type FamilyDemoScenario = (typeof demoScenarios)[number]["id"];
 

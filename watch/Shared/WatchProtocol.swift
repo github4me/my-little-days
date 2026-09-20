@@ -1,5 +1,56 @@
 import Foundation
 
+enum WatchLocale {
+  static let supported = [
+    "en", "zh-Hans", "zh-Hant", "fr", "de", "hi",
+    "it", "ja", "ko", "es", "th", "vi",
+  ]
+  static let defaultFormattingIdentifiers = [
+    "en": "en-AU", "zh-Hans": "zh-CN", "zh-Hant": "zh-TW",
+    "fr": "fr-FR", "de": "de-DE", "hi": "hi-IN", "it": "it-IT",
+    "ja": "ja-JP", "ko": "ko-KR", "es": "es-ES", "th": "th-TH",
+    "vi": "vi-VN",
+  ]
+
+  static func canonical(_ value: String?) -> String? {
+    guard let value else { return nil }
+    let normalized = value.replacingOccurrences(of: "_", with: "-").lowercased()
+    if normalized.hasPrefix("zh-") || normalized == "zh" {
+      return normalized.contains("hant") || normalized.contains("-tw") ||
+        normalized.contains("-hk") || normalized.contains("-mo") ? "zh-Hant" : "zh-Hans"
+    }
+    let language = normalized.split(separator: "-").first.map(String.init) ?? normalized
+    return supported.first { $0.lowercased() == language }
+  }
+
+  static func resolve(locale: String?, language: String?, system: Locale = .current) -> String {
+    if let selected = canonical(locale) { return selected }
+    if language == "zh" { return "zh-Hans" }
+    if language == "en" { return "en" }
+    return canonical(system.identifier) ?? "en"
+  }
+
+  static func canonicalFormatting(_ value: String?, for catalog: String) -> String? {
+    guard let value else { return nil }
+    let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+      .replacingOccurrences(of: "_", with: "-")
+    guard !normalized.isEmpty, normalized.count <= 64,
+          canonical(normalized) == catalog else { return nil }
+    return normalized
+  }
+
+  static func resolveFormatting(locale: String?, language: String?, formattingLocale: String?,
+    system: Locale = .current) -> String {
+    let catalog = resolve(locale: locale, language: language, system: system)
+    if let selected = canonicalFormatting(formattingLocale, for: catalog) { return selected }
+    let hasPhoneSelection = canonical(locale) != nil || language == "zh" || language == "en"
+    if !hasPhoneSelection,
+       canonical(system.identifier) == catalog,
+       let selected = canonicalFormatting(system.identifier, for: catalog) { return selected }
+    return defaultFormattingIdentifiers[catalog] ?? "en-AU"
+  }
+}
+
 enum WatchClock {
   static func string(_ date: Date = Date()) -> String {
     let formatter = ISO8601DateFormatter()
@@ -59,6 +110,12 @@ struct WatchContext: Codable {
   // Completed sleep intervals, merged and bounded by the phone, in Unix seconds.
   // Older phones omit them; in that case sleep totals wait for confirmation.
   var sleepRanges: [[Double]]?
+  // Canonical app-selected locale. Older phones only send language (en|zh),
+  // so this remains optional without changing the version 1 wire contract.
+  var locale: String? = nil
+  // Regional formatting locale. Optional so previously persisted version 1
+  // contexts continue to decode and use the catalog's stable default region.
+  var formattingLocale: String? = nil
 
   func isValid(at now: Date) -> Bool {
     guard schemaVersion == 1, status == "ready", !workspaceKey.isEmpty,

@@ -22,7 +22,7 @@ export function useFamilyPush(
   onOpen?: () => void,
 ) {
   const { locale } = useI18n();
-  const language = locale === "en-US" ? "en" : "zh";
+  const language = locale;
   const snapshot = family.fullSnapshot;
   const scope: PushScope | null =
     family.ready && family.user && snapshot

@@ -5,6 +5,20 @@ const { withDangerousMod, withXcodeProject } = require("expo/config-plugins");
 
 const TARGET = "LittleDaysTodayWidget";
 const GROUP_KEY = "com.apple.security.application-groups";
+const LOCALES = [
+  "en",
+  "zh-Hans",
+  "zh-Hant",
+  "fr",
+  "de",
+  "hi",
+  "it",
+  "ja",
+  "ko",
+  "es",
+  "th",
+  "vi",
+];
 const unquote = (value) => String(value ?? "").replace(/^"|"$/g, "");
 
 function widgetOptions(config) {
@@ -60,7 +74,7 @@ function copyWidgetFiles(projectRoot, platformRoot, options) {
     ),
     path.join(destination, "TodayWidgetSnapshot.swift"),
   );
-  for (const locale of ["en", "zh-Hans", "zh-Hant"]) {
+  for (const locale of LOCALES) {
     fs.mkdirSync(path.join(destination, `${locale}.lproj`), {
       recursive: true,
     });
@@ -81,7 +95,7 @@ function copyWidgetFiles(projectRoot, platformRoot, options) {
       CFBundlePackageType: "XPC!",
       CFBundleShortVersionString: "$(MARKETING_VERSION)",
       CFBundleVersion: "$(CURRENT_PROJECT_VERSION)",
-      CFBundleLocalizations: ["en", "zh-Hans", "zh-Hant"],
+      CFBundleLocalizations: LOCALES,
       LittleDaysWidgetAppGroup: options.appGroup,
       NSExtension: {
         NSExtensionPointIdentifier: "com.apple.widgetkit-extension",
@@ -98,6 +112,11 @@ function copyWidgetFiles(projectRoot, platformRoot, options) {
 function ensureWidgetTarget(project, options) {
   const objects = project.hash.project.objects;
   const root = project.getFirstProject().firstProject;
+  root.knownRegions ??= [];
+  for (const locale of LOCALES) {
+    if (!root.knownRegions.some((value) => unquote(value) === locale))
+      root.knownRegions.push(locale);
+  }
   const targets = Object.entries(objects.PBXNativeTarget).filter(
     ([, value]) => value?.isa,
   );
@@ -145,14 +164,14 @@ function ensureWidgetTarget(project, options) {
   }
   for (const filename of ["TodayWidget.swift", "TodayWidgetSnapshot.swift"])
     project.addSourceFile(filename, { target: target.uuid }, group);
-  // Keep localized files in one variant group. Three separate resources can
+  // Keep localized files in one variant group. Separate resources can
   // otherwise compete for the same output Localizable.strings file.
-  if (
-    !objects.PBXGroup[group].children.some(
-      (item) => item.comment === "Localizable.strings",
-    )
-  ) {
-    const variant = project.generateUuid();
+  let localized = objects.PBXGroup[group].children.find(
+    (item) => item.comment === "Localizable.strings",
+  );
+  let variant = localized?.value;
+  if (!variant || !objects.PBXVariantGroup?.[variant]) {
+    variant = project.generateUuid();
     objects.PBXVariantGroup ??= {};
     objects.PBXVariantGroup[variant] = {
       isa: "PBXVariantGroup",
@@ -165,21 +184,33 @@ function ensureWidgetTarget(project, options) {
       value: variant,
       comment: "Localizable.strings",
     });
-    for (const locale of ["en", "zh-Hans", "zh-Hant"]) {
-      const file = project.generateUuid();
-      objects.PBXFileReference[file] = {
-        isa: "PBXFileReference",
-        lastKnownFileType: "text.plist.strings",
-        name: locale,
-        path: `"${locale}.lproj/Localizable.strings"`,
-        sourceTree: '"<group>"',
-      };
-      objects.PBXFileReference[`${file}_comment`] = locale;
-      objects.PBXVariantGroup[variant].children.push({
-        value: file,
-        comment: locale,
-      });
-    }
+  }
+  for (const locale of LOCALES) {
+    if (
+      objects.PBXVariantGroup[variant].children.some(
+        (item) => item.comment === locale,
+      )
+    )
+      continue;
+    const file = project.generateUuid();
+    objects.PBXFileReference[file] = {
+      isa: "PBXFileReference",
+      lastKnownFileType: "text.plist.strings",
+      name: locale,
+      path: `"${locale}.lproj/Localizable.strings"`,
+      sourceTree: '"<group>"',
+    };
+    objects.PBXFileReference[`${file}_comment`] = locale;
+    objects.PBXVariantGroup[variant].children.push({
+      value: file,
+      comment: locale,
+    });
+  }
+  if (
+    !Object.entries(objects.PBXBuildFile).some(
+      ([id, value]) => !id.endsWith("_comment") && value?.fileRef === variant,
+    )
+  ) {
     const file = {
       uuid: project.generateUuid(),
       fileRef: variant,
@@ -254,4 +285,5 @@ Object.assign(module.exports, {
   declareWidget,
   copyWidgetFiles,
   ensureWidgetTarget,
+  LOCALES,
 });

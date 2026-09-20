@@ -1,10 +1,18 @@
 import * as Notifications from "expo-notifications";
+import { randomUUID } from "expo-crypto";
 import { Platform } from "react-native";
 import type { Entry } from "./domain";
 import { feedReminderTime } from "./feedReminder";
+import type { SupportedLocale } from "./locales";
 import {
+  autoFeedReminderRuleId,
+  reminderContentVersion,
+  reminderNotificationFingerprint,
+  reminderRevision,
+  reminderRuleId,
   settingsFromReminderData,
   type ReminderKind,
+  type ReminderSchedule,
   type ReminderSettings,
 } from "./reminderSettings";
 import {
@@ -12,7 +20,13 @@ import {
   loadAutoFeedReminder,
   saveAutoFeedReminder,
 } from "./storage";
-import { formatDate, t } from "./i18n";
+import {
+  currentFormattingLocale,
+  currentLocale,
+  formatDate,
+  t,
+  translate,
+} from "./i18n";
 import { personalStorageIsBlocked, reminderWrite } from "./personalWrites";
 import type { FamilyExtraRecord } from "./family/extras";
 import {
@@ -30,6 +44,33 @@ export type Reminder = {
   settings?: ReminderSettings;
 };
 const autoFeedMode = "after-feed";
+type ScheduledReminder = Awaited<
+  ReturnType<typeof Notifications.getAllScheduledNotificationsAsync>
+>[number];
+
+function isPersonalReminder(reminder: ScheduledReminder) {
+  return !isFamilyReminderData(reminder.content.data);
+}
+
+function logicalReminderGroup(
+  scheduled: readonly ScheduledReminder[],
+  ruleId: string,
+) {
+  return scheduled.filter(
+    (reminder) =>
+      isPersonalReminder(reminder) &&
+      reminderRuleId(reminder.identifier, reminder.content.data) === ruleId,
+  );
+}
+
+function latestReminder(group: readonly ScheduledReminder[]) {
+  return [...group].sort((left, right) => {
+    const revision =
+      reminderRevision(right.content.data) -
+      reminderRevision(left.content.data);
+    return revision || left.identifier.localeCompare(right.identifier);
+  })[0];
+}
 
 Notifications.setNotificationHandler({
   handleNotification: async (notification) => {
@@ -54,80 +95,203 @@ function validMinutes(minutes: number) {
     throw new Error(t("请填写 1–10080 分钟"));
 }
 
-async function prepareChannel(silent: boolean) {
+async function prepareChannel(silent: boolean, locale: SupportedLocale) {
   if (Platform.OS === "android")
     await Notifications.setNotificationChannelAsync(silent ? "quiet" : "care", {
-      name: silent ? t("安静提醒") : t("照护提醒"),
+      name: silent
+        ? translate("安静提醒", locale)
+        : translate("照护提醒", locale),
       importance: Notifications.AndroidImportance.DEFAULT,
       sound: silent ? null : "default",
     });
   return silent ? "quiet" : "care";
 }
 
-async function requirePermission() {
+async function requirePermission(locale: SupportedLocale) {
   const permission = await Notifications.requestPermissionsAsync();
   if (
     !permission.granted &&
     permission.ios?.status !== Notifications.IosAuthorizationStatus.PROVISIONAL
   )
-    throw new Error(t("请在手机设置中允许通知后再试"));
+    throw new Error(translate("请在手机设置中允许通知后再试", locale));
 }
 
-function autoFeedDetail(time: number) {
-  return t("随最新喂养 · {time}", {
-    time: formatDate(time, {
+function dateDetail(time: number, formattingLocale: string) {
+  return formatDate(
+    time,
+    {
       year: "numeric",
       month: "numeric",
       day: "numeric",
       hour: "2-digit",
       minute: "2-digit",
       hour12: false,
-    }),
+    },
+    formattingLocale,
+  );
+}
+
+function reminderSchedule(
+  settings: ReminderSettings,
+  data: Record<string, unknown> | undefined,
+  trigger: unknown,
+): ReminderSchedule | null {
+  if (settings.mode === "daily") {
+    const [hour, minute] = settings.dailyTime.split(":").map(Number);
+    return { type: "daily", hour, minute };
+  }
+  const onceAt = absoluteReminderTime(data, trigger);
+  return onceAt ? { type: "date", time: Date.parse(onceAt) } : null;
+}
+
+async function scheduleReminder(
+  settings: ReminderSettings,
+  trigger: ReminderSchedule,
+  locale: SupportedLocale,
+  formattingLocale: string,
+  ruleId: string,
+  revision: number,
+) {
+  const channelId = await prepareChannel(settings.silent, locale);
+  const time = trigger.type === "date" ? trigger.time : null;
+  const detail =
+    settings.mode === "after-feed" && time !== null
+      ? translate("随最新喂养 · {time}", locale, {
+          time: dateDetail(time, formattingLocale),
+        })
+      : settings.mode === "daily"
+        ? translate("每天 {time}", locale, { time: settings.dailyTime })
+        : time !== null
+          ? dateDetail(time, formattingLocale)
+          : "";
+  const fingerprint = reminderNotificationFingerprint(
+    settings,
+    trigger,
+    locale,
+    formattingLocale,
+  );
+  return Notifications.scheduleNotificationAsync({
+    content: {
+      title: settings.title,
+      body:
+        settings.mode === "after-feed"
+          ? translate("距离上次喂养已到设定间隔。", locale)
+          : translate("按宝宝当下的需要安排照护。", locale),
+      sound: settings.silent ? false : "default",
+      data: {
+        detail,
+        reminderMode: settings.mode,
+        reminderKind: settings.kind,
+        minutes: settings.minutes,
+        dailyTime: settings.dailyTime,
+        silent: settings.silent,
+        reminderLocale: locale,
+        reminderFormattingLocale: formattingLocale,
+        reminderContentVersion,
+        reminderFingerprint: fingerprint,
+        reminderRuleId: ruleId,
+        reminderRevision: revision,
+        ...(time !== null ? { onceAt: new Date(time).toISOString() } : {}),
+      },
+    },
+    trigger:
+      trigger.type === "daily"
+        ? {
+            type: Notifications.SchedulableTriggerInputTypes.DAILY,
+            hour: trigger.hour,
+            minute: trigger.minute,
+            channelId,
+          }
+        : {
+            type: Notifications.SchedulableTriggerInputTypes.DATE,
+            date: new Date(trigger.time),
+            channelId,
+          },
   });
 }
 
-async function scheduleAutoFeedReminder(
-  title: string,
-  minutes: number,
-  silent: boolean,
-  time: number,
+async function reconcileReminderGroup(
+  group: readonly ScheduledReminder[],
+  settings: ReminderSettings,
+  trigger: ReminderSchedule,
+  locale: SupportedLocale,
+  formattingLocale: string,
+  shouldContinue: () => boolean = () => true,
 ) {
-  const channelId = await prepareChannel(silent);
-  const detail = autoFeedDetail(time);
-  return Notifications.scheduleNotificationAsync({
-    content: {
-      title,
-      body: t("距离上次喂养已到设定间隔。"),
-      sound: silent ? false : "default",
-      data: {
-        detail,
-        reminderMode: autoFeedMode,
-        reminderKind: "feed",
-        minutes,
-        dailyTime: "",
-        silent,
-      },
-    },
-    trigger: {
-      type: Notifications.SchedulableTriggerInputTypes.DATE,
-      date: new Date(time),
-      channelId,
-    },
-  });
+  if (group.length === 0) return null;
+  const authority = latestReminder(group);
+  const ruleId = reminderRuleId(authority.identifier, authority.content.data);
+  const fingerprint = reminderNotificationFingerprint(
+    settings,
+    trigger,
+    locale,
+    formattingLocale,
+  );
+  const matching = group
+    .filter(
+      (reminder) => reminder.content.data?.reminderFingerprint === fingerprint,
+    )
+    .sort((left, right) => {
+      const revision =
+        reminderRevision(right.content.data) -
+        reminderRevision(left.content.data);
+      return revision || left.identifier.localeCompare(right.identifier);
+    });
+  let keep = matching[0]?.identifier ?? null;
+  if (!keep) {
+    if (!shouldContinue()) return null;
+    const nextRevision =
+      Math.max(...group.map((item) => reminderRevision(item.content.data))) + 1;
+    keep = await scheduleReminder(
+      settings,
+      trigger,
+      locale,
+      formattingLocale,
+      ruleId,
+      nextRevision,
+    );
+  }
+
+  // Keep the authoritative source until last. If an earlier cancellation
+  // fails, a retry can recover the group and reuse the new native schedule.
+  const obsolete = group
+    .filter((reminder) => reminder.identifier !== keep)
+    .sort((left, right) => {
+      if (left.identifier === authority.identifier) return 1;
+      if (right.identifier === authority.identifier) return -1;
+      return left.identifier.localeCompare(right.identifier);
+    });
+  for (const reminder of obsolete) {
+    if (!shouldContinue()) return keep;
+    await Notifications.cancelScheduledNotificationAsync(reminder.identifier);
+  }
+  return keep;
 }
 
 export async function listReminders(): Promise<Reminder[]> {
-  return (await Notifications.getAllScheduledNotificationsAsync())
-    .filter((n) => !isFamilyReminderData(n.content.data))
-    .map((n) => {
-      const title = n.content.title ?? t("照护提醒");
-      return {
-        id: n.identifier,
-        title,
-        detail: String(n.content.data?.detail ?? ""),
-        settings: settingsFromReminderData(title, n.content.data),
-      };
-    });
+  const scheduled = (
+    await Notifications.getAllScheduledNotificationsAsync()
+  ).filter(isPersonalReminder);
+  const canonical = new Map<string, ScheduledReminder>();
+  for (const reminder of scheduled) {
+    const ruleId = reminderRuleId(reminder.identifier, reminder.content.data);
+    const current = canonical.get(ruleId);
+    if (
+      !current ||
+      reminderRevision(reminder.content.data) >
+        reminderRevision(current.content.data)
+    )
+      canonical.set(ruleId, reminder);
+  }
+  return [...canonical.values()].map((n) => {
+    const title = n.content.title ?? t("照护提醒");
+    return {
+      id: n.identifier,
+      title,
+      detail: String(n.content.data?.detail ?? ""),
+      settings: settingsFromReminderData(title, n.content.data),
+    };
+  });
 }
 
 export async function captureReminderRecords(): Promise<FamilyExtraRecord[]> {
@@ -140,46 +304,47 @@ export async function captureReminderRecords(): Promise<FamilyExtraRecord[]> {
 
 export async function cancelReminder(id: string) {
   return reminderWrite(async () => {
-    const reminder = (
-      await Notifications.getAllScheduledNotificationsAsync()
-    ).find((item) => item.identifier === id);
-    if (reminder?.content.data?.reminderMode === autoFeedMode)
+    const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+    const reminder = scheduled.find((item) => item.identifier === id);
+    if (!reminder) {
+      await Notifications.cancelScheduledNotificationAsync(id);
+      return;
+    }
+    const ruleId = reminderRuleId(id, reminder.content.data);
+    const group = logicalReminderGroup(scheduled, ruleId);
+    for (const item of group)
+      await Notifications.cancelScheduledNotificationAsync(item.identifier);
+    if (reminder.content.data?.reminderMode === autoFeedMode)
       await clearAutoFeedReminder();
-    await Notifications.cancelScheduledNotificationAsync(id);
   });
 }
 
 export async function updateReminderSilent(id: string, silent: boolean) {
   return reminderWrite(async () => {
-    const reminder = (
-      await Notifications.getAllScheduledNotificationsAsync()
-    ).find((item) => item.identifier === id);
-    if (!reminder || !reminder.trigger || typeof reminder.trigger !== "object")
-      return;
-    const channelId = await prepareChannel(silent);
-    const onceAt = absoluteReminderTime(
-      reminder.content.data,
-      reminder.trigger,
+    const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+    const reminder = scheduled.find((item) => item.identifier === id);
+    if (!reminder) return;
+    const ruleId = reminderRuleId(id, reminder.content.data);
+    const group = logicalReminderGroup(scheduled, ruleId);
+    const authority = latestReminder(group);
+    const title = authority.content.title ?? t("照护提醒");
+    const settings = settingsFromReminderData(title, authority.content.data);
+    if (!settings) return;
+    const trigger = reminderSchedule(
+      settings,
+      authority.content.data,
+      authority.trigger,
     );
-    await Notifications.cancelScheduledNotificationAsync(id);
-    await Notifications.scheduleNotificationAsync({
-      content: {
-        title: reminder.content.title ?? t("照护提醒"),
-        body: reminder.content.body ?? t("按宝宝当下的需要安排照护。"),
-        sound: silent ? false : "default",
-        data: { ...(reminder.content.data ?? {}), silent },
-      },
-      trigger: onceAt
-        ? {
-            type: Notifications.SchedulableTriggerInputTypes.DATE,
-            date: new Date(onceAt),
-            channelId,
-          }
-        : ({
-            ...reminder.trigger,
-            channelId,
-          } as Notifications.NotificationTriggerInput),
-    });
+    if (!trigger) return;
+    const next = { ...settings, silent };
+    if (next.mode === "after-feed") await saveAutoFeedReminder(next);
+    await reconcileReminderGroup(
+      group,
+      next,
+      trigger,
+      currentLocale(),
+      currentFormattingLocale(),
+    );
   });
 }
 
@@ -191,57 +356,33 @@ export async function addReminder(
   kind: ReminderKind = "feed",
 ) {
   return reminderWrite(async () => {
-    const channelId = await prepareChannel(silent);
-    await requirePermission();
-    let trigger: Notifications.NotificationTriggerInput;
-    let detail: string;
-    let onceAt: string | undefined;
+    const locale = currentLocale();
+    await requirePermission(locale);
+    let trigger: ReminderSchedule;
     if (dailyTime) {
       if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(dailyTime))
         throw new Error(t("时间格式应为 HH:mm"));
       const [hour, minute] = dailyTime.split(":").map(Number);
-      trigger = {
-        type: Notifications.SchedulableTriggerInputTypes.DAILY,
-        hour,
-        minute,
-        channelId,
-      };
-      detail = t("每天 {time}", { time: dailyTime });
+      trigger = { type: "daily", hour, minute };
     } else {
       validMinutes(minutes);
-      const date = new Date(Date.now() + minutes * 60000);
-      onceAt = date.toISOString();
-      trigger = {
-        type: Notifications.SchedulableTriggerInputTypes.DATE,
-        date,
-        channelId,
-      };
-      detail = formatDate(date, {
-        year: "numeric",
-        month: "numeric",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: false,
-      });
+      trigger = { type: "date", time: Date.now() + minutes * 60000 };
     }
-    await Notifications.scheduleNotificationAsync({
-      content: {
+    await scheduleReminder(
+      {
+        kind,
+        mode: dailyTime ? "daily" : "once",
         title,
-        body: t("按宝宝当下的需要安排照护。"),
-        sound: silent ? false : "default",
-        data: {
-          detail,
-          reminderMode: dailyTime ? "daily" : "once",
-          reminderKind: kind,
-          minutes,
-          dailyTime: dailyTime ?? "",
-          silent,
-          ...(onceAt ? { onceAt } : {}),
-        },
+        minutes,
+        dailyTime: dailyTime ?? "",
+        silent,
       },
       trigger,
-    });
+      locale,
+      currentFormattingLocale(),
+      randomUUID(),
+      0,
+    );
   });
 }
 
@@ -256,7 +397,8 @@ export async function addAutoFeedReminder(
     const time = feedReminderTime(entries, minutes);
     if (time === null)
       throw new Error(t("请先保存一条喂养记录，再启用自动提醒"));
-    await requirePermission();
+    const locale = currentLocale();
+    await requirePermission(locale);
     await saveAutoFeedReminder({
       kind: "feed",
       mode: "after-feed",
@@ -265,40 +407,130 @@ export async function addAutoFeedReminder(
       dailyTime: "",
       silent,
     });
-    await rescheduleAutoFeedRemindersCore(entries);
+    await rescheduleAutoFeedRemindersCore(
+      entries,
+      locale,
+      currentFormattingLocale(),
+    );
   });
 }
 
-export async function rescheduleAutoFeedReminders(entries: Entry[]) {
-  return reminderWrite(() => rescheduleAutoFeedRemindersCore(entries));
+export async function rescheduleAutoFeedReminders(
+  entries: Entry[],
+  locale: SupportedLocale = currentLocale(),
+  formattingLocale: string = currentFormattingLocale(),
+  shouldContinue: () => boolean = () => true,
+) {
+  return reminderWrite(() =>
+    shouldContinue()
+      ? rescheduleAutoFeedRemindersCore(
+          entries,
+          locale,
+          formattingLocale,
+          shouldContinue,
+        )
+      : Promise.resolve(),
+  );
 }
 
-async function rescheduleAutoFeedRemindersCore(entries: Entry[]) {
+async function rescheduleAutoFeedRemindersCore(
+  entries: Entry[],
+  locale: SupportedLocale,
+  formattingLocale: string,
+  shouldContinue: () => boolean = () => true,
+) {
   const scheduled = await Notifications.getAllScheduledNotificationsAsync();
-  const automatic = scheduled.filter(
+  if (!shouldContinue()) return;
+  const personal = scheduled.filter(
+    (reminder) => !isFamilyReminderData(reminder.content.data),
+  );
+  const automatic = personal.filter(
     (reminder) => reminder.content.data?.reminderMode === autoFeedMode,
   );
   const legacySettings = automatic
     .map((reminder) =>
       settingsFromReminderData(
-        reminder.content.title ?? t("喂养提醒"),
+        reminder.content.title ?? translate("喂养提醒", locale),
         reminder.content.data,
       ),
     )
     .find((settings) => settings?.mode === "after-feed");
   const storedSettings = await loadAutoFeedReminder();
+  if (!shouldContinue()) return;
   const settings = storedSettings ?? legacySettings;
-  if (!settings) return;
   if (!storedSettings && legacySettings)
     await saveAutoFeedReminder(legacySettings);
-  const time = feedReminderTime(entries, settings.minutes);
-  if (time !== null)
-    await scheduleAutoFeedReminder(
-      settings.title,
-      settings.minutes,
-      settings.silent,
-      time,
+  if (!shouldContinue()) return;
+  if (settings) {
+    const time = feedReminderTime(entries, settings.minutes);
+    let keep: string | null = null;
+    if (time !== null) {
+      const trigger = { type: "date", time } as const;
+      const fingerprint = reminderNotificationFingerprint(
+        settings,
+        trigger,
+        locale,
+        formattingLocale,
+      );
+      keep =
+        latestReminder(
+          automatic.filter(
+            (reminder) =>
+              reminder.content.data?.reminderFingerprint === fingerprint,
+          ),
+        )?.identifier ?? null;
+      if (!keep) {
+        if (!shouldContinue()) return;
+        keep = await scheduleReminder(
+          settings,
+          trigger,
+          locale,
+          formattingLocale,
+          autoFeedReminderRuleId,
+          Math.max(
+            -1,
+            ...automatic.map((item) => reminderRevision(item.content.data)),
+          ) + 1,
+        );
+      }
+    }
+    for (const reminder of automatic) {
+      if (!shouldContinue()) return;
+      if (reminder.identifier !== keep)
+        await Notifications.cancelScheduledNotificationAsync(
+          reminder.identifier,
+        );
+    }
+  }
+
+  const groups = new Map<string, ScheduledReminder[]>();
+  for (const reminder of personal) {
+    if (!shouldContinue()) return;
+    if (reminder.content.data?.reminderMode === autoFeedMode) continue;
+    const ruleId = reminderRuleId(reminder.identifier, reminder.content.data);
+    const group = groups.get(ruleId) ?? [];
+    group.push(reminder);
+    groups.set(ruleId, group);
+  }
+  for (const group of groups.values()) {
+    if (!shouldContinue()) return;
+    const authority = latestReminder(group);
+    const title = authority.content.title ?? translate("照护提醒", locale);
+    const rule = settingsFromReminderData(title, authority.content.data);
+    if (!rule) continue;
+    const trigger = reminderSchedule(
+      rule,
+      authority.content.data,
+      authority.trigger,
     );
-  for (const reminder of automatic)
-    await Notifications.cancelScheduledNotificationAsync(reminder.identifier);
+    if (!trigger) continue;
+    await reconcileReminderGroup(
+      group,
+      rule,
+      trigger,
+      locale,
+      formattingLocale,
+      shouldContinue,
+    );
+  }
 }

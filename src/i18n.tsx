@@ -1,8 +1,43 @@
 import React, { createContext, useContext, useMemo } from "react";
 import { getLocales } from "expo-localization";
+import {
+  isChineseLocale,
+  localeDefinition,
+  normalizeLanguagePreference,
+  resolveLocalization,
+  type LanguagePreference,
+  type PreferredLocale,
+  type SupportedLocale,
+} from "./locales";
+import {
+  formatDisplayNumber,
+  formatEditableNumber as formatEditableNumberForLocale,
+  parseLocalizedNumber as parseLocalizedNumberForLocale,
+} from "./localeNumbers";
+import {
+  getGeneratedCatalog,
+  getGeneratedEnglishCatalog,
+  loadGeneratedCatalog,
+} from "./locales/generated";
+import { manualEnglishOverride } from "./locales/manualOverrides";
 
-export type LanguagePreference = "system" | "zh" | "en";
-export type AppLocale = "zh-CN" | "en-US";
+export {
+  LOCALE_REGISTRY,
+  SUPPORTED_LOCALES,
+  isChineseLocale,
+  localeDefinition,
+  matchSupportedLocale,
+  normalizeLanguagePreference,
+  resolveLocalization,
+  type LanguagePreference,
+  type LocaleDefinition,
+  type PreferredLocale,
+  type ResolvedLocalization,
+  type SupportedLocale,
+} from "./locales";
+
+/** Kept as a compatibility alias while callers migrate to SupportedLocale. */
+export type AppLocale = SupportedLocale;
 
 type TranslationValues = Record<string, string | number>;
 
@@ -26,7 +61,7 @@ const english: Record<string, string> = {
   "试点仅限获准的测试账户，请勿填写真实宝宝资料。退出会清除这台设备的试点缓存和草稿；服务端数据仍保留。账户删除、保留期限和正式隐私披露完成前，不对外发布家庭共享。":
     "The pilot is limited to admitted test accounts. Do not enter real baby data. Signing out clears this device's pilot cache and drafts; server data remains. Family sharing will not be publicly released until account deletion, retention rules and privacy disclosures are ready.",
   "MY LITTLE DAYS · 小日子": "MY LITTLE DAYS",
-  今天的小日子: "{name}'s little days",
+  今天的小日子: "Today",
   "每一天，都记得": "Every day remembered",
   慢慢长大的你: "Growing with you",
   我的: "More",
@@ -46,6 +81,59 @@ const english: Record<string, string> = {
     "Saved immediately and used when you open Records. You can also switch views temporarily in Records.",
   "无法保存视图设置，请重试。":
     "Could not save the view preference. Please try again.",
+  这台设备暂不支持导出文件:
+    "This device does not currently support file export.",
+  "备份文件不能超过 25 MB": "Backup files cannot exceed 25 MB.",
+  头像仅支持在手机安装版中保存:
+    "Baby photos can only be saved in the installed mobile app.",
+  "无法读取所选照片，请重试":
+    "The selected photo could not be read. Please try again.",
+  "请选择 12 MB 以内的照片": "Choose a photo smaller than 12 MB.",
+  "头像保存失败，请重试": "The baby photo could not be saved. Try again.",
+  提醒设置无效: "The reminder settings are invalid.",
+  跟随喂养设置无效: "The follow-feed reminder settings are invalid.",
+  头像地址无效: "The baby photo address is invalid.",
+  "打开成长记录…": "Opening your records…",
+  保存成长记录备份: "Save a Little Days backup",
+  数据格式无效: "The data format is invalid.",
+  出生日期无效: "The birth date is invalid.",
+  "出生日期格式应为 YYYY-MM-DD":
+    "The birth date must use the YYYY-MM-DD format.",
+  记录时间需要带时区: "The record time must include a time zone.",
+  记录时间无效: "The record time is invalid.",
+  记录类型无效: "The record type is invalid.",
+  记录编号无效: "The record identifier is invalid.",
+  备注无效: "The notes are invalid or too long.",
+  结束时间不能早于开始时间:
+    "The end time cannot be earlier than the start time.",
+  喂养方式无效: "The feeding method is invalid.",
+  奶量超出有效范围: "The milk amount is outside the valid range.",
+  亲喂不能填写估算奶量: "A milk amount cannot be estimated for breastfeeding.",
+  尿布类型无效: "The diaper type is invalid.",
+  至少填写一项测量: "Enter at least one measurement.",
+  体重超出有效范围: "Weight is outside the valid range.",
+  身长超出有效范围: "Length is outside the valid range.",
+  头围超出有效范围: "Head circumference is outside the valid range.",
+  里程碑标题无效: "The milestone title is invalid or too long.",
+  记录包含不支持的字段: "The record contains unsupported fields.",
+  照护类型无效: "The care type is invalid.",
+  体温超出有效范围: "Temperature is outside the valid range.",
+  测量方式无效: "The measurement method is invalid.",
+  请选择有效的补充剂: "Select one or more valid supplements.",
+  其他补充剂名称无效: "The other supplement name is invalid or too long.",
+  请选择其他补充剂后填写名称:
+    "Select Other before entering another supplement name.",
+  照护记录包含不支持的字段: "The care record contains unsupported fields.",
+  不支持此备份版本: "This backup version is not supported.",
+  备份包含不支持的字段: "The backup contains unsupported fields.",
+  性别设置无效: "The sex setting is invalid.",
+  记录列表无效或过大: "The record list is invalid or too large.",
+  备份包含重复记录编号: "The backup contains duplicate record identifiers.",
+  只能有一个进行中的睡眠: "Only one sleep session can be ongoing at a time.",
+  照护记录列表无效或过大: "The care record list is invalid or too large.",
+  照护记录编号重复: "The care record identifiers are duplicated.",
+  宝宝名字无效: "The baby's name is invalid or too long.",
+  统计日期范围无效: "The statistics date range is invalid.",
   应用版本: "App version",
   "版本 {version} · 更新 {build}": "Version {version} · Update {build}",
   日: "Day",
@@ -119,10 +207,13 @@ const english: Record<string, string> = {
   配方奶: "Formula",
   瓶喂: "Bottle",
   瓶喂母乳: "Expressed milk",
-  左侧: "Left",
-  右侧: "Right",
+  左侧: "Left side",
+  右侧: "Right side",
   双侧: "Both",
   亲喂: "Breastfeed",
+  "亲喂 · 左侧": "Breastfeed · left side",
+  "亲喂 · 右侧": "Breastfeed · right side",
+  "亲喂 · 双侧": "Breastfeed · Both",
   尿: "Pee",
   便: "Poo",
   "尿＋便": "Pee + poo",
@@ -423,7 +514,6 @@ const english: Record<string, string> = {
     "Chart in {unit}; values appear in the daily summary and details.",
   没有恢复副本: "No recovery copy available",
   语言已保存: "Language saved",
-  出生日期无效: "Invalid birth date",
   "请填写 1–10080 分钟": "Enter a value from 1 to 10,080 minutes.",
   安静提醒: "Quiet reminder",
   请在手机设置中允许通知后再试:
@@ -451,36 +541,116 @@ const english: Record<string, string> = {
   "头围 {value} cm": "Head {value} cm",
 };
 
-let activeLocale: AppLocale = "zh-CN";
+let activeLocale: AppLocale = "zh-Hans";
+let activeFormattingLocale = "zh-CN";
 
-export function resolveLocale(preference: LanguagePreference): AppLocale {
-  if (preference === "zh") return "zh-CN";
-  if (preference === "en") return "en-US";
-  return getLocales()[0]?.languageCode?.toLowerCase().startsWith("zh")
-    ? "zh-CN"
-    : "en-US";
-}
-
-export function setActiveLocale(locale: AppLocale) {
-  activeLocale = locale;
-}
-
-export function currentLocale() {
-  return activeLocale;
-}
-
-export function t(source: string, values?: TranslationValues): string {
-  const template =
-    activeLocale === "en-US" ? (english[source] ?? source) : source;
+function interpolate(template: string, values?: TranslationValues) {
   if (!values) return template;
   return template.replace(/\{(\w+)\}/g, (_, name) =>
     String(values[name] ?? ""),
   );
 }
 
+function canonicalCatalogLocale(locale: AppLocale | string): SupportedLocale {
+  if (locale === "zh" || locale === "zh-CN") return "zh-Hans";
+  if (locale === "en-US") return "en";
+  const normalized = normalizeLanguagePreference(locale);
+  return !normalized || normalized === "system" ? "en" : normalized;
+}
+
+export function resolveLocale(
+  preference: LanguagePreference,
+  preferredLocales: readonly PreferredLocale[] = getLocales(),
+): AppLocale {
+  return resolveAppLocalization(preference, preferredLocales).catalogLocale;
+}
+
+export function resolveFormattingLocale(
+  preference: LanguagePreference,
+  preferredLocales: readonly PreferredLocale[] = getLocales(),
+) {
+  return resolveAppLocalization(preference, preferredLocales).formattingLocale;
+}
+
+export function resolveAppLocalization(
+  preference: LanguagePreference,
+  preferredLocales: readonly PreferredLocale[] = getLocales(),
+) {
+  return resolveLocalization(preference, preferredLocales);
+}
+
+export function setActiveLocale(
+  locale: AppLocale,
+  formattingLocale = localeDefinition(locale).formattingLocale,
+) {
+  activeLocale = locale;
+  activeFormattingLocale = formattingLocale;
+}
+
+export function currentLocale() {
+  return activeLocale;
+}
+
+export function currentFormattingLocale() {
+  return activeFormattingLocale;
+}
+
+export async function hydrateLocaleCatalog(locale: AppLocale | string) {
+  await loadGeneratedCatalog(canonicalCatalogLocale(locale));
+}
+
+export function translate(
+  source: string,
+  locale: AppLocale,
+  values?: TranslationValues,
+): string {
+  locale = canonicalCatalogLocale(locale);
+  const englishTemplate = english[source] ?? source;
+  const template =
+    locale === "zh-Hans"
+      ? source
+      : locale === "en"
+        ? englishTemplate
+        : (manualEnglishOverride(locale, englishTemplate) ??
+          getGeneratedCatalog(locale)?.[source] ??
+          englishTemplate);
+  return interpolate(template, values);
+}
+
+export function translateEnglish(
+  template: string,
+  locale: AppLocale,
+  values?: TranslationValues,
+): string {
+  locale = canonicalCatalogLocale(locale);
+  const translated =
+    locale === "en"
+      ? template
+      : (manualEnglishOverride(locale, template) ??
+        getGeneratedEnglishCatalog(locale)?.[template] ??
+        template);
+  return interpolate(translated, values);
+}
+
+export function localize(
+  chinese: string,
+  englishTemplate: string,
+  values?: TranslationValues,
+  locale = activeLocale,
+) {
+  locale = canonicalCatalogLocale(locale);
+  return locale === "zh-Hans"
+    ? interpolate(chinese, values)
+    : translateEnglish(englishTemplate, locale, values);
+}
+
+export function t(source: string, values?: TranslationValues): string {
+  return translate(source, activeLocale, values);
+}
+
 export function formatTime(
   value: string | number | Date,
-  locale = activeLocale,
+  locale = activeFormattingLocale,
 ) {
   return new Intl.DateTimeFormat(locale, {
     hour: "2-digit",
@@ -496,20 +666,45 @@ export function formatDate(
     month: "long",
     day: "numeric",
   },
-  locale = activeLocale,
+  locale = activeFormattingLocale,
 ) {
   return new Intl.DateTimeFormat(locale, options).format(new Date(value));
 }
 
+export function formatEditableNumber(
+  value: number,
+  locale = activeFormattingLocale,
+) {
+  return formatEditableNumberForLocale(value, locale);
+}
+
+export function formatNumber(
+  value: number,
+  options: Intl.NumberFormatOptions = {},
+  locale = activeFormattingLocale,
+) {
+  return formatDisplayNumber(value, locale, options);
+}
+
+export function parseLocalizedNumber(
+  value: string,
+  locale = activeFormattingLocale,
+) {
+  return parseLocalizedNumberForLocale(value, locale);
+}
+
 export function elapsed(ms: number, locale = activeLocale) {
+  locale = canonicalCatalogLocale(locale);
   const minutes = Math.floor(Math.max(0, Number.isFinite(ms) ? ms : 0) / 60000);
-  if (locale === "en-US") {
-    const hours = Math.floor(minutes / 60);
-    return hours ? `${hours}h ${minutes % 60}m` : `${minutes}m`;
-  }
-  return minutes >= 60
-    ? `${Math.floor(minutes / 60)}小时${minutes % 60}分`
-    : `${minutes}分钟`;
+  const hours = Math.floor(minutes / 60);
+  return hours
+    ? localize(
+        "{hours}小时{minutes}分",
+        "{hours}h {minutes}m",
+        { hours, minutes: minutes % 60 },
+        locale,
+      )
+    : localize("{minutes}分钟", "{minutes}m", { minutes }, locale);
 }
 
 export function age(
@@ -517,7 +712,9 @@ export function age(
   now = new Date(),
   locale = activeLocale,
 ) {
-  if (!birthDate) return locale === "en-US" ? "Set birth date" : "设置出生日期";
+  locale = canonicalCatalogLocale(locale);
+  if (!birthDate)
+    return localize("设置出生日期", "Set birth date", undefined, locale);
   const [year, month, day] = birthDate.split("-").map(Number);
   const days = Math.floor(
     (Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()) -
@@ -525,26 +722,51 @@ export function age(
       86400000,
   );
   if (days < 0)
-    return locale === "en-US"
-      ? "Birth date is in the future"
-      : "出生日期在未来";
-  return locale === "en-US"
-    ? `${days} days · ${Math.floor(days / 7)}w ${days % 7}d`
-    : `${days}天 · ${Math.floor(days / 7)}周${days % 7}天`;
+    return localize(
+      "出生日期在未来",
+      "Birth date is in the future",
+      undefined,
+      locale,
+    );
+  return localize(
+    "{days}天 · {weeks}周{remainingDays}天",
+    "{days} days · {weeks}w {remainingDays}d",
+    {
+      days,
+      weeks: Math.floor(days / 7),
+      remainingDays: days % 7,
+    },
+    locale,
+  );
 }
 
-type I18nValue = { locale: AppLocale; t: typeof t };
-const I18nContext = createContext<I18nValue>({ locale: activeLocale, t });
+type I18nValue = {
+  locale: AppLocale;
+  formattingLocale: string;
+  t: typeof t;
+  localize: typeof localize;
+};
+const I18nContext = createContext<I18nValue>({
+  locale: activeLocale,
+  formattingLocale: activeFormattingLocale,
+  t,
+  localize,
+});
 
 export function I18nProvider({
   locale,
+  formattingLocale = localeDefinition(locale).formattingLocale,
   children,
 }: {
   locale: AppLocale;
+  formattingLocale?: string;
   children: React.ReactNode;
 }) {
-  setActiveLocale(locale);
-  const value = useMemo(() => ({ locale, t }), [locale]);
+  setActiveLocale(locale, formattingLocale);
+  const value = useMemo(
+    () => ({ locale, formattingLocale, t, localize }),
+    [formattingLocale, locale],
+  );
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
 }
 

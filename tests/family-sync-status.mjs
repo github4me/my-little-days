@@ -257,7 +257,25 @@ function fixture(overrides = {}, locale = "en") {
         if (name === "react-native") return native;
         if (name === "react-native-safe-area-context")
           return { SafeAreaView: "SafeAreaView" };
-        if (name === "../i18n") return { useI18n: () => ({ locale }) };
+        if (name === "../i18n")
+          return (() => {
+            const localize = (zh, en, values, target = locale) =>
+              (target === "zh-CN" || target === "zh-Hans" ? zh : en).replace(
+                /\{(\w+)\}/g,
+                (_, key) => String(values?.[key] ?? `{${key}}`),
+              );
+            return {
+              localeDefinition: () => ({
+                formattingLocale: locale === "zh-CN" ? "zh-CN" : "en-AU",
+              }),
+              localize,
+              useI18n: () => ({
+                locale,
+                formattingLocale: locale === "zh-CN" ? "zh-CN" : "en-AU",
+                localize,
+              }),
+            };
+          })();
         if (name === "../ui") return ui;
         if (name === "./messages") return load("src/family/messages.ts");
         if (name === "./syncIssues") return load("src/family/syncIssues.ts");

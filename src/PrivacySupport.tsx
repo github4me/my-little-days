@@ -61,9 +61,8 @@ function PrivacySection({
 
 export default function PrivacySupport({ onBack }: { onBack: () => void }) {
   const c = useContext(Theme);
-  const { locale } = useI18n();
+  const { localize: copy } = useI18n();
   const [supportError, setSupportError] = useState(false);
-  const copy = (zh: string, en: string) => (locale === "zh-CN" ? zh : en);
   return (
     <View style={{ gap: 18 }}>
       <Pressable

@@ -25,8 +25,7 @@ export type SharedRemindersProps = {
 type ReminderRecord = Extract<FamilyExtraRecord, { kind: "reminder" }>;
 export default function SharedReminders(props: SharedRemindersProps) {
   const c = useContext(Theme);
-  const { locale } = useI18n();
-  const copy = (zh: string, en: string) => (locale === "zh-CN" ? zh : en);
+  const { locale, formattingLocale, localize: copy } = useI18n();
   const preset = props.records.find(
     (r) => r.record.kind === "reminder-settings",
   )?.record;
@@ -194,7 +193,7 @@ export default function SharedReminders(props: SharedRemindersProps) {
       {editing?.record.onceAt ? (
         <T raw style={{ fontSize: 12, color: c.muted }}>
           {copy("原定时间：", "Scheduled: ")}
-          {new Date(editing.record.onceAt).toLocaleString()}
+          {new Date(editing.record.onceAt).toLocaleString(formattingLocale)}
           {copy(
             "。修改间隔才会从现在重新计时。",
             ". Changing the interval starts a new countdown.",
@@ -292,7 +291,7 @@ export default function SharedReminders(props: SharedRemindersProps) {
                 ? copy("喂养开始后 ", "After feed start: ") +
                   record.settings.minutes +
                   copy(" 分钟", " min")
-                : new Date(record.onceAt!).toLocaleString() +
+                : new Date(record.onceAt!).toLocaleString(formattingLocale) +
                   (Date.parse(record.onceAt!) <= Date.now()
                     ? copy(" · 已过期", " · Expired")
                     : "")}

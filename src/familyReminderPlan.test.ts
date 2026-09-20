@@ -85,6 +85,12 @@ test("notification comparison fingerprints are stable across refresh and detect 
   const first = familyReminderPlans([record], [], now)[0];
   const refresh = familyReminderPlans([record], [], now + 60_000)[0];
   assert.equal(first.fingerprint, refresh.fingerprint);
+  const localized = familyReminderPlans([record], [], now, "ja")[0];
+  assert.notEqual(first.fingerprint, localized.fingerprint);
+  assert.equal(localized.title, first.title);
+  assert.deepEqual(localized.trigger, first.trigger);
+  assert.equal(localized.locale, "ja");
+  assert.equal(localized.contentVersion, 1);
   assert.notEqual(
     first.fingerprint,
     familyReminderPlans(
@@ -184,6 +190,44 @@ test("migration captures stable reminder rules, ignores family schedules and ded
     (records[1] as { onceAt: string }).onceAt,
     "2026-09-16T01:30:00.000Z",
   );
+});
+
+test("migration captures only the latest revision of a logical personal reminder", () => {
+  const data = {
+    reminderKind: "feed",
+    reminderMode: "daily",
+    minutes: 30,
+    dailyTime: "10:00",
+    reminderRuleId: "stable-rule",
+  };
+  const records = captureScheduledReminderRecords(
+    [
+      {
+        identifier: "old-native",
+        content: {
+          title: "Daily",
+          data: { ...data, silent: true, reminderRevision: 0 },
+        },
+        trigger: { type: "daily", hour: 10, minute: 0 },
+      },
+      {
+        identifier: "new-native",
+        content: {
+          title: "Daily",
+          data: { ...data, silent: false, reminderRevision: 1 },
+        },
+        trigger: { type: "daily", hour: 10, minute: 0 },
+      },
+    ],
+    null,
+  );
+
+  assert.equal(records.length, 1);
+  const record = records[0];
+  assert.equal(record.id, "reminder-stable-rule");
+  assert.equal(record.kind, "reminder");
+  if (record.kind !== "reminder") assert.fail("expected reminder record");
+  assert.equal(record.settings.silent, false);
 });
 
 test("migration blocks unknown legacy once time instead of losing or delaying that reminder", () => {

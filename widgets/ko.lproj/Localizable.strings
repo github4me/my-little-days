@@ -1,0 +1,11 @@
+"widget.gallery.name" = "오늘의 돌봄";
+"widget.gallery.description" = "오늘 기록한 수유량, 기저귀 교체 및 수면입니다. 탭하여 오늘을 여세요.";
+"widget.today" = "오늘";
+"widget.milk" = "수유량";
+"widget.nappies" = "기저귀";
+"widget.sleep" = "수면";
+"widget.recorded_sleep" = "기록된 수면";
+"widget.unit.ml" = "mL";
+"widget.unit.hour_short" = "시간";
+"widget.updated" = "업데이트: ";
+"widget.empty" = "Little Days를 열어\n오늘 기록 업데이트";

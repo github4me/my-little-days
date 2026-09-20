@@ -1,0 +1,11 @@
+"widget.gallery.name" = "今日のお世話";
+"widget.gallery.description" = "今日記録したミルク、おむつ交換、睡眠を表示します。タップして「今日」を開きます。";
+"widget.today" = "今日";
+"widget.milk" = "ミルク";
+"widget.nappies" = "おむつ";
+"widget.sleep" = "睡眠";
+"widget.recorded_sleep" = "記録した睡眠";
+"widget.unit.ml" = "mL";
+"widget.unit.hour_short" = "時間";
+"widget.updated" = "更新：";
+"widget.empty" = "Little Daysを開いて\n今日を更新";

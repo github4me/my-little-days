@@ -1,0 +1,11 @@
+"widget.gallery.name" = "Cuidados de hoy";
+"widget.gallery.description" = "Leche, cambios de pañal y sueño registrados hoy. Toca para abrir Hoy.";
+"widget.today" = "Hoy";
+"widget.milk" = "Leche";
+"widget.nappies" = "Pañales";
+"widget.sleep" = "Sueño";
+"widget.recorded_sleep" = "Sueño registrado";
+"widget.unit.ml" = "mL";
+"widget.unit.hour_short" = "h";
+"widget.updated" = "Actualizado a las ";
+"widget.empty" = "Abre Little Days\npara actualizar hoy";

@@ -7,6 +7,7 @@ namespace LittleDays.FamilyApi;
 
 public sealed record PushEnvelope(string Token, string Locale, Guid EventId, Guid FamilyId, Guid MembershipId,
     Guid HistoryId, Guid InstallationId, int Generation, DateTimeOffset ExpiresAt);
+public sealed record PushContent(string Title, string Body);
 public sealed record PushGatewayResult(string Outcome, string? ReceiptId = null, string Error = "");
 public interface IPushGateway
 {
@@ -16,18 +17,38 @@ public interface IPushGateway
 
 public sealed class ExpoPushGateway(HttpClient http, PushSettings settings, TimeProvider clock) : IPushGateway
 {
-    public Task<PushGatewayResult> Send(PushEnvelope envelope, CancellationToken ct) => Request("send", new
+    public Task<PushGatewayResult> Send(PushEnvelope envelope, CancellationToken ct)
     {
-        to = envelope.Token,
-        title = "My Little Days",
-        body = envelope.Locale == "zh" ? "家庭记录已更新。" : "Family records updated.",
-        sound = "default",
-        channelId = "family-entries",
-        ttl = Math.Clamp((int)(envelope.ExpiresAt - clock.GetUtcNow()).TotalSeconds, 0, 86400),
-        data = new { kind = "family-entry", eventId = envelope.EventId, familyId = envelope.FamilyId,
-            membershipId = envelope.MembershipId, historyId = envelope.HistoryId,
-            installationId = envelope.InstallationId, generation = envelope.Generation }
-    }, null, ct);
+        var content = Content(envelope.Locale);
+        return Request("send", new
+        {
+            to = envelope.Token,
+            title = content.Title,
+            body = content.Body,
+            sound = "default",
+            channelId = "family-entries",
+            ttl = Math.Clamp((int)(envelope.ExpiresAt - clock.GetUtcNow()).TotalSeconds, 0, 86400),
+            data = new { kind = "family-entry", eventId = envelope.EventId, familyId = envelope.FamilyId,
+                membershipId = envelope.MembershipId, historyId = envelope.HistoryId,
+                installationId = envelope.InstallationId, generation = envelope.Generation }
+        }, null, ct);
+    }
+
+    public static PushContent Content(string? locale) => PushPolicy.DeliveryLocale(locale) switch
+    {
+        "zh-Hans" => new("小日子", "家庭记录已更新。"),
+        "zh-Hant" => new("小日子", "家庭記錄已更新。"),
+        "fr" => new("Little Days", "Les données familiales ont été mises à jour."),
+        "de" => new("Little Days", "Die Familienaufzeichnungen wurden aktualisiert."),
+        "hi" => new("Little Days", "परिवार के रिकॉर्ड अपडेट किए गए हैं।"),
+        "it" => new("Little Days", "I dati della famiglia sono stati aggiornati."),
+        "ja" => new("Little Days", "家族の記録が更新されました。"),
+        "ko" => new("Little Days", "가족 기록이 업데이트되었습니다."),
+        "es" => new("Little Days", "Se actualizaron los registros familiares."),
+        "th" => new("Little Days", "อัปเดตบันทึกครอบครัวแล้ว"),
+        "vi" => new("Little Days", "Hồ sơ gia đình đã được cập nhật."),
+        _ => new("My Little Days", "Family records updated.")
+    };
 
     public Task<PushGatewayResult> Receipt(string receiptId, CancellationToken ct) =>
         Request("getReceipts", new { ids = new[] { receiptId } }, receiptId, ct);

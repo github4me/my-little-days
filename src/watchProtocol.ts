@@ -1,6 +1,7 @@
 import { type Entry, type State, validateEntry, validateState } from "./domain";
 import { finishLiveSleep } from "./sleepTimer";
 import { finishFeed } from "./feedFinish";
+import type { SupportedLocale } from "./locales";
 
 export type WatchCommand = {
   schemaVersion: 1;
@@ -39,7 +40,12 @@ export type WatchContext = {
   mode: "personal" | "family";
   status: "ready" | "unavailable";
   expiresAt: string;
+  /** Legacy compatibility field consumed by older Watch/widget builds. */
   language: "zh" | "en";
+  /** Canonical locale consumed by current Watch/widget builds. */
+  locale?: SupportedLocale;
+  /** Regional formatting locale; optional for version 1 compatibility. */
+  formattingLocale?: string;
   profile: { name: string; birthDate: string };
   entries: (Entry & {
     version?: string;

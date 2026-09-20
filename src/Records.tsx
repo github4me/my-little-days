@@ -3,7 +3,7 @@ import { View, Pressable, ScrollView, useWindowDimensions } from "react-native";
 import Svg, { Rect, Line, Text as Label } from "react-native-svg";
 import { Entry, summarize } from "./domain";
 import { Theme, T, Card, Chips, row } from "./ui";
-import { elapsed, formatDate, formatTime, t } from "./i18n";
+import { elapsed, formatDate, formatNumber, formatTime, t } from "./i18n";
 import RecordsCalendar from "./RecordsCalendar";
 import RecordActionButton from "./RecordActionButton";
 import type { RecordView } from "./recordCalendar";
@@ -77,7 +77,10 @@ function Bars({
               fontSize={12}
               textAnchor="end"
             >
-              {(max * f).toFixed(unit === "小时" ? 1 : 0)}
+              {formatNumber(max * f, {
+                minimumFractionDigits: unit === "小时" ? 1 : 0,
+                maximumFractionDigits: unit === "小时" ? 1 : 0,
+              })}
             </Label>
           ) : null}
         </React.Fragment>
@@ -103,7 +106,7 @@ function Bars({
               {b.label ??
                 (unit === "小时"
                   ? elapsed(Math.round(b.value * 3600000))
-                  : b.value.toFixed(0))}
+                  : formatNumber(b.value, { maximumFractionDigits: 0 }))}
             </Label>
           ) : null}
         </React.Fragment>
@@ -612,7 +615,9 @@ function BarRecords({
                         color: color(e),
                         label:
                           kind === "feed" && unit === "mL"
-                            ? String(e.amount ?? t("亲喂"))
+                            ? e.amount === undefined
+                              ? t("亲喂")
+                              : formatNumber(e.amount)
                             : undefined,
                       };
                     })}
@@ -660,7 +665,7 @@ function BarRecords({
                               <T style={{ fontSize: 13, lineHeight: 19 }}>
                                 {kind === "feed"
                                   ? e.amount !== undefined
-                                    ? `${e.amount} mL`
+                                    ? `${formatNumber(e.amount)} mL`
                                     : t("亲喂")
                                   : kind === "diaper"
                                     ? t(

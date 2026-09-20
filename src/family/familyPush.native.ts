@@ -8,12 +8,15 @@ import { familyRequest, PilotApiError } from "./api";
 import { loadIdentity } from "./auth";
 import {
   acceptPushReply,
+  pushRegistrationLocale,
   pushCategories,
   readPushRegistration,
   samePushScope,
   validCategories,
+  validPushLocales,
   type PushCapabilities,
   type PushCategory,
+  type PushLocale,
   type PushRegistration,
   type PushScope,
 } from "./familyPushCore";
@@ -26,6 +29,20 @@ const options = {
   keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
 };
 const projectId = appConfig.expo.extra.eas.projectId;
+const familyChannelNames: Record<PushLocale, string> = {
+  en: "Family records",
+  "zh-Hans": "家庭记录",
+  "zh-Hant": "家庭記錄",
+  fr: "Dossiers familiaux",
+  de: "Familienaufzeichnungen",
+  hi: "परिवार के रिकॉर्ड",
+  it: "Registri di famiglia",
+  ja: "家族の記録",
+  ko: "가족 기록",
+  es: "Registros familiares",
+  th: "บันทึกครอบครัว",
+  vi: "Nhật ký gia đình",
+};
 let active: PushScope | null = null;
 let cached: PushRegistration | null = null;
 let generation = 0;
@@ -143,10 +160,30 @@ async function sendPending(s: PushRegistration, signal?: AbortSignal) {
       enabled: false,
       categories: [],
       token: null,
+      locale: null,
       pending: null,
       expiresAt: new Date(0).toISOString(),
     });
   }
+}
+function isDefinitivelyUnappliedRegister(
+  s: PushRegistration,
+  cause: unknown,
+  includeAccessRejection = false,
+) {
+  if (s.pending?.kind !== "register" || !(cause instanceof PilotApiError))
+    return false;
+  // A rolled-back API rejects a newer canonical locale before applying the
+  // request. If it had already applied, its operation receipt would be returned
+  // before request validation, so this exact response is safe to discard.
+  if (cause.status === 422 && cause.code === "invalid_input") return true;
+  return (
+    includeAccessRejection &&
+    [403, 409].includes(cause.status) &&
+    ["membership_changed", "membership_revoked", "history_changed"].includes(
+      cause.code,
+    )
+  );
 }
 async function disable(s: PushRegistration, signal?: AbortSignal) {
   s = await save({ ...s, desiredEnabled: false });
@@ -157,17 +194,7 @@ async function disable(s: PushRegistration, signal?: AbortSignal) {
     } catch (cause) {
       // These exact non-replay server denials prove this registration never
       // applied. Preserve the earlier binding proof so it can still be revoked.
-      if (
-        s.pending?.kind !== "register" ||
-        !(cause instanceof PilotApiError) ||
-        ![
-          "membership_changed",
-          "membership_revoked",
-          "history_changed",
-        ].includes(cause.code) ||
-        ![403, 409].includes(cause.status)
-      )
-        throw cause;
+      if (!isDefinitivelyUnappliedRegister(s, cause, true)) throw cause;
       s = await save({ ...s, pending: null });
     }
   }
@@ -202,15 +229,16 @@ async function capabilities(signal: AbortSignal): Promise<PushCapabilities> {
     !c ||
     !c.registrationEnabled ||
     c.projectId !== projectId ||
-    !validCategories(c.categories)
+    !validCategories(c.categories) ||
+    (c.supportedLocales !== undefined && !validPushLocales(c.supportedLocales))
   )
     throw new Error("push_unavailable");
   return c;
 }
-async function token(ask: boolean) {
+async function token(ask: boolean, locale: PushLocale) {
   if (Platform.OS === "android")
     await Notifications.setNotificationChannelAsync("family-entries", {
-      name: "Family records",
+      name: familyChannelNames[locale],
       importance: Notifications.AndroidImportance.DEFAULT,
     });
   let p = await Notifications.getPermissionsAsync();
@@ -225,7 +253,7 @@ async function token(ask: boolean) {
 async function configure(
   enabled: boolean,
   categories: PushCategory[],
-  locale: "zh" | "en",
+  locale: PushLocale,
   ask: boolean,
 ) {
   if (!validCategories(categories) || (enabled && categories.length === 0))
@@ -247,7 +275,11 @@ async function configure(
       current(e, scope);
       return view(s);
     }
-    await capabilities(abort.signal);
+    const available = await capabilities(abort.signal);
+    const registrationLocale = pushRegistrationLocale(
+      locale,
+      available.supportedLocales,
+    );
     current(e, scope);
     if (s && !samePushScope(s.scope, scope)) {
       s = await disable(s, abort.signal);
@@ -279,10 +311,11 @@ async function configure(
         desiredCategories: categories,
         expiresAt: new Date(0).toISOString(),
         token: null,
+        locale: null,
         pending: null,
       });
     }
-    const expoPushToken = await abortable(token(ask), abort.signal);
+    const expoPushToken = await abortable(token(ask, locale), abort.signal);
     current(e, scope);
     if (abort.signal.aborted) throw new Error("network_unavailable");
     s = await save({
@@ -290,11 +323,22 @@ async function configure(
       desiredEnabled: true,
       desiredCategories: categories,
     });
-    if (s.pending) s = await sendPending(s, abort.signal);
+    if (s.pending) {
+      try {
+        s = await sendPending(s, abort.signal);
+      } catch (cause) {
+        // Recover a durable canonical-locale request after an API rollback.
+        // The current capability response determines the replacement locale
+        // (legacy en/zh or a supported canonical locale).
+        if (!isDefinitivelyUnappliedRegister(s, cause)) throw cause;
+        s = await save({ ...s, pending: null });
+      }
+    }
     current(e, scope);
     const unchanged =
       s.enabled &&
       s.token === expoPushToken &&
+      s.locale === registrationLocale &&
       JSON.stringify(s.categories) === JSON.stringify(categories);
     if (unchanged && Date.parse(s.expiresAt) > Date.now() + 12 * 3600000) {
       presentationSuspended = false;
@@ -313,7 +357,7 @@ async function configure(
             expoPushToken,
             projectId,
             platform: Platform.OS === "ios" ? "ios" : "android",
-            locale,
+            locale: registrationLocale,
             enabled: true,
             categories,
             familyId: scope.familyId,
@@ -341,7 +385,7 @@ export async function loadFamilyPush(): Promise<FamilyPushView> {
 export async function configureFamilyPush(
   enabled: boolean,
   categories: PushCategory[],
-  locale: "zh" | "en",
+  locale: PushLocale,
 ) {
   // Stop in-process presentation immediately on opt-out; persistence/network are
   // serialized so a delayed enable response cannot silently undo the opt-out.
@@ -351,7 +395,7 @@ export async function configureFamilyPush(
   }
   return serial(() => configure(enabled, categories, locale, enabled));
 }
-export async function reconcileFamilyPush(locale: "zh" | "en") {
+export async function reconcileFamilyPush(locale: PushLocale) {
   return serial(async () => {
     const s = await read();
     if (!s || !active) return view(s);

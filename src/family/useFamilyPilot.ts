@@ -18,6 +18,7 @@ import type {
   RecordOperation,
 } from "./contracts";
 import type { State, Entry, CareRecord } from "../domain";
+import type { SupportedLocale } from "../locales";
 import { serializeOwnerSeed, type OwnerSeedDraft } from "./ownerSeed";
 import { loadPersonalExtras } from "./personalExtras";
 import { drainReminderWrites } from "../personalWrites";
@@ -122,7 +123,7 @@ export type FamilyAuthStatus =
   | "reauth_required"
   | "unverified";
 
-export function useFamilyPilot() {
+export function useFamilyPilot(notificationLocale: SupportedLocale = "en") {
   const configured = !!familyConfig,
     webUnsupported = Platform.OS === "web";
   const [identity, setIdentity] = useState<PilotIdentity | null>(null);
@@ -1586,6 +1587,7 @@ export function useFamilyPilot() {
           notificationOrigin,
           projectedExtraRecords(state).map((r) => r.record),
           projectedFullState(state)?.entries ?? [],
+          notificationLocale,
         );
         const enabled = await loadFamilyReminderOptIn(notificationOrigin);
         if (
@@ -1629,6 +1631,7 @@ export function useFamilyPilot() {
     booting,
     authStatus,
     tokenRecognized,
+    notificationLocale,
   ]);
 
   return {
@@ -1655,6 +1658,7 @@ export function useFamilyPilot() {
         origin,
         projectedExtraRecords(current.current).map((r) => r.record),
         projectedFullState(current.current)?.entries ?? [],
+        notificationLocale,
       );
       if (!stillCurrent()) throw new Error("session_changed");
       setNotificationError(null);

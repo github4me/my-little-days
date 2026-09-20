@@ -15,6 +15,7 @@ import {
 } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
+import { useLocales } from "expo-localization";
 import Modal from "./src/AccessibleModal";
 import RecordActionButton from "./src/RecordActionButton";
 import {
@@ -87,14 +88,18 @@ import { rescheduleAutoFeedReminders } from "./src/reminders";
 import { Theme, T, Card, Button, Chips, Field, row, heading } from "./src/ui";
 import {
   formatDate,
+  formatNumber,
   formatTime,
+  hydrateLocaleCatalog,
   age,
   elapsed,
   I18nProvider,
+  isChineseLocale,
   type LanguagePreference,
-  resolveLocale,
+  resolveAppLocalization,
   setActiveLocale,
   t,
+  useI18n,
 } from "./src/i18n";
 const kinds: Record<
   Entry["type"],
@@ -133,7 +138,7 @@ function detail(e: Entry, now: number) {
   if (e.type === "feed")
     return [
       t(feedLabels[e.feedKind!]),
-      e.amount !== undefined ? `${e.amount} mL` : null,
+      e.amount !== undefined ? `${formatNumber(e.amount)} mL` : null,
       e.end ? elapsed(Date.parse(e.end) - Date.parse(e.start)) : null,
     ]
       .filter(Boolean)
@@ -147,32 +152,128 @@ function detail(e: Entry, now: number) {
         });
   if (e.type === "growth")
     return [
-      e.weight !== undefined ? `${e.weight} kg` : null,
-      e.length !== undefined ? t("身长 {value} cm", { value: e.length }) : null,
-      e.head !== undefined ? t("头围 {value} cm", { value: e.head }) : null,
+      e.weight !== undefined ? `${formatNumber(e.weight)} kg` : null,
+      e.length !== undefined
+        ? t("身长 {value} cm", { value: formatNumber(e.length) })
+        : null,
+      e.head !== undefined
+        ? t("头围 {value} cm", { value: formatNumber(e.head) })
+        : null,
     ]
       .filter(Boolean)
       .join(" · ");
   return e.title!;
 }
 export default function App() {
-  const [language, setLanguage] = useState<LanguagePreference>("system");
+  const loadingColorScheme = useColorScheme();
+  const preferredLocales = useLocales();
+  const initialPreferredLocales = useRef(preferredLocales);
+  const preferredLocalesKey = preferredLocales
+    .map(
+      ({ languageCode, languageTag, languageScriptCode, regionCode }) =>
+        `${languageCode ?? ""}:${languageTag ?? ""}:${languageScriptCode ?? ""}:${regionCode ?? ""}`,
+    )
+    .join("|");
+  const loadingPalette = selectPalette(loadingColorScheme === "dark", false);
+  const [localization, setLocalization] = useState<{
+    language: LanguagePreference;
+    catalogLocale: ReturnType<typeof resolveAppLocalization>["catalogLocale"];
+    formattingLocale: string;
+  } | null>(null);
   useEffect(() => {
-    void loadLanguage().then((saved) => {
-      if (saved) setLanguage(saved);
-    });
+    let mounted = true;
+    void (async () => {
+      let language: LanguagePreference = "system";
+      try {
+        language = (await loadLanguage()) ?? "system";
+      } catch {}
+
+      let resolved = resolveAppLocalization(
+        language,
+        initialPreferredLocales.current,
+      );
+      try {
+        await hydrateLocaleCatalog(resolved.catalogLocale);
+      } catch {
+        language = "en";
+        resolved = resolveAppLocalization(language, []);
+      }
+      if (!mounted) return;
+      setActiveLocale(resolved.catalogLocale, resolved.formattingLocale);
+      setLocalization({ language, ...resolved });
+    })();
+    return () => {
+      mounted = false;
+    };
   }, []);
-  const locale = resolveLocale(language);
+
+  useEffect(() => {
+    if (localization?.language !== "system") return;
+    const resolved = resolveAppLocalization("system", preferredLocales);
+    if (
+      resolved.catalogLocale === localization.catalogLocale &&
+      resolved.formattingLocale === localization.formattingLocale
+    )
+      return;
+
+    let cancelled = false;
+    void hydrateLocaleCatalog(resolved.catalogLocale)
+      .then(() => {
+        if (cancelled) return;
+        setLocalization((current) =>
+          current?.language === "system"
+            ? { language: "system", ...resolved }
+            : current,
+        );
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    localization?.catalogLocale,
+    localization?.formattingLocale,
+    localization?.language,
+    preferredLocalesKey,
+  ]);
+
+  if (localization === null)
+    return (
+      <AccessibilityPreferencesProvider>
+        <SafeAreaProvider>
+          <View
+            style={{
+              flex: 1,
+              alignItems: "center",
+              justifyContent: "center",
+              backgroundColor: loadingPalette.bg,
+            }}
+          >
+            <ActivityIndicator color={loadingPalette.primary} />
+          </View>
+        </SafeAreaProvider>
+      </AccessibilityPreferencesProvider>
+    );
+  const { language, catalogLocale: locale, formattingLocale } = localization;
   return (
     <AccessibilityPreferencesProvider>
       <SafeAreaProvider>
-        <I18nProvider locale={locale}>
+        <I18nProvider locale={locale} formattingLocale={formattingLocale}>
           <BabyApp
             language={language}
             onLanguageChange={async (next) => {
-              setActiveLocale(resolveLocale(next));
+              const resolved = resolveAppLocalization(next, preferredLocales);
+              try {
+                await hydrateLocaleCatalog(resolved.catalogLocale);
+              } catch {
+                throw new Error("操作失败，请重试");
+              }
               await saveLanguage(next);
-              setLanguage(next);
+              setActiveLocale(
+                resolved.catalogLocale,
+                resolved.formattingLocale,
+              );
+              setLocalization({ language: next, ...resolved });
             }}
           />
         </I18nProvider>
@@ -187,6 +288,7 @@ function BabyApp({
   language: LanguagePreference;
   onLanguageChange: (language: LanguagePreference) => Promise<void>;
 }) {
+  const { locale, formattingLocale, localize: text } = useI18n();
   const { width, fontScale } = useWindowDimensions();
   const compactTitle = width < 360;
   const largeType = fontScale >= 1.35;
@@ -230,7 +332,7 @@ function BabyApp({
     const timer = setTimeout(() => setSleepNotice(""), 5000);
     return () => clearTimeout(timer);
   }, [sleepNotice]);
-  const family = useFamilyPilot();
+  const family = useFamilyPilot(locale);
   const familyPush = useFamilyPush(family, () => setTab("records"));
   useWidgetHomeLink(() => {
     Keyboard.dismiss();
@@ -299,13 +401,9 @@ function BabyApp({
     family.fullSnapshot?.entries.find((r) => r.entry.id === id)?.version;
   const familyMemberName = (id?: string | null) =>
     family.fullSnapshot?.members.find((member) => member.id === id)
-      ?.displayName ??
-    (resolveLocale(language) === "zh-CN"
-      ? "曾加入的家庭成员"
-      : "Former family member");
+      ?.displayName ?? text("曾加入的家庭成员", "Former family member");
   const authorLabel = (id: string) => {
     const record = family.fullSnapshot?.entries.find((r) => r.entry.id === id);
-    const locale = resolveLocale(language);
     if (!record) {
       const pendingStart = family.recordPending.find(
         (item) =>
@@ -321,16 +419,18 @@ function BabyApp({
           pendingStart.sleepFollowUp?.stoppedAt ??
           pendingStart.feedFollowUp?.stoppedAt;
         if (stoppedAt)
-          return locale === "zh-CN"
-            ? `记录人：${starter} · ${time(stoppedAt)} 结束（等待同步）`
-            : `Recorded by ${starter} · Ended at ${time(stoppedAt)} (waiting to sync)`;
-        return locale === "zh-CN"
-          ? `${starter} 于 ${time(pendingEntry.start)} 开始 · 仍在进行（等待同步）`
-          : `Started by ${starter} at ${time(pendingEntry.start)} · Ongoing (waiting to sync)`;
+          return text(
+            "记录人：{starter} · {endedAt} 结束（等待同步）",
+            "Recorded by {starter} · Ended at {endedAt} (waiting to sync)",
+            { starter, endedAt: time(stoppedAt) },
+          );
+        return text(
+          "{starter} 于 {startedAt} 开始 · 仍在进行（等待同步）",
+          "Started by {starter} at {startedAt} · Ongoing (waiting to sync)",
+          { starter, startedAt: time(pendingEntry.start) },
+        );
       }
-      return locale === "zh-CN"
-        ? "记录人：家庭成员"
-        : "Recorded by a family member";
+      return text("记录人：家庭成员", "Recorded by a family member");
     }
     const starter = familyMemberName(record.recordedBy);
     const pendingCompletion = family.recordPending.find(
@@ -345,13 +445,17 @@ function BabyApp({
       if (pendingEnderId !== record.recordedBy) {
         const ender =
           family.user?.displayName ?? familyMemberName(pendingEnderId);
-        return locale === "zh-CN"
-          ? `开始：${starter} · ${time(record.entry.start)}　结束：${ender} · ${endedAt}（等待同步）`
-          : `Started by ${starter} · ${time(record.entry.start)} · Ended by ${ender} · ${endedAt} (waiting to sync)`;
+        return text(
+          "开始：{starter} · {startedAt}　结束：{ender} · {endedAt}（等待同步）",
+          "Started by {starter} · {startedAt} · Ended by {ender} · {endedAt} (waiting to sync)",
+          { starter, startedAt: time(record.entry.start), ender, endedAt },
+        );
       }
-      return locale === "zh-CN"
-        ? `记录人：${starter} · ${endedAt} 结束（等待同步）`
-        : `Recorded by ${starter} · Ended at ${endedAt} (waiting to sync)`;
+      return text(
+        "记录人：{starter} · {endedAt} 结束（等待同步）",
+        "Recorded by {starter} · Ended at {endedAt} (waiting to sync)",
+        { starter, endedAt },
+      );
     }
     const isRunning =
       (record.entry.type === "sleep" && !record.entry.end) ||
@@ -359,20 +463,29 @@ function BabyApp({
         !!record.entry.feedRunning &&
         !record.entry.end);
     if (isRunning)
-      return locale === "zh-CN"
-        ? `${starter} 于 ${time(record.entry.start)} 开始 · 仍在进行`
-        : `Started by ${starter} at ${time(record.entry.start)} · Ongoing`;
+      return text(
+        "{starter} 于 {startedAt} 开始 · 仍在进行",
+        "Started by {starter} at {startedAt} · Ongoing",
+        { starter, startedAt: time(record.entry.start) },
+      );
     if (
       record.endedBy &&
       record.endedBy !== record.recordedBy &&
       record.entry.end
     ) {
       const ender = familyMemberName(record.endedBy);
-      return locale === "zh-CN"
-        ? `开始：${starter} · ${time(record.entry.start)}　结束：${ender} · ${time(record.entry.end)}`
-        : `Started by ${starter} · ${time(record.entry.start)} · Ended by ${ender} · ${time(record.entry.end)}`;
+      return text(
+        "开始：{starter} · {startedAt}　结束：{ender} · {endedAt}",
+        "Started by {starter} · {startedAt} · Ended by {ender} · {endedAt}",
+        {
+          starter,
+          startedAt: time(record.entry.start),
+          ender,
+          endedAt: time(record.entry.end),
+        },
+      );
     }
-    return locale === "zh-CN" ? `记录人：${starter}` : `Recorded by ${starter}`;
+    return text("记录人：{starter}", "Recorded by {starter}", { starter });
   };
   function beginEditor(entry: Entry) {
     if (family.sharedMode && !family.canEditRecord("entry", entry.id)) return;
@@ -486,6 +599,33 @@ function BabyApp({
       sub.remove();
     };
   }, []);
+  const personalStateLoaded = offlineState !== null;
+  useEffect(() => {
+    if (!personalStateLoaded || family.booting || family.sharedMode) return;
+    const personalGeneration = privateDataGeneration.current;
+    let active = true;
+    void rescheduleAutoFeedReminders(
+      offlineState!.entries,
+      locale,
+      formattingLocale,
+      () =>
+        active &&
+        personalGeneration === privateDataGeneration.current &&
+        !sharingRef.current,
+    ).catch(() => {
+      // Loading personal records and changing language must still succeed if
+      // native notification reconciliation is temporarily unavailable.
+    });
+    return () => {
+      active = false;
+    };
+  }, [
+    family.booting,
+    family.sharedMode,
+    formattingLocale,
+    locale,
+    personalStateLoaded,
+  ]);
   useEffect(() => setAvatarFailed(false), [avatarUri]);
   async function commit(
     next: State,
@@ -637,6 +777,8 @@ function BabyApp({
       family.watchRecordingEnabled,
       family.watchExpiresAt,
       language,
+      locale,
+      formattingLocale,
       localDay(new Date(now)),
       state?.profile,
       state?.entries.filter(
@@ -681,7 +823,9 @@ function BabyApp({
         expiresAt: shared
           ? familyState.expiresAt
           : new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-        language: resolveLocale(language).startsWith("zh") ? "zh" : "en",
+        language: isChineseLocale(locale) ? "zh" : "en",
+        locale,
+        formattingLocale,
         profile: current
           ? { name: current.profile.name, birthDate: current.profile.birthDate }
           : { name: "", birthDate: "" },
@@ -781,7 +925,7 @@ function BabyApp({
     } catch (e) {
       setMessage(
         family.sharedMode
-          ? familyErrorMessage(resolveLocale(language), (e as Error).message)
+          ? familyErrorMessage(locale, (e as Error).message)
           : (e as Error).message,
       );
     }
@@ -1279,14 +1423,17 @@ function BabyApp({
                     ]}
                   >
                     {[
-                      [String(summary.feedMl), "mL 已记录奶量"],
+                      [formatNumber(summary.feedMl), "mL 已记录奶量"],
                       [
                         summary.sleepMinutes
-                          ? (summary.sleepMinutes / 60).toFixed(1)
-                          : "0",
+                          ? formatNumber(summary.sleepMinutes / 60, {
+                              minimumFractionDigits: 1,
+                              maximumFractionDigits: 1,
+                            })
+                          : formatNumber(0),
                         "小时 已记录睡眠",
                       ],
-                      [String(summary.diaperCount), "次 换尿布"],
+                      [formatNumber(summary.diaperCount), "次 换尿布"],
                     ].map(([v, l]) => (
                       <View key={l} style={{ flexShrink: 1, minWidth: 0 }}>
                         <T

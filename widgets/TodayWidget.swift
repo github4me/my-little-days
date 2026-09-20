@@ -8,8 +8,33 @@ struct TodayEntry: TimelineEntry {
     guard let snapshot, snapshot.isCurrent(at: date) else { return nil }
     return snapshot
   }
-  var chinese: Bool {
-    snapshot.map { $0.language == "zh" } ?? (Locale.current.languageCode == "zh")
+  var localeIdentifier: String {
+    snapshot?.resolvedLocale ?? TodayWidgetSnapshot.canonicalLocale(Locale.current.identifier) ?? "en"
+  }
+  var formattingLocaleIdentifier: String {
+    if let snapshot { return snapshot.resolvedFormattingLocale }
+    return TodayWidgetSnapshot.canonicalFormattingLocale(Locale.current.identifier,
+      for: localeIdentifier) ?? TodayWidgetSnapshot.defaultFormattingLocales[localeIdentifier] ?? "en-AU"
+  }
+  var locale: Locale { Locale(identifier: formattingLocaleIdentifier) }
+}
+
+private struct WidgetLocalizer {
+  let locale: Locale
+  private let selected: Bundle
+  private let english: Bundle?
+
+  init(identifier: String, container: Bundle = .main) {
+    let identifier = TodayWidgetSnapshot.canonicalLocale(identifier) ?? "en"
+    locale = Locale(identifier: identifier)
+    english = container.path(forResource: "en", ofType: "lproj").flatMap(Bundle.init(path:))
+    selected = container.path(forResource: identifier, ofType: "lproj")
+      .flatMap(Bundle.init(path:)) ?? english ?? container
+  }
+
+  func text(_ key: String) -> String {
+    let fallback = english?.localizedString(forKey: key, value: key, table: nil) ?? key
+    return selected.localizedString(forKey: key, value: fallback, table: nil)
   }
 }
 
@@ -35,9 +60,13 @@ struct TodayProvider: TimelineProvider {
 
   private func example() -> TodayEntry {
     let now = Date()
+    let locale = TodayWidgetSnapshot.canonicalLocale(Locale.current.identifier) ?? "en"
     return TodayEntry(date: now, snapshot: TodayWidgetSnapshot(schemaVersion: 1,
       binding: "gallery-example", day: TodayWidgetSnapshot.dayKey(now),
-      timeZone: TimeZone.current.identifier, language: Locale.current.languageCode == "zh" ? "zh" : "en",
+      timeZone: TimeZone.current.identifier,
+      language: locale.hasPrefix("zh") ? "zh" : "en", locale: locale,
+      formattingLocale: TodayWidgetSnapshot.canonicalFormattingLocale(
+        Locale.current.identifier, for: locale) ?? TodayWidgetSnapshot.defaultFormattingLocales[locale],
       feedMl: 450, diaperCount: 4, sleepMinutes: 180, updatedAt: now,
       expiresAt: now.addingTimeInterval(86400)))
   }
@@ -46,12 +75,12 @@ struct TodayProvider: TimelineProvider {
 struct TodayWidgetView: View {
   let entry: TodayEntry
   @Environment(\.widgetFamily) private var family
-  private var zh: Bool { entry.chinese }
+  private var strings: WidgetLocalizer { WidgetLocalizer(identifier: entry.localeIdentifier) }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
       HStack(alignment: .firstTextBaseline) {
-        Text(zh ? "今日" : "Today").font(.headline).widgetAccentable()
+        Text(strings.text("widget.today")).font(.headline).widgetAccentable()
         Spacer(minLength: 4)
         if family == .systemMedium {
           Text(entry.date, format: .dateTime.month(.abbreviated).day())
@@ -61,37 +90,40 @@ struct TodayWidgetView: View {
       if let snapshot = entry.current {
         if family == .systemSmall {
           VStack(spacing: 5) {
-            compactMetric(zh ? "奶量" : "Milk", symbol: "drop.fill", value: milk(snapshot), unit: "mL")
-            compactMetric(zh ? "尿布" : "Nappies", symbol: "square.stack", value: "\(snapshot.diaperCount)", unit: zh ? "次" : "")
-            compactMetric(zh ? "睡眠" : "Sleep", symbol: "moon.fill", value: sleep(snapshot), unit: zh ? "小时" : "h")
+            compactMetric(strings.text("widget.milk"), symbol: "drop.fill", value: milk(snapshot), unit: strings.text("widget.unit.ml"))
+            compactMetric(strings.text("widget.nappies"), symbol: "square.stack", value: nappyCount(snapshot), unit: "")
+            compactMetric(strings.text("widget.sleep"), symbol: "moon.fill", value: sleep(snapshot), unit: strings.text("widget.unit.hour_short"))
           }.privacySensitive()
         } else {
           HStack(alignment: .top, spacing: 12) {
-            metric(zh ? "奶量" : "Milk", symbol: "drop.fill", value: milk(snapshot), unit: "mL")
-            metric(zh ? "尿布" : "Nappies", symbol: "square.stack", value: "\(snapshot.diaperCount)", unit: zh ? "次" : "changes")
-            metric(zh ? "已记录睡眠" : "Recorded sleep", symbol: "moon.fill", value: sleep(snapshot), unit: zh ? "小时" : "hours")
+            metric(strings.text("widget.milk"), symbol: "drop.fill", value: milk(snapshot), unit: strings.text("widget.unit.ml"))
+            metric(strings.text("widget.nappies"), symbol: "square.stack", value: nappyCount(snapshot), unit: "")
+            metric(strings.text("widget.recorded_sleep"), symbol: "moon.fill", value: sleep(snapshot), unit: strings.text("widget.unit.hour_short"))
           }.privacySensitive()
         }
         Spacer(minLength: 0)
-        (Text(zh ? "更新于 " : "Updated ") + Text(snapshot.updatedAt, style: .time))
+        (Text(strings.text("widget.updated")) + Text(snapshot.updatedAt, style: .time))
           .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
       } else {
         Spacer(minLength: 0)
-        Text(zh ? "打开小日子\n查看今日记录" : "Open Little Days\nto update today")
+        Text(strings.text("widget.empty"))
           .font(.subheadline).foregroundStyle(.secondary)
         Spacer(minLength: 0)
       }
     }
     .widgetURL(URL(string: "mylittledays://today"))
     .modifier(WidgetSurface())
-    .environment(\.locale, Locale(identifier: zh ? "zh-Hans" : "en"))
+    .environment(\.locale, entry.locale)
   }
 
   private func milk(_ snapshot: TodayWidgetSnapshot) -> String {
-    snapshot.feedMl.formatted(.number.precision(.fractionLength(0...1)))
+    snapshot.feedMl.formatted(.number.locale(entry.locale).precision(.fractionLength(0...1)))
   }
   private func sleep(_ snapshot: TodayWidgetSnapshot) -> String {
-    snapshot.displaySleepHours.formatted(.number.precision(.fractionLength(1)))
+    snapshot.displaySleepHours.formatted(.number.locale(entry.locale).precision(.fractionLength(1)))
+  }
+  private func nappyCount(_ snapshot: TodayWidgetSnapshot) -> String {
+    snapshot.diaperCount.formatted(.number.locale(entry.locale))
   }
 
   private func compactMetric(_ title: String, symbol: String, value: String, unit: String) -> some View {
@@ -135,8 +167,8 @@ struct LittleDaysTodayWidget: Widget {
     StaticConfiguration(kind: TodayWidgetSnapshot.kind, provider: TodayProvider()) { entry in
       TodayWidgetView(entry: entry)
     }
-    .configurationDisplayName("Today's care")
-    .description("Today's recorded milk, nappy changes and sleep. Tap to open Today.")
+    .configurationDisplayName(LocalizedStringKey("widget.gallery.name"))
+    .description(LocalizedStringKey("widget.gallery.description"))
     .supportedFamilies([.systemSmall, .systemMedium])
   }
 }

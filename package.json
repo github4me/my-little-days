@@ -66,7 +66,7 @@
     "test:care-picker": "node --test tests/care-picker.mjs",
     "test:apple-ui": "node --test tests/accessibility-preferences.mjs tests/shared-controls.mjs tests/app-navigation.mjs tests/apple-forms.mjs tests/calendar-accessibility.mjs tests/data-screen-accessibility.mjs",
     "test:apple-browser": "node tests/apple-guidance-browser.mjs",
-    "test:native-security": "node --test tests/native-security.mjs tests/family-reminders-native.mjs",
+    "test:native-security": "node --test tests/native-security.mjs tests/native-localization.mjs tests/reminders-native.mjs tests/family-reminders-native.mjs",
     "test:family-demo-browser": "node tests/family-demo-browser.mjs",
     "verify": "npm run typecheck && npm test && npm run test:family-auth && npm run test:family-push && npm run test:watch-native && npm run test:family-controller && npm run test:family-ui && npm run test:family-sync-status && npm run test:owner-setup && npm run test:family-play && npm run test:family-extras-capture && npm run test:shared-reminders-ui && npm run test:care-picker && npm run test:apple-ui && npm run test:native-security",
     "export:ios": "expo export --platform ios",

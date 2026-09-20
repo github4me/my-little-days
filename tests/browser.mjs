@@ -19,9 +19,8 @@ const screenshotDir = process.env.SCREENSHOT_OUTPUT_DIR ?? "docs";
 await fs.mkdir(screenshotDir, { recursive: true });
 page.setDefaultTimeout(8000);
 async function chooseEnglish() {
-  const expand = page.getByRole("button", { name: "展开语言", exact: true });
-  if (await expand.isVisible()) await expand.click();
-  return page.getByRole("button", { name: "English", exact: true }).click();
+  await page.getByTestId("language-picker-row").click();
+  return page.getByRole("radio", { name: "English", exact: true }).click();
 }
 await page.addInitScript(() => {
   localStorage.setItem("little-days-v1-language", "zh");
@@ -38,8 +37,7 @@ const errors = [];
 page.on("pageerror", (e) => errors.push(e.message));
 async function assertNoUntranslatedChinese(screen) {
   const text = await page.locator("body").innerText();
-  // The Chinese language selector intentionally uses 中 as its icon in all locales.
-  const match = text.replace(/^中$/gm, "").match(/[\p{Script=Han}]/u);
+  const match = text.match(/[\p{Script=Han}]/u);
   assert.equal(
     match,
     null,
@@ -401,7 +399,12 @@ assert.equal(
 );
 await page.getByRole("tab", { name: "我的", exact: true }).click();
 assert.equal(await page.getByLabel("宝宝名字", { exact: true }).count(), 0);
-for (const section of ["语言", "主题", "照护提醒", "备份与恢复", "致谢"]) {
+const languageRow = page.getByTestId("language-picker-row");
+assert.equal(await languageRow.getAttribute("aria-expanded"), "false");
+await languageRow.click();
+assert.equal(await languageRow.getAttribute("aria-expanded"), "true");
+await page.getByRole("button", { name: "完成", exact: true }).click();
+for (const section of ["主题", "照护提醒", "备份与恢复", "致谢"]) {
   const header = page.getByRole("button", {
     name: `展开${section}`,
     exact: true,
@@ -514,16 +517,32 @@ await page.getByRole("radio", { name: "深色", exact: true }).click();
 await chooseEnglish();
 await page.getByText("Care reminders", { exact: true }).waitFor();
 assert.equal(await page.getByText("● This device", { exact: true }).count(), 0);
-const languageOptions = await Promise.all(
-  ["Follow system", "Simplified Chinese", "English"].map((name) =>
-    page.getByRole("button", { name, exact: true }).boundingBox(),
-  ),
+await page.getByTestId("language-picker-row").click();
+const languageOptions = [
+  "Follow system",
+  "中文（简体）",
+  "中文（繁體）",
+  "English",
+  "Français",
+  "Deutsch",
+  "हिन्दी",
+  "Italiano",
+  "日本語",
+  "한국어",
+  "Español",
+  "ไทย",
+  "Tiếng Việt",
+];
+assert.deepEqual(
+  await page
+    .getByTestId("language-options")
+    .getByRole("radio")
+    .evaluateAll((nodes) =>
+      nodes.map((node) => node.getAttribute("aria-label")),
+    ),
+  languageOptions,
 );
-assert.ok(languageOptions.every(Boolean));
-assert.ok(
-  languageOptions.every((box) => Math.abs(box.y - languageOptions[0].y) < 1),
-  "language choices should stay on one row",
-);
+await page.getByRole("button", { name: "Done", exact: true }).click();
 assert.equal(
   await page
     .getByRole("button", { name: "Expand Privacy & support", exact: true })
@@ -1632,7 +1651,7 @@ assert.equal(
 );
 assert.equal(await page.getByText(/Quick amounts for age at feed/).count(), 0);
 await page
-  .getByRole("button", { name: "Feeding method: Left", exact: true })
+  .getByRole("button", { name: "Feeding method: Left side", exact: true })
   .click();
 assert.equal(await page.getByLabel("Amount fed", { exact: true }).count(), 0);
 await page
@@ -2311,7 +2330,7 @@ await chooseEnglish();
 await page.getByRole("tab", { name: "Today", exact: true }).click();
 await page.getByText("Woke at 06:05 · Awake for 7m", { exact: true }).waitFor();
 await page
-  .getByText("Last sleep: Sep 16 22:05–06:05 · Slept for 8h 0m", {
+  .getByText("Last sleep: 16 Sept 22:05–06:05 · Slept for 8h 0m", {
     exact: true,
   })
   .waitFor();

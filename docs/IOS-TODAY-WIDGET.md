@@ -29,8 +29,10 @@ that instant; a widget snapshot is not a continuously running sleep timer.
 ## Data, privacy and refresh
 
 - No network calls, SQL, tokens, record bodies, baby names/photos or member IDs
-  in the widget. Only aggregates, date/time, language and an opaque scope digest
-  enter the App Group snapshot.
+  in the widget. Only aggregates, date/time, legacy language, optional canonical
+  locale and an opaque scope digest enter the App Group snapshot. Old version 1
+  files without the canonical locale still decode. The body mirrors the selected
+  app locale; system-owned gallery name and description follow the system language.
 - Reuse the companion's authorized workspace, expiry and invalidation boundary,
   even on an iPhone with no paired Watch. Startup suspends old content until
   local identity restoration; logout/removal/switching clears it on the same
@@ -59,7 +61,7 @@ that instant; a widget snapshot is not a continuously running sleep timer.
 4. Configure Apple signing for the new extension and App Group (see runbook).
 5. Build production iOS, inspect phone/Watch/widget versions and entitlements,
    submit that exact build, and verify Apple processing and tester availability.
-6. On iPhone/iPad, test small/medium, Chinese/English, light/dark/tinted,
+6. On iPhone/iPad, test small/medium, all 12 locales, light/dark/tinted,
    Dynamic Type/VoiceOver, empty data, milk/nappy/sleep edits, midnight,
    offline use, logout/family switch and cold/warm taps. Never use destructive
    account tests on a real family. Windows cannot run the iOS Simulator.

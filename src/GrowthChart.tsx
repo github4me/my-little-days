@@ -4,7 +4,7 @@ import Svg, { Path, Line, Circle, Text as SvgText } from "react-native-svg";
 import { Entry, State } from "./domain";
 import { referenceSeries, type GrowthMetric } from "./growth";
 import { T, Theme } from "./ui";
-import { t, formatDate, useI18n } from "./i18n";
+import { t, formatDate, formatNumber, useI18n } from "./i18n";
 
 export type Metric = GrowthMetric | "all";
 
@@ -52,7 +52,7 @@ function GrowthPlot({
   showReferences?: boolean;
 }) {
   const c = useContext(Theme);
-  const { locale } = useI18n();
+  const { localize } = useI18n();
   const points = pointsFor(entries, profile.birthDate, metric);
   const maxMonth = Math.max(
     3,
@@ -104,12 +104,20 @@ function GrowthPlot({
     undefined,
   );
   const summary = latest
-    ? locale === "zh-CN"
-      ? `${points.length} 条实测记录。最新：${formatDate(latest.date)}，${latest.value} ${metric === "weight" ? "kg" : "cm"}。准确数值可在下方成长记录中查看。`
-      : `${points.length} recorded measurements. Latest: ${latest.value} ${metric === "weight" ? "kg" : "cm"}, ${formatDate(latest.date)}. Exact measurements are listed in the growth records below.`
-    : locale === "zh-CN"
-      ? "尚无实测记录；当前只显示参考曲线。"
-      : "No recorded measurements; only reference curves are shown.";
+    ? localize(
+        "{count} 条实测记录。最新：{date}，{value} {unit}。准确数值可在下方成长记录中查看。",
+        "{count} recorded measurements. Latest: {value} {unit}, {date}. Exact measurements are listed in the growth records below.",
+        {
+          count: points.length,
+          date: formatDate(latest.date),
+          value: formatNumber(latest.value),
+          unit: metric === "weight" ? "kg" : "cm",
+        },
+      )
+    : localize(
+        "尚无实测记录；当前只显示参考曲线。",
+        "No recorded measurements; only reference curves are shown.",
+      );
 
   return (
     <Svg
@@ -138,7 +146,10 @@ function GrowthPlot({
               fill={c.muted}
               fontSize={compact ? 11 : 12}
             >
-              {value.toFixed(metric === "weight" ? 1 : 0)}
+              {formatNumber(value, {
+                minimumFractionDigits: metric === "weight" ? 1 : 0,
+                maximumFractionDigits: metric === "weight" ? 1 : 0,
+              })}
             </SvgText>
           </React.Fragment>
         );
@@ -181,7 +192,11 @@ function GrowthPlot({
           fontSize={compact ? 11 : 12}
           textAnchor="middle"
         >
-          {t("{months}月", { months: ((index * maxMonth) / 3).toFixed(0) })}
+          {t("{months}月", {
+            months: formatNumber((index * maxMonth) / 3, {
+              maximumFractionDigits: 0,
+            }),
+          })}
         </SvgText>
       ))}
     </Svg>

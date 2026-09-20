@@ -11,8 +11,7 @@ export default function FamilyPushSettings({
   controller: ReturnType<typeof useFamilyPush>;
 }) {
   const c = useContext(Theme);
-  const { locale } = useI18n();
-  const copy = (zh: string, en: string) => (locale === "en-US" ? en : zh);
+  const { localize: copy } = useI18n();
   const labels = {
     feed: copy("喂奶", "Milk feeds"),
     diaper: copy("尿布", "Nappies"),

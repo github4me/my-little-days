@@ -11,7 +11,7 @@ import {
 } from "react-native";
 import NativeDateTimeField from "../NativeDateTimeField";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useI18n, type AppLocale } from "../i18n";
+import { useI18n } from "../i18n";
 import { Button, Card, T, Theme } from "../ui";
 import Modal from "../AccessibleModal";
 import RecordActionButton from "../RecordActionButton";
@@ -241,7 +241,7 @@ function localISO(date: string, time: string): string | null {
   return value.toISOString();
 }
 
-function displayDate(value: string, locale: AppLocale) {
+function displayDate(value: string, locale: string) {
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) return "";
   return new Intl.DateTimeFormat(locale, {
@@ -465,7 +465,7 @@ export default function FamilyScreenView({
   initialDataSummary?: OwnerSeedSummary;
 }) {
   const c = useContext(Theme);
-  const { locale } = useI18n();
+  const { locale, formattingLocale, localize: text } = useI18n();
   const m: Translate = (key, values) =>
     demo
       ? familyMessage(locale, key, values)
@@ -664,7 +664,9 @@ export default function FamilyScreenView({
           {m("invitedBy", { name: invitation.ownerDisplayName })}
         </T>
         <T raw style={styles.muted(c.muted)}>
-          {m("expiresAt", { time: displayDate(invitation.expiresAt, locale) })}
+          {m("expiresAt", {
+            time: displayDate(invitation.expiresAt, formattingLocale),
+          })}
         </T>
         <View style={styles.actions}>
           <Button
@@ -814,7 +816,8 @@ export default function FamilyScreenView({
           ) : null}
         </View>
         <T raw>
-          {displayDate(feed.start, locale)} — {displayDate(feed.end, locale)}
+          {displayDate(feed.start, formattingLocale)} —{" "}
+          {displayDate(feed.end, formattingLocale)}
         </T>
         {feed.note ? (
           <T raw style={styles.muted(c.muted)}>
@@ -834,22 +837,20 @@ export default function FamilyScreenView({
             <RecordActionButton
               action="edit"
               accessibilityLabel={m("editFeed")}
-              accessibilityHint={
-                locale === "zh-CN"
-                  ? "打开记录编辑界面"
-                  : "Opens the record editor"
-              }
+              accessibilityHint={text(
+                "打开记录编辑界面",
+                "Opens the record editor",
+              )}
               disabled={workspaceBusy || !!waiting || !!pilot.draft}
               onPress={() => void run(() => pilot.beginFeed(feed))}
             />
             <RecordActionButton
               action="delete"
               accessibilityLabel={m("deleteFeed")}
-              accessibilityHint={
-                locale === "zh-CN"
-                  ? "打开删除确认"
-                  : "Opens a confirmation before deleting"
-              }
+              accessibilityHint={text(
+                "打开删除确认",
+                "Opens a confirmation before deleting",
+              )}
               disabled={workspaceBusy || !!waiting || !!pilot.draft}
               onPress={() =>
                 confirm(
@@ -893,11 +894,10 @@ export default function FamilyScreenView({
           <RecordActionButton
             action="delete"
             accessibilityLabel={m("deletion")}
-            accessibilityHint={
-              locale === "zh-CN"
-                ? "打开删除账户确认"
-                : "Opens the account deletion confirmation"
-            }
+            accessibilityHint={text(
+              "打开删除账户确认",
+              "Opens the account deletion confirmation",
+            )}
             disabled={workspaceBusy || owner || familyAccessPending}
             onPress={() =>
               confirm(
@@ -916,9 +916,10 @@ export default function FamilyScreenView({
           </T>
         ) : familyAccessPending ? (
           <T raw style={styles.muted(c.muted)}>
-            {locale === "zh-CN"
-              ? "请在“我的账户”刷新家庭权限后继续。"
-              : "Refresh family access in My account before continuing."}
+            {text(
+              "请在“我的账户”刷新家庭权限后继续。",
+              "Refresh family access in My account before continuing.",
+            )}
           </T>
         ) : null}
       </Card>
@@ -1073,9 +1074,7 @@ export default function FamilyScreenView({
             {!demo ? (
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel={
-                  locale === "zh-CN" ? "关闭提示" : "Dismiss message"
-                }
+                accessibilityLabel={text("关闭提示", "Dismiss message")}
                 onPress={() =>
                   localError
                     ? setDismissedFeedback(feedbackKey)
@@ -1128,7 +1127,7 @@ export default function FamilyScreenView({
           ) : null}
           <T raw style={styles.muted(c.muted)}>
             {m("deletionRequestedAt", {
-              time: displayDate(deletion.requestedAt, locale),
+              time: displayDate(deletion.requestedAt, formattingLocale),
             })}
           </T>
           <Button
@@ -1419,9 +1418,10 @@ export default function FamilyScreenView({
             !pilot.ready ? (
             <Card>
               <T raw>
-                {locale === "zh-CN"
-                  ? "家庭记录暂不可见。请联网刷新权限与完整记录后继续。"
-                  : "Family records are hidden until access and the complete history have been refreshed."}
+                {text(
+                  "家庭记录暂不可见。请联网刷新权限与完整记录后继续。",
+                  "Family records are hidden until access and the complete history have been refreshed.",
+                )}
               </T>
               <Button
                 label={m("refresh")}
@@ -1628,8 +1628,15 @@ export default function FamilyScreenView({
                         {conflict.operation.feed.amount} mL
                       </T>
                       <T raw style={styles.muted(c.muted)}>
-                        {displayDate(conflict.operation.feed.start, locale)} —{" "}
-                        {displayDate(conflict.operation.feed.end, locale)}
+                        {displayDate(
+                          conflict.operation.feed.start,
+                          formattingLocale,
+                        )}{" "}
+                        —{" "}
+                        {displayDate(
+                          conflict.operation.feed.end,
+                          formattingLocale,
+                        )}
                       </T>
                       {conflict.operation.feed.note ? (
                         <T raw>{conflict.operation.feed.note}</T>
@@ -1916,7 +1923,7 @@ export default function FamilyScreenView({
                                 {m("endedAt", {
                                   time: displayDate(
                                     acceptedMember.endedAt,
-                                    locale,
+                                    formattingLocale,
                                   ),
                                 })}
                               </T>
@@ -1925,7 +1932,7 @@ export default function FamilyScreenView({
                                 {m("expiresAt", {
                                   time: displayDate(
                                     invitation.expiresAt,
-                                    locale,
+                                    formattingLocale,
                                   ),
                                 })}
                               </T>
@@ -1988,7 +1995,10 @@ export default function FamilyScreenView({
                             {member.endedAt ? (
                               <T raw style={styles.muted(c.muted)}>
                                 {m("endedAt", {
-                                  time: displayDate(member.endedAt, locale),
+                                  time: displayDate(
+                                    member.endedAt,
+                                    formattingLocale,
+                                  ),
                                 })}
                               </T>
                             ) : null}

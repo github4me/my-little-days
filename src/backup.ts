@@ -2,6 +2,7 @@ import { File, Paths } from "expo-file-system";
 import * as DocumentPicker from "expo-document-picker";
 import * as Sharing from "expo-sharing";
 import { State, validateState } from "./domain";
+import { t } from "./i18n";
 export async function exportBackup(state: State) {
   const file = new File(Paths.cache, `little-days-${Date.now()}.json`);
   file.write(JSON.stringify(validateState(state), null, 2));
@@ -11,7 +12,7 @@ export async function exportBackup(state: State) {
     await Sharing.shareAsync(file.uri, {
       mimeType: "application/json",
       UTI: "public.json",
-      dialogTitle: "保存成长记录备份",
+      dialogTitle: t("保存成长记录备份"),
     });
   } finally {
     if (file.exists) file.delete();

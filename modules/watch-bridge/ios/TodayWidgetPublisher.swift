@@ -30,9 +30,16 @@ enum TodayWidgetPublisher {
     }
     let binding = SHA256.hash(data: Data("\(bridge)|\(generation)|\(workspace)".utf8))
       .map { String(format: "%02x", $0) }.joined()
+    let language = context["language"] as? String == "zh" ? "zh" : "en"
+    let locale = TodayWidgetSnapshot.canonicalLocale(context["locale"] as? String) ??
+      (language == "zh" ? "zh-Hans" : "en")
     let snapshot = TodayWidgetSnapshot(schemaVersion: 1, binding: binding,
       day: day, timeZone: TimeZone.current.identifier,
-      language: context["language"] as? String == "zh" ? "zh" : "en",
+      language: language,
+      locale: locale,
+      formattingLocale: TodayWidgetSnapshot.canonicalFormattingLocale(
+        context["formattingLocale"] as? String, for: locale) ??
+        TodayWidgetSnapshot.defaultFormattingLocales[locale],
       feedMl: milk, diaperCount: nappy, sleepMinutes: sleep,
       updatedAt: now, expiresAt: expiry)
     guard snapshot.isCurrent(at: now), var url = TodayWidgetSnapshot.fileURL() else {

@@ -149,6 +149,19 @@ public sealed class PushSqlTests(SqlFixture sql) : IClassFixture<SqlFixture>
     }
 
     [SqlFact]
+    public async Task CanonicalLocalePersistsAndFlowsToTheGateway()
+    {
+        var s = new Setup(sql); await s.Initialize();
+        await s.Call(x => x.RegisterPush(s.Scenario.Caregiver, s.DeviceId, s.Registration with
+            { OperationId = Guid.NewGuid(), ExpectedGeneration = 1, Locale = "zh-Hant" }, default));
+        await s.Create(s.Record());
+        await s.Process();
+        Assert.Equal("zh-Hant", Assert.Single(s.Gateway.Sent).Locale);
+        await using var db = sql.Open();
+        Assert.Equal("zh-Hant", (await db.PushInstallations.SingleAsync(x => x.Id == s.DeviceId)).Locale);
+    }
+
+    [SqlFact]
     public async Task FinishingLongTimersNotifiesWithoutBackfillDelay()
     {
         foreach (var category in new[] { "feed", "sleep" })

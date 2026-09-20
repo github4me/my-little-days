@@ -38,7 +38,7 @@ export default function NativeDateTimeField({
   optional?: boolean;
 }) {
   const c = useContext(Theme);
-  const { t, locale } = useI18n();
+  const { t, formattingLocale } = useI18n();
   const [picker, setPicker] = useState<{ value: Date } | null>(null);
   const context = useRef({
     picker,
@@ -121,7 +121,7 @@ export default function NativeDateTimeField({
       mode={mode}
       display={Platform.OS === "ios" ? "spinner" : "default"}
       themeVariant={c.isDark ? "dark" : "light"}
-      locale={locale}
+      locale={formattingLocale}
       is24Hour
       minimumDate={minimumDate}
       maximumDate={maximumDate}

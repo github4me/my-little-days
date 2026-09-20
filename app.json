@@ -4,17 +4,110 @@
     "locales": {
       "en": {
         "ios": {
-          "CFBundleDisplayName": "My Little Days"
+          "CFBundleDisplayName": "My Little Days",
+          "NSPhotoLibraryUsageDescription": "Allow My Little Days to access the photos you choose for your baby's avatar."
+        },
+        "android": {
+          "app_name": "My Little Days"
         }
       },
       "zh-Hans": {
         "ios": {
-          "CFBundleDisplayName": "小日子"
+          "CFBundleDisplayName": "小日子",
+          "NSPhotoLibraryUsageDescription": "允许小日子访问您选择的照片，用作宝宝头像。"
+        },
+        "android": {
+          "app_name": "小日子"
         }
       },
       "zh-Hant": {
         "ios": {
-          "CFBundleDisplayName": "小日子"
+          "CFBundleDisplayName": "小日子",
+          "NSPhotoLibraryUsageDescription": "允許小日子取用您選擇的照片，作為寶寶頭像。"
+        },
+        "android": {
+          "app_name": "小日子"
+        }
+      },
+      "fr": {
+        "ios": {
+          "CFBundleDisplayName": "Little Days",
+          "NSPhotoLibraryUsageDescription": "Autorisez Little Days à accéder aux photos que vous sélectionnez pour l’avatar de votre bébé."
+        },
+        "android": {
+          "app_name": "Little Days"
+        }
+      },
+      "de": {
+        "ios": {
+          "CFBundleDisplayName": "Little Days",
+          "NSPhotoLibraryUsageDescription": "Erlaube Little Days den Zugriff auf die von dir ausgewählten Fotos für den Avatar deines Babys."
+        },
+        "android": {
+          "app_name": "Little Days"
+        }
+      },
+      "hi": {
+        "ios": {
+          "CFBundleDisplayName": "Little Days",
+          "NSPhotoLibraryUsageDescription": "अपने बच्चे की प्रोफ़ाइल तस्वीर के लिए चुनी गई फ़ोटो को ऐक्सेस करने की अनुमति Little Days को दें।"
+        },
+        "android": {
+          "app_name": "Little Days"
+        }
+      },
+      "it": {
+        "ios": {
+          "CFBundleDisplayName": "Little Days",
+          "NSPhotoLibraryUsageDescription": "Consenti a Little Days di accedere alle foto che scegli per l’avatar del tuo bambino."
+        },
+        "android": {
+          "app_name": "Little Days"
+        }
+      },
+      "ja": {
+        "ios": {
+          "CFBundleDisplayName": "Little Days",
+          "NSPhotoLibraryUsageDescription": "赤ちゃんのアバターに使用する写真を選択できるよう、Little Daysにアクセスを許可します。"
+        },
+        "android": {
+          "app_name": "Little Days"
+        }
+      },
+      "ko": {
+        "ios": {
+          "CFBundleDisplayName": "Little Days",
+          "NSPhotoLibraryUsageDescription": "아기 아바타에 사용할 사진을 선택할 수 있도록 Little Days의 접근을 허용합니다."
+        },
+        "android": {
+          "app_name": "Little Days"
+        }
+      },
+      "es": {
+        "ios": {
+          "CFBundleDisplayName": "Little Days",
+          "NSPhotoLibraryUsageDescription": "Permite que Little Days acceda a las fotos que elijas para el avatar de tu bebé."
+        },
+        "android": {
+          "app_name": "Little Days"
+        }
+      },
+      "th": {
+        "ios": {
+          "CFBundleDisplayName": "Little Days",
+          "NSPhotoLibraryUsageDescription": "อนุญาตให้ Little Days เข้าถึงรูปภาพที่คุณเลือกเพื่อใช้เป็นรูปโปรไฟล์ของลูกน้อย"
+        },
+        "android": {
+          "app_name": "Little Days"
+        }
+      },
+      "vi": {
+        "ios": {
+          "CFBundleDisplayName": "Little Days",
+          "NSPhotoLibraryUsageDescription": "Cho phép Little Days truy cập những ảnh bạn chọn để làm ảnh đại diện cho bé."
+        },
+        "android": {
+          "app_name": "Little Days"
         }
       }
     },
@@ -56,12 +149,30 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "允许小日子访问照片，以选择宝宝头像。",
+          "photosPermission": "Allow My Little Days to access the photos you choose for your baby's avatar.",
           "cameraPermission": false,
           "microphonePermission": false
         }
       ],
-      "expo-localization",
+      [
+        "expo-localization",
+        {
+          "supportedLocales": [
+            "en",
+            "zh-Hans",
+            "zh-Hant",
+            "fr",
+            "de",
+            "hi",
+            "it",
+            "ja",
+            "ko",
+            "es",
+            "th",
+            "vi"
+          ]
+        }
+      ],
       "expo-web-browser",
       "expo-secure-store",
       "./plugins/with-watch-companion",

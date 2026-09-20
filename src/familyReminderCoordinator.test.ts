@@ -12,6 +12,8 @@ const plan: FamilyReminderPlan = {
   recordId: "r1",
   title: "Care",
   silent: true,
+  locale: "en",
+  contentVersion: 1,
   trigger: { type: "daily", hour: 10, minute: 0 },
   fingerprint: "version1",
 };
@@ -54,6 +56,8 @@ function fixture(initial: FamilyReminderPreferences | null = null) {
     schedule: async (origin: string, value: FamilyReminderPlan) => {
       scheduleCalls++;
       if (blockSchedule) await blockSchedule();
+      if (failures.has(`schedule:${scheduleCalls}`))
+        throw new Error("native_failed");
       const id = `notification-${scheduleCalls}`;
       scheduled.set(id, { id, origin, fingerprint: value.fingerprint });
       return id;
@@ -162,6 +166,129 @@ test("edited and deleted records replace or cancel native notifications without 
   assert.equal([...f.scheduled.values()][0].fingerprint, "version2");
   await f.coordinator.sync("family-a", []);
   assert.equal(f.scheduled.size, 0);
+});
+
+test("failed replacement keeps old reminders and rolls back only schedules created by that attempt", async () => {
+  const f = fixture({ origin: "family-a", enabled: true });
+  await f.coordinator.sync("family-a", [plan]);
+  f.failures.add("schedule:3");
+  f.attempts.length = 0;
+
+  await assert.rejects(
+    f.coordinator.sync("family-a", [
+      { ...plan, fingerprint: "version2" },
+      { ...plan, fingerprint: "version3" },
+    ]),
+    /native_failed/,
+  );
+
+  assert.deepEqual(
+    [...f.scheduled.entries()],
+    [
+      [
+        "notification-1",
+        {
+          id: "notification-1",
+          origin: "family-a",
+          fingerprint: "version1",
+        },
+      ],
+    ],
+  );
+  assert.ok(f.attempts.includes("cancel:notification-2"));
+  assert.equal(f.attempts.includes("cancel:notification-1"), false);
+  assert.equal(f.coordinator.shouldShow("family-a"), true);
+
+  f.failures.clear();
+  await f.coordinator.sync("family-a", [
+    { ...plan, fingerprint: "version2" },
+    { ...plan, fingerprint: "version3" },
+  ]);
+  assert.deepEqual(
+    [...f.scheduled.values()].map((value) => value.fingerprint).sort(),
+    ["version2", "version3"],
+  );
+});
+
+test("first verified sync after restart retains same-origin reminders when replacement scheduling fails", async () => {
+  const f = fixture({ origin: "family-a", enabled: true });
+  await f.coordinator.sync("family-a", [plan]);
+  f.scheduled.set("foreign", {
+    id: "foreign",
+    origin: "family-b",
+    fingerprint: "foreign-version",
+  });
+  const restarted = f.restart();
+  f.failures.add("schedule:3");
+  f.attempts.length = 0;
+
+  await assert.rejects(
+    restarted.sync("family-a", [
+      { ...plan, fingerprint: "version2" },
+      { ...plan, fingerprint: "version3" },
+    ]),
+    /native_failed/,
+  );
+
+  assert.deepEqual(
+    [...f.scheduled.values()].map((value) => value.fingerprint),
+    ["version1"],
+  );
+  assert.ok(f.attempts.includes("cancel:notification-2"));
+  assert.ok(f.attempts.includes("cancel:foreign"));
+  assert.equal(f.attempts.includes("cancel:notification-1"), false);
+  assert.equal(restarted.shouldShow("family-a"), true);
+});
+
+test("obsolete cancellation failure keeps the complete replacement and retries without another schedule", async () => {
+  const f = fixture({ origin: "family-a", enabled: true });
+  await f.coordinator.sync("family-a", [plan]);
+  f.failures.add("cancel:notification-1");
+  f.attempts.length = 0;
+
+  await assert.rejects(
+    f.coordinator.sync("family-a", [{ ...plan, fingerprint: "version2" }]),
+    /native_failed/,
+  );
+
+  assert.deepEqual(
+    [...f.scheduled.values()].map((value) => value.fingerprint).sort(),
+    ["version1", "version2"],
+  );
+  assert.equal(f.calls(), 2);
+  assert.equal(f.getCleanup(), null);
+  assert.equal(f.attempts.includes("markCleanup"), false);
+  assert.equal(f.attempts.includes("dismiss"), false);
+  assert.equal(f.coordinator.shouldShow("family-a"), true);
+
+  f.failures.clear();
+  const restarted = f.restart();
+  await restarted.sync("family-a", [{ ...plan, fingerprint: "version2" }]);
+  assert.deepEqual(
+    [...f.scheduled.values()].map((value) => value.fingerprint),
+    ["version2"],
+  );
+  assert.equal(f.calls(), 2);
+  assert.equal(restarted.shouldShow("family-a"), true);
+});
+
+test("obsolete cancellation failure without a desired plan remains durable and fail-closed", async () => {
+  const f = fixture({ origin: "family-a", enabled: true });
+  await f.coordinator.sync("family-a", [plan]);
+  f.failures.add("cancel:notification-1");
+
+  await assert.rejects(
+    f.coordinator.sync("family-a", []),
+    /reminder_cleanup_failed/,
+  );
+
+  assert.equal(f.coordinator.shouldShow("family-a"), false);
+  assert.deepEqual(f.getCleanup(), { clearPreference: false });
+  assert.ok(f.attempts.includes("dismiss"));
+  f.failures.clear();
+  await f.coordinator.sync("family-a", []);
+  assert.equal(f.scheduled.size, 0);
+  assert.equal(f.getCleanup(), null);
 });
 
 test("a same-family refresh does not undo an explicit enable in progress", async () => {

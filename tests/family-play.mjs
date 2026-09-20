@@ -95,7 +95,14 @@ function fixture(sharedMode = true, display = { width: 390, fontScale: 1 }) {
     "react-native-svg": { __esModule: true, default: "Svg", Path: "Path" },
     "./AccessibleModal": { __esModule: true, default: "Modal" },
     "./ui": { Theme: palette, Button: "Button", Card: "Card", T: "T" },
-    "./i18n": { useI18n: () => ({ locale: "en-US" }) },
+    "./i18n": {
+      useI18n: () => ({
+        locale: "en",
+        formattingLocale: "en-US",
+        localize: (_zh, en, args) =>
+          en.replace(/\{(\w+)\}/g, (_, key) => args?.[key] ?? ""),
+      }),
+    },
     "./DailyCare": { __esModule: true, default: "DailyCare" },
     "./PlayIcon": { __esModule: true, default: "PlayIcon" },
     "./storage": {
