@@ -1610,6 +1610,84 @@ test("saved credentials without a recognized subject retain neutral refresh and 
       view.calls.map((call) => call.name),
       ["refresh", "signOut"],
     );
+
+    const activating = fixture(
+      {
+        user: null,
+        authStatus: "unverified",
+        sessionAvailable: false,
+        sharedMode: true,
+        ready: false,
+        activationPending: true,
+      },
+      locale,
+      false,
+      "family",
+      true,
+      { onBack: undefined },
+    );
+    activating.render();
+    assert.equal(activating.buttons(signOut)[0].props.disabled, true);
+  }
+});
+
+test("unresolved workspace without an identity offers retry and a confirmed offline escape", async () => {
+  for (const locale of ["en", "zh-CN"]) {
+    let resolveRefresh;
+    const pendingRefresh = new Promise((resolve) => {
+      resolveRefresh = resolve;
+    });
+    const view = fixture(
+      {
+        user: null,
+        authStatus: "unverified",
+        sessionAvailable: false,
+        tokenRecognized: false,
+        sharedMode: true,
+        ready: false,
+        error: "invalid_response",
+        hasPrivateWork: true,
+        refresh: () => pendingRefresh,
+      },
+      locale,
+      false,
+      "family",
+      true,
+      { onBack: undefined },
+    );
+    view.render();
+    assert.equal(view.buttons(locale === "en" ? "Back" : "返回").length, 0);
+    assert.match(
+      view.text(),
+      locale === "en"
+        ? /Connect and verify your sign-in/
+        : /请先联网验证登录状态/,
+    );
+    const refresh = locale === "en" ? "Refresh" : "刷新";
+    const signIn = locale === "en" ? "Login" : "登录";
+    const signOut = locale === "en" ? "Sign out" : "退出登录";
+    assert.equal(view.buttons(refresh).length, 1);
+    assert.equal(view.buttons(signIn).length, 1);
+    assert.equal(view.buttons(signOut).length, 1);
+    view.buttons(refresh)[0].props.onPress();
+    await tick();
+    view.render();
+    assert.equal(view.buttons(signOut)[0].props.disabled, false);
+    view.buttons(signOut)[0].props.onPress();
+    view.render();
+    assert.match(
+      view.modalText(),
+      locale === "en"
+        ? /Signing out discards unsent changes and drafts/
+        : /退出将丢弃本设备上的未发送修改和草稿/,
+    );
+    view.buttons(signOut).at(-1).props.onPress();
+    await tick();
+    assert.deepEqual(
+      view.calls.map((call) => call.name),
+      ["signOut"],
+    );
+    resolveRefresh();
   }
 });
 

@@ -500,6 +500,8 @@ export default function FamilyScreenView({
     pilot.authStatus !== "signed_out" &&
     pilot.authStatus !== "reauth_required";
   const accountAccessPending = tokenConfirmed || savedSessionPending;
+  const unresolvedWorkspace =
+    !pilot.user && pilot.sharedMode && pilot.authStatus !== "signed_out";
   const accessCheckUnavailable =
     accountAccessPending && !pilot.syncing && !!pilot.error;
   const needsSignIn = pilot.authStatus === "reauth_required";
@@ -1284,17 +1286,38 @@ export default function FamilyScreenView({
             {m(accountStatusKey)}
           </T>
           <T raw style={styles.muted(c.muted)}>
-            {m("signInDescription")}
+            {m(
+              unresolvedWorkspace
+                ? needsSignIn
+                  ? "accountExpiredAction"
+                  : pilot.sessionAvailable
+                    ? "accountSavedSignInDetails"
+                    : "accountVerifyAction"
+                : "signInDescription",
+            )}
           </T>
+          {unresolvedWorkspace && !needsSignIn ? (
+            <Button
+              label={m(pilot.syncing ? "refreshing" : "refresh")}
+              disabled={busy || pilot.syncing}
+              // A slow access check must not trap the user on this recovery
+              // screen. Refresh publishes its own errors, while sign-in and
+              // the confirmed local escape remain available.
+              onPress={() => void pilot.refresh().catch(() => {})}
+            />
+          ) : null}
           <Button
             label={m(
               busy
                 ? "working"
                 : pilot.error === "sign_out_failed"
                   ? "retrySignOut"
-                  : "signIn",
+                  : needsSignIn
+                    ? "signInAgain"
+                    : "signIn",
             )}
             disabled={busy}
+            secondary={unresolvedWorkspace && !needsSignIn}
             onPress={() =>
               void run(
                 pilot.error === "sign_out_failed"
@@ -1303,6 +1326,27 @@ export default function FamilyScreenView({
               )
             }
           />
+          {unresolvedWorkspace && pilot.error !== "sign_out_failed" ? (
+            <Button
+              label={m("signOut")}
+              secondary
+              disabled={busy || pilot.activationPending}
+              onPress={() =>
+                confirm(
+                  "signOutTitle",
+                  m(
+                    pilot.transitionPending
+                      ? "signOutDuringTransition"
+                      : pilot.hasPrivateWork
+                        ? "signOutWithWork"
+                        : "signOutDescription",
+                  ),
+                  "signOut",
+                  pilot.signOut,
+                )
+              }
+            />
+          ) : null}
         </Card>
       ) : (
         <>

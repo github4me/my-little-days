@@ -945,11 +945,7 @@ function BabyApp({
             {family.booting ? (
               <ActivityIndicator />
             ) : (
-              <FamilyScreen
-                pilot={family}
-                source={initialState}
-                onBack={() => {}}
-              />
+              <FamilyScreen pilot={family} source={initialState} />
             )}
           </ScrollView>
         </SafeAreaView>

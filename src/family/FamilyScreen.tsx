@@ -10,7 +10,7 @@ export default function FamilyScreen({
   pilot,
   feedbackHandledByGlobalBanner = false,
 }: {
-  onBack: () => void;
+  onBack?: () => void;
   source: State;
   pilot: ReturnType<typeof useFamilyPilot>;
   feedbackHandledByGlobalBanner?: boolean;

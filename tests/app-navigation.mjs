@@ -261,3 +261,12 @@ test("Growth initially shows all measurement series", () => {
   const app = fs.readFileSync("App.tsx", "utf8");
   assert.match(app, /useState<Metric>\("all"\)/);
 });
+
+test("unresolved family recovery never renders an inert Back action", () => {
+  const app = fs.readFileSync("App.tsx", "utf8");
+  assert.doesNotMatch(app, /onBack=\{\(\) => \{\}\}/);
+  assert.match(
+    app,
+    /<FamilyScreen\s+pilot=\{family\}\s+source=\{initialState\}\s+\/>/,
+  );
+});
