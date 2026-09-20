@@ -407,7 +407,7 @@ function BabyApp({
     }
   }, [family.activationSerial]);
   const [rescue, setRescue] = useState<State | null>(null);
-  const [metric, setMetric] = useState<Metric>("weight");
+  const [metric, setMetric] = useState<Metric>("all");
   const [growthHistoryExpanded, setGrowthHistoryExpanded] = useState(false);
   const [openProfile, setOpenProfile] = useState(false);
   const mainScroll = useRef<ScrollView>(null);

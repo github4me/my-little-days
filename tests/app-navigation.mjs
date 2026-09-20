@@ -248,3 +248,16 @@ test("More composes account and deletion as separate sibling slots using the sam
     attribute(deletion, "pilot").expression.getText(app),
   );
 });
+
+test("Privacy and support is a direct More destination, not an accordion action", () => {
+  const settings = fs.readFileSync("src/Settings.tsx", "utf8");
+  assert.doesNotMatch(settings, /<SettingsSection title="隐私与支持"/);
+  assert.doesNotMatch(settings, /<Button label="隐私与支持"/);
+  assert.match(settings, /accessibilityLabel=\{t\("隐私与支持"\)\}/);
+  assert.match(settings, /onPress=\{onOpenPrivacy\}/);
+});
+
+test("Growth initially shows all measurement series", () => {
+  const app = fs.readFileSync("App.tsx", "utf8");
+  assert.match(app, /useState<Metric>\("all"\)/);
+});

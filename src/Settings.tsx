@@ -1203,12 +1203,38 @@ export default function Settings({
           </>
         )}
       </SettingsSection>
-      <SettingsSection title="隐私与支持" busy={busy}>
-        <T style={{ color: c.muted, fontSize: 13 }}>
-          了解本机记录、家庭共享、备份和软件更新
-        </T>
-        <Button label="隐私与支持" secondary onPress={onOpenPrivacy} />
-      </SettingsSection>
+      <Card>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t("隐私与支持")}
+          accessibilityHint={t("了解本机记录、家庭共享、备份和软件更新")}
+          accessibilityState={{ disabled: busy }}
+          disabled={busy}
+          onPress={onOpenPrivacy}
+          style={({ pressed }) => [
+            row,
+            {
+              minHeight: 44,
+              alignItems: "center",
+              opacity: busy ? 0.65 : pressed ? 0.7 : 1,
+            },
+          ]}
+        >
+          <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
+            <T style={{ fontSize: 18, fontWeight: "700" }}>隐私与支持</T>
+            <T style={{ color: c.muted, fontSize: 13, lineHeight: 19 }}>
+              了解本机记录、家庭共享、备份和软件更新
+            </T>
+          </View>
+          <T
+            raw
+            accessibilityElementsHidden
+            style={{ color: c.primary, fontSize: 22 }}
+          >
+            ›
+          </T>
+        </Pressable>
+      </Card>
       <SettingsSection title="致谢" busy={busy}>
         <T style={{ color: c.muted, fontSize: 13 }}>
           感谢 Trista（来自 FPH）和她群里的 Mia、Violet、Bill

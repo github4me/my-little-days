@@ -508,7 +508,16 @@ function BarRecords({
         );
         return (
           <View key={key} style={{ gap: 8 }}>
-            <T style={{ fontSize: 17, fontWeight: "600" }}>
+            <T
+              raw
+              accessibilityRole="header"
+              style={{ fontSize: 17, fontWeight: "600" }}
+            >
+              {key === today ? (
+                <T raw style={{ color: c.primary, fontWeight: "700" }}>
+                  {t("今天")} ·{" "}
+                </T>
+              ) : null}
               {formatDate(date, {
                 month: "long",
                 day: "numeric",
@@ -518,7 +527,14 @@ function BarRecords({
                 {date.getFullYear()}
               </T>
             </T>
-            <Card style={{ padding: 16, gap: 8 }}>
+            <Card
+              style={{
+                padding: 16,
+                gap: 8,
+                borderWidth: key === today ? 2 : 1,
+                borderColor: key === today ? c.primary : c.line,
+              }}
+            >
               <Pressable
                 disabled={key === today}
                 accessibilityRole="button"

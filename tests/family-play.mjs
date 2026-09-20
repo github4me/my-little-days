@@ -215,9 +215,25 @@ function fixture(sharedMode = true, display = { width: 390, fontScale: 1 }) {
   return world;
 }
 
+test("daily care is the default Care section", async () => {
+  const world = fixture();
+  await world.ready();
+  assert.equal(
+    world.node("Daily care").props.accessibilityState.selected,
+    true,
+  );
+  assert.equal(world.node("Play").props.accessibilityState.selected, false);
+  assert.equal(
+    world.node("Play settings").props.accessibilityState.selected,
+    false,
+  );
+  assert.ok(world.render().some((node) => node.type === "DailyCare"));
+});
+
 test("shared play renders family selections and submits check-ins only to the family callback", async () => {
   const world = fixture();
   await world.ready();
+  await world.press("Play");
   const checkin = world.node("Done today: Gentle touch");
   assert.equal(checkin?.props.disabled, false);
   await world.press("Done today: Gentle touch");
@@ -237,6 +253,7 @@ test("member permissions disable owner settings and other members' check-ins, in
   world.sharedPlay.canToggleCheckin = () => false;
   world.sharedPlay.checkins = ["gentle-touch"];
   await world.ready();
+  await world.press("Play");
   const checkin = world.node("Done today: Gentle touch"),
     selection = world.node("Select play activity: Gentle touch");
   assert.equal(checkin?.props.disabled, true);
@@ -249,6 +266,7 @@ test("member permissions disable owner settings and other members' check-ins, in
 test("owner selection updates use the family callback without writing personal settings", async () => {
   const world = fixture();
   await world.ready();
+  await world.press("Play");
   await world.press("Select play activity: Gentle touch");
   assert.deepEqual(JSON.parse(JSON.stringify(world.calls)), [
     {
@@ -271,6 +289,7 @@ test("legacy shared server disables edits and never reads the personal play stor
 test("offline check-ins retain their existing personal persistence behavior", async () => {
   const world = fixture(false);
   await world.ready();
+  await world.press("Play");
   await world.press("Done today: Gentle touch");
   assert.equal(
     world.calls.filter((c) => c.kind === "personal-checkin").length,
@@ -286,6 +305,7 @@ test("play storage disclosure reflects the active family or personal workspace",
   for (const shared of [false, true]) {
     const world = fixture(shared);
     await world.ready();
+    await world.press("Play");
     await world.press("Play help & references");
     const contents = world.visibleText();
     assert.equal(
@@ -304,6 +324,7 @@ test("play storage disclosure reflects the active family or personal workspace",
 test("play help starts collapsed and retains the mode-specific intro and references", async () => {
   const world = fixture();
   await world.ready();
+  await world.press("Play");
   const help = world.node("Play help & references");
   assert.equal(help.props.accessibilityState.expanded, false);
   assert.equal(help.props["aria-expanded"], false);
@@ -339,6 +360,7 @@ test("play help starts collapsed and retains the mode-specific intro and referen
 test("sharing explanation is collapsed below content while capability and safety notices stay visible", async () => {
   const world = fixture();
   await world.ready();
+  await world.press("Play");
   assert.ok(
     !world
       .visibleText()

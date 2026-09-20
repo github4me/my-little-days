@@ -156,6 +156,23 @@ test("record history reveals seven date groups at a time and resets on filter ch
     onEdit() {},
     onDelete() {},
   });
+  const textContent = (value) => {
+    if (Array.isArray(value)) return value.map(textContent).join("");
+    if (typeof value === "string" || typeof value === "number")
+      return String(value);
+    return value?.props ? textContent(value.props.children) : "";
+  };
+  assert.ok(
+    screen
+      .nodes()
+      .some(
+        (node) =>
+          node.type === "T" &&
+          node.props.accessibilityRole === "header" &&
+          textContent(node.props.children).includes("今天 ·"),
+      ),
+    "the current day group should be explicitly labelled Today",
+  );
   const button = (label) =>
     screen.nodes().find((node) => node.props.accessibilityLabel === label);
   const days = () =>

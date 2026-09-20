@@ -128,7 +128,7 @@ export default function PlayLearning({
   const actualMonths = completedMonths(birthDate, new Date(now));
   const actualSupported = actualMonths !== null && actualMonths < 25;
   const [manualMonths, setManualMonths] = useState<number | null>(null);
-  const [mode, setMode] = useState("today");
+  const [mode, setMode] = useState("care");
   const [expanded, setExpanded] = useState<string | null>(null);
   const [selection, setSelection] = useState<PlaySelection>({
     included: [],

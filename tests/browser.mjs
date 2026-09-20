@@ -89,6 +89,7 @@ await page.getByRole("button", { name: "收起宝宝档案", exact: true }).wait
 await page.getByRole("button", { name: "保存档案", exact: true }).waitFor();
 await page.getByRole("tab", { name: "今天", exact: true }).click();
 await page.getByRole("tab", { name: "照护", exact: true }).click();
+await page.getByRole("button", { name: "早教", exact: true }).click();
 await page
   .getByText(
     "还没有早教活动，请到「设置早教」添加。未设置出生日期时不会自动选择。",
@@ -203,6 +204,7 @@ assert.equal(await page.getByText("● 仅此设备", { exact: true }).count(), 
 await page.evaluate(() => document.fonts.ready);
 await page.screenshot({ path: path.join(screenshotDir, "home-preview.png") });
 await page.getByRole("tab", { name: "记录", exact: true }).click();
+await page.getByRole("heading", { name: /^今天 · / }).waitFor();
 for (const label of [
   "测量",
   "里程碑",
@@ -377,7 +379,12 @@ await page.getByRole("tab", { name: "成长", exact: true }).click();
 assert.equal(await page.getByText("小小里程碑", { exact: true }).count(), 0);
 assert.equal(await page.getByText("日常趋势", { exact: true }).count(), 0);
 await page.getByRole("button", { name: "＋测量", exact: true }).waitFor();
-await page.getByRole("button", { name: "全部", exact: true }).click();
+assert.equal(
+  await page
+    .getByRole("button", { name: "全部", exact: true })
+    .getAttribute("aria-selected"),
+  "true",
+);
 await page
   .getByText("三项曲线按各自单位缩放；切换到单项可查看 WHO 参考。", {
     exact: true,
@@ -395,14 +402,7 @@ assert.equal(
 );
 await page.getByRole("tab", { name: "我的", exact: true }).click();
 assert.equal(await page.getByLabel("宝宝名字", { exact: true }).count(), 0);
-for (const section of [
-  "语言",
-  "主题",
-  "照护提醒",
-  "备份与恢复",
-  "隐私与支持",
-  "致谢",
-]) {
+for (const section of ["语言", "主题", "照护提醒", "备份与恢复", "致谢"]) {
   const header = page.getByRole("button", {
     name: `展开${section}`,
     exact: true,
@@ -424,6 +424,16 @@ for (const section of [
   }
   await expanded.click();
 }
+assert.equal(
+  await page
+    .getByRole("button", { name: "展开隐私与支持", exact: true })
+    .count(),
+  0,
+);
+assert.equal(
+  await page.getByRole("button", { name: "隐私与支持", exact: true }).count(),
+  1,
+);
 await page.screenshot({
   path: path.join(process.env.TEMP ?? "docs", "little-days-more-collapsed.png"),
 });
@@ -515,9 +525,12 @@ assert.ok(
   languageOptions.every((box) => Math.abs(box.y - languageOptions[0].y) < 1),
   "language choices should stay on one row",
 );
-await page
-  .getByRole("button", { name: "Expand Privacy & support", exact: true })
-  .click();
+assert.equal(
+  await page
+    .getByRole("button", { name: "Expand Privacy & support", exact: true })
+    .count(),
+  0,
+);
 await page
   .getByRole("button", { name: "Privacy & support", exact: true })
   .click();
@@ -864,6 +877,7 @@ assert.equal(
 );
 await page.getByRole("tab", { name: "照护", exact: true }).click();
 await page.getByRole("heading", { name: "照护", exact: true }).waitFor();
+await page.getByRole("button", { name: "早教", exact: true }).click();
 await page
   .getByRole("checkbox", { name: "今天做过：看看黑白卡", exact: true })
   .waitFor();
@@ -921,6 +935,7 @@ await page
   .waitFor();
 await page.reload();
 await page.getByRole("tab", { name: "照护", exact: true }).click();
+await page.getByRole("button", { name: "早教", exact: true }).click();
 await page
   .getByRole("button", { name: "查看今天穿哪一件？", exact: true })
   .waitFor();
@@ -981,6 +996,7 @@ await page.evaluate(() =>
 );
 await page.reload();
 await page.getByRole("tab", { name: "照护", exact: true }).click();
+await page.getByRole("button", { name: "早教", exact: true }).click();
 await page
   .getByText("早教设置无法读取，原数据未覆盖。", { exact: true })
   .waitFor();
@@ -1057,6 +1073,7 @@ const checkinKey = await page.evaluate(() => {
 });
 await page.reload();
 await page.getByRole("tab", { name: "照护", exact: true }).click();
+await page.getByRole("button", { name: "早教", exact: true }).click();
 await page
   .getByRole("checkbox", { name: "今天做过：看看黑白卡", checked: true })
   .waitFor();
@@ -1113,6 +1130,7 @@ assert.deepEqual(
 await page.getByRole("tab", { name: "我的", exact: true }).click();
 await chooseEnglish();
 await page.getByRole("tab", { name: "Care", exact: true }).click();
+await page.getByRole("button", { name: "Play", exact: true }).click();
 await page
   .getByRole("button", { name: "View Awake tummy time", exact: true })
   .click();
