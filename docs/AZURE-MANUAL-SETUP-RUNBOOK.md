@@ -2180,13 +2180,14 @@ erase timer history to restore an older build.
   starter, finisher and timestamps. Do not test destructive flows on real family
   data or uninstall a data-bearing app.
 
-## Twelve-locale native and notification rollout — prepared 20 September 2026, not deployed
+## Twelve-locale native and notification rollout — deployed 20 September 2026
 
 This source change adds the canonical locales `en`, `zh-Hans`, `zh-Hant`, `fr`,
 `de`, `hi`, `it`, `ja`, `ko`, `es`, `th` and `vi` to phone/native metadata,
 local and family reminders, and generic family-entry push content. It does not add
-or change the optional Buy Me a Coffee feature. No Azure, SQL, Expo, Apple or live
-push setting was changed while preparing it.
+or change the optional Buy Me a Coffee feature. The release changed the compatible
+SQL schema, API and native binary as recorded below; live push rollout settings
+remained disabled and unchanged.
 
 1. **Freeze one reviewed SHA and keep the rollout schema-first.** In the existing
    GitHub **Deploy family API and database** workflow, apply only the immutable
@@ -2229,6 +2230,42 @@ push setting was changed while preparing it.
    non-Chinese locale never receives Chinese fallback; old API capability responses
    may use legacy `zh` only for `zh-Hans/zh-Hant`, and English for all other locales.
    Record build/submission IDs and physical-device results separately.
+
+Release evidence:
+
+- Application/API source commit
+  [`1b32e13953d545bb929f1a1a50836c25a773881a`](https://github.com/github4me/my-little-days/commit/1b32e13953d545bb929f1a1a50836c25a773881a)
+  contains the reviewed multilingual implementation and no Buy Me a Coffee runtime
+  code. [Family sharing CI 35513108287](https://github.com/github4me/my-little-days/actions/runs/35513108287)
+  completed successfully for that exact SHA.
+- [API/database release 35513415777](https://github.com/github4me/my-little-days/actions/runs/35513415777)
+  completed successfully for the same SHA. DbUp applied only
+  `0008_WidenPushLocale.sql`; the journal hash is
+  `E166C26301FB6EDC1FD8B840F5FAD19AB445113053DF8134CEA8FB1BCA4882AE`
+  and the post-release check reported **zero pending scripts**.
+  `dbo.PushInstallations.Locale` is `varchar(16) NOT NULL`. SQL remained Online on
+  Basic (5 DTU, 2 GiB). All 33 permanent firewall rules remained exact-IP rules and
+  no `github-db-*` temporary rule remained.
+- Matching API OneDeploy `dd71bb52-5592-4b0f-b50f-c12657672769` completed and is
+  active. Independent checks returned 200 with `{"status":"ok"}` from
+  `/health/live`, and 401 from unauthenticated `/v2/capabilities` and
+  `/v2/push/capabilities`. Azure deployment metadata does not embed the Git SHA;
+  the pinned workflow and its same-run artifact provide the source attribution.
+- The production EAS environment resolved the HTTPS API URL, existing Entra tenant,
+  client and API scope, and `EXPO_PUBLIC_FAMILY_UI_DEMO=0`. Store build
+  [`5a655aa4-8af5-470e-a9b8-34818005b6a5`](https://expo.dev/accounts/expo4chao/projects/little-days/builds/5a655aa4-8af5-470e-a9b8-34818005b6a5)
+  finished from exact Git SHA `1b32e139...` as iOS **0.2.1 (39)** with the existing
+  Phone, Watch and Widget credentials.
+- Exact-ID [submission 97154d89-66de-4cdb-8c1f-a5d45e979693](https://expo.dev/accounts/expo4chao/projects/little-days/submissions/97154d89-66de-4cdb-8c1f-a5d45e979693)
+  finished at `2026-09-20T13:42:14.725Z`. App Store Connect readback reports build
+  39 **VALID**, internal **IN_BETA_TESTING** and external
+  **READY_FOR_BETA_SUBMISSION**. No tester group, external Beta review or public
+  App Store release was changed.
+- Live push registration/provider acceptance was not run because the existing push
+  rollout gates and provider credentials remain deliberately disabled. Full
+  native-speaker review, installed-phone language/reminder checks, Watch/Widget
+  checks and non-destructive two-device acceptance remain release follow-ups; cloud
+  tests and Apple processing do not establish those outcomes.
 
 If the API or client must roll back, leave migration 0008 applied: widening the
 column is backward-compatible with the prior `en/zh` API. Roll back only to a
