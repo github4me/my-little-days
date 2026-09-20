@@ -29,6 +29,7 @@ import { copyAvatarFile, deleteAvatarFile } from "./avatar";
 import { t, useI18n, type LanguagePreference } from "./i18n";
 import type { RecordView } from "./recordCalendar";
 import NativeDateTimeField from "./NativeDateTimeField";
+import RecordActionButton from "./RecordActionButton";
 
 const reminderKindLabels = {
   feed: "喂养",
@@ -436,11 +437,14 @@ export default function Settings({
                     }
                   />
                   {avatarUri ? (
-                    <Button
-                      label="移除头像"
-                      secondary
+                    <RecordActionButton
+                      action="delete"
+                      accessibilityLabel={t("移除头像")}
+                      accessibilityHint={copy(
+                        "移除宝宝头像",
+                        "Removes the baby photo",
+                      )}
                       disabled={busy || (sharedMode && !sharedAvatarEditable)}
-                      style={{ flex: 1 }}
                       onPress={() =>
                         run(async () => {
                           await onAvatarChange(null);
@@ -1040,9 +1044,16 @@ export default function Settings({
                           {t(reminder.detail)}
                         </T>
                       </View>
-                      <Button
-                        label="取消"
-                        secondary
+                      <RecordActionButton
+                        action="delete"
+                        accessibilityLabel={
+                          copy("取消提醒：", "Cancel reminder: ") +
+                          t(reminder.title)
+                        }
+                        accessibilityHint={copy(
+                          "停止此设备上的这项提醒",
+                          "Stops this reminder on this device",
+                        )}
                         disabled={busy}
                         onPress={() =>
                           run(async () => {

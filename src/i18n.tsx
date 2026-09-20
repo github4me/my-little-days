@@ -443,6 +443,9 @@ const english: Record<string, string> = {
   "{name}的小日子": "{name}'s little days",
   "正在睡 · {duration}": "Sleeping · {duration}",
   "已睡 {duration}": "Asleep for {duration}",
+  "{time} 醒来 · 已清醒 {duration}": "Woke at {time} · Awake for {duration}",
+  "上一觉：{start}–{end} · 共睡 {duration}":
+    "Last sleep: {start}–{end} · Slept for {duration}",
   "上次 {time} · {duration}前": "Last {time} · {duration} ago",
   "身长 {value} cm": "Length {value} cm",
   "头围 {value} cm": "Head {value} cm",

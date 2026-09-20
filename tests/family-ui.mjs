@@ -202,13 +202,17 @@ function fixture(
       Set,
       require(name) {
         if (name === "react") return react;
+        if (name === "react-native-svg")
+          return { __esModule: true, default: "Svg", Path: "Path" };
+        if (name === "../RecordActionButton")
+          return load("src/RecordActionButton.tsx");
         if (name === "react-native") return native;
         if (name === "react-native-safe-area-context")
           return { SafeAreaView: "SafeAreaView" };
         if (name === "@react-native-community/datetimepicker")
           return () => null;
         if (name === "../i18n") return { useI18n: () => ({ locale }) };
-        if (name === "../ui") return ui;
+        if (name === "../ui" || name === "./ui") return ui;
         if (name === "../AccessibleModal") return "Modal";
         if (name === "../NativeDateTimeField") return "NativeDateTimeField";
         if (name === "./messages") return messages;
@@ -287,7 +291,10 @@ function fixture(
     },
     buttons(label) {
       return nodes.filter(
-        (node) => node.type === "Button" && node.props.label === label,
+        (node) =>
+          (node.type === "Button" && node.props.label === label) ||
+          (node.type === "Pressable" &&
+            node.props.accessibilityLabel === label),
       );
     },
     text() {
@@ -791,9 +798,12 @@ test("standalone deletion panel omits account details and keeps consequences in 
     const label = zh ? "删除账户" : "Delete account";
     const view = fixture({}, locale, false, "deletion", false);
     view.render();
-    const buttons = view.nodes().filter((node) => node.type === "Button");
+    const buttons = view
+      .nodes()
+      .filter((node) => node.type === "Button" || node.type === "Pressable");
     assert.equal(buttons.length, 1);
-    assert.equal(buttons.at(-1).props.label, label);
+    assert.equal(buttons.at(-1).props.accessibilityLabel, label);
+    assert.equal(buttons.at(-1).props.children.type, "Svg");
     assert.doesNotMatch(
       view.text(),
       /My account|我的账户|Signed in|已登录|Test member|test@example.invalid/,

@@ -84,6 +84,8 @@ function fixture(platform = "ios", overrides = {}) {
       String,
       require(name) {
         if (name === "react") return react;
+        if (name === "react-native-svg")
+          return { __esModule: true, default: "Svg", Path: "Path" };
         if (name === "react-native")
           return {
             ...Object.fromEntries(
@@ -136,6 +138,7 @@ function fixture(platform = "ios", overrides = {}) {
   function walk(node) {
     if (Array.isArray(node)) return node.forEach(walk);
     if (!node || typeof node !== "object") return;
+    if (typeof node.type === "function") return walk(node.type(node.props));
     nodes.push(node);
     walk(node.props.children);
   }
@@ -230,7 +233,7 @@ test("supplements support multiple explicit choices, custom text and editing", a
   screen.field("Other supplement name").props.onChange("Prescribed product");
   screen.render();
   screen.save().props.onPress();
-  await Promise.resolve();
+  await new Promise((resolve) => setImmediate(resolve));
   assert.equal(saved.kind, "supplement");
   assert.deepEqual(
     [...saved.supplements],

@@ -69,9 +69,16 @@ function view(overrides = {}) {
         if (name === "../NativeDateTimeField") return "Field";
         if (name === "react") return react;
         if (name === "react-native")
-          return { View: "View", Switch: "Switch", Platform: { OS: "ios" } };
+          return {
+            View: "View",
+            Switch: "Switch",
+            Pressable: "Pressable",
+            Platform: { OS: "ios" },
+          };
+        if (name === "react-native-svg")
+          return { __esModule: true, default: "Svg", Path: "Path" };
         if (name === "expo-crypto") return { randomUUID: () => "new-reminder" };
-        if (name === "../ui")
+        if (name === "../ui" || name === "./ui")
           return {
             Theme: {},
             ...Object.fromEntries(
@@ -108,7 +115,11 @@ function view(overrides = {}) {
     render,
     nodes: () => nodes,
     button: (label) =>
-      nodes.find((n) => n.type === "Button" && n.props.label === label),
+      nodes.find(
+        (n) =>
+          (n.type === "Button" && n.props.label === label) ||
+          (n.type === "Pressable" && n.props.accessibilityLabel === label),
+      ),
     field: (label) =>
       nodes.find((n) => n.type === "Field" && n.props.label === label),
   };
@@ -150,9 +161,20 @@ test("shared reminder delete is permission gated and needs confirmation", async 
     ],
   };
   const denied = view({ ...props, canEdit: () => false });
-  assert.equal(denied.button("Delete")?.props.disabled, true);
+  assert.equal(
+    denied.button("Delete family reminder: Feed")?.props.disabled,
+    true,
+  );
+  assert.equal(
+    denied.button("Delete family reminder: Feed")?.props.onPress,
+    undefined,
+  );
   const screen = view(props);
-  screen.button("Delete").props.onPress();
+  assert.equal(
+    screen.button("Delete family reminder: Feed").props.children[0].type,
+    "Svg",
+  );
+  screen.button("Delete family reminder: Feed").props.onPress();
   screen.render();
   assert.equal(screen.calls.length, 0);
   await screen.button("Confirm delete").props.onPress();

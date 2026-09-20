@@ -16,6 +16,7 @@ import {
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import Modal from "./src/AccessibleModal";
+import RecordActionButton from "./src/RecordActionButton";
 import {
   AccessibilityPreferencesProvider,
   useAccessibilityPreferences,
@@ -116,6 +117,18 @@ const diaperLabels = { wet: "尿", dirty: "便", mixed: "尿＋便" };
 const time = (iso: string) => formatTime(iso);
 const localDay = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+function sleepTime(iso: string, now: number) {
+  const date = new Date(iso);
+  const today = new Date(now);
+  if (localDay(date) === localDay(today)) return time(iso);
+  return `${formatDate(date, {
+    month: "short",
+    day: "numeric",
+    ...(date.getFullYear() !== today.getFullYear()
+      ? { year: "numeric" as const }
+      : {}),
+  })} ${time(iso)}`;
+}
 function detail(e: Entry, now: number) {
   if (e.type === "feed")
     return [
@@ -999,52 +1012,28 @@ function BabyApp({
               justifyContent: "flex-end",
             }}
           >
-            <Pressable
-              accessibilityRole="button"
+            <RecordActionButton
+              action="edit"
               accessibilityLabel={t("编辑{kind}", {
                 kind: t(kinds[e.type].label),
               })}
+              accessibilityHint={t("打开记录编辑界面")}
               disabled={
                 family.sharedMode && !family.canEditRecord("entry", e.id)
               }
-              accessibilityState={{
-                disabled:
-                  family.sharedMode && !family.canEditRecord("entry", e.id),
-              }}
               onPress={() => beginEditor(e)}
-              style={{
-                minHeight: 44,
-                minWidth: 44,
-                justifyContent: "center",
-                alignItems: "center",
-                paddingHorizontal: 5,
-              }}
-            >
-              <T style={{ color: c.primary, fontSize: 12 }}>编辑</T>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
+            />
+            <RecordActionButton
+              action="delete"
               accessibilityLabel={t("删除{kind}", {
                 kind: t(kinds[e.type].label),
               })}
+              accessibilityHint={t("打开删除确认")}
               disabled={
                 family.sharedMode && !family.canEditRecord("entry", e.id)
               }
-              accessibilityState={{
-                disabled:
-                  family.sharedMode && !family.canEditRecord("entry", e.id),
-              }}
               onPress={() => beginDelete(e)}
-              style={{
-                minHeight: 44,
-                minWidth: 44,
-                justifyContent: "center",
-                alignItems: "center",
-                paddingHorizontal: 5,
-              }}
-            >
-              <T style={{ fontSize: 11, color: c.muted }}>删除</T>
-            </Pressable>
+            />
           </View>
         </View>
         {e.note ? (
@@ -1398,21 +1387,19 @@ function BabyApp({
                                     ),
                                   })
                                 : last
-                                  ? t("上次 {time} · {duration}前", {
-                                      time: time(
-                                        type === "sleep"
-                                          ? last.end!
-                                          : last.start,
-                                      ),
-                                      duration: elapsed(
-                                        now -
-                                          Date.parse(
-                                            type === "sleep"
-                                              ? last.end!
-                                              : last.start,
-                                          ),
-                                      ),
-                                    })
+                                  ? type === "sleep"
+                                    ? t("{time} 醒来 · 已清醒 {duration}", {
+                                        time: sleepTime(last.end!, now),
+                                        duration: elapsed(
+                                          now - Date.parse(last.end!),
+                                        ),
+                                      })
+                                    : t("上次 {time} · {duration}前", {
+                                        time: time(last.start),
+                                        duration: elapsed(
+                                          now - Date.parse(last.start),
+                                        ),
+                                      })
                                   : "还没有记录，轻点开始"}
                           </T>
                           {((type === "feed" && activeFeed) ||
@@ -1483,6 +1470,18 @@ function BabyApp({
                       {type === "feed" && latestFeed ? (
                         <T style={{ color: c.muted, fontSize: 13 }}>
                           {detail(activeFeed ?? latestFeed, now)}
+                        </T>
+                      ) : null}
+                      {type === "sleep" && latestSleep && !active ? (
+                        <T style={{ color: c.muted, fontSize: 13 }}>
+                          {t("上一觉：{start}–{end} · 共睡 {duration}", {
+                            start: sleepTime(latestSleep.start, now),
+                            end: sleepTime(latestSleep.end!, now),
+                            duration: elapsed(
+                              Date.parse(latestSleep.end!) -
+                                Date.parse(latestSleep.start),
+                            ),
+                          })}
                         </T>
                       ) : null}
                       {type === "sleep" ? (

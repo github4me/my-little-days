@@ -1,5 +1,6 @@
 import React, { useContext, useRef, useState } from "react";
 import NativeDateTimeField from "../NativeDateTimeField";
+import RecordActionButton from "../RecordActionButton";
 import { View, Switch, Platform } from "react-native";
 import { randomUUID } from "expo-crypto";
 import { Button, Chips, Field, T, Theme, row } from "../ui";
@@ -296,10 +297,17 @@ export default function SharedReminders(props: SharedRemindersProps) {
                     ? copy(" · 已过期", " · Expired")
                     : "")}
           </T>
-          <View style={row}>
-            <Button
-              secondary
-              label={copy("编辑", "Edit")}
+          <View style={[row, { justifyContent: "flex-end", gap: 8 }]}>
+            <RecordActionButton
+              action="edit"
+              accessibilityLabel={
+                copy("编辑家庭提醒：", "Edit family reminder: ") +
+                (record.settings.title || kindLabel(record.settings.kind))
+              }
+              accessibilityHint={copy(
+                "打开记录编辑界面",
+                "Opens the record editor",
+              )}
               disabled={busy || !props.canEdit(record.id)}
               onPress={() => {
                 if (!props.canEdit(record.id)) return;
@@ -310,9 +318,16 @@ export default function SharedReminders(props: SharedRemindersProps) {
                 setError("");
               }}
             />
-            <Button
-              secondary
-              label={copy("删除", "Delete")}
+            <RecordActionButton
+              action="delete"
+              accessibilityLabel={
+                copy("删除家庭提醒：", "Delete family reminder: ") +
+                (record.settings.title || kindLabel(record.settings.kind))
+              }
+              accessibilityHint={copy(
+                "打开删除确认",
+                "Opens a confirmation before deleting",
+              )}
               disabled={busy || !props.canEdit(record.id)}
               onPress={() => {
                 if (props.canEdit(record.id))

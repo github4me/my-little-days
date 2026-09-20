@@ -579,6 +579,13 @@ await page
   .getByRole("button", { name: "Hide earlier records", exact: true })
   .waitFor();
 await page.getByText("4.1 kg", { exact: false }).waitFor();
+for (const name of ["Edit Measure", "Delete Measure"]) {
+  const action = page.getByRole("button", { name, exact: true }).last();
+  assert.equal(await action.locator("svg").count(), 1);
+  assert.equal(await action.innerText(), "");
+  const target = await action.boundingBox();
+  assert.ok(target.width >= 44 && target.height >= 44);
+}
 await page
   .getByRole("button", { name: "Delete Measure", exact: true })
   .last()
@@ -1220,6 +1227,13 @@ assert.equal(
     .inputValue(),
   "36.8",
 );
+for (const name of ["Edit care record", "Delete care record"]) {
+  const action = page.getByRole("button", { name, exact: true });
+  assert.equal(await action.locator("svg").count(), 1);
+  assert.equal(await action.innerText(), "");
+  const target = await action.boundingBox();
+  assert.ok(target.width >= 44 && target.height >= 44);
+}
 await page
   .getByRole("button", { name: "Edit care record", exact: true })
   .click();
@@ -2203,6 +2217,10 @@ await page.getByText("正在睡觉", { exact: true }).waitFor();
 await page.clock.setFixedTime(new Date(sleepClock.getTime() + 60_000));
 await page.getByRole("button", { name: "醒了", exact: true }).click();
 await page.getByRole("button", { name: "睡了", exact: true }).waitFor();
+await page.getByText("03:15 醒来 · 已清醒 0分钟", { exact: true }).waitFor();
+await page
+  .getByText("上一觉：03:14–03:15 · 共睡 1分钟", { exact: true })
+  .waitFor();
 const sleepRecords = await page.evaluate(
   () => JSON.parse(localStorage.getItem("little-days-v1")).entries,
 );
@@ -2242,6 +2260,53 @@ await assertNoUntranslatedChinese("live sleep feedback and today's totals");
 await page
   .getByText(/This sleep lasted less than 1 minute/)
   .waitFor({ state: "hidden", timeout: 6500 });
+
+// An overnight session keeps its full duration separate from time awake and
+// today's midnight-clipped total. Previously these looked like a short sleep.
+await page.clock.setFixedTime(new Date("2026-09-17T06:12:00+10:00"));
+await page.evaluate(() => {
+  localStorage.setItem(
+    "little-days-v1",
+    JSON.stringify({
+      schemaVersion: 1,
+      profile: { name: "Sleep test", birthDate: "", sex: "unspecified" },
+      entries: [
+        {
+          id: "overnight-sleep-label",
+          type: "sleep",
+          start: "2026-09-16T22:05:00+10:00",
+          end: "2026-09-17T06:05:00+10:00",
+          note: "",
+        },
+      ],
+    }),
+  );
+});
+await page.reload();
+await page.getByText("06:05 醒来 · 已清醒 7分钟", { exact: true }).waitFor();
+await page
+  .getByText("上一觉：9月16日 22:05–06:05 · 共睡 8小时0分", { exact: true })
+  .waitFor();
+await page.getByText("6.1", { exact: true }).waitFor();
+await page.getByRole("tab", { name: "我的", exact: true }).click();
+await chooseEnglish();
+await page.getByRole("tab", { name: "Today", exact: true }).click();
+await page.getByText("Woke at 06:05 · Awake for 7m", { exact: true }).waitFor();
+await page
+  .getByText("Last sleep: Sep 16 22:05–06:05 · Slept for 8h 0m", {
+    exact: true,
+  })
+  .waitFor();
+await assertNoUntranslatedChinese("overnight sleep and wake duration");
+await page.getByRole("button", { name: "Sleep", exact: true }).click();
+await page.getByText("Asleep for 0m", { exact: true }).waitFor();
+assert.equal(await page.getByText(/^Woke at /).count(), 0);
+await page.getByRole("button", { name: "Awake", exact: true }).click();
+await page.getByText("Woke at 06:05 · Awake for 7m", { exact: true }).waitFor();
+await page.clock.setFixedTime(new Date("2026-09-17T07:12:00+10:00"));
+await page
+  .getByText("Woke at 06:05 · Awake for 1h 7m", { exact: true })
+  .waitFor();
 
 // Suggested feeding ends never go past now, including across midnight.
 // Saving a feed started in the current minute must preserve valid seconds.

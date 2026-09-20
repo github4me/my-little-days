@@ -14,6 +14,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useI18n, type AppLocale } from "../i18n";
 import { Button, Card, T, Theme } from "../ui";
 import Modal from "../AccessibleModal";
+import RecordActionButton from "../RecordActionButton";
 import type { SharedFeed } from "./contracts";
 import type { FeedDraft } from "./pilotState";
 import {
@@ -829,17 +830,26 @@ export default function FamilyScreenView({
           </T>
         ) : null}
         {canEdit ? (
-          <View style={styles.actions}>
-            <Button
-              label={m("editFeed")}
-              secondary
+          <View style={[styles.actions, { justifyContent: "flex-end" }]}>
+            <RecordActionButton
+              action="edit"
+              accessibilityLabel={m("editFeed")}
+              accessibilityHint={
+                locale === "zh-CN"
+                  ? "打开记录编辑界面"
+                  : "Opens the record editor"
+              }
               disabled={workspaceBusy || !!waiting || !!pilot.draft}
               onPress={() => void run(() => pilot.beginFeed(feed))}
-              style={styles.flexButton}
             />
-            <Button
-              label={m("deleteFeed")}
-              secondary
+            <RecordActionButton
+              action="delete"
+              accessibilityLabel={m("deleteFeed")}
+              accessibilityHint={
+                locale === "zh-CN"
+                  ? "打开删除确认"
+                  : "Opens a confirmation before deleting"
+              }
               disabled={workspaceBusy || !!waiting || !!pilot.draft}
               onPress={() =>
                 confirm(
@@ -849,7 +859,6 @@ export default function FamilyScreenView({
                   () => pilot.deleteFeed(feed.id),
                 )
               }
-              style={styles.flexButton}
             />
           </View>
         ) : null}
@@ -873,20 +882,34 @@ export default function FamilyScreenView({
       (!snapshot || !pilot.ready);
     return (
       <Card style={styles.card}>
-        <Button
-          label={m("deletion")}
-          secondary
-          disabled={workspaceBusy || owner || familyAccessPending}
-          onPress={() =>
-            confirm(
-              "deleteAccountTitle",
-              m("deleteAccountDescription"),
-              "deleteAccount",
-              pilot.deleteAccount,
-              "deleteAccountConsent",
-            )
-          }
-        />
+        <View style={styles.spread}>
+          <T
+            raw
+            accessibilityRole="header"
+            style={{ flex: 1, fontSize: 18, fontWeight: "700" }}
+          >
+            {m("deletion")}
+          </T>
+          <RecordActionButton
+            action="delete"
+            accessibilityLabel={m("deletion")}
+            accessibilityHint={
+              locale === "zh-CN"
+                ? "打开删除账户确认"
+                : "Opens the account deletion confirmation"
+            }
+            disabled={workspaceBusy || owner || familyAccessPending}
+            onPress={() =>
+              confirm(
+                "deleteAccountTitle",
+                m("deleteAccountDescription"),
+                "deleteAccount",
+                pilot.deleteAccount,
+                "deleteAccountConsent",
+              )
+            }
+          />
+        </View>
         {owner ? (
           <T raw style={styles.muted(c.muted)}>
             {m("deleteAccountBlocked")}

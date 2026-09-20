@@ -8,6 +8,7 @@ import {
   useWindowDimensions,
 } from "react-native";
 import Modal from "./AccessibleModal";
+import RecordActionButton from "./RecordActionButton";
 import { SafeAreaView } from "react-native-safe-area-context";
 import DateTimePicker, {
   type DateTimePickerEvent,
@@ -626,10 +627,13 @@ export default function DailyCare({
                   })}
                 </T>
               </View>
-              <Pressable
-                accessibilityRole="button"
+              <RecordActionButton
+                action="edit"
                 accessibilityLabel={text("编辑照护记录", "Edit care record")}
-                accessibilityState={{ disabled: busy || !canEdit(r.id) }}
+                accessibilityHint={text(
+                  "打开记录编辑界面",
+                  "Opens the record editor",
+                )}
                 disabled={busy || !canEdit(r.id)}
                 onPress={() => {
                   if (!canEdit(r.id)) return;
@@ -646,21 +650,14 @@ export default function DailyCare({
                   setNote(r.note);
                   setMessage(null);
                 }}
-                style={{
-                  minHeight: 44,
-                  minWidth: 44,
-                  justifyContent: "center",
-                  paddingHorizontal: 4,
-                }}
-              >
-                <T raw style={{ fontSize: 12, color: c.primary }}>
-                  {text("编辑", "Edit")}
-                </T>
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
+              />
+              <RecordActionButton
+                action="delete"
                 accessibilityLabel={text("删除照护记录", "Delete care record")}
-                accessibilityState={{ disabled: busy || !canEdit(r.id) }}
+                accessibilityHint={text(
+                  "打开删除确认",
+                  "Opens a confirmation before deleting",
+                )}
                 disabled={busy || !canEdit(r.id)}
                 onPress={() => {
                   if (canEdit(r.id)) {
@@ -668,17 +665,7 @@ export default function DailyCare({
                     setConfirm(r.id);
                   }
                 }}
-                style={{
-                  minHeight: 44,
-                  minWidth: 44,
-                  justifyContent: "center",
-                  paddingHorizontal: 4,
-                }}
-              >
-                <T raw style={{ fontSize: 12, color: c.muted }}>
-                  {text("删除", "Delete")}
-                </T>
-              </Pressable>
+              />
             </View>
             {r.note ? (
               <T raw style={{ fontSize: 12, color: c.muted }}>
