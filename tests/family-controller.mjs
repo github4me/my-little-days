@@ -3137,6 +3137,124 @@ const liveSleep = {
   start: "2026-09-01T01:00:00.000Z",
   note: "",
 };
+test("timer starts are durably projected before their authoritative preflight finishes", async () => {
+  const timerFeed = {
+    id: "preflight-feed",
+    type: "feed",
+    feedKind: "formula",
+    feedRunning: true,
+    amount: 120,
+    start: "2026-09-01T01:00:00.000Z",
+    note: "",
+  };
+  for (const entry of [liveSleep, timerFeed]) {
+    const world = makeWorld({ offline: false });
+    const c = await boot(world);
+    const gate = deferred();
+    try {
+      world.http.length = 0;
+      world.beforeSnapshot = () => gate.promise;
+      await c.result().saveRecord("entry", entry);
+      await until(
+        () => world.http.some((request) => request.url.endsWith("/snapshot")),
+        `${entry.type} timer preflight`,
+      );
+      const projected = c
+        .result()
+        .sharedState.entries.find((item) => item.id === entry.id);
+      assert.equal(
+        JSON.stringify(projected),
+        JSON.stringify(entry),
+        entry.type,
+      );
+      assert.equal(world.read().records.length, 1, entry.type);
+      assert.equal(
+        world.read().records[0].operation.recordId,
+        entry.id,
+        entry.type,
+      );
+      assert.equal(world.recordsSent.length, 0, entry.type);
+      gate.resolve();
+      await until(
+        () => world.recordsSent.length === 1 && !c.result().syncing,
+        `${entry.type} timer background send`,
+      );
+      assert.equal(world.recordsSent[0].durablySaved, true, entry.type);
+    } finally {
+      gate.resolve();
+      c.unmount();
+    }
+  }
+});
+
+test("an unrelated remote feed remains independent while a sleep stop projects and syncs", async () => {
+  const world = makeWorld({ offline: false });
+  world.server.entries = [
+    {
+      entry: liveSleep,
+      version: "sleep-version",
+      recordedBy: "user-a",
+      lastEditedBy: "user-a",
+    },
+  ];
+  world.server.revision = "1";
+  const c = await boot(world);
+  const gate = deferred();
+  const stoppedAt = "2026-09-01T01:05:00.000Z";
+  const remoteFeed = {
+    id: "other-members-feed",
+    type: "feed",
+    start: "2026-09-01T01:02:00.000Z",
+    end: "2026-09-01T01:04:00.000Z",
+    feedKind: "formula",
+    amount: 90,
+    note: "",
+  };
+  try {
+    world.server.entries.push({
+      entry: remoteFeed,
+      version: "feed-version",
+      recordedBy: "other-user",
+      lastEditedBy: "other-user",
+    });
+    world.server.revision = "2";
+    world.http.length = 0;
+    world.beforeSnapshot = () => gate.promise;
+
+    await c.result().finishSleep(liveSleep.id, stoppedAt);
+    await until(
+      () => world.http.some((request) => request.url.endsWith("/snapshot")),
+      "sleep-stop preflight",
+    );
+    assert.equal(
+      c.result().sharedState.entries.find((entry) => entry.id === liveSleep.id)
+        ?.end,
+      stoppedAt,
+    );
+    assert.equal(world.read().records[0].timerCompletion, "sleep");
+    assert.equal(world.recordsSent.length, 0);
+    assert.equal(c.result().recordConflicts.length, 0);
+
+    gate.resolve();
+    await until(
+      () => world.recordsSent.length === 1 && !c.result().syncing,
+      "independent sleep completion",
+    );
+    assert.equal(world.recordsSent[0].operation.recordId, liveSleep.id);
+    assert.equal(world.recordsSent[0].operation.entry.end, stoppedAt);
+    assert.deepEqual(
+      world.server.entries.find((item) => item.entry.id === remoteFeed.id)
+        ?.entry,
+      remoteFeed,
+    );
+    assert.equal(c.result().recordConflicts.length, 0);
+    assert.equal(world.read().records.length, 0);
+  } finally {
+    gate.resolve();
+    c.unmount();
+  }
+});
+
 test("timer preflight finds an active sleep before either member can queue a duplicate", async () => {
   for (const recordedBy of ["other-user", "user-a"]) {
     const world = makeWorld({ offline: false });

@@ -330,7 +330,9 @@ test("an unresolved lifecycle operation hides full records and blocks record sub
 const stopped = (milliseconds: number) =>
   new Date(Date.parse(start) + milliseconds).toISOString();
 function pendingSleep() {
-  const base = applyFullSnapshot(emptyPilotState(), snapshot());
+  const initial = snapshot();
+  initial.entries = [];
+  const base = applyFullSnapshot(emptyPilotState(), initial);
   return enqueueRecord(base, {
     ...operation({ id: "new-sleep", type: "sleep", start, note: "" }),
     kind: "create",
@@ -340,13 +342,459 @@ function pendingSleep() {
 function committedSleep(state: ReturnType<typeof pendingSleep>) {
   const incoming = snapshot();
   incoming.revision = "2";
-  incoming.entries.push({
-    ...metadata,
-    version: "created-version",
-    entry: state.records![0].operation.entry!,
-  });
+  incoming.entries = [
+    {
+      ...metadata,
+      version: "created-version",
+      entry: state.records![0].operation.entry!,
+    },
+  ];
   return incoming;
 }
+
+function activeTimerEntry(type: "sleep" | "feed", id: string): Entry {
+  return type === "sleep"
+    ? { id, type, start, note: "" }
+    : {
+        id,
+        type,
+        start,
+        note: "",
+        feedKind: "formula",
+        amount: 120,
+        feedRunning: true,
+      };
+}
+
+function activeTimerSnapshot(
+  type: "sleep" | "feed",
+  id = `active-${type}`,
+): FullFamilySnapshot {
+  const value = snapshot();
+  value.entries = [{ ...metadata, entry: activeTimerEntry(type, id) }];
+  return value;
+}
+
+function pendingTimerStart(
+  type: "sleep" | "feed",
+  activeType: "sleep" | "feed",
+) {
+  const base = applyFullSnapshot(
+    emptyPilotState(),
+    activeTimerSnapshot(activeType),
+  );
+  const entry = activeTimerEntry(type, `attempted-${type}`);
+  return enqueueRecord(base, {
+    operationId: `start-${type}`,
+    recordId: entry.id,
+    collection: "entry",
+    kind: "create",
+    entry,
+    membershipId: "grant",
+    historyId: "history",
+  });
+}
+
+test("a fresh snapshot rejects only a same-kind pending timer start", () => {
+  for (const type of ["sleep", "feed"] as const) {
+    const pending = pendingTimerStart(type, type);
+    const incoming = activeTimerSnapshot(type);
+    incoming.revision = "2";
+    const reconciled = applyFullSnapshot(pending, incoming);
+    assert.equal(reconciled.records?.[0].status, "failed", type);
+    assert.equal(reconciled.records?.[0].error, "active_timer_conflict", type);
+    assert.equal(recordsForSend(reconciled, reconciled).length, 0, type);
+    assert.deepEqual(
+      projectedFullState(reconciled)?.entries.map((entry) => entry.id),
+      [`active-${type}`],
+      type,
+    );
+  }
+});
+
+test("feeding and sleep timer starts coexist and remain independently sendable", () => {
+  for (const [activeType, attemptedType] of [
+    ["sleep", "feed"],
+    ["feed", "sleep"],
+  ] as const) {
+    const pending = pendingTimerStart(attemptedType, activeType);
+    const incoming = activeTimerSnapshot(activeType);
+    incoming.revision = "2";
+    const reconciled = applyFullSnapshot(pending, incoming);
+    assert.equal(reconciled.records?.[0].status, "pending");
+    assert.equal(reconciled.records?.[0].error, undefined);
+    assert.equal(recordsForSend(reconciled, reconciled).length, 1);
+    const projected = projectedFullState(reconciled)!.entries;
+    assert.ok(
+      projected.some(
+        (entry) =>
+          entry.type === activeType && entry.id === `active-${activeType}`,
+      ),
+    );
+    assert.ok(
+      projected.some(
+        (entry) =>
+          entry.type === attemptedType &&
+          entry.id === `attempted-${attemptedType}`,
+      ),
+    );
+  }
+});
+
+test("a same-kind restart waits behind the queued stop of the current timer", () => {
+  for (const type of ["sleep", "feed"] as const) {
+    const source = activeTimerSnapshot(type);
+    const base = applyFullSnapshot(emptyPilotState(), source);
+    const stoppedAt = stopped(120_000);
+    let pending =
+      type === "sleep"
+        ? enqueueSleepFinish(base, `active-${type}`, stoppedAt, `stop-${type}`)
+        : enqueueFeedFinish(
+            base,
+            `active-${type}`,
+            stoppedAt,
+            95,
+            `stop-${type}`,
+          );
+    const next = activeTimerEntry(type, `next-${type}`);
+    pending = enqueueRecord(pending, {
+      operationId: `start-next-${type}`,
+      recordId: next.id,
+      collection: "entry",
+      kind: "create",
+      entry: next,
+      membershipId: "grant",
+      historyId: "history",
+    });
+    const incoming = activeTimerSnapshot(type);
+    incoming.revision = "2";
+
+    const reconciled = applyFullSnapshot(pending, incoming);
+    assert.deepEqual(
+      reconciled.records?.map((item) => [
+        item.operation.operationId,
+        item.status,
+        item.error,
+      ]),
+      [
+        [`stop-${type}`, "pending", undefined],
+        [`start-next-${type}`, "pending", undefined],
+      ],
+      type,
+    );
+    assert.deepEqual(
+      recordsForSend(reconciled, reconciled).map(
+        (item) => item.operation.operationId,
+      ),
+      [`stop-${type}`, `start-next-${type}`],
+      type,
+    );
+  }
+});
+
+test("a stop follow-up is sent before another start of the same timer kind", () => {
+  for (const type of ["sleep", "feed"] as const) {
+    const initial = snapshot();
+    initial.entries = [];
+    let pending = applyFullSnapshot(emptyPilotState(), initial);
+    const first = activeTimerEntry(type, `first-${type}`);
+    pending = enqueueRecord(pending, {
+      operationId: `create-first-${type}`,
+      recordId: first.id,
+      collection: "entry",
+      kind: "create",
+      entry: first,
+      membershipId: "grant",
+      historyId: "history",
+    });
+    pending =
+      type === "sleep"
+        ? enqueueSleepFinish(
+            pending,
+            first.id,
+            stopped(120_000),
+            `stop-first-${type}`,
+          )
+        : enqueueFeedFinish(
+            pending,
+            first.id,
+            stopped(120_000),
+            95,
+            `stop-first-${type}`,
+          );
+    const second = activeTimerEntry(type, `second-${type}`);
+    pending = enqueueRecord(pending, {
+      operationId: `create-second-${type}`,
+      recordId: second.id,
+      collection: "entry",
+      kind: "create",
+      entry: second,
+      membershipId: "grant",
+      historyId: "history",
+    });
+    assert.deepEqual(
+      recordsForSend(pending, pending).map(
+        (item) => item.operation.operationId,
+      ),
+      [`create-first-${type}`],
+      type,
+    );
+
+    const accepted = acceptRecordReceipt(pending, `create-first-${type}`, {
+      operationId: `create-first-${type}`,
+      historyId: "history",
+      revision: "2",
+    });
+    const materialized = snapshot();
+    materialized.revision = "2";
+    materialized.entries = [
+      { ...metadata, version: `version-first-${type}`, entry: first },
+    ];
+    const promoted = applyFullSnapshot(accepted, materialized);
+    assert.deepEqual(
+      promoted.records?.map((item) => [
+        item.operation.operationId,
+        item.status,
+        item.error,
+      ]),
+      [
+        [`stop-first-${type}`, "pending", undefined],
+        [`create-second-${type}`, "pending", undefined],
+      ],
+      type,
+    );
+    assert.deepEqual(
+      recordsForSend(promoted, promoted).map(
+        (item) => item.operation.operationId,
+      ),
+      [`stop-first-${type}`, `create-second-${type}`],
+      type,
+    );
+  }
+});
+
+test("a stop follow-up also precedes reactivating a completed timer", () => {
+  for (const type of ["sleep", "feed"] as const) {
+    const initial = snapshot();
+    const completed = {
+      ...activeTimerEntry(type, `completed-${type}`),
+      end: stopped(60_000),
+      ...(type === "feed" ? { feedRunning: undefined } : {}),
+    } as Entry;
+    initial.entries = [{ ...metadata, entry: completed }];
+    let pending = applyFullSnapshot(emptyPilotState(), initial);
+    const first = activeTimerEntry(type, `first-${type}`);
+    pending = enqueueRecord(pending, {
+      operationId: `create-first-${type}`,
+      recordId: first.id,
+      collection: "entry",
+      kind: "create",
+      entry: first,
+      membershipId: "grant",
+      historyId: "history",
+    });
+    pending =
+      type === "sleep"
+        ? enqueueSleepFinish(
+            pending,
+            first.id,
+            stopped(120_000),
+            `stop-first-${type}`,
+          )
+        : enqueueFeedFinish(
+            pending,
+            first.id,
+            stopped(120_000),
+            95,
+            `stop-first-${type}`,
+          );
+    const reactivated = activeTimerEntry(type, completed.id);
+    pending = enqueueRecord(pending, {
+      operationId: `reactivate-${type}`,
+      recordId: completed.id,
+      collection: "entry",
+      kind: "update",
+      baseVersion: metadata.version,
+      entry: reactivated,
+      membershipId: "grant",
+      historyId: "history",
+    });
+    assert.deepEqual(
+      recordsForSend(pending, pending).map(
+        (item) => item.operation.operationId,
+      ),
+      [`create-first-${type}`],
+      type,
+    );
+
+    const accepted = acceptRecordReceipt(pending, `create-first-${type}`, {
+      operationId: `create-first-${type}`,
+      historyId: "history",
+      revision: "2",
+    });
+    const materialized = snapshot();
+    materialized.revision = "2";
+    materialized.entries = [
+      { ...metadata, version: `version-first-${type}`, entry: first },
+      { ...metadata, entry: completed },
+    ];
+    const promoted = applyFullSnapshot(accepted, materialized);
+    assert.deepEqual(
+      recordsForSend(promoted, promoted).map(
+        (item) => item.operation.operationId,
+      ),
+      [`stop-first-${type}`, `reactivate-${type}`],
+      type,
+    );
+  }
+});
+
+test("an unrelated feeding revision does not invalidate a pending sleep completion", () => {
+  const source = activeTimerSnapshot("sleep");
+  const stoppedAt = stopped(120_000);
+  const pending = enqueueSleepFinish(
+    applyFullSnapshot(emptyPilotState(), source),
+    "active-sleep",
+    stoppedAt,
+    "finish-sleep",
+  );
+  const incoming = activeTimerSnapshot("sleep");
+  incoming.revision = "2";
+  incoming.entries.push({
+    ...metadata,
+    version: "feed-version",
+    recordedBy: "other-member",
+    lastEditedBy: "other-member",
+    entry: {
+      id: "unrelated-feed",
+      type: "feed",
+      start,
+      end: stopped(60_000),
+      feedKind: "formula",
+      amount: 95,
+      note: "",
+    },
+  });
+
+  const reconciled = applyFullSnapshot(pending, incoming);
+  assert.equal(reconciled.records?.[0].status, "pending");
+  assert.equal(reconciled.records?.[0].error, undefined);
+  assert.equal(reconciled.records?.[0].timerCompletion, "sleep");
+  assert.equal(recordsForSend(reconciled, reconciled).length, 1);
+  assert.equal(
+    projectedFullState(reconciled)?.entries.find(
+      (entry) => entry.id === "active-sleep",
+    )?.end,
+    stoppedAt,
+  );
+});
+
+test("a materialized timer stop is acknowledged while a different remote stop is reported precisely", () => {
+  for (const type of ["sleep", "feed"] as const) {
+    const source = activeTimerSnapshot(type);
+    const original = source.entries[0].entry;
+    const stoppedAt = stopped(120_000);
+    const base = applyFullSnapshot(emptyPilotState(), source);
+    const pending =
+      type === "sleep"
+        ? enqueueSleepFinish(base, original.id, stoppedAt, `finish-${type}`)
+        : enqueueFeedFinish(
+            base,
+            original.id,
+            stoppedAt,
+            95,
+            `finish-${type}`,
+            metadata.version,
+            original,
+          );
+    const attempted = pending.records![0].operation.entry!;
+    const applied = activeTimerSnapshot(type);
+    applied.revision = "2";
+    applied.entries[0] = {
+      ...applied.entries[0],
+      version: "finished-version",
+      lastEditedBy: "owner",
+      endedBy: "owner",
+      entry: attempted,
+    };
+    const acknowledged = applyFullSnapshot(pending, applied);
+    assert.equal(acknowledged.records?.length, 0, type);
+    assert.deepEqual(
+      projectedFullState(acknowledged)?.entries[0],
+      attempted,
+      type,
+    );
+
+    const remote = activeTimerSnapshot(type);
+    remote.revision = "2";
+    remote.entries[0] = {
+      ...remote.entries[0],
+      version: "remote-finished-version",
+      lastEditedBy: "other-member",
+      endedBy: "other-member",
+      entry: {
+        ...attempted,
+        end: stopped(180_000),
+        ...(type === "feed" ? { amount: 80 } : {}),
+      },
+    };
+    const conflicted = applyFullSnapshot(pending, remote);
+    assert.equal(conflicted.records?.[0].status, "failed", type);
+    assert.equal(conflicted.records?.[0].error, "timer_already_finished", type);
+    assert.equal(recordsForSend(conflicted, conflicted).length, 0, type);
+    assert.equal(
+      projectedFullState(conflicted)?.entries[0].end,
+      stopped(180_000),
+      type,
+    );
+  }
+});
+
+test("a later edit keeps an already-applied timer completion acknowledged", () => {
+  for (const type of ["sleep", "feed"] as const) {
+    const source = activeTimerSnapshot(type);
+    const stoppedAt = stopped(120_000);
+    const base = applyFullSnapshot(emptyPilotState(), source);
+    const pending =
+      type === "sleep"
+        ? enqueueSleepFinish(
+            base,
+            `active-${type}`,
+            stoppedAt,
+            `finish-${type}`,
+          )
+        : enqueueFeedFinish(
+            base,
+            `active-${type}`,
+            stoppedAt,
+            95,
+            `finish-${type}`,
+          );
+    const attempted = pending.records![0].operation.entry!;
+    const edited = activeTimerSnapshot(type);
+    edited.revision = "3";
+    edited.entries[0] = {
+      ...edited.entries[0],
+      version: "edited-after-finish",
+      lastEditedBy: "other-member",
+      endedBy: "owner",
+      entry: {
+        ...attempted,
+        note: "reviewed after the timer ended",
+        ...(type === "feed" ? { amount: 90 } : {}),
+      },
+    };
+
+    const reconciled = applyFullSnapshot(pending, edited);
+    assert.equal(reconciled.records?.length, 0, type);
+    assert.equal(
+      projectedFullState(reconciled)?.entries[0].note,
+      "reviewed after the timer ended",
+      type,
+    );
+  }
+});
+
 test("pending sleep can stop immediately without changing the original operation, including restart", () => {
   const pending = pendingSleep();
   const original = JSON.stringify(pending.records![0].operation);

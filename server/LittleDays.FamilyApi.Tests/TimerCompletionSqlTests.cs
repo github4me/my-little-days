@@ -83,6 +83,39 @@ public sealed class TimerCompletionSqlTests(SqlFixture sql) : IClassFixture<SqlF
     }
 
     [SqlFact]
+    public async Task ActiveSleepAndFeedAreIndependentAndUnrelatedFeedDoesNotInvalidateSleepFinish()
+    {
+        var setup = await Setup(enforceSingleActiveTimers: true);
+        await setup.Apply(setup.Caregiver, Create(setup, setup.CaregiverGrant,
+            Sleep("independent-sleep", "2026-09-19T15:00:00Z")));
+        var sleepBeforeFeed = await setup.Entry("independent-sleep");
+
+        await setup.Apply(setup.Other, Create(setup, setup.OtherGrant,
+            Feed("independent-feed", "2026-09-19T15:05:00Z", 0, running: true)));
+
+        var sleepAfterFeed = await setup.Entry("independent-sleep");
+        Assert.Equal(sleepBeforeFeed.Version, sleepAfterFeed.Version);
+        await Code("active_timer_conflict", () => setup.Apply(setup.Owner,
+            Create(setup, setup.OwnerGrant, Sleep("duplicate-sleep", "2026-09-19T15:06:00Z"))));
+        await Code("active_timer_conflict", () => setup.Apply(setup.Owner,
+            Create(setup, setup.OwnerGrant, Feed("duplicate-feed", "2026-09-19T15:07:00Z", 0, running: true))));
+
+        await setup.Apply(setup.Caregiver, Update(setup, setup.CaregiverGrant, sleepBeforeFeed,
+            Sleep("independent-sleep", "2026-09-19T15:00:00Z", "2026-09-19T15:30:00Z")));
+
+        var snapshot = await setup.Snapshot();
+        var completedSleep = snapshot.Entries.Single(x =>
+            x.Entry.GetProperty("id").GetString() == "independent-sleep");
+        var activeFeed = snapshot.Entries.Single(x =>
+            x.Entry.GetProperty("id").GetString() == "independent-feed");
+        Assert.Equal("2026-09-19T15:30:00Z", completedSleep.Entry.GetProperty("end").GetString());
+        Assert.Equal(setup.Caregiver.ObjectId, completedSleep.RecordedBy);
+        Assert.Equal(setup.Caregiver.ObjectId, completedSleep.EndedBy);
+        Assert.True(activeFeed.Entry.GetProperty("feedRunning").GetBoolean());
+        Assert.False(activeFeed.Entry.TryGetProperty("end", out _));
+    }
+
+    [SqlFact]
     public async Task CrossMemberSubMinuteSleepStopCompletesWithAttributionAndDeleteRemainsForbidden()
     {
         var setup = await Setup();

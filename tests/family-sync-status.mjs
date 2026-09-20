@@ -53,6 +53,29 @@ const activeTimerConflict = (type = "sleep", id = `operation-${type}`) => ({
     },
   },
 });
+const finishedTimerConflict = (
+  type = "sleep",
+  id = `finished-operation-${type}`,
+) => ({
+  ...conflict(id),
+  error: "timer_already_finished",
+  timerCompletion: type,
+  operation: {
+    operationId: id,
+    recordId: `active-${type}`,
+    kind: "update",
+    collection: "entry",
+    baseVersion: "4",
+    entry: {
+      id: `active-${type}`,
+      type,
+      start: "2026-09-19T21:56:00.000Z",
+      end: "2026-09-19T22:05:00.000Z",
+      note: "",
+      ...(type === "feed" ? { amount: 145, feedKind: "formula" } : {}),
+    },
+  },
+});
 
 function fullSnapshotWithActiveTimer(type = "sleep") {
   const entry = {
@@ -87,6 +110,25 @@ function fullSnapshotWithActiveTimer(type = "sleep") {
       },
     ],
   };
+}
+
+function fullSnapshotWithFinishedTimer(type = "sleep") {
+  const value = fullSnapshotWithActiveTimer(type);
+  const entry = value.entries[0].entry;
+  entry.end = "2026-09-19T22:04:00.000Z";
+  delete entry.feedRunning;
+  value.entries[0].lastEditedBy = "finisher-user";
+  value.entries[0].endedBy = "finisher-user";
+  value.members.push({
+    id: "finisher-user",
+    displayName: "Lin Chen",
+    email: null,
+    role: "caregiver",
+    membershipId: "finisher-membership",
+    status: "active",
+    endedAt: null,
+  });
+  return value;
 }
 
 function fixture(overrides = {}, locale = "en") {
@@ -390,6 +432,40 @@ test("active feeding conflicts are localized and fall back without exposing an u
   assert.match(unverified.text(), /如果计时仍在进行/);
   assert.doesNotMatch(unverified.text(), /另一位家庭成员/);
   assert.doesNotMatch(unverified.text(), /且仍在进行/);
+});
+
+test("an already-finished timer conflict names the timer kind, starter, finisher and authoritative end", () => {
+  const sleep = fixture({
+    recordConflicts: [finishedTimerConflict("sleep")],
+    fullSnapshot: fullSnapshotWithFinishedTimer("sleep"),
+  });
+  sleep.render();
+  assert.match(
+    sleep.text(),
+    /Lin Chen finished the sleep timer started by Yao Huang at/,
+  );
+  assert.match(sleep.text(), /latest family record is kept/i);
+  assert.doesNotMatch(sleep.text(), /Some changes could not be shared/);
+  sleep.render("FamilySyncDetails");
+  assert.equal(
+    sleep
+      .text()
+      .match(/Lin Chen finished the sleep timer started by Yao Huang at/g)
+      ?.length,
+    1,
+  );
+
+  const feed = fixture(
+    {
+      recordConflicts: [finishedTimerConflict("feed")],
+      fullSnapshot: fullSnapshotWithFinishedTimer("feed"),
+    },
+    "zh-CN",
+  );
+  feed.render();
+  assert.match(feed.text(), /Lin Chen 已于 .* 结束由 Yao Huang 开始的喂养计时/);
+  assert.match(feed.text(), /最新家庭记录已保留/);
+  assert.doesNotMatch(feed.text(), /部分修改未能共享/);
 });
 
 test("dismissed conflict remains reachable in details; only confirmed discard calls the controller", async () => {

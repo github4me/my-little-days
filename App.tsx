@@ -565,32 +565,6 @@ function BabyApp({
         editVersion.current?.id === e.id ? editVersion.current : null;
       if (draft && draft.context !== familyContext)
         throw new Error("membership_changed");
-      const previous = family.fullSnapshot?.entries.find(
-        (record) => record.entry.id === e.id,
-      )?.entry;
-      const startingTimer: "sleep" | "feed" | null =
-        e.type === "sleep" &&
-        !e.end &&
-        (!previous || previous.type !== "sleep" || !!previous.end)
-          ? "sleep"
-          : e.type === "feed" &&
-              !!e.feedRunning &&
-              !e.end &&
-              (!previous || previous.type !== "feed" || !previous.feedRunning)
-            ? "feed"
-            : null;
-      if (startingTimer) {
-        const currentTimer = await family.refreshActiveTimer(startingTimer);
-        if (currentTimer.activeId) {
-          setEditor(null);
-          setMessage(
-            startingTimer === "sleep"
-              ? "已同步到家庭中正在进行的睡眠，未创建重复计时。"
-              : "已同步到家庭中正在进行的喂养，未创建重复计时。",
-          );
-          return;
-        }
-      }
       await family.saveRecord(
         "entry",
         e,

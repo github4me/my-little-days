@@ -452,6 +452,87 @@ function sameEntry(left: Entry, right: Entry) {
   );
 }
 
+function activeTimerKind(entry: Entry): "sleep" | "feed" | null {
+  if (entry.type === "sleep" && !entry.end) return "sleep";
+  if (entry.type === "feed" && entry.feedRunning === true && !entry.end)
+    return "feed";
+  return null;
+}
+
+function timerStartKind(operation: RecordOperation): "sleep" | "feed" | null {
+  if (operation.kind === "delete" || operation.collection !== "entry")
+    return null;
+  return operation.entry ? activeTimerKind(operation.entry) : null;
+}
+
+function hasOtherActiveTimer(
+  snapshot: FullFamilySnapshot,
+  operation: RecordOperation,
+  preceding: readonly QueuedRecord[],
+) {
+  const kind = timerStartKind(operation);
+  return (
+    !!kind &&
+    snapshot.entries.some(
+      ({ entry }) =>
+        entry.id !== operation.recordId &&
+        activeTimerKind(entry) === kind &&
+        !preceding.some((item) => resolvesActiveTimer(item, entry.id, kind)),
+    )
+  );
+}
+
+function resolvesActiveTimer(
+  item: QueuedRecord,
+  recordId: string,
+  kind: "sleep" | "feed",
+) {
+  return (
+    item.status !== "failed" &&
+    item.operation.collection === "entry" &&
+    item.operation.recordId === recordId &&
+    (item.timerCompletion === kind || item.operation.kind === "delete")
+  );
+}
+
+function completedTimerRecord(
+  snapshot: FullFamilySnapshot,
+  operation: RecordOperation,
+  type: "sleep" | "feed",
+) {
+  const record = snapshot.entries.find(
+    ({ entry }) => entry.id === operation.recordId,
+  );
+  if (!record || record.entry.type !== type) return undefined;
+  if (type === "sleep") return record.entry.end ? record : undefined;
+  return record.entry.end && !record.entry.feedRunning ? record : undefined;
+}
+
+function timerCompletionAlreadyApplied(
+  snapshot: FullFamilySnapshot,
+  item: QueuedRecord,
+) {
+  const record = snapshot.entries.find(
+    ({ entry }) => entry.id === item.operation.recordId,
+  );
+  const intended = item.operation.entry;
+  if (!record || !intended || !item.timerCompletion || !intended.end)
+    return false;
+  const sameCompletion =
+    record.entry.type === item.timerCompletion &&
+    intended.type === item.timerCompletion &&
+    record.entry.end === intended.end &&
+    (item.timerCompletion === "sleep" || record.entry.feedRunning !== true);
+  if (!sameCompletion) return false;
+  // Newer APIs preserve the identity of the member who stopped the timer even
+  // if somebody edits notes or amounts later. Older snapshots do not include
+  // endedBy, so retain the exact-entry fallback for compatibility.
+  return record.endedBy
+    ? record.endedBy === item.origin.userId
+    : record.lastEditedBy === item.origin.userId &&
+        sameEntry(record.entry, intended);
+}
+
 function promoteTimerFinish(
   q: QueuedRecord,
   snapshot: FullFamilySnapshot,
@@ -559,28 +640,48 @@ export function applyFullSnapshot(
   const snapshot = validateFullSnapshot(incoming);
   const next = applySnapshot(state, snapshot);
   if (next === state) return state;
-  const records = (state.records ?? [])
-    .filter((q) => matchesOrigin(q.origin, snapshot))
-    .flatMap<QueuedRecord>((q) => {
-      if (
-        q.status === "accepted" &&
-        q.receiptRevision &&
-        revision(snapshot.revision) >= revision(q.receiptRevision)
-      )
-        return promoteTimerFinish(q, snapshot);
-      if (q.timerCompletion) {
-        if (
-          !isTimerCompletionOperation(snapshot, q.operation, q.timerCompletion)
-        )
-          return [{ ...q, status: "failed", error: "record_changed" }];
-        return [q];
+  const records: QueuedRecord[] = [];
+  for (const queued of state.records ?? []) {
+    if (!matchesOrigin(queued.origin, snapshot)) continue;
+    let q = queued;
+    if (
+      q.status === "accepted" &&
+      q.receiptRevision &&
+      revision(snapshot.revision) >= revision(q.receiptRevision)
+    ) {
+      records.push(...promoteTimerFinish(q, snapshot));
+      continue;
+    }
+    if (
+      q.status === "pending" &&
+      hasOtherActiveTimer(snapshot, q.operation, records)
+    ) {
+      records.push({
+        ...q,
+        status: "failed",
+        error: "active_timer_conflict",
+      });
+      continue;
+    }
+    if (q.timerCompletion) {
+      if (timerCompletionAlreadyApplied(snapshot, q)) continue;
+      if (completedTimerRecord(snapshot, q.operation, q.timerCompletion)) {
+        records.push({
+          ...q,
+          status: "failed",
+          error: "timer_already_finished",
+        });
+        continue;
       }
-      if (
-        !canEditRecord(snapshot, q.operation.collection, q.operation.recordId)
-      )
-        return [{ ...q, status: "failed", error: "record_forbidden" }];
-      return [q];
-    });
+      if (!isTimerCompletionOperation(snapshot, q.operation, q.timerCompletion))
+        q = { ...q, status: "failed", error: "record_changed" };
+      records.push(q);
+      continue;
+    }
+    if (!canEditRecord(snapshot, q.operation.collection, q.operation.recordId))
+      q = { ...q, status: "failed", error: "record_forbidden" };
+    records.push(q);
+  }
   return { ...next, records };
 }
 export function acceptRecordReceipt(
@@ -626,19 +727,37 @@ export function recordsForSend(durable: PilotState, visible: PilotState) {
     !isFullSnapshot(durable.snapshot)
   )
     return [];
-  const watchRecordingEnabled = visible.snapshot.watchRecordingEnabled === true;
-  return (durable.records ?? []).filter(
-    (q) =>
-      q.status === "pending" &&
-      (!durable.watchLedger?.[q.operation.operationId] ||
-        watchRecordingEnabled) &&
-      matchesOrigin(q.origin, visible.snapshot) &&
-      (visible.records ?? []).some(
-        (v) =>
-          v.operation.operationId === q.operation.operationId &&
-          v.status === "pending",
-      ),
-  );
+  const snapshot = visible.snapshot;
+  const watchRecordingEnabled = snapshot.watchRecordingEnabled === true;
+  const visibleRecords = visible.records ?? [];
+  return (durable.records ?? []).filter((q) => {
+    if (
+      q.status !== "pending" ||
+      (durable.watchLedger?.[q.operation.operationId] &&
+        !watchRecordingEnabled) ||
+      !matchesOrigin(q.origin, snapshot)
+    )
+      return false;
+    const index = visibleRecords.findIndex(
+      (v) =>
+        v.operation.operationId === q.operation.operationId &&
+        v.status === "pending",
+    );
+    if (index < 0) return false;
+    const kind = timerStartKind(q.operation);
+    if (!kind) return true;
+    const preceding = visibleRecords.slice(0, index);
+    // A later start of the same timer kind must wait until the earlier start
+    // and its optional stop have reached the service in order.
+    if (
+      preceding.some(
+        (item) =>
+          item.status !== "failed" && timerStartKind(item.operation) === kind,
+      )
+    )
+      return false;
+    return !hasOtherActiveTimer(snapshot, q.operation, preceding);
+  });
 }
 export function projectedFullState(state: PilotState): State | null {
   if (state.transition || !isFullSnapshot(state.snapshot)) return null;

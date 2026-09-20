@@ -87,6 +87,38 @@ function timerConflictMessage(
   return `${starter} started the ${kind === "sleep" ? "sleep" : "feeding"} timer at ${time}, and it is still ongoing. Your new timer was not shared and is preserved on this device. Return to Today to finish the ongoing timer.`;
 }
 
+function timerAlreadyFinishedMessage(
+  item: QueuedRecord,
+  pilot: Pilot,
+  locale: AppLocale,
+) {
+  const kind = item.timerCompletion ?? item.operation.entry?.type;
+  const record = pilot.fullSnapshot?.entries.find(
+    ({ entry }) => entry.id === item.operation.recordId,
+  );
+  if ((kind !== "sleep" && kind !== "feed") || !record || !record.entry.end)
+    return familyErrorMessage(locale, "timer_already_finished");
+  const fallback = fullFamilyMessage(locale, "memberFallback");
+  const starter =
+    pilot.fullSnapshot?.members.find(
+      (member) => member.id === record.recordedBy,
+    )?.displayName || fallback;
+  const finisher =
+    pilot.fullSnapshot?.members.find(
+      (member) => member.id === (record.endedBy ?? record.lastEditedBy),
+    )?.displayName || fallback;
+  const endedAt = new Date(record.entry.end);
+  if (!Number.isFinite(endedAt.getTime()))
+    return familyErrorMessage(locale, "timer_already_finished");
+  const time = endedAt.toLocaleTimeString(
+    locale === "zh-CN" ? "zh-CN" : "en-AU",
+    { hour: "2-digit", minute: "2-digit" },
+  );
+  if (locale === "zh-CN")
+    return `${finisher} 已于 ${time} 结束由 ${starter} 开始的${kind === "sleep" ? "睡眠" : "喂养"}计时。最新家庭记录已保留；你选择的结束时间没有覆盖它，并保留在本机供检查。`;
+  return `${finisher} finished the ${kind === "sleep" ? "sleep" : "feeding"} timer started by ${starter} at ${time}. The latest family record is kept; your chosen end time did not overwrite it and remains on this device for review.`;
+}
+
 function IssueMessages({
   issues,
   pilot,
@@ -99,8 +131,13 @@ function IssueMessages({
   const activeTimerConflicts = conflicts.filter(
     (issue) => issue.code === "active_timer_conflict",
   );
+  const finishedTimerConflicts = conflicts.filter(
+    (issue) => issue.code === "timer_already_finished",
+  );
   const hasOtherConflicts = conflicts.some(
-    (issue) => issue.code !== "active_timer_conflict",
+    (issue) =>
+      issue.code !== "active_timer_conflict" &&
+      issue.code !== "timer_already_finished",
   );
   const reviewable = reviewableRecordConflicts(pilot);
   return (
@@ -114,6 +151,11 @@ function IssueMessages({
               activeTimerConflicts.length &&
               issue.kind === "error" &&
               issue.code === "active_timer_conflict"
+            ) &&
+            !(
+              finishedTimerConflicts.length &&
+              issue.kind === "error" &&
+              issue.code === "timer_already_finished"
             ),
         )
         .map((issue) => (
@@ -137,6 +179,21 @@ function IssueMessages({
             {item
               ? timerConflictMessage(item, pilot, locale)
               : familyErrorMessage(locale, "active_timer_conflict")}
+          </T>
+        );
+      })}
+      {finishedTimerConflicts.map((issue) => {
+        const operationId = conflictOperationId(issue);
+        const item = operationId
+          ? reviewable.find(
+              (conflict) => conflict.operation.operationId === operationId,
+            )
+          : undefined;
+        return (
+          <T raw key={`finished:${issue.key}`}>
+            {item
+              ? timerAlreadyFinishedMessage(item, pilot, locale)
+              : familyErrorMessage(locale, "timer_already_finished")}
           </T>
         );
       })}
@@ -314,7 +371,8 @@ export function FamilySyncDetails({ pilot }: { pilot: Pilot }) {
             <T raw style={{ fontWeight: "600" }}>
               {recordDescription(item, locale)}
             </T>
-            {item.error === "active_timer_conflict" ? null : (
+            {item.error === "active_timer_conflict" ||
+            item.error === "timer_already_finished" ? null : (
               <T raw>
                 {sharingText(
                   familyErrorMessage(locale, item.error ?? "record_changed"),

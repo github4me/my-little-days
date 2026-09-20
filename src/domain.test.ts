@@ -42,6 +42,36 @@ test("feed timers persist without activating legacy records and reject conflicti
     undefined,
   );
 });
+test("running sleep and feed timers are independent while same-kind duplicates remain invalid", () => {
+  const runningFeed = validateEntry({ ...feed, feedRunning: true });
+  const runningSleep: Entry = {
+    id: "sleep-1",
+    type: "sleep",
+    start: feed.start,
+    note: "",
+  };
+  const concurrent = validateState({
+    ...initialState,
+    entries: [runningSleep, runningFeed],
+  });
+  assert.deepEqual(concurrent.entries, [runningSleep, runningFeed]);
+  assert.throws(
+    () =>
+      validateState({
+        ...initialState,
+        entries: [runningSleep, { ...runningSleep, id: "sleep-2" }],
+      }),
+    /只能有一个进行中的睡眠/,
+  );
+  assert.throws(
+    () =>
+      validateState({
+        ...initialState,
+        entries: [runningFeed, { ...runningFeed, id: "feed-2" }],
+      }),
+    /请先停止正在进行的喂养/,
+  );
+});
 test("backup round-trip validates and returns detached data", () => {
   const state = {
     ...initialState,
