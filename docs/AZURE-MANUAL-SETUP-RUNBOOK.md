@@ -2272,3 +2272,54 @@ column is backward-compatible with the prior `en/zh` API. Roll back only to a
 reviewed API/client, keep the existing push gates and encryption key, require zero
 pending scripts, and ship a forward correction rather than narrowing the column or
 discarding registrations.
+
+## Family recovery navigation repair — TestFlight build 40, 21 September 2026
+
+- App source commit
+  [`d9bf542c2a8761abbdf4cb43d89133146d8e76a8`](https://github.com/github4me/my-little-days/commit/d9bf542c2a8761abbdf4cb43d89133146d8e76a8)
+  removes the inert Back action from the family-access recovery screen. When a
+  cached family workspace cannot yet be authorized, the screen now offers a
+  non-blocking Refresh, explicit Login and a confirmed Sign out escape back to
+  personal/offline mode. A slow Refresh does not disable Login or Sign out. Sign
+  out discloses and permanently discards unsent family changes/private drafts;
+  an unresolved create/join activation continues to block sign out so its durable
+  lifecycle result can be recovered. Family data remains hidden until authority is
+  verified. No Buy Me a Coffee runtime work is included.
+- Local verification passed `npm run verify`, `npm run test:browser`, iOS and web
+  production exports, focused family UI/navigation regressions and an independent
+  code review. The new regression holds Refresh pending and confirms the recovery
+  escape remains enabled, its destructive confirmation is accurate and no fake
+  Back control is rendered. [Family sharing CI run 35532528433](https://github.com/github4me/my-little-days/actions/runs/35532528433)
+  passed both **TypeScript and browser** and **API and SQL integration** for that
+  exact source SHA.
+- Before build, the Expo **production** project environment was read back against
+  section 12.1: API URL, Entra tenant/client/scope and
+  `EXPO_PUBLIC_FAMILY_UI_DEMO=0` all matched, with no account-level production
+  overrides. The existing STORE profile, Apple team `A9974KXQ4G`, Phone, Watch and
+  Widget credentials, runtime/app version **0.2.1** and disabled OTA were retained.
+  No Azure, API, SQL, Entra or firewall change was required.
+- Exact-source EAS build
+  [`ebdc2035-ab0c-419d-a1ba-ad92880989f8`](https://expo.dev/accounts/expo4chao/projects/little-days/builds/ebdc2035-ab0c-419d-a1ba-ad92880989f8)
+  finished successfully as iOS **0.2.1 (40)** from `d9bf542c...` with fingerprint
+  `b19989c5146f7e32d0ea645232a2e7babe54f5b0`. Downloaded IPA inspection verified
+  all three bundle identifiers and versions, the Watch companion, Widget extension
+  point, Store profiles, team/application identifiers, production push entitlement,
+  disabled debug access, Phone/Widget App Group and disabled Expo OTA. This is
+  artifact/profile inspection, not independent cryptographic signature validation.
+  IPA SHA-256:
+  `7D2E24C68C74151B18581616FB1E7F4A23862422C6748EEF4C87D9DDC7C96D9B`.
+- Exact-ID submission
+  [`7f4e9178-9e58-4182-b6e3-dc640ee67a16`](https://expo.dev/accounts/expo4chao/projects/little-days/submissions/7f4e9178-9e58-4182-b6e3-dc640ee67a16)
+  finished successfully for App Store Connect app `6809826484` with
+  `--no-auto-testflight-setup`. Apple readback reports build 40 **VALID**, internal
+  **IN_BETA_TESTING** and external **READY_FOR_BETA_SUBMISSION**. No tester group,
+  external Beta review or public App Store release was changed. Repository
+  `app.json` is aligned to build **40**.
+- Physical-device acceptance remains outstanding. Update over the existing
+  installation; do not uninstall a data-bearing app. Reproduce the original
+  unverified-session state with a disposable account, confirm Refresh remains
+  usable without hiding the two escape actions, Login can recover the same family,
+  and confirmed Sign out returns to personal/offline mode without exposing cached
+  family data. Also verify the data-loss warning when unsent family work exists and
+  the activation-pending safety lock. Passing cloud tests and Apple processing do
+  not establish those device results.
