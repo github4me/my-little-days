@@ -1,5 +1,7 @@
 # My Little Days: manual Azure and GitHub setup runbook
 
+For recurring failure patterns, product decisions and future working rules, see [project lessons and working memory](PROJECT-LESSONS.md). This runbook remains the source for exact setup and dated deployment evidence.
+
 Last updated: 20 September 2026 (Australia/Sydney).
 
 This is the operator's step-by-step reference for infrastructure, SQL bootstrap, customer authentication, API settings and releases. It records known values without storing secrets. Existing names containing `pilot` are compatibility identifiers: do not rename them or create replacement resources just because the product now supports full family sharing.
@@ -12,24 +14,24 @@ This is the operator's step-by-step reference for infrastructure, SQL bootstrap,
 
 Status below combines the historical setup conversation with the explicitly dated live verification on 16–17 September 2026. The latest SQL migration/schema, deployment result, firewall cleanup and HTTP health/rejection checks were verified directly on 17 September. Unverified or historical rows are marked separately; this is not a full audit of Azure/GitHub.
 
-| Area | Recorded status | Next action |
-| --- | --- | --- |
-| Bicep infrastructure | Successful deployment output supplied | Reuse existing resources |
-| SQL identity bootstrap | User confirmed rows created | Do not recreate the database |
-| DbUp | Migrations 0001–0005 applied; all journal hashes, indexes, counter trigger and aggregate counter reconciliation independently verified on 17 September | Future scripts start with 0006 and update the version-specific verifier; see section 22 |
-| API deployment identity and GitHub setup | User reported completed | Its client ID still needs recording in the private operator inventory |
-| Customer mobile/API registrations | IDs supplied and recorded below | Verify redirect, scope, consent and token version |
-| Customer default domain, OTP flow, Graph credentials | Completion not confirmed | Complete sections 8–9 |
-| Directory credential diagnostic | Rechecked App Service: corrected client `538d93ee-1d58-43cb-adcd-68e094200621` is active; token acquisition and reading the signed-in user succeed | Earlier client-ID blocker resolved by operator; no further credential rotation indicated |
-| Customer admission compatibility | Strict support for the observed `creationType=null`, `federated`/`mail` OTP account format deployed in `2fec7dcbfff90f72631600cd1c4a5d68ff07102f` | Release 35043608849 passed all CI, migration, deployment and liveness checks. Live Graph lookup returns exactly the same enabled account. Native sign-in still needs the user's device retry; do not recreate the account |
-| App Service runtime settings | API starts; exact deployed settings and customer authentication not audited | Verify section 10; do not recreate valid settings |
-| API liveness | Direct liveness/readiness GETs returned 200 on 17 September; unauthenticated capabilities returned 401 | Proceed to authenticated/native checks; this does not verify SQL or Graph |
-| Latest API/database workflow | Release 35172852363 succeeded for `581834c`; migration, receipt counters, temporary firewall cleanup and API health independently verified | Test signed-in refresh/read/sync on the phone; do not rerun Bicep or initialization |
-| Native sign-in and two-device acceptance | Not verified | Complete sections 12–13 |
-| Expo preview variables | Read back through EAS CLI: all four public values match, with `EXPO_PUBLIC_FAMILY_UI_DEMO=0` | Verify actual build environment selection and device provisioning before building |
-| Expo account/project and devices | CLI confirmed `expo4chao/little-days`, expected project ID and two iPhones on Apple team `A9974KXQ4G`; user confirmed the same phones will be used | Verify both are included in signing; no cloud build started by these checks |
-| Local mobile preflight | Type check and 161 tests passed; iOS JS export passed with the recorded live public settings and demo `0` | Signed native build and device acceptance still required |
-| Signed iOS preview | EAS CLI verified build `eb360c84-c263-49be-ac63-217ad61dda19` is `FINISHED`, profile `preview`, distribution `INTERNAL`, version `0.2.0` build `18` | Install on the registered phones and test real sign-in; not submitted to TestFlight by this task |
+| Area                                                 | Recorded status                                                                                                                                        | Next action                                                                                                                                                                                                               |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Bicep infrastructure                                 | Successful deployment output supplied                                                                                                                  | Reuse existing resources                                                                                                                                                                                                  |
+| SQL identity bootstrap                               | User confirmed rows created                                                                                                                            | Do not recreate the database                                                                                                                                                                                              |
+| DbUp                                                 | Migrations 0001–0005 applied; all journal hashes, indexes, counter trigger and aggregate counter reconciliation independently verified on 17 September | Future scripts start with 0006 and update the version-specific verifier; see section 22                                                                                                                                   |
+| API deployment identity and GitHub setup             | User reported completed                                                                                                                                | Its client ID still needs recording in the private operator inventory                                                                                                                                                     |
+| Customer mobile/API registrations                    | IDs supplied and recorded below                                                                                                                        | Verify redirect, scope, consent and token version                                                                                                                                                                         |
+| Customer default domain, OTP flow, Graph credentials | Completion not confirmed                                                                                                                               | Complete sections 8–9                                                                                                                                                                                                     |
+| Directory credential diagnostic                      | Rechecked App Service: corrected client `538d93ee-1d58-43cb-adcd-68e094200621` is active; token acquisition and reading the signed-in user succeed     | Earlier client-ID blocker resolved by operator; no further credential rotation indicated                                                                                                                                  |
+| Customer admission compatibility                     | Strict support for the observed `creationType=null`, `federated`/`mail` OTP account format deployed in `2fec7dcbfff90f72631600cd1c4a5d68ff07102f`      | Release 35043608849 passed all CI, migration, deployment and liveness checks. Live Graph lookup returns exactly the same enabled account. Native sign-in still needs the user's device retry; do not recreate the account |
+| App Service runtime settings                         | API starts; exact deployed settings and customer authentication not audited                                                                            | Verify section 10; do not recreate valid settings                                                                                                                                                                         |
+| API liveness                                         | Direct liveness/readiness GETs returned 200 on 17 September; unauthenticated capabilities returned 401                                                 | Proceed to authenticated/native checks; this does not verify SQL or Graph                                                                                                                                                 |
+| Latest API/database workflow                         | Release 35172852363 succeeded for `581834c`; migration, receipt counters, temporary firewall cleanup and API health independently verified             | Test signed-in refresh/read/sync on the phone; do not rerun Bicep or initialization                                                                                                                                       |
+| Native sign-in and two-device acceptance             | Not verified                                                                                                                                           | Complete sections 12–13                                                                                                                                                                                                   |
+| Expo preview variables                               | Read back through EAS CLI: all four public values match, with `EXPO_PUBLIC_FAMILY_UI_DEMO=0`                                                           | Verify actual build environment selection and device provisioning before building                                                                                                                                         |
+| Expo account/project and devices                     | CLI confirmed `expo4chao/little-days`, expected project ID and two iPhones on Apple team `A9974KXQ4G`; user confirmed the same phones will be used     | Verify both are included in signing; no cloud build started by these checks                                                                                                                                               |
+| Local mobile preflight                               | Type check and 161 tests passed; iOS JS export passed with the recorded live public settings and demo `0`                                              | Signed native build and device acceptance still required                                                                                                                                                                  |
+| Signed iOS preview                                   | EAS CLI verified build `eb360c84-c263-49be-ac63-217ad61dda19` is `FINISHED`, profile `preview`, distribution `INTERNAL`, version `0.2.0` build `18`    | Install on the registered phones and test real sign-in; not submitted to TestFlight by this task                                                                                                                          |
 
 **While a release runs:** avoid pushing a new commit to the trusted branch before its revision recheck, changing deployment variables, rerunning Bicep, or changing App Service settings without coordinating the release. App-setting changes can restart the API. Wait for the run result before deciding on recovery. Do not assume a running or green deployment means customer sign-in works.
 
@@ -45,44 +47,44 @@ Status below combines the historical setup conversation with the explicitly date
 
 ### Hosting directory: infrastructure and deployment only
 
-| Item | Known value |
-| --- | --- |
-| Hosting tenant ID | `7b7e6e31-a778-4334-aee2-e969fa27fd0e` |
-| Subscription ID | `4768a858-f23f-4a39-bb64-eabc9c142627` |
-| Resource group | `my-little-days-pilot-rg` |
-| Existing Linux B1 plan | `ProdRG/reticelASP`, Australia Southeast |
-| Web App | `little-days-api-522fpstfbtds2` |
-| API origin | `https://little-days-api-522fpstfbtds2.azurewebsites.net` |
-| Stable family history ID | `64136b6e-01e2-4c48-890f-bef208eac9e3` (App Service value independently verified unchanged on 17 September 2026) |
-| SQL server | `little-days-sql-522fpstfbtds2` |
-| SQL hostname | `little-days-sql-522fpstfbtds2.database.windows.net` |
-| Database | `little-days-family` |
-| Runtime managed identity object ID | `fbb9ee76-3e03-4089-a94c-3548f74ad35a` |
-| SQL administrator | `Chao Wang`, type `User` |
-| SQL administrator object ID | `a57bbcf8-5aec-4ac5-82e0-c02b450fc5d0` |
-| Infrastructure preview app client ID | `23ff75d4-ed66-4929-93cf-c0223c41a1f7` |
-| Infrastructure deployment app client ID | `440d17a0-8501-415a-9579-8f8de7d3c2f8` |
-| Database migration app client ID | `f122630b-8e09-4aa1-a6c4-1bb122945afb` |
-| Database migration service principal object ID | `a7f2dbde-d334-401a-b6df-a24baf0a6f43` |
-| API deployment app | `my-little-days-api-deploy`; client ID not supplied in conversation |
+| Item                                           | Known value                                                                                                      |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Hosting tenant ID                              | `7b7e6e31-a778-4334-aee2-e969fa27fd0e`                                                                           |
+| Subscription ID                                | `4768a858-f23f-4a39-bb64-eabc9c142627`                                                                           |
+| Resource group                                 | `my-little-days-pilot-rg`                                                                                        |
+| Existing Linux B1 plan                         | `ProdRG/reticelASP`, Australia Southeast                                                                         |
+| Web App                                        | `little-days-api-522fpstfbtds2`                                                                                  |
+| API origin                                     | `https://little-days-api-522fpstfbtds2.azurewebsites.net`                                                        |
+| Stable family history ID                       | `64136b6e-01e2-4c48-890f-bef208eac9e3` (App Service value independently verified unchanged on 17 September 2026) |
+| SQL server                                     | `little-days-sql-522fpstfbtds2`                                                                                  |
+| SQL hostname                                   | `little-days-sql-522fpstfbtds2.database.windows.net`                                                             |
+| Database                                       | `little-days-family`                                                                                             |
+| Runtime managed identity object ID             | `fbb9ee76-3e03-4089-a94c-3548f74ad35a`                                                                           |
+| SQL administrator                              | `Chao Wang`, type `User`                                                                                         |
+| SQL administrator object ID                    | `a57bbcf8-5aec-4ac5-82e0-c02b450fc5d0`                                                                           |
+| Infrastructure preview app client ID           | `23ff75d4-ed66-4929-93cf-c0223c41a1f7`                                                                           |
+| Infrastructure deployment app client ID        | `440d17a0-8501-415a-9579-8f8de7d3c2f8`                                                                           |
+| Database migration app client ID               | `f122630b-8e09-4aa1-a6c4-1bb122945afb`                                                                           |
+| Database migration service principal object ID | `a7f2dbde-d334-401a-b6df-a24baf0a6f43`                                                                           |
+| API deployment app                             | `my-little-days-api-deploy`; client ID not supplied in conversation                                              |
 
 ### Customer directory: parent accounts and application authentication
 
-| Item | Known value |
-| --- | --- |
-| Customer tenant ID | `deab2578-7cd3-4152-b5db-f430d6b638f8` |
-| Default customer domain | App Service currently configures `mylittledayscustomers.onmicrosoft.com`; compare against customer directory's actual default domain |
-| Mobile registration | `my-little-days-mobile` |
-| Mobile client ID | `abce8eb9-baf9-4c17-8801-20d0716a0e4d` |
-| Mobile app-registration object ID | `705f603b-b07d-484d-bfd9-6d182114941f` |
-| API registration | `my-little-days-api` |
-| API client ID | `9233837e-60c2-45c6-871b-96bd9cc8e007` |
-| API app-registration object ID | `f86866db-e6ee-45ec-aa78-890042e48b4d` |
-| Directory access registration | `my-little-days-directory`, client ID `538d93ee-1d58-43cb-adcd-68e094200621`, customer tenant confirmed by user |
-| Directory registration object ID | `caf5630f-a587-4442-b7fd-98ed56b18d14` (not the client ID) |
-| Directory service principal object ID | `c42091bb-b1e6-4796-bed1-285129ceaddc` (not the client ID) |
-| Native redirect | `mylittledays://auth` |
-| API delegated scope | `api://9233837e-60c2-45c6-871b-96bd9cc8e007/Family.ReadWrite` |
+| Item                                  | Known value                                                                                                                          |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| Customer tenant ID                    | `deab2578-7cd3-4152-b5db-f430d6b638f8`                                                                                               |
+| Default customer domain               | App Service currently configures `mylittledayscustomers.onmicrosoft.com`; compare against customer directory's actual default domain |
+| Mobile registration                   | `my-little-days-mobile`                                                                                                              |
+| Mobile client ID                      | `abce8eb9-baf9-4c17-8801-20d0716a0e4d`                                                                                               |
+| Mobile app-registration object ID     | `705f603b-b07d-484d-bfd9-6d182114941f`                                                                                               |
+| API registration                      | `my-little-days-api`                                                                                                                 |
+| API client ID                         | `9233837e-60c2-45c6-871b-96bd9cc8e007`                                                                                               |
+| API app-registration object ID        | `f86866db-e6ee-45ec-aa78-890042e48b4d`                                                                                               |
+| Directory access registration         | `my-little-days-directory`, client ID `538d93ee-1d58-43cb-adcd-68e094200621`, customer tenant confirmed by user                      |
+| Directory registration object ID      | `caf5630f-a587-4442-b7fd-98ed56b18d14` (not the client ID)                                                                           |
+| Directory service principal object ID | `c42091bb-b1e6-4796-bed1-285129ceaddc` (not the client ID)                                                                           |
+| Native redirect                       | `mylittledays://auth`                                                                                                                |
+| API delegated scope                   | `api://9233837e-60c2-45c6-871b-96bd9cc8e007/Family.ReadWrite`                                                                        |
 
 Use **Application (client) IDs** in app configuration and Azure login. Use the appropriate **service principal/managed identity object ID** when verifying SQL principals or RBAC identities. An app-registration object ID is not interchangeable with its Enterprise application object ID.
 
@@ -95,29 +97,29 @@ Repository: [github4me/my-little-days](https://github.com/github4me/my-little-da
 1. Open repository **Settings → Environments**.
 2. Reuse or create these environments:
 
-   | Environment | Purpose | Protection |
-   | --- | --- | --- |
-   | `family-infra-preview` | Read-only Bicep what-if | Exact trusted branch restriction |
-   | `family-infra` | Apply infrastructure | Required reviewer and exact branch restriction |
-   | `family-database` | DbUp migrations | Required reviewer and exact branch restriction |
-   | `family-pilot` | API deployment | Required reviewer and exact branch restriction |
+   | Environment            | Purpose                 | Protection                                     |
+   | ---------------------- | ----------------------- | ---------------------------------------------- |
+   | `family-infra-preview` | Read-only Bicep what-if | Exact trusted branch restriction               |
+   | `family-infra`         | Apply infrastructure    | Required reviewer and exact branch restriction |
+   | `family-database`      | DbUp migrations         | Required reviewer and exact branch restriction |
+   | `family-pilot`         | API deployment          | Required reviewer and exact branch restriction |
 
 3. Under deployment branches/tags choose selected branches and add `feature/family-invitations` exactly. Do not assume an environment name creates protection.
 4. Configure reviewers for the three write environments. Disable administrator bypass where available. Prevent self-review when a separate reviewer is available; a solo operator needs a workable review arrangement.
 5. If your GitHub plan/repository visibility does not support the required protections, leave privileged deployment disabled pending a reviewed alternative.
 6. Open **Settings → Secrets and variables → Actions → Variables** and record these repository variables:
 
-   | Variable | Value |
-   | --- | --- |
-   | `FAMILY_INFRA_BRANCH` | `feature/family-invitations` |
-   | `AZURE_SUBSCRIPTION_ID` | `4768a858-f23f-4a39-bb64-eabc9c142627` |
-   | `AZURE_TENANT_ID` | `7b7e6e31-a778-4334-aee2-e969fa27fd0e` |
-   | `AZURE_INFRA_PREVIEW_CLIENT_ID` | `23ff75d4-ed66-4929-93cf-c0223c41a1f7` |
-   | `AZURE_INFRA_DEPLOY_CLIENT_ID` | `440d17a0-8501-415a-9579-8f8de7d3c2f8` |
-   | `SQL_ADMIN_OBJECT_ID` | `a57bbcf8-5aec-4ac5-82e0-c02b450fc5d0` |
-   | `SQL_ADMIN_DISPLAY_NAME` | `Chao Wang` |
-   | `SQL_ADMIN_PRINCIPAL_TYPE` | `User` (capital U) |
-   | `FAMILY_INFRA_ENABLED` | `true` only once preview setup is ready |
+   | Variable                        | Value                                   |
+   | ------------------------------- | --------------------------------------- |
+   | `FAMILY_INFRA_BRANCH`           | `feature/family-invitations`            |
+   | `AZURE_SUBSCRIPTION_ID`         | `4768a858-f23f-4a39-bb64-eabc9c142627`  |
+   | `AZURE_TENANT_ID`               | `7b7e6e31-a778-4334-aee2-e969fa27fd0e`  |
+   | `AZURE_INFRA_PREVIEW_CLIENT_ID` | `23ff75d4-ed66-4929-93cf-c0223c41a1f7`  |
+   | `AZURE_INFRA_DEPLOY_CLIENT_ID`  | `440d17a0-8501-415a-9579-8f8de7d3c2f8`  |
+   | `SQL_ADMIN_OBJECT_ID`           | `a57bbcf8-5aec-4ac5-82e0-c02b450fc5d0`  |
+   | `SQL_ADMIN_DISPLAY_NAME`        | `Chao Wang`                             |
+   | `SQL_ADMIN_PRINCIPAL_TYPE`      | `User` (capital U)                      |
+   | `FAMILY_INFRA_ENABLED`          | `true` only once preview setup is ready |
 
 7. In **family-infra → Environment variables**, set `FAMILY_INFRA_APPLY_ENABLED=true` only after protection is ready, and `FAMILY_INFRA_CAPACITY_CONFIRMED=true` only after reviewing shared-plan capacity.
 
@@ -143,12 +145,12 @@ See [the infrastructure guide](AZURE-GITHUB-INFRA.md) for the exact workflow beh
 4. Audience: `api://AzureADTokenExchange`.
 5. Use the corresponding subject:
 
-   | Registration | Subject |
-   | --- | --- |
+   | Registration                   | Subject                                                                             |
+   | ------------------------------ | ----------------------------------------------------------------------------------- |
    | `my-little-days-infra-preview` | `repo:github4me@4475381/my-little-days@1360277237:environment:family-infra-preview` |
-   | `my-little-days-infra-deploy` | `repo:github4me@4475381/my-little-days@1360277237:environment:family-infra` |
-   | `my-little-days-db-migrate` | `repo:github4me@4475381/my-little-days@1360277237:environment:family-database` |
-   | `my-little-days-api-deploy` | `repo:github4me@4475381/my-little-days@1360277237:environment:family-pilot` |
+   | `my-little-days-infra-deploy`  | `repo:github4me@4475381/my-little-days@1360277237:environment:family-infra`         |
+   | `my-little-days-db-migrate`    | `repo:github4me@4475381/my-little-days@1360277237:environment:family-database`      |
+   | `my-little-days-api-deploy`    | `repo:github4me@4475381/my-little-days@1360277237:environment:family-pilot`         |
 
 6. Give the credential a descriptive name and save.
 7. Confirm issuer/subject/audience against the current workflow's binding or Azure login log. These subjects follow this repository's observed immutable-ID format; do not replace them with the older `repo:owner/repo:...` form unless the actual claim changes. Never print or copy the raw token.
@@ -163,12 +165,12 @@ See [the infrastructure guide](AZURE-GITHUB-INFRA.md) for the exact workflow beh
 6. Choose **Review + assign**, then verify the resulting assignment's scope.
 7. If Add role assignment is disabled, ask the hosting role administrator to perform it; application ownership does not itself grant Azure RBAC-assignment permission.
 
-| Principal | Role/scope to verify |
-| --- | --- |
-| Infrastructure preview | Custom role in [github-infra-preview-role.example.json](../infra/github-infra-preview-role.example.json), assigned at the hosting subscription for subscription metadata/what-if. No write roles. |
-| Infrastructure apply | Preserve the reviewed existing assignments. Needs subscription deployment/resource-group operations, target RG resource management and existing-plan join. No Owner, role-assignment management or SQL data-plane rights are required. |
-| Database migration | Custom role in [github-database-role.example.json](../infra/github-database-role.example.json), assigned only at `little-days-sql-522fpstfbtds2` SQL server. |
-| API deployment | **Website Contributor**, assigned only at `little-days-api-522fpstfbtds2` Web App. No database privileges. |
+| Principal              | Role/scope to verify                                                                                                                                                                                                                   |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Infrastructure preview | Custom role in [github-infra-preview-role.example.json](../infra/github-infra-preview-role.example.json), assigned at the hosting subscription for subscription metadata/what-if. No write roles.                                      |
+| Infrastructure apply   | Preserve the reviewed existing assignments. Needs subscription deployment/resource-group operations, target RG resource management and existing-plan join. No Owner, role-assignment management or SQL data-plane rights are required. |
+| Database migration     | Custom role in [github-database-role.example.json](../infra/github-database-role.example.json), assigned only at `little-days-sql-522fpstfbtds2` SQL server.                                                                           |
+| API deployment         | **Website Contributor**, assigned only at `little-days-api-522fpstfbtds2` Web App. No database privileges.                                                                                                                             |
 
 For a custom role: open **Subscription → IAM → Add → Add custom role**, import/review the linked JSON, create it, then make the separate role assignment at the scope specified above. `AssignableScopes` in a role definition does not itself grant access.
 
@@ -177,6 +179,8 @@ The exact infrastructure-apply role names were not supplied in the setup record,
 Portal reference: [assign Azure roles](https://learn.microsoft.com/en-us/azure/role-based-access-control/role-assignments-portal).
 
 ## 5. Bicep: initial deployment and future changes
+
+**SQL Basic migration applied on 17 September 2026:** see the [dedicated Basic migration record and procedure](AZURE-SQL-BASIC-MIGRATION.md). The ordinary workflow remains free-only and its cloud gates are disabled. See section 24 for verification and the required steady-state integration before re-enabling infrastructure.
 
 Infrastructure is already created. This section is for reference, not an instruction to redeploy now.
 
@@ -202,11 +206,11 @@ Do not run a local infrastructure apply alongside GitHub. Infrastructure apply a
 4. Sign in as the configured administrator **Chao Wang**. Server is `little-days-sql-522fpstfbtds2.database.windows.net`; select database **little-days-family**, not `master`. Keep encryption enabled and certificate validation on.
 5. Open [sql-bootstrap.sql](../infra/sql-bootstrap.sql). In a private local copy, replace:
 
-   | Variable | Value |
-   | --- | --- |
-   | `@ExpectedDatabase` | `little-days-family` |
-   | `@RuntimeIdentity` | `little-days-api-522fpstfbtds2` |
-   | `@MigrationGroup` | `my-little-days-db-migrate` |
+   | Variable            | Value                           |
+   | ------------------- | ------------------------------- |
+   | `@ExpectedDatabase` | `little-days-family`            |
+   | `@RuntimeIdentity`  | `little-days-api-522fpstfbtds2` |
+   | `@MigrationGroup`   | `my-little-days-db-migrate`     |
 
 6. Verify the named identities uniquely resolve in the hosting tenant. Runtime object ID: `fbb9ee76-3e03-4089-a94c-3548f74ad35a`. Migration service principal object ID: `a7f2dbde-d334-401a-b6df-a24baf0a6f43` (not registration object ID `5d7fdc0e-9ec7-4e4b-a63a-d0f114c5270e`).
 7. Review and execute the bootstrap against the dedicated database. It creates contained users, runtime-role membership and migration privileges; it does not create the application tables.
@@ -217,14 +221,14 @@ Do not run a local infrastructure apply alongside GitHub. Infrastructure apply a
 
 In **Settings → Environments → family-database → Environment variables**, set:
 
-| Variable | Value |
-| --- | --- |
-| `AZURE_SUBSCRIPTION_ID` | `4768a858-f23f-4a39-bb64-eabc9c142627` |
-| `AZURE_TENANT_ID` | `7b7e6e31-a778-4334-aee2-e969fa27fd0e` |
-| `AZURE_DB_MIGRATION_CLIENT_ID` | `f122630b-8e09-4aa1-a6c4-1bb122945afb` |
-| `FAMILY_DB_RESOURCE_GROUP` | `my-little-days-pilot-rg` |
-| `FAMILY_DB_SERVER_NAME` | `little-days-sql-522fpstfbtds2` |
-| `FAMILY_DB_NAME` | `little-days-family` |
+| Variable                       | Value                                                  |
+| ------------------------------ | ------------------------------------------------------ |
+| `AZURE_SUBSCRIPTION_ID`        | `4768a858-f23f-4a39-bb64-eabc9c142627`                 |
+| `AZURE_TENANT_ID`              | `7b7e6e31-a778-4334-aee2-e969fa27fd0e`                 |
+| `AZURE_DB_MIGRATION_CLIENT_ID` | `f122630b-8e09-4aa1-a6c4-1bb122945afb`                 |
+| `FAMILY_DB_RESOURCE_GROUP`     | `my-little-days-pilot-rg`                              |
+| `FAMILY_DB_SERVER_NAME`        | `little-days-sql-522fpstfbtds2`                        |
+| `FAMILY_DB_NAME`               | `little-days-family`                                   |
 | `FAMILY_DB_MIGRATIONS_ENABLED` | `true` only after bootstrap and environment protection |
 
 Do not add a manual IP-list variable. If `FAMILY_DB_APPROVED_FIREWALL_RULES_JSON`
@@ -271,13 +275,13 @@ For a future rebuild only: **Entra ID → Overview → Manage tenants → Create
 
 4. Select **Add a scope** and enter:
 
-   | Field | Value |
-   | --- | --- |
-   | Scope name | `Family.ReadWrite` |
-   | Who can consent | `Admins only` |
-   | Admin consent display name | `Access your family's records` |
-   | Admin consent description | `Allow My Little Days to read and update records in families you belong to.` |
-   | State | `Enabled` |
+   | Field                      | Value                                                                        |
+   | -------------------------- | ---------------------------------------------------------------------------- |
+   | Scope name                 | `Family.ReadWrite`                                                           |
+   | Who can consent            | `Admins only`                                                                |
+   | Admin consent display name | `Access your family's records`                                               |
+   | Admin consent description  | `Allow My Little Days to read and update records in families you belong to.` |
+   | State                      | `Enabled`                                                                    |
 
 5. Save the scope. Under **Authorized client applications → Add a client application**, enter mobile client ID `abce8eb9-baf9-4c17-8801-20d0716a0e4d`, check `Family.ReadWrite` and save.
 6. Open **Manifest**, find the existing `api` object and set `requestedAccessTokenVersion` to numeric `2`. Preserve every other property, especially the newly created scope; save.
@@ -335,21 +339,21 @@ The table below records the shared-credential configuration retained for the tok
 2. Open **App Services → little-days-api-522fpstfbtds2 → Settings → Environment variables → App settings**.
 3. Add/update each setting below. Double underscores are intentional; do not use the Object IDs or hosting tenant where customer values are requested.
 
-   | App setting | Value |
-   | --- | --- |
-   | `Entra__TenantId` | `deab2578-7cd3-4152-b5db-f430d6b638f8` |
-   | `Entra__Audience` | `9233837e-60c2-45c6-871b-96bd9cc8e007` |
-   | `Entra__MobileClientId` | `abce8eb9-baf9-4c17-8801-20d0716a0e4d` |
-   | `Family__PublicBaseUrl` | `https://little-days-api-522fpstfbtds2.azurewebsites.net` |
-   | `Family__HistoryId` | `64136b6e-01e2-4c48-890f-bef208eac9e3` — preserve across ordinary deployments |
-   | `Admission__Mode` | `Directory` |
-   | `Admission__LocalAccountIssuer` | Actual customer `<domain>.onmicrosoft.com` from section 7 |
-   | `Admission__EmailOtpOnly` | `true` after the real OTP-only flow is configured |
-   | `Admission__UseAccountDeletionCredentials` | `true` |
-   | `AccountDeletion__GraphClientId` | `538d93ee-1d58-43cb-adcd-68e094200621` |
-   | `AccountDeletion__GraphClientSecret` | Secret Value from section 9; server-only |
-   | `AccountDeletion__WorkerEnabled` | `true` |
-   | `AccountDeletion__PollIntervalMinutes` | `120` |
+   | App setting                                | Value                                                                         |
+   | ------------------------------------------ | ----------------------------------------------------------------------------- |
+   | `Entra__TenantId`                          | `deab2578-7cd3-4152-b5db-f430d6b638f8`                                        |
+   | `Entra__Audience`                          | `9233837e-60c2-45c6-871b-96bd9cc8e007`                                        |
+   | `Entra__MobileClientId`                    | `abce8eb9-baf9-4c17-8801-20d0716a0e4d`                                        |
+   | `Family__PublicBaseUrl`                    | `https://little-days-api-522fpstfbtds2.azurewebsites.net`                     |
+   | `Family__HistoryId`                        | `64136b6e-01e2-4c48-890f-bef208eac9e3` — preserve across ordinary deployments |
+   | `Admission__Mode`                          | `Directory`                                                                   |
+   | `Admission__LocalAccountIssuer`            | Actual customer `<domain>.onmicrosoft.com` from section 7                     |
+   | `Admission__EmailOtpOnly`                  | `true` after the real OTP-only flow is configured                             |
+   | `Admission__UseAccountDeletionCredentials` | `true`                                                                        |
+   | `AccountDeletion__GraphClientId`           | `538d93ee-1d58-43cb-adcd-68e094200621`                                        |
+   | `AccountDeletion__GraphClientSecret`       | Secret Value from section 9; server-only                                      |
+   | `AccountDeletion__WorkerEnabled`           | `true`                                                                        |
+   | `AccountDeletion__PollIntervalMinutes`     | `120`                                                                         |
 
 4. The user supplied `64136b6e-01e2-4c48-890f-bef208eac9e3` as the history ID. Verify the App Service setting matches; do not generate a replacement for this deployment. If a different valid value is already in use, reconcile the discrepancy before changing it. Only for a separate first-time setup with no existing history ID, generate one locally in PowerShell:
 
@@ -381,14 +385,14 @@ The table below records the shared-credential configuration retained for the tok
 
 Open **Settings → Environments → family-pilot → Environment variables**:
 
-| Variable | Value |
-| --- | --- |
-| `AZURE_CLIENT_ID` | Hosting `my-little-days-api-deploy` client ID; still to record, not `9233837e-...` |
-| `AZURE_TENANT_ID` | `7b7e6e31-a778-4334-aee2-e969fa27fd0e` |
-| `AZURE_SUBSCRIPTION_ID` | `4768a858-f23f-4a39-bb64-eabc9c142627` |
-| `AZURE_WEBAPP_NAME` | `little-days-api-522fpstfbtds2` |
-| `FAMILY_API_PUBLIC_URL` | `https://little-days-api-522fpstfbtds2.azurewebsites.net` |
-| `FAMILY_PILOT_DEPLOY_ENABLED` | `true` only after protections and runtime configuration are ready |
+| Variable                      | Value                                                                              |
+| ----------------------------- | ---------------------------------------------------------------------------------- |
+| `AZURE_CLIENT_ID`             | Hosting `my-little-days-api-deploy` client ID; still to record, not `9233837e-...` |
+| `AZURE_TENANT_ID`             | `7b7e6e31-a778-4334-aee2-e969fa27fd0e`                                             |
+| `AZURE_SUBSCRIPTION_ID`       | `4768a858-f23f-4a39-bb64-eabc9c142627`                                             |
+| `AZURE_WEBAPP_NAME`           | `little-days-api-522fpstfbtds2`                                                    |
+| `FAMILY_API_PUBLIC_URL`       | `https://little-days-api-522fpstfbtds2.azurewebsites.net`                          |
+| `FAMILY_PILOT_DEPLOY_ENABLED` | `true` only after protections and runtime configuration are ready                  |
 
 The `pilot` environment/flag names remain intentional. OIDC uses the hosting deployer, while the deployed API validates customer access tokens; these are different identities.
 
@@ -625,29 +629,29 @@ The deletion worker retries every 120 minutes by default while the service/datab
 
 ## 14. Troubleshooting and safe reruns
 
-| Symptom | Check / next action |
-| --- | --- |
-| `SQL_ADMIN_PRINCIPAL_TYPE must be User or Group` | Use exactly `User` or `Group`, not lowercase `user`. |
-| Existing plan validation fails | Inspect actual Linux/region/SKU/status and use reviewed current scripts. Do not resize the shared plan just to bypass validation. |
-| .NET runtime preflight fails | Inspect the actual advertised runtime and checked-in runtime parsing/version. Resolve the mismatch rather than bypassing the check or changing the API target blindly. |
-| Apply/capacity flags are false | Review protection/capacity, then set the two flags in `family-infra`; repository enablement alone is insufficient. |
-| `AADSTS70025` / missing federated credential | Configure federation on the exact client ID used by that job, in the hosting tenant. |
-| No matching federated identity record | Compare issuer, full subject (including immutable IDs) and audience with the run's claims. Do not create a client secret as a workaround. |
-| API configuration gate shows blank values | Check variables in **family-pilot**, exact names, and `FAMILY_PILOT_DEPLOY_ENABLED=true` after readiness. |
-| Workflow missing / no Run workflow button | Manual discovery requires a workflow on the default branch. The repository has a discovery workflow; refresh Actions and select the feature branch. If still missing, verify remote workflow/default branch without merging unreviewed feature code. |
-| `Approval is stale` | Branch head moved after the run was pinned. Start a fresh run at current trusted head and review it; retrying the old run keeps the old commit. |
-| Migration succeeds, API fails | Keep the successful database state. Fix runtime/deployment configuration and rerun the compatible release. Do not drop tables or delete journal entries. |
-| Need to retry after only Azure/GitHub configuration changed | An unchanged trusted SHA can be rerun after the first run ends. Applied DbUp scripts are skipped. If code changed, use a new run. |
-| Migration SQL fails | Inspect the failed script and transactional result. Do not force journal entries or edit already-applied migrations. Review a forward fix. |
-| Stale `github-db-*` firewall rule | Confirm the owning run is finished; remove only that exact stale rule under SQL Networking. Preserve runtime/other valid rules. |
-| API starts but SQL fails | Check managed identity, contained user/runtime grants, exact database, outbound-IP rules and SQL availability/quota. No `db_owner` grant to runtime. |
-| Invalid audience/tenant or sign-in rejection | Check customer IDs, delegated scope, API v2 token setting, mobile redirect/flow and actual default issuer domain. Do not weaken validation. |
-| Hosted sign-in says it cannot find the email | For a first-time customer use **No account? Create one**, verify the email code and complete registration. Existing Azure/Expo credentials or an in-app family invitation do not automatically register a customer identity. If previously registered, verify email spelling and tenant. No rebuild is indicated by this message alone. |
-| Graph access denied | Check customer directory client ID, secret Value/expiry, Application permissions and admin consent. Keep secret material out of logs. |
-| Directory token request returns `AADSTS700016` | Compare the directory registration's Application (client) ID and customer tenant before inspecting secret/consent. Previously reproduced with incorrect `50ecf79c-fd34-40df-b008-fd286ebaa97b`; operator correction to `538d93ee-1d58-43cb-adcd-68e094200621` is now verified. |
-| Correct Graph credentials, but email-code account still rejected | Deploy the admission correction supporting the exact tenant-bound `creationType=null`, `federated`/`mail` OTP format, then retry the existing iPhone build. If it still fails, distinguish token exchange/storage from API admission. Do not alter the account or loosen authentication. |
-| Package deployed, but liveness step fails during warm-up | Check the deployment step and timestamped container startup logs, then request `/health/live` again. The shared B1 plan has taken about 2½ minutes to warm up. The workflow allows up to five minutes of retries; a continuing failure needs diagnosis, not repeated restarts. A passing liveness check still does not prove database access or customer sign-in. |
-| Startup rejects shared directory credentials | With reuse `true`, omit both separate Admission Graph credentials; configure AccountDeletion credentials. |
+| Symptom                                                          | Check / next action                                                                                                                                                                                                                                                                                                                                               |
+| ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SQL_ADMIN_PRINCIPAL_TYPE must be User or Group`                 | Use exactly `User` or `Group`, not lowercase `user`.                                                                                                                                                                                                                                                                                                              |
+| Existing plan validation fails                                   | Inspect actual Linux/region/SKU/status and use reviewed current scripts. Do not resize the shared plan just to bypass validation.                                                                                                                                                                                                                                 |
+| .NET runtime preflight fails                                     | Inspect the actual advertised runtime and checked-in runtime parsing/version. Resolve the mismatch rather than bypassing the check or changing the API target blindly.                                                                                                                                                                                            |
+| Apply/capacity flags are false                                   | Review protection/capacity, then set the two flags in `family-infra`; repository enablement alone is insufficient.                                                                                                                                                                                                                                                |
+| `AADSTS70025` / missing federated credential                     | Configure federation on the exact client ID used by that job, in the hosting tenant.                                                                                                                                                                                                                                                                              |
+| No matching federated identity record                            | Compare issuer, full subject (including immutable IDs) and audience with the run's claims. Do not create a client secret as a workaround.                                                                                                                                                                                                                         |
+| API configuration gate shows blank values                        | Check variables in **family-pilot**, exact names, and `FAMILY_PILOT_DEPLOY_ENABLED=true` after readiness.                                                                                                                                                                                                                                                         |
+| Workflow missing / no Run workflow button                        | Manual discovery requires a workflow on the default branch. The repository has a discovery workflow; refresh Actions and select the feature branch. If still missing, verify remote workflow/default branch without merging unreviewed feature code.                                                                                                              |
+| `Approval is stale`                                              | Branch head moved after the run was pinned. Start a fresh run at current trusted head and review it; retrying the old run keeps the old commit.                                                                                                                                                                                                                   |
+| Migration succeeds, API fails                                    | Keep the successful database state. Fix runtime/deployment configuration and rerun the compatible release. Do not drop tables or delete journal entries.                                                                                                                                                                                                          |
+| Need to retry after only Azure/GitHub configuration changed      | An unchanged trusted SHA can be rerun after the first run ends. Applied DbUp scripts are skipped. If code changed, use a new run.                                                                                                                                                                                                                                 |
+| Migration SQL fails                                              | Inspect the failed script and transactional result. Do not force journal entries or edit already-applied migrations. Review a forward fix.                                                                                                                                                                                                                        |
+| Stale `github-db-*` firewall rule                                | Confirm the owning run is finished; remove only that exact stale rule under SQL Networking. Preserve runtime/other valid rules.                                                                                                                                                                                                                                   |
+| API starts but SQL fails                                         | Check managed identity, contained user/runtime grants, exact database, outbound-IP rules and SQL availability/quota. No `db_owner` grant to runtime.                                                                                                                                                                                                              |
+| Invalid audience/tenant or sign-in rejection                     | Check customer IDs, delegated scope, API v2 token setting, mobile redirect/flow and actual default issuer domain. Do not weaken validation.                                                                                                                                                                                                                       |
+| Hosted sign-in says it cannot find the email                     | For a first-time customer use **No account? Create one**, verify the email code and complete registration. Existing Azure/Expo credentials or an in-app family invitation do not automatically register a customer identity. If previously registered, verify email spelling and tenant. No rebuild is indicated by this message alone.                           |
+| Graph access denied                                              | Check customer directory client ID, secret Value/expiry, Application permissions and admin consent. Keep secret material out of logs.                                                                                                                                                                                                                             |
+| Directory token request returns `AADSTS700016`                   | Compare the directory registration's Application (client) ID and customer tenant before inspecting secret/consent. Previously reproduced with incorrect `50ecf79c-fd34-40df-b008-fd286ebaa97b`; operator correction to `538d93ee-1d58-43cb-adcd-68e094200621` is now verified.                                                                                    |
+| Correct Graph credentials, but email-code account still rejected | Deploy the admission correction supporting the exact tenant-bound `creationType=null`, `federated`/`mail` OTP format, then retry the existing iPhone build. If it still fails, distinguish token exchange/storage from API admission. Do not alter the account or loosen authentication.                                                                          |
+| Package deployed, but liveness step fails during warm-up         | Check the deployment step and timestamped container startup logs, then request `/health/live` again. The shared B1 plan has taken about 2½ minutes to warm up. The workflow allows up to five minutes of retries; a continuing failure needs diagnosis, not repeated restarts. A passing liveness check still does not prove database access or customer sign-in. |
+| Startup rejects shared directory credentials                     | With reuse `true`, omit both separate Admission Graph credentials; configure AccountDeletion credentials.                                                                                                                                                                                                                                                         |
 
 Do not start another release or change the current run just because this document was added locally. No commit, push, cloud setting update or workflow execution is performed by this documentation task.
 
@@ -884,15 +888,15 @@ Record these real-device results separately from automated tests; implementation
 
 ## 19. Moving this version to TestFlight
 
-Read-only checkpoint, 16 September 2026: `eas env:list production` did not list any of the five required family connection/demo variables. They are verified in **preview**, not **production**. The existing production build profile uses channel `production`, `autoIncrement=true`, and local version management. Submission is already linked to App Store Connect app `6809826484`, bundle identifier `com.littledays.babylog`. No configuration, build, submission, Azure deployment or tester notification was performed for this checklist.
+Checklist refreshed 17 September 2026: local app configuration is version `0.2.1`, build `21`, with remote updates disabled (`updates.enabled=false`). The production build profile uses channel `production`, `autoIncrement=true`, and local version management. Submission is already linked to App Store Connect app `6809826484`, bundle identifier `com.littledays.babylog`. At the earlier read-only checkpoint on 16 September, `eas env:list production` did not list any of the five required family connection/demo variables; preview was verified. That historical check does not establish today's production environment: verify it again before building. This checklist update did not change Expo/Apple configuration, build, submit, deploy Azure resources or notify testers.
 
-1. **Complete the API feature, if releasing all current fixes.** Follow section 11.2 to deploy the reviewed API commit and verify success. This particular correction adds no database migration or Bicep change, although the existing release workflow still runs DbUp. Without the new API field, the app remains compatible but accepted invitations cannot display their later-removal/exit annotations. API deployment is separate from uploading a binary to Apple.
+1. **Confirm the backend release.** The security API/database release from source `d41b7a132700bd8e96ca377fdbb918e3e52edbfe` completed successfully in [run 35167068255](https://github.com/github4me/my-little-days/actions/runs/35167068255), including migration `0004_FamilyAvailabilityBounds.sql`. Subsequent checks verified public liveness/readiness and unauthenticated rejection. TestFlight packaging itself does not require another API, database or Bicep deployment, or merging the feature branch. Before wider testing, complete the outstanding signed-in, two-device and security acceptance checks recorded in `SECURITY-REMEDIATION-2026-09-17.md`; successful deployment alone does not close them.
 2. **Configure Expo production variables.** In Expo dashboard, open **expo4chao → little-days → Environment variables**. Assign the existing, verified section 12.1 values to **production** as well as preview: `EXPO_PUBLIC_FAMILY_API_URL`, `EXPO_PUBLIC_ENTRA_TENANT_ID`, `EXPO_PUBLIC_ENTRA_CLIENT_ID`, `EXPO_PUBLIC_ENTRA_API_SCOPE`, and `EXPO_PUBLIC_FAMILY_UI_DEMO=0`. Reusing those values connects TestFlight to the same Azure service and family data; it does not create an isolated test backend. Do not add Graph credentials or SQL secrets. Check for duplicate account/project definitions, then verify the five values with `npx --yes eas-cli@24.6.0 env:list production` without exposing unrelated secrets. See [EAS environment configuration](https://docs.expo.dev/eas/environment-variables/).
-3. **Verify the build profile and source.** Make the production profile's `environment` explicitly `production`, retain channel `production`, and confirm distribution resolves to App Store rather than internal/ad hoc. Review/commit any configuration changes through the GitHub plugin. The current signed preview build cannot be submitted as the new TestFlight build. Confirm the next build number against App Store Connect; current local build 18 plus `autoIncrement` does not prove 19 is unused. Keep version `0.2.0` only if compatible with the current App Store version state. Confirm active Apple Developer membership, valid signing credentials and EAS submission credentials; complete Apple authentication privately if requested.
+3. **Verify the build profile and source.** Use the reviewed `feature/family-invitations` source and the `production` profile, not `preview` or `ui-preview`. Run `npx --yes eas-cli@24.6.0 config --platform ios --profile production` and confirm the resolved environment is `production` and distribution is App Store (`store`), not internal/ad hoc. These are the expected defaults for the current profile; optionally make `environment: production` and `distribution: store` explicit before release. Review/commit any configuration changes through the GitHub plugin. The current signed ad hoc preview cannot be submitted as the TestFlight build. Confirm the next build number against App Store Connect; local build 21 plus `autoIncrement` does not prove 22 is unused. Keep version `0.2.1` only if compatible with the current App Store version state. Preserve the bundle identifier. Confirm active Apple Developer membership, valid signing credentials and EAS submission credentials; complete Apple authentication privately if requested. Because version management is local, review and commit the resulting build-number change through the GitHub plugin after building so the next release does not reuse it.
 4. **Finish native smoke checks.** On disposable accounts/data, verify email-code registration/sign-in, create/join/remove/reinvite, two-phone sync, offline restart/reconnection, and account deletion. Check privacy/support text reflects server-based family sharing and prepare a reviewer-access route that actually works with email OTP. Reviewers cannot use a developer-owned mailbox's one-time code without an access arrangement. Do not bypass authentication or use the UI-only demo as a substitute for testing the live service.
 5. **Build and submit after the checks above.** From the reviewed source, run `npx --yes eas-cli@24.6.0 build --platform ios --profile production --auto-submit`. This creates a new App Store-signed IPA and uploads that build to the existing App Store Connect app. If building and submitting separately, record the successful store build ID and run `npx --yes eas-cli@24.6.0 submit --platform ios --profile production --id <STORE_BUILD_ID>`; do not select an internal preview or an ambiguous latest build. Record source SHA, version/build, build ID and submission result. See [Expo's iOS submission guide](https://docs.expo.dev/submit/ios/).
 6. **Finish TestFlight setup in App Store Connect.** Open **Apps → My Little Days → TestFlight**, wait for processing, and address any compliance prompts accurately. Enter the beta description, **What to Test**, feedback email `contact@reticle.com.au`, review contact details and working login/registration instructions. Add the build to the intended internal group and validate it before external distribution. Then select the external testing group, **Add Builds**, and follow **Submit Review** or **Start Testing** according to the build's state. Apple requires a full review for the first external build; later builds of the same version may not require it. See [test information](https://developer.apple.com/help/app-store-connect/test-a-beta-version/provide-test-information) and [external testing](https://developer.apple.com/help/app-store-connect/test-a-beta-version/invite-external-testers).
-7. **Distribute only to the intended testers.** After any required beta approval, use the existing external group or its approved invitation link. Testers install through Apple's TestFlight app; ad hoc device registration is not this distribution route. Record actual phone acceptance separately from successful upload. Uploading to TestFlight does not publish the app publicly: App Store review/release is a separate action. The production-channel TestFlight build does not receive updates sent only to `preview`; keep future production-channel updates deliberate and reviewed.
+7. **Distribute only to the intended testers.** Internal testers must be eligible App Store Connect users; family/friends who are not team users belong in an external group, not an administrative role added just for testing. After any required beta approval, use the intended external group or its approved invitation link. Testers install through Apple's TestFlight app; ad hoc device registration is not this distribution route. Do not uninstall a data-bearing preview app as a routine preparation step; verify its pending family changes have synced and validate the installation transition on a disposable device/account first. Record actual phone acceptance separately from successful upload. Uploading to TestFlight does not publish the app publicly: App Store review/release is a separate action. With `updates.enabled=false`, this version receives no EAS OTA updates from either channel; future mobile changes require a new native build and submission unless that policy is deliberately changed and reviewed.
 
 ## 20. Live-data operation and release-branch cutover
 
@@ -980,12 +984,12 @@ Reference: [Microsoft Graph read-user permissions](https://learn.microsoft.com/e
 1. Switch to hosting tenant `7b7e6e31-a778-4334-aee2-e969fa27fd0e`. Open **App Services → little-days-api-522fpstfbtds2 → Settings → Environment variables → App settings**.
 2. Confirm the retained configuration without exporting secret values:
 
-   | Setting | Retained value |
-   | --- | --- |
-   | `Admission__UseAccountDeletionCredentials` | `true` |
+   | Setting                                                    | Retained value                                |
+   | ---------------------------------------------------------- | --------------------------------------------- |
+   | `Admission__UseAccountDeletionCredentials`                 | `true`                                        |
    | `Admission__GraphClientId`, `Admission__GraphClientSecret` | Both omitted, as required by credential reuse |
-   | `AccountDeletion__GraphClientId` | `538d93ee-1d58-43cb-adcd-68e094200621` |
-   | `AccountDeletion__GraphClientSecret` | Existing server-only secret, unchanged |
+   | `AccountDeletion__GraphClientId`                           | `538d93ee-1d58-43cb-adcd-68e094200621`        |
+   | `AccountDeletion__GraphClientSecret`                       | Existing server-only secret, unchanged        |
 
 3. Keep `Admission__Mode=Directory`, issuer/OTP settings, both `AccountDeletion__Graph*` settings, Entra mobile/API IDs, `Family__HistoryId`, SQL connection string, auto-pause and firewall unchanged. No new GitHub variable/secret, mobile environment value, API scope or redirect URI is needed.
 4. No **Apply** or settings restart is needed for this change. The existing configuration works with the previous API; caching begins when the updated API is deployed. If the observed configuration differs, reconcile it before making changes rather than copying credentials into extra settings.
@@ -1056,6 +1060,49 @@ Steps for this and future submissions:
 5. Check `eas submit:view <SUBMISSION_ID> --json`, then `eas submit:status --platform ios --profile production --json --non-interactive`. EAS upload success, Apple processing success and tester availability are separate states. Do not repeatedly upload the same binary merely because Apple is processing it.
 6. In **App Store Connect → My Little Days → TestFlight → iOS → 0.2.1 → build 24**, wait for processing and add **What to Test** if desired: "Faster sign-in recognition while family access verifies in the background. Test returning after inactivity, refresh, offline reconnection and two-device family sync. Existing family permissions remain enforced."
 7. Use the existing intended tester group. Internal availability and external beta-review approval are separate. If external testing requires submission/reviewer information, supply the existing approved review contact and a working email-OTP login route; do not bypass authentication. Do not mark tester availability or device acceptance complete until actually observed. Installing through TestFlight should not require uninstalling the existing data-bearing app.
+
+## 24. SQL Basic tier migration — deployed 17 September 2026
+
+The user requested a Bicep and migration plan on 17 September 2026. Follow [Azure SQL Basic migration](AZURE-SQL-BASIC-MIGRATION.md) for all manual Azure/GitHub steps, commands, approval gates, validation and rollback. The standalone target is `infra/bicep/sql-basic.bicep`; `infra/sql-basic-preflight.sql` contains read-only operator checks. Neither is wired into automatic apply.
+
+Before publishing/executing this migration, record then disable `FAMILY_INFRA_ENABLED` and `FAMILY_INFRA_APPLY_ENABLED` in GitHub, including any environment overrides. The current main template/wrappers remain free-only and must stay disabled after conversion until the plan's explicit Basic-profile integration is completed. Preserve the operator's exact-IP rule; do not remove it to pass the older infrastructure wrapper.
+
+Target: same server and `little-days-family` database; Basic/5 DTU, 2 GiB maximum, local seven-day backups, estimated A$7.49/month before tax. Existing family data, operation receipts, history ID, schema, SQL users, Entra registrations, API URL and mobile settings stay unchanged. No DbUp migration or iOS rebuild is needed solely for the tier change.
+
+The initial preflight requirements were paid-conversion approval, fresh size/feature checks, backup/recovery review, Azure provider validation/what-if and a maintenance window; the execution record below documents results. Production performance remains a supervised trial rather than an isolated benchmark. Paid scale-up requires separate approval; a data restore is a different, privacy-sensitive operation requiring independent reconciliation.
+
+### 24.1 Live execution checkpoint — 17 September 2026
+
+The user authorized the in-place Basic change. Read-only SQL verification at 09:19 UTC passed: 32 MiB allocated, 9.56 MiB used, 11 tables, five applied migrations with matching hashes, zero pending migrations, zero operation-counter mismatches and no other active user transactions. No memory-optimized tables, columnstore indexes or CDC were present. The persisted-feature DMV reported only transparent database encryption, which is supported and must remain enabled. Preserve the existing seven-day retention and 12-hour differential backup interval explicitly.
+
+Azure provider validation passed. No database conversion or API maintenance has started at this checkpoint. GitHub requires account re-verification before saving the infrastructure freeze:
+
+1. In Chrome, complete GitHub's **Confirm access** dialog using GitHub Mobile or the existing password; never paste credentials/codes into chat.
+2. Save repository variable `FAMILY_INFRA_ENABLED=false` (previous value `true`) and confirm it on the variables list.
+3. Open environment **family-infra**, set `FAMILY_INFRA_APPLY_ENABLED=false` (previous value `true`) and confirm the saved value. Leave API/database deployment variables unchanged.
+4. Confirm no active infrastructure/API/database release is underway; then repeat the final preview and quiet-window baseline before applying the migration plan.
+
+The local Azure CLI is 2.61.0 and does not accept `--validation-level`. For this authorized operator, omit that option and use the CLI's normal provider validation; do not replace provider validation with template-only validation. The newer GitHub runner CLI can use the documented explicit option.
+
+### 24.2 In-place conversion and verification
+
+- GitHub confirmation completed. Repository `FAMILY_INFRA_ENABLED=false` and environment **family-infra** `FAMILY_INFRA_APPLY_ENABLED=false` were saved/read back; both were previously `true`. No active, queued or waiting Actions runs were present. Other deployment variables were unchanged. Keep these two cloud guards disabled until the free-only steady-state workflow supports Basic.
+- Provider validation and what-if succeeded with only the existing database modified and its backup policy unchanged. No resource creation/deletion, server, firewall, identity, API or customer-tenant change appeared in the preview.
+- Added temporary App Service setting `Recovery__Blocked=true` (previously absent), restarted the API, verified `503/recovery_blocked` on readiness and `/v1/session`, then stopped only `little-days-api-522fpstfbtds2`. The shared B1 plan and other app were untouched. SQL had paused during the approval gap; a read-only connection initially returned 40613, then succeeded after SQL resumed. This was before conversion, not a Basic failure.
+- Final writer-free SQL baseline at **09:42:32 UTC**: 11 tables / 241 total rows, five matching migrations, zero pending scripts/counter mismatches/other active user transactions. Applied frozen Bicep with explicit paid consent using incremental deployment **`little-days-sql-basic-20260917`**, which succeeded at **09:44:17 UTC**.
+- At **09:44:39 UTC**, the database was **Online, Basic, 5 DTU, maximum 2147483648 bytes**, with `useFreeLimit=null` (not free). Database GUID `873e470c-47a0-4337-822e-61134a8a7926` unchanged. Storage remained 32 MiB allocated / 9.56 MiB used. All table counts, migration hashes, index/trigger metadata, contained principals, role memberships and permissions matched the stopped baseline exactly; counters remained consistent. These metadata/count checks are not a full payload checksum or a restore drill.
+- Separate management comparison passed: all firewall rules including the operator IP, SQL administrator, seven-day/12-hour backup policy, TDE and API managed identity unchanged. No schema migration, SQL initialization, data restore, new database, mobile configuration change or iOS build was performed.
+- Frozen template SHA-256: `5E7010918F7E70EAC8E224EFAAD0127E8E4755F614AA6ACFBBB984B892867F0C`; parameter SHA-256: `525082B5DC97A88164F073FB5E43D52B164C1F53E3CA0ECBC7370EDABCBF567D`. Private baseline metadata remains under local `work/`, not committed or published.
+- Native two-phone refresh/write propagation, sustained Basic performance and disaster-recovery drill remain unverified. No synthetic baby records were inserted. Basic is a supervised small-workload choice, not evidence that 5 DTU handles arbitrary future scale; a different paid tier requires separate approval.
+- API reopened at approximately **09:50 UTC / 19:50 Sydney**. Started with the gate intact and verified liveness `200`, readiness/data-route `503/recovery_blocked`; removed only the temporary `Recovery__Blocked` setting and read back its absence, restoring the original configuration. An explicit API restart was required while the old process still served maintenance responses. Final checks returned `/health/live=200`, `/health/ready=200`, and anonymous `/v1/session=401/unauthorized`, confirming maintenance is off and authentication remains enforced. App Service restart propagation took several minutes; these generic checks do not establish signed-in SQL-backed phone acceptance.
+
+Phone acceptance after the API is reopened:
+
+1. Keep the existing installation and account; no build or reinstall is required for this SQL tier change.
+2. Open Family sharing on both phones and refresh. Confirm the same family, baby profile and recent records are present.
+3. Add or edit one real record you intended to record. Refresh the other phone and confirm it appears once. Let any pre-maintenance pending change reconcile; do not recreate it with a new operation ID just because the earlier response was uncertain.
+4. Check a normal return to the app after inactivity. SQL Basic no longer auto-pauses, but authentication/network/API startup can still cause latency.
+5. Report repeated errors or unusually slow reads/writes. Review Azure SQL DTU/data-I/O/log-I/O/storage metrics before approving a higher paid tier; do not run the old free-serverless infrastructure workflow as a repair.
 
 ## 25. Care picker and night appearance preview (18 September 2026)
 
@@ -1442,6 +1489,172 @@ the public App Store. Build, submission and Apple readback results follow below.
   Install over the existing app without uninstalling or clearing records.
   No Azure/API/SQL deployment, credential change or public App Store release occurred.
 
+## 31. Planned Apple Watch support prerequisites
+
+Status: source implementation added on 18 September 2026; nothing below has been
+provisioned or released. See section 32 and the implementation guide for exact
+settings and verification. See [Apple Watch implementation plan](APPLE-WATCH-PLAN.md) for scope,
+dependencies, acceptance tests and rollback requirements. Existing iPhone build 30
+does not acquire Watch support from this document.
+
+1. **Scope and devices:** the user confirmed baby milk feeds, not pumping, and
+   notifications for other members' milk-feed, nappy and sleep entries only.
+   Record the actual Watch model/watchOS, paired iPhone/iOS and Mac/Xcode versions.
+   Choose deployment targets after checking those devices and the supported build
+   toolchain; do not assume any particular Watch model is supported yet.
+2. **Native build proof:** implement the empty companion Watch target and repeatable
+   Expo config plugin first. On the Mac, validate pairing and basic message delivery.
+   In EAS, prove clean prebuild, target embedding and signing with the existing
+   iPhone bundle `com.littledays.babylog`. A proposed companion identifier is
+   `com.littledays.babylog.watchkitapp`; verify it and register the required target
+   identifiers/profiles only during approved implementation. Do not rename the
+   existing app or create a separate App Store product by default.
+3. **Apple push credentials:** in Apple Developer Certificates, Identifiers &
+   Profiles, verify the iPhone App ID's Push Notifications capability and the
+   appropriate APNs entitlement in the signed app. In Expo/EAS iOS credentials,
+   inspect and reuse a valid APNs key where possible; create one only if missing.
+   APNs keys are not the same as App Store Connect submission keys. Do not rotate
+   existing signing credentials merely to add notifications. Follow
+   [Expo push setup](https://docs.expo.dev/push-notifications/push-notifications-setup/).
+4. **Expo delivery security:** use existing project
+   `a5210f78-8729-46d4-82a4-7d1d40d30ac6`. Verify project-scoped token registration
+   and configure push access-token protection for the server sender. Store any
+   sender credential only in protected server configuration, never in an
+   `EXPO_PUBLIC_*` value, source control, screenshots or mobile bundles. Recheck
+   preview/production app identity and notification routing to avoid duplicates.
+   See [Expo sending/security setup](https://docs.expo.dev/push-notifications/sending-notifications/).
+5. **Azure and GitHub:** add notification configuration with registration, event
+   generation and delivery disabled initially. Deploy reviewed additive DbUp
+   migrations before the compatible API through the existing database/API flow.
+   Check new grants/index verification, recovery gates and queue metrics. Confirm
+   the existing App Service can host the background sender reliably. Do not
+   re-enable the paused free-only Bicep workflow or change SQL Basic for this work.
+   No new Entra registration or extra Azure queue service is planned for the
+   companion MVP. Exact new setting names/values must be documented when implemented.
+6. **Install and grant consent:** build a new signed iPhone+Watch application;
+   JavaScript preview/OTA alone cannot add a native Watch target. Install over the
+   current app without deleting records. Enable the new per-device family-entry
+   notification preference and grant the iOS notification permission. In the
+   iPhone Watch app, check My Watch → Notifications and the app's mirroring/custom
+   settings. Label availability varies with installed OS/app configuration.
+7. **Test with isolated accounts:** use two consenting disposable family accounts,
+   paired devices and real Watch hardware. Enable registration, event generation
+   and delivery gates only for that acceptance cohort, keeping general production
+   delivery disabled. Confirm another member's committed
+   entry alerts the recipient, not the creator; imports, retries and opt-out do not.
+   Test locked/unlocked phone routing, Focus, offline commands, app termination,
+   account switching and removal. Never test deletion/removal against a real
+   family's data. Apple chooses whether a forwarded alert appears on iPhone or
+   Watch; do not expect both. See
+   [Apple routing rules](https://developer.apple.com/documentation/watchos-apps/taking-advantage-of-notification-forwarding).
+8. **TestFlight rollout:** submit the exact new store build, verify Apple processing
+   and tester availability separately, then install the Watch companion from the
+   paired iPhone's TestFlight app/build details when available. Start with the
+   intended internal testers; external testing may require beta review. After
+   acceptance, extend notification availability beyond the isolated cohort only
+   to intended users who explicitly opt in. Record source,
+   migration/API revisions, EAS build/submission IDs and physical-device results.
+   Keep a compatible rollback build and documented feature-off/queue-recovery steps.
+
+## 32. Apple Watch implementation: manual release checklist
+
+The step-by-step operator guide is [Apple Watch implementation and rollout](APPLE-WATCH-IMPLEMENTATION.md).
+It records exact bundle IDs, Azure settings, Apple/Expo credentials, database/API
+ordering, timer-duplicate review, notification cohort, device acceptance and rollback.
+Use that guide as the detailed continuation of section 31.
+
+1. Prove native compilation/embedding/signing using EAS cloud builders or a Mac,
+   then verify on paired hardware. A personal Mac is not required for EAS Build.
+   Windows checks and an iOS JavaScript export are not a watchOS build.
+2. Review/publish source and pass CI; run the existing **Deploy family API and database**
+   workflow for migration 0006 then compatible API, with feature gates disabled.
+3. Preserve SQL Basic and the current production resources. Do not re-enable the
+   paused free-only Bicep flow or alter existing Entra registrations for this feature.
+4. Configure server-only Expo sender credentials and persistent token-encryption key.
+   Add explicit disposable customer IDs with `Push__AllowAllUsers=false` before
+   enabling any notification gate. Review old active timers before enabling the
+   separately gated single-timer guard required by family Watch recording.
+5. Build a new signed iPhone + `LittleDaysWatch` binary, install over the existing app,
+   opt in on the phone and verify actual notification routing/sync on paired hardware.
+6. Only after acceptance, approve the intended cohort expansion/TestFlight submission.
+   Record the exact build, source, schema and API revisions; no release was made in
+   this implementation step. Never report a provider receipt as confirmed user delivery.
+
+### 32.1 First EAS Watch build attempt — Apple signing setup needed
+
+On 18 September 2026, the user authorized the EAS cloud build, not Azure deployment
+or TestFlight submission. EAS CLI 24.6.0 resolved production/store/channel settings,
+the five public production variables matched the approved values, account-level
+overrides were absent, and the Watch target was detected.
+
+- EAS registered Apple bundle identifier `com.littledays.babylog.watchkitapp`.
+  The existing iPhone credentials were found; the new Watch provisioning profile
+  was missing. Noninteractive credential setup stopped **before a cloud build was
+  queued**. No build ID or native compilation result exists for this attempt.
+- Interactive setup found the Apple session expired and requested a password.
+  The prompt was cancelled; do not put Apple passwords or verification codes in
+  chat, scripts or build artifacts.
+- To complete this one-time step, open a terminal in the repository and run:
+
+  ```powershell
+  npx --yes eas-cli@24.6.0 credentials:configure-build --platform ios --profile production
+  ```
+
+  Sign in to the existing Apple Developer account privately and complete Apple's
+  verification. Reuse the existing distribution certificate; create the missing
+  App Store provisioning profile for `LittleDaysWatch` on the same Apple team.
+  Do not revoke or replace the working iPhone signing credentials. Once setup
+  completes, retry the production EAS build; submission remains separate.
+
+- Source is still uncommitted Watch work on base `44b351d99057ab64bc19bb6f13bba3c4a1ecf05d`,
+  not an already-published release SHA. A minimal 167-file app-source package was
+  frozen in `work/watch-store-build31` and compared byte-for-byte with the inspected
+  clean archive. It excludes server code, local work, credentials and generated
+  exports. Version/build remain 0.2.1/30 before EAS's build-number increment.
+- When using that isolated directory, set **both** `EAS_NO_VCS=1` and
+  `EAS_PROJECT_ROOT` to its absolute path. Without the latter, the no-VCS client can
+  still discover the parent Git root. The first archive inspection detected that
+  mismatch; the corrected archive was verified. No archive was uploaded or build
+  started while credential setup was blocked.
+
+### 32.2 EAS Watch build 31 queued
+
+After the user completed Apple login, EAS confirmed both active App Store profiles:
+phone `Z6BA8UVQM6` and Watch `8MHYYTJZ6Q`, using existing distribution certificate
+serial `58D2164224C284130E166C60EAEDA733` on team `A9974KXQ4G`. No certificate was revoked.
+
+- Build [`24af9879-54a8-4044-998a-5ce4197536b2`](https://expo.dev/accounts/expo4chao/projects/little-days/builds/24af9879-54a8-4044-998a-5ce4197536b2)
+  was accepted at **2026-09-18 10:41:06 UTC** as **0.2.1 (31)**, profile/environment/
+  channel `production`, distribution `STORE`, existing bundle `com.littledays.babylog`.
+- The frozen source package from section 32.1 was uploaded with the embedded Watch
+  target and disabled OTA. EAS incremented the isolated package's build number
+  30 → 31; the repository app.json was aligned afterward. Source remains local
+  uncommitted implementation, not a published release commit.
+- Fingerprint: `3293f79d8aa3d8e254466df60681047c2995e374`.
+- Initial status was `NEW`; native build success and physical-device acceptance are
+  separate checks. **No TestFlight submission, Azure deployment or feature-gate
+  enablement was requested or performed by this build.**
+
+### Build 31 completed — native iPhone and Watch archive verified
+
+EAS reported build `24af9879-54a8-4044-998a-5ce4197536b2` **FINISHED** at
+**2026-09-18 10:46:18 UTC** (20:46 Sydney). Cloud logs confirm the Watch executable
+linked, `LittleDaysWatch.app` was signed/created, and the native phone Watch bridge
+compiled and packaged. This replaces the previous native-compilation uncertainty.
+
+The downloaded final IPA was inspected locally: it contains
+`Payload/MyLittleDays.app/Watch/LittleDaysWatch.app/`, its executable, Info.plist
+and embedded provisioning profile. This is a combined store-signed build, not
+an OTA or simulator artifact. No TestFlight submission has occurred. Installation,
+real WatchConnectivity behaviour and APNs notification delivery still require
+paired-device acceptance; family Watch recording also requires the separately
+deployed/gated compatible API and database migration.
+
+Both compiled Info.plists report version **0.2.1**, build **31**. Phone minimum OS
+is 16.4; Watch minimum OS is 9.4 with companion ID `com.littledays.babylog` and
+`WKApplication=true`. IPA SHA-256:
+`A1A80B1549271B78B65DED93C60CE4289C25AE487A784F75A7FE881D7E200A81`.
+
 ## Watch backend release — 18 September 2026
 
 The backend-only release is recorded in [Watch backend deployment](APPLE-WATCH-BACKEND-DEPLOYMENT.md), including exact commit/workflow, migration verification, timer-guard activation and remaining notification setup. Use that record for current rollout status; the earlier build-only entries are historical checkpoints. This deployment does not submit the mobile build to TestFlight or enable push delivery.
@@ -1588,13 +1801,13 @@ needed for this update. Retain the current Basic database and timer setting.
    Resource group is `my-little-days-pilot-rg`; the name is legacy, the data is production.
 4. While all three operational push gates remain false, configure:
 
-   | App setting | Value |
-   | --- | --- |
-   | `Push__ProjectId` | `a5210f78-8729-46d4-82a4-7d1d40d30ac6` |
-   | `Push__Environment` | `production` |
-   | `Push__TokenEncryptionKey` | Persistent, securely generated base64 encoding of 32 random bytes |
-   | `Push__AccessToken` | Protected sending access token from step 2 |
-   | `Push__AllowAllUsers` | `false` until broad rollout is explicitly approved |
+   | App setting                                             | Value                                                                    |
+   | ------------------------------------------------------- | ------------------------------------------------------------------------ |
+   | `Push__ProjectId`                                       | `a5210f78-8729-46d4-82a4-7d1d40d30ac6`                                   |
+   | `Push__Environment`                                     | `production`                                                             |
+   | `Push__TokenEncryptionKey`                              | Persistent, securely generated base64 encoding of 32 random bytes        |
+   | `Push__AccessToken`                                     | Protected sending access token from step 2                               |
+   | `Push__AllowAllUsers`                                   | `false` until broad rollout is explicitly approved                       |
    | `Push__AllowedUserIds__0`, `Push__AllowedUserIds__1`, … | Approved customer-account object IDs for initial sender/recipient cohort |
 
    Customer IDs are user Object IDs in customer tenant
@@ -1603,6 +1816,7 @@ needed for this update. Retain the current Basic database and timer setting.
    mobile/API app-registration client IDs, service-principal IDs or Azure admin IDs.
    Preserve the encryption key across restarts/replicas; replacement requires a
    deliberate token re-registration/rotation plan.
+
 5. Save/apply, allow the App Service restart to settle, and verify setting **presence**
    without printing secret values. Confirm health and authenticated readiness. Missing
    secrets or an empty cohort must not be bypassed by switching on the flags anyway.
@@ -1721,13 +1935,13 @@ The widget works without a paired Watch and never accesses the API itself.
 Use Apple Developer team **A9974KXQ4G**, not an Azure tenant. These identifiers are
 public configuration, not credentials:
 
-| Item | Exact value |
-| --- | --- |
-| Existing phone App ID | `com.littledays.babylog` |
-| Existing Watch App ID (unchanged) | `com.littledays.babylog.watchkitapp` |
-| New widget App ID / Xcode target | `com.littledays.babylog.widget` / `LittleDaysTodayWidget` |
-| Shared App Group | `group.com.littledays.babylog.widgets` |
-| Widget destination | `mylittledays://today` |
+| Item                              | Exact value                                               |
+| --------------------------------- | --------------------------------------------------------- |
+| Existing phone App ID             | `com.littledays.babylog`                                  |
+| Existing Watch App ID (unchanged) | `com.littledays.babylog.watchkitapp`                      |
+| New widget App ID / Xcode target  | `com.littledays.babylog.widget` / `LittleDaysTodayWidget` |
+| Shared App Group                  | `group.com.littledays.babylog.widgets`                    |
+| Widget destination                | `mylittledays://today`                                    |
 
 If EAS cannot configure the new capabilities/profile unattended:
 
@@ -1751,14 +1965,14 @@ If EAS cannot configure the new capabilities/profile unattended:
    old phone profile without that entitlement is not sufficient.
 6. Recheck the resolved production environment, demo `0`, distribution STORE and
    OTA disabled. Build the reviewed source with `eas build --platform ios --profile
-   production --non-interactive --freeze-credentials --no-wait`. Do not substitute
+production --non-interactive --freeze-credentials --no-wait`. Do not substitute
    an internal/ad-hoc preview IPA for a store build.
 7. Inspect the finished IPA: embedded `PlugIns/LittleDaysTodayWidget.appex`, widget
    extension-point `com.apple.widgetkit-extension`, matching phone/Watch/widget
    versions, both required App Group entitlements and OTA disabled. The cloud
    post-install hook runs the Swift snapshot boundary tests before compilation.
 8. Submit only that exact EAS build ID using `eas submit --platform ios --profile
-   production --id <ID> --non-interactive --no-auto-testflight-setup --no-wait`.
+production --id <ID> --non-interactive --no-auto-testflight-setup --no-wait`.
    Confirm Apple **VALID**, then the intended tester group's availability. Do not
    duplicate submissions while Apple processing is pending.
 
@@ -2323,3 +2537,110 @@ discarding registrations.
   family data. Also verify the data-loss warning when unsent family work exists and
   the activation-pending safety lock. Passing cloud tests and Apple processing do
   not establish those device results.
+
+## Buy-me-a-coffee IAP setup (client implemented; Apple steps not executed)
+
+Added 20 September 2026. The approved client implementation is present locally,
+including the pinned iOS package, platform isolation, StoreKit coordinator and
+support UI. No products, agreements, banking details, builds or submissions were
+changed by this implementation task. See
+[the implementation plan](BUY-ME-A-COFFEE-PLAN.md) for scope and acceptance gates
+and [the dated validation entry](VALIDATION.md#自愿支持购买源码实现--2026-09-20本机实现未构建或发布)
+for local evidence and explicit native gaps.
+Do not interpret local tests as deployment evidence or as authorization to
+accept financial agreements, create products at unapproved prices, or make a
+real-money purchase.
+
+1. **Preserve the baseline — GitHub `github4me/my-little-days`.** Before feature
+   implementation, publish and read back the annotated tag
+   `pre-buy-me-a-coffee-2026-09-20`, which currently exists locally only, pointing
+   to `bc48826a7229f72a099714677c4e7b8860d499bd`. Use the GitHub plugin; if its tag
+   capability remains unavailable, resolve an approved publishing method without
+   opening a surprise Git credential window. Expected result: remote tag peels to
+   the exact baseline SHA. Preserve unrelated worktree changes.
+2. **Commercial readiness — App Store Connect, team `A9974KXQ4G` (Chao Wang).**
+   Account Holder opens Business → Agreements and confirms the Paid Apps
+   Agreement is Active, completing required banking and tax information privately.
+   Record only the status and verification date, never banking/tax values. Verify
+   the app's actual category and any historical Kids Category obligations; if
+   applicable, review a parental gate before exposing purchase opportunities.
+   [Apple configuration overview](https://developer.apple.com/help/app-store-connect/configure-in-app-purchase-settings/overview-for-configuring-in-app-purchases).
+3. **Products — Apps → My Little Days (`6809826484`) → Monetization → In-App
+   Purchases → +.** Confirm bundle `com.littledays.babylog`. After owner approval,
+   create Consumable products `com.littledays.babylog.tip.small`,
+   `com.littledays.babylog.tip.coffee`, and
+   `com.littledays.babylog.tip.generous`. Proposed Australian base prices are
+   A$2.99/A$4.99/A$9.99; verify available price points before saving. Complete
+   reference names, English/Simplified Chinese display names and descriptions,
+   availability, appropriate tax category and price schedules. IDs cannot be
+   changed or reused; do not create unapproved draft alternatives. Expected
+   result: the approved catalog is complete and queryable by the matching bundle
+   in sandbox. Allow product metadata propagation, potentially about an hour,
+   before concluding a fresh configuration is broken.
+   [Create consumables](https://developer.apple.com/help/app-store-connect/manage-in-app-purchases/create-consumable-or-non-consumable-in-app-purchases).
+   When another app language is added, also add matching product display-name and
+   description localization in App Store Connect; the client's English fallback
+   is not a substitute for completed storefront metadata.
+4. **Review information — each product's Review Information section.** Upload
+   actual support-screen screenshots and explain the More entry, voluntary
+   single payment, repeatability, no subscription/benefit, and no required app
+   login. Do not expose real family records in screenshots. Verify localizations
+   against Apple's field limits and complete the app's privacy declarations
+   after auditing the selected SDK.
+   [IAP information fields](https://developer.apple.com/help/app-store-connect/reference/in-app-purchases-and-subscriptions/in-app-purchase-information).
+5. **Native sandbox candidate — EAS project `@expo4chao/little-days`.** Freeze the
+   reviewed SHA, dependency versions, native configuration and resolved production
+   environment. Confirm real API URL/Entra IDs/scope and demo flag `0`; do not log
+   credentials. Current `eas.json` production lacks an explicit environment field,
+   so verify resolution rather than assuming preview values. Build a new iOS
+   store-distribution archive, preserving main app, Watch and Widget targets and
+   existing app-group settings. In Apple Developer Identifiers, verify the main
+   app's existing explicit App ID and matching bundle; in the generated Xcode
+   project, verify the main target's In-App Purchase capability. Explicit App IDs
+   enable IAP by default; this is a verification step, not a reason to invent an
+   entitlement or add Watch/Widget purchasing. Recheck the latest version/build
+   before choosing the next values. Do not regenerate profiles unless actual
+   capability checks require it. Expected result: a finished EAS archive with all targets correctly
+   signed, not merely a successful JavaScript export or an ad hoc preview IPA.
+   [Apple App ID configuration](https://developer.apple.com/help/account/identifiers/register-an-app-id).
+   Before building, confirm `package.json` still pins `expo-iap` **5.6.3** and
+   excludes it only under `expo.autolinking.android.exclude`. Do not add the
+   upstream `expo-iap` config plugin: at this audited version its default path
+   also adds Android Billing permission/dependencies. Run
+   `npx expo-modules-autolinking resolve --platform android --json` and confirm
+   `expo-iap` is absent; run the same command with `--platform apple` and confirm
+   it is present. On an isolated clean prebuild, inspect the Android merged
+   manifest/dependency tree for no Billing/OpenIAP, and the iOS `Podfile.lock`
+   for ExpoIap 5.6.3 plus openiap 3.4.0. If CocoaPods cannot resolve without the
+   package's generic plugin, review a tiny iOS-only Podfile plugin; do not enable
+   the generic plugin as a workaround. Standard StoreKit IAP has no app
+   entitlement key—never add the Apple Pay
+   `com.apple.developer.in-app-payments` entitlement. Verify the generated main
+   target/profile and signed archive instead, leaving Watch and Widget targets
+   unchanged.
+6. **TestFlight — the same Apple app.** Submit that exact archive, then separately
+   verify upload success, processing, tester-group availability and device
+   acceptance. Use Apple sandbox/StoreKit test tooling for successful, cancelled,
+   pending, repeated and interrupted purchases. TestFlight purchases do not
+   charge, but existing family API data remains production unless verified
+   otherwise; use disposable family data for lifecycle tests. Record device/OS,
+   build, storefront and outcomes without receipts or private payloads.
+   [Apple test environments](https://developer.apple.com/in-app-purchase/).
+7. **Public release — separate approval required.** Attach the first
+   consumable-type submission to a new app version and submit the app/products
+   together. Verify product and app approval and availability separately; a
+   TestFlight upload is not public IAP approval. A deliberate real-money smoke
+   purchase needs explicit separate authorization. Apple financial reports, not
+   client counters or sandbox events, determine revenue.
+   [Submission rules](https://developer.apple.com/help/app-store-connect/manage-submissions-to-app-review/submit-an-in-app-purchase).
+
+No Azure resource, Entra registration, API deployment or Azure SQL migration is
+planned. For normal discontinuation, follow Apple's guidance to announce and stop
+merchandising at least 31 days beforehand, end promotions and notify Apple. No
+explicit exemption for pure tips is stated; confirm applicability with Apple.
+Contact Apple if an urgent issue prevents sufficient notice. Availability changes
+do not cancel unfinished transactions or fix installed code: publish a corrective
+native build as needed, retain transaction recovery, do not erase family data,
+and do not enable OTA as a shortcut. See
+[Apple's availability/discontinuation guidance](https://developer.apple.com/help/app-store-connect/manage-in-app-purchases/set-availability-for-in-app-purchases).
+Record actual execution evidence here only after approved steps occur.

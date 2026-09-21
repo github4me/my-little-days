@@ -109,6 +109,7 @@ export default function Settings({
   language,
   onLanguageChange,
   onOpenPrivacy,
+  onOpenSupport,
   onOpenFamily,
 }: {
   familyUiPreview?: boolean;
@@ -137,6 +138,7 @@ export default function Settings({
   language: LanguagePreference;
   onLanguageChange: (language: LanguagePreference) => Promise<void>;
   onOpenPrivacy: () => void;
+  onOpenSupport?: () => void;
   onOpenFamily: () => void;
 }) {
   const c = useContext(Theme);
@@ -1327,6 +1329,36 @@ export default function Settings({
           </>
         )}
       </SettingsSection>
+      {onOpenSupport ? (
+        <Card>
+          <View style={[row, { alignItems: "flex-start" }]}>
+            <View
+              accessibilityElementsHidden
+              aria-hidden
+              importantForAccessibility="no-hide-descendants"
+              style={{
+                width: 44,
+                height: 44,
+                borderRadius: 22,
+                backgroundColor: c.soft,
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <T raw style={{ color: c.primary, fontSize: 22 }}>
+                ☕︎
+              </T>
+            </View>
+            <View style={{ flex: 1, gap: 3 }}>
+              <T style={{ fontSize: 18, fontWeight: "700" }}>请我喝杯咖啡</T>
+              <T style={{ color: c.muted, fontSize: 13, lineHeight: 19 }}>
+                自愿、单次支持，不会订阅或解锁额外功能
+              </T>
+            </View>
+          </View>
+          <Button label="查看支持选项" secondary onPress={onOpenSupport} />
+        </Card>
+      ) : null}
       <Card>
         <Pressable
           accessibilityRole="button"

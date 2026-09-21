@@ -60,6 +60,11 @@ import AppVersion from "./src/AppVersion";
 import type { RecordView } from "./src/recordCalendar";
 import Settings from "./src/Settings";
 import PrivacySupport from "./src/PrivacySupport";
+import SupportPurchaseRoute from "./src/support/SupportPurchaseRoute";
+import {
+  SupportPurchaseProvider,
+  useSupportPurchases,
+} from "./src/support/SupportPurchaseProvider";
 import FamilyScreen from "./src/family/FamilyScreen";
 import FamilyScreenView from "./src/family/FamilyScreenView";
 import { FamilySyncBanner } from "./src/family/FamilySyncStatus";
@@ -259,23 +264,25 @@ export default function App() {
     <AccessibilityPreferencesProvider>
       <SafeAreaProvider>
         <I18nProvider locale={locale} formattingLocale={formattingLocale}>
-          <BabyApp
-            language={language}
-            onLanguageChange={async (next) => {
-              const resolved = resolveAppLocalization(next, preferredLocales);
-              try {
-                await hydrateLocaleCatalog(resolved.catalogLocale);
-              } catch {
-                throw new Error("操作失败，请重试");
-              }
-              await saveLanguage(next);
-              setActiveLocale(
-                resolved.catalogLocale,
-                resolved.formattingLocale,
-              );
-              setLocalization({ language: next, ...resolved });
-            }}
-          />
+          <SupportPurchaseProvider>
+            <BabyApp
+              language={language}
+              onLanguageChange={async (next) => {
+                const resolved = resolveAppLocalization(next, preferredLocales);
+                try {
+                  await hydrateLocaleCatalog(resolved.catalogLocale);
+                } catch {
+                  throw new Error("操作失败，请重试");
+                }
+                await saveLanguage(next);
+                setActiveLocale(
+                  resolved.catalogLocale,
+                  resolved.formattingLocale,
+                );
+                setLocalization({ language: next, ...resolved });
+              }}
+            />
+          </SupportPurchaseProvider>
         </I18nProvider>
       </SafeAreaProvider>
     </AccessibilityPreferencesProvider>
@@ -293,6 +300,7 @@ function BabyApp({
   const compactTitle = width < 360;
   const largeType = fontScale >= 1.35;
   const { highContrast } = useAccessibilityPreferences();
+  const supportPurchases = useSupportPurchases();
   const systemTheme = useColorScheme();
   const [themePreference, setThemePreference] = useState<boolean | null>(null);
   const [recordView, setRecordView] = useState<RecordView>("bars");
@@ -318,7 +326,7 @@ function BabyApp({
     [sleepNotice, setSleepNotice] = useState(""),
     [tab, setTab] = useState<AppTab>("today"),
     [settingsPage, setSettingsPage] = useState<
-      "main" | "privacy" | "family" | "family-demo"
+      "main" | "privacy" | "support" | "family" | "family-demo"
     >("main"),
     [now, setNow] = useState(Date.now()),
     [editor, setEditor] = useState<Entry | null>(null),
@@ -539,7 +547,9 @@ function BabyApp({
     tab === "settings" && settingsPage !== "main"
       ? settingsPage === "privacy"
         ? "隐私与支持"
-        : "家庭共享"
+        : settingsPage === "support"
+          ? "请我喝杯咖啡"
+          : "家庭共享"
       : appTabs.find((item) => item.key === tab)!.label,
   );
   useNavigationAnnouncement(
@@ -1877,6 +1887,13 @@ function BabyApp({
             {tab === "settings" ? (
               settingsPage === "privacy" ? (
                 <PrivacySupport onBack={() => setSettingsPage("main")} />
+              ) : settingsPage === "support" ? (
+                <SupportPurchaseRoute
+                  onBack={() => {
+                    setSettingsPage("main");
+                    mainScroll.current?.scrollTo({ y: 0, animated: false });
+                  }}
+                />
               ) : settingsPage === "family-demo" && familyDemoEnabled ? (
                 <FamilyDemoScreen
                   onBack={() => {
@@ -1954,6 +1971,17 @@ function BabyApp({
                   language={language}
                   onLanguageChange={changeLanguage}
                   onOpenPrivacy={() => setSettingsPage("privacy")}
+                  onOpenSupport={
+                    supportPurchases.visible
+                      ? () => {
+                          setSettingsPage("support");
+                          mainScroll.current?.scrollTo({
+                            y: 0,
+                            animated: false,
+                          });
+                        }
+                      : undefined
+                  }
                   onOpenFamily={openFamilyPage}
                   onDarkMode={async (v) => {
                     const previous = themePreference;
@@ -1968,7 +1996,10 @@ function BabyApp({
                 />
               )
             ) : null}
-            {!(tab === "settings" && settingsPage === "privacy") ? (
+            {!(
+              tab === "settings" &&
+              (settingsPage === "privacy" || settingsPage === "support")
+            ) ? (
               <T
                 style={{
                   fontSize: 10,

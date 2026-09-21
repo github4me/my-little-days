@@ -1,5 +1,7 @@
 # Family-sharing operations
 
+**Live SQL is now paid Basic (17 September 2026):** see [the in-place migration record and plan](../docs/AZURE-SQL-BASIC-MIGRATION.md). `bicep/sql-basic.bicep` is the isolated Basic target. The ordinary infrastructure template/wrappers remain free-only, so their cloud gates are disabled. Do not re-enable them or apply the old free target to this database before the documented Basic-profile integration. API/DbUp releases remain separate and usable.
+
 Start with [GitHub infrastructure setup](../docs/AZURE-GITHUB-INFRA.md): relevant pushes/PRs run local checks automatically; an enabled trusted-branch push runs read-only Azure preview, then waits for configured environment approval before deployment. Azure identities, variables and real environment protections must be set up first. The [local Bicep guide](../docs/AZURE-BICEP-DEPLOYMENT.md) remains an operator fallback. Follow [Azure activation](../docs/AZURE-FAMILY-SETUP.md) afterward for customer identity, database initialization and the separate manual API-code deployment.
 
 Legacy `pilot` filenames, resource-group names, SQL roles, ownership tags and GitHub environment identifiers are intentionally retained. They are deployment identities, not restrictions to synthetic feeds. Renaming them could create duplicate infrastructure or invalidate existing OIDC trust. The v2 API serves complete record histories; no API code, customer registrations or credentials are installed by Bicep alone.

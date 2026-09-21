@@ -5,6 +5,8 @@ dist/
 dist-ios/
 dist-web/
 dist-ui-demo/
+/dist-*/
+/work/
 *.log
 .env*
 .DS_Store

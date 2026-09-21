@@ -73,6 +73,10 @@ const english: Record<string, string> = {
   "筛选：{kind}": "Filter: {kind}",
   "筛选记录：{kind}": "Filter records: {kind}",
   致谢: "Credits",
+  请我喝杯咖啡: "Buy me a coffee",
+  "自愿、单次支持，不会订阅或解锁额外功能":
+    "Optional, one-time support. No subscription or feature unlocks.",
+  查看支持选项: "View support options",
   "感谢 Trista（来自 FPH）和她群里的 Mia、Violet、Bill 提出的建议与想法，也感谢群里每一位妈妈爸爸的支持。期待更多妈妈爸爸出现在这里，一起让小日子更好。":
     "Thank you to Trista from FPH and Mia, Violet, and Bill in her group for their suggestions and ideas, and to all the mums and dads in the group for their support. We hope to see more mums and dads here, helping make My Little Days even better.",
   柱状图: "Bar chart",
@@ -353,6 +357,9 @@ const english: Record<string, string> = {
   备份与删除: "Backups and deletion",
   "个人离线模式可主动导出备份，换机或卸载前请妥善保存；家庭共享期间不提供本机备份导出或导入。卸载应用不会删除服务器上的家庭记录或账户；如需删除账户，请使用「我的账户」中的删除流程并查看确认说明。":
     "In personal offline mode, export and keep a backup before changing phones or uninstalling. Local backup export and import are unavailable while sharing. Uninstalling does not delete server-side family records or your account. To delete your account, use My account and review the deletion confirmation.",
+  可选支持: "Optional support",
+  "iOS 上可以选择单次支持。付款由 Apple 处理；小日子不会收到你的银行卡或 Apple 账户详情，也不会把支持与你的宝宝、家庭或应用登录关联。未完成交易仅通过 StoreKit 恢复；收据和购买记录不会上传到小日子服务器。":
+    "On iOS, you can choose a one-time support purchase. Apple handles payment; My Little Days does not receive your card or Apple Account details or link support to your baby, family or app sign-in. Unfinished transactions are recovered only through StoreKit; receipts and purchase history are not uploaded to My Little Days servers.",
   软件更新: "Software updates",
   "应用会安全检查更新。更新服务可能收到设备系统版本和随机安装标记，但不包含宝宝记录或照片。":
     "The app securely checks for updates. The update service may receive the operating-system version and a random installation token, never baby records or photos.",

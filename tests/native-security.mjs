@@ -116,3 +116,30 @@ test("native candidate cannot accept unsigned OTA updates", () => {
   assert.match(ignore, /private-key/);
   assert.match(ignore, /work\//);
 });
+
+test("iOS-only support purchases cannot add Android billing", () => {
+  const packageConfig = JSON.parse(fs.readFileSync("package.json", "utf8"));
+  assert.equal(packageConfig.dependencies["expo-iap"], "5.6.3");
+  assert.ok(
+    packageConfig.expo.autolinking.android.exclude.includes("expo-iap"),
+  );
+
+  const { expo } = JSON.parse(fs.readFileSync("app.json", "utf8"));
+  assert.equal(
+    expo.plugins.some((plugin) =>
+      Array.isArray(plugin) ? plugin[0] === "expo-iap" : plugin === "expo-iap",
+    ),
+    false,
+    "The upstream plugin unconditionally adds Android Billing configuration",
+  );
+
+  const fallback = fs.readFileSync("src/support/store.ts", "utf8");
+  const ios = fs.readFileSync("src/support/store.ios.ts", "utf8");
+  assert.doesNotMatch(fallback, /from ["']expo-iap["']/);
+  assert.match(ios, /from ["']expo-iap["']/);
+  assert.match(ios, /andDangerouslyFinishTransactionAutomatically: false/);
+  assert.doesNotMatch(
+    ios,
+    /verifyPurchase|isTransactionVerifiedIOS|latestTransactionIOS|getTransactionJwsIOS/,
+  );
+});

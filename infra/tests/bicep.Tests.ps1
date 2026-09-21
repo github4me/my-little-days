@@ -115,3 +115,5 @@ foreach ($check in $checks.GetEnumerator()) {
     Write-Host "PASS: $($check.Key)"
 }
 Write-Host "Passed $($checks.Count) compiled-template safety checks; no Azure resources accessed."
+
+& (Join-Path $PSScriptRoot 'sql-basic.Tests.ps1')

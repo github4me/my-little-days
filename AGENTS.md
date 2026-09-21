@@ -6,6 +6,21 @@ When information or a material decision is needed from the user, use the availab
 
 Use the GitHub plugin for future commits and pushes to GitHub. Do not default to command-line pushes or open local Git credential/login windows. Local Git inspection and fetching remain available for verification and keeping the checkout aligned. If the plugin is unavailable, explain the blocker before choosing another publishing method.
 
+## Project memory and operational lessons
+
+Read [docs/PROJECT-LESSONS.md](docs/PROJECT-LESSONS.md) before changing authentication, family lifecycle/sync, releases or infrastructure. Use [docs/AZURE-MANUAL-SETUP-RUNBOOK.md](docs/AZURE-MANUAL-SETUP-RUNBOOK.md) for current configuration and deployment evidence; recheck dated observations against live state.
+
+- Update the runbook in the same task whenever new manual Azure/GitHub/Expo/Apple steps are needed. Specify location, tenant/environment, exact fields, expected result and verification; never record secrets or private family payloads.
+- Treat preview as connected to production data unless verified otherwise. Do not uninstall data-bearing apps, reset production data or test destructive family/account flows on real users.
+- Separate token recognition, authoritative account/family access, local persistence and server acknowledgement. Render permitted same-account cache promptly; preserve durable operation IDs, version checks and late-response isolation. Do not optimistically grant access or confirm create/join/delete outcomes.
+- Creating uploads the reviewed owner's seed; joining downloads/replaces after consent without merging the invitee's personal history. Leave/removal retains contributions and is not account deletion. Offline revocation cannot be detected instantly. Consult the current contract before altering lifecycle semantics.
+- Keep DbUp scripts immutable and schema changes additive/compatible with the previous running API. Require catalog verification and explicit zero pending scripts for no-op acceptance; never truncate active-family idempotency receipts as cache cleanup.
+- Validate real response shapes and installed tool versions. Fix incorrect checks without removing target, cost, identity, privacy or integrity safeguards. Preserve unrelated resources/settings and clean up only temporary state owned by this operation.
+- Freeze release SHA/configuration and verify actual environment protections. After deployment/settings changes, allow bounded startup propagation with one health check in flight; do not equate ARM success or generic health with signed-in SQL-backed readiness.
+- Verify the resolved EAS environment, URL/IDs/scope/demo flag, runtime and distribution before each build. Read current OTA settings; do not assume an OTA can deliver native/security changes or an ad hoc IPA can go to TestFlight. Track build, upload, processing and device acceptance separately.
+- As of 17 September 2026, live SQL is paid Basic and the ordinary infrastructure path is still free-only; its cloud gates are paused. Do not re-enable or apply the old target before the documented Basic-profile integration and fresh preview. Recheck current state rather than treating this dated checkpoint as permanent.
+- Report tested, deployed, device-verified and outstanding results separately. Preserve restore/revocation reconciliation and native acceptance gaps until demonstrated, not merely documented or committed.
+
 ## Apple-first design standard
 
 The user requires **all app design**, not only Night mode, to follow the current [Apple Human Interface Guidelines](https://developer.apple.com/design/human-interface-guidelines). Apply this to existing screens when changing them and to all new UI/UX: navigation, forms, recording flows, settings, account/family management, dialogs, feedback, accessibility and both appearances. Apple's platform guidance takes precedence over generic design-skill aesthetics or custom styling preferences.
@@ -45,4 +60,4 @@ Add focused `*.test.ts` coverage for changes to validation, imports/exports, tim
 
 ## Commit & Pull Request Guidelines
 
-This repository has no existing commit history to infer a convention from. Use concise, imperative subject lines such as `Fix sleep duration across midnight`. Keep commits scoped. Pull requests should describe the user-visible change, list verification performed, link the relevant issue when one exists, and include screenshots for UI changes. Call out any untested iOS-native behavior explicitly.
+Use concise, imperative subject lines such as `Fix sleep duration across midnight`. Keep commits scoped. Pull requests should describe the user-visible change, list verification performed, link the relevant issue when one exists, and include screenshots for UI changes. Call out any untested iOS-native behavior explicitly.

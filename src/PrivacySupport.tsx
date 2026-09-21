@@ -183,6 +183,11 @@ export default function PrivacySupport({ onBack }: { onBack: () => void }) {
           children="个人离线模式可主动导出备份，换机或卸载前请妥善保存；家庭共享期间不提供本机备份导出或导入。卸载应用不会删除服务器上的家庭记录或账户；如需删除账户，请使用「我的账户」中的删除流程并查看确认说明。"
         />
         <PrivacySection
+          icon="♡"
+          title="可选支持"
+          children="iOS 上可以选择单次支持。付款由 Apple 处理；小日子不会收到你的银行卡或 Apple 账户详情，也不会把支持与你的宝宝、家庭或应用登录关联。未完成交易仅通过 StoreKit 恢复；收据和购买记录不会上传到小日子服务器。"
+        />
+        <PrivacySection
           icon="↻"
           title="软件更新"
           children={copy(

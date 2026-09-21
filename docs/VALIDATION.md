@@ -2,6 +2,18 @@
 
 > 以下按日期保留各轮实际验证结果，不是当前功能或发布状态清单。2026-09-16 的头像、提醒、早教共享及五人名额范围见[共享资料说明](FAMILY-EXTRAS.md)，已完成的数据库/API 与 preview 发布见[运行手册证据](AZURE-MANUAL-SETUP-RUNBOOK.md#shared-extras-release-evidence-16-september-2026)。较早的本机准备、虚构数据试点及旧邀请上限描述只适用于当时版本。两部 iPhone 的激活/恢复、照片显示、实际通知、真实删除与恢复演练仍需独立验收，不能由这些本机测试或发布结果推定通过。
 
+## 自愿支持购买源码实现 · 2026-09-20（本机实现，未构建或发布）
+
+- More 中新增 iOS/iPadOS 专用的「请我喝杯咖啡」入口和独立页面。三档均为可重复购买的单次 Consumable，不订阅、不解锁功能；价格仅使用 StoreKit 返回的本地化价格，初始不预选金额。Android 和 Web 不显示入口。
+- 固定依赖 `expo-iap` 5.6.3（内含 OpenIAP Apple 3.4.0）。源码审计后未启用该版本会同时写入 Android Billing 配置的通用 Expo 插件；改为只让 Apple 自动链接，并用 `expo.autolinking.android.exclude` 排除 Android。`npx expo-modules-autolinking resolve --platform android --json` 未解析 `expo-iap`，Apple 同命令成功解析。
+- 购买监听器先于连接注册；应用启动和回到前台时重放 StoreKit 未完成交易。仅接受产品白名单、Apple store、数量 1、已购买状态、同一原始/规范交易编号、有效日期、签名交易、匹配的可选 bundle/environment 且未撤销/升级的交易；完成操作只作用于该笔已验证的原始交易。取消保持安静，等待批准、结果不明、已确认但完成失败分别显示，后两者阻止重复付款直至状态核对。
+- 不新增 Azure/API/SQL/Entra 依赖，不把支持与应用登录、家庭或宝宝资料关联，不保存银行卡、Apple 账户、收据/JWS 或购买历史，也不新增本机支付账本；StoreKit 未完成交易是恢复来源。隐私说明和 Apple 购买记录/退款帮助入口已加入。
+- 支持页面的文字使用独立 locale catalog：当前提供英文和简体中文、缺失项明确回退英文，交易逻辑不含语言分支。扩展新语言仍须同步扩展全局 locale/语言选择、应用翻译和 App Store Connect 商品元数据；英文回退不代表该语言已完成发布本地化。
+- 本机验证：`npm run verify` 全部配置套件通过；其中根级单元测试 244 项通过，原生安全套件 9 项通过。`npm audit --omit=dev` 为 0 个已知漏洞。`npx expo config --type public` 成功，仍仅包含原有 Watch、Today Widget 等插件/扩展，没有 Apple Pay entitlement。`npm run export:web` 和 `npm run export:ios` 成功；`npm run test:browser` 通过；`npm run test:apple-browser` 在 320/390/768px、中英文、浅/深色和更高对比度下通过 24 个隔离截图场景，外部请求为 0。
+- **尚未验证**：干净 iOS prebuild/CocoaPods、Swift 原生编译、签名 archive、主应用 IAP capability/profile、Watch/Widget 嵌入保留、App Store Connect 商品/协议/税务/银行、StoreKit sandbox 的成功/取消/等待/重复/中断/完成重试、真机 VoiceOver/Dynamic Type/浅深色、App Privacy 声明、TestFlight 上传/处理/安装。本功能加入原生依赖，不能通过 OTA 交付。本轮没有修改 Apple/Azure/GitHub 远端状态，没有生成 IPA 或提交 TestFlight。
+
+后续操作和验收门槛见[实现计划](BUY-ME-A-COFFEE-PLAN.md)及[手工设置运行手册](AZURE-MANUAL-SETUP-RUNBOOK.md#buy-me-a-coffee-iap-setup-client-implemented-apple-steps-not-executed)。
+
 ## 喂养保存、照护补充剂及导航 · 2026-09-19（本机实现，未发布）
 
 - 喂养可只填开始时间后「保存记录」，不再自动开始计时；「开始计时」为独立次要操作，填写结束时间后隐藏。编辑正在计时的记录且未填结束时间时保留计时。

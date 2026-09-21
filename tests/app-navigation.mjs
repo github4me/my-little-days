@@ -262,11 +262,42 @@ test("Growth initially shows all measurement series", () => {
   assert.match(app, /useState<Metric>\("all"\)/);
 });
 
-test("unresolved family recovery never renders an inert Back action", () => {
-  const app = fs.readFileSync("App.tsx", "utf8");
-  assert.doesNotMatch(app, /onBack=\{\(\) => \{\}\}/);
-  assert.match(
-    app,
-    /<FamilyScreen\s+pilot=\{family\}\s+source=\{initialState\}\s+\/>/,
+test("unresolved family recovery omits every Back handler", () => {
+  const app = ts.createSourceFile(
+    "App.tsx",
+    fs.readFileSync("App.tsx", "utf8"),
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX,
+  );
+  const familyScreens = [];
+  const visit = (node) => {
+    if (
+      ts.isJsxSelfClosingElement(node) &&
+      node.tagName.getText(app) === "FamilyScreen"
+    )
+      familyScreens.push(node);
+    ts.forEachChild(node, visit);
+  };
+  visit(app);
+  const attribute = (element, name) =>
+    element.attributes.properties.find(
+      (node) => ts.isJsxAttribute(node) && node.name.text === name,
+    );
+  const expression = (element, name) => {
+    const initializer = attribute(element, name)?.initializer;
+    assert(initializer && ts.isJsxExpression(initializer));
+    return initializer.expression?.getText(app);
+  };
+  const recoveryScreens = familyScreens.filter(
+    (screen) => expression(screen, "source") === "initialState",
+  );
+
+  assert.equal(recoveryScreens.length, 1);
+  assert.equal(expression(recoveryScreens[0], "pilot"), "family");
+  assert.equal(
+    attribute(recoveryScreens[0], "onBack"),
+    undefined,
+    "Recovery must not expose a Back action unless it has a real destination",
   );
 });

@@ -7,6 +7,15 @@
       "uuid": "11.1.1"
     }
   },
+  "expo": {
+    "autolinking": {
+      "android": {
+        "exclude": [
+          "expo-iap"
+        ]
+      }
+    }
+  },
   "version": "0.2.1",
   "main": "index.ts",
   "dependencies": {
@@ -16,6 +25,7 @@
     "expo-crypto": "~57.0.3",
     "expo-document-picker": "~57.0.1",
     "expo-file-system": "~57.0.6",
+    "expo-iap": "5.6.3",
     "expo-image-manipulator": "~57.0.16",
     "expo-image-picker": "~57.0.16",
     "expo-localization": "~57.0.1",
