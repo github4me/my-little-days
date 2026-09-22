@@ -17,14 +17,21 @@ export default function SupportPurchaseRoute({
   const controller = useSupportPurchases();
 
   useEffect(() => {
-    void controller.reloadProducts();
-  }, [controller.reloadProducts]);
+    if (!controller.visible) onBack();
+  }, [controller.visible, onBack]);
+
+  useEffect(() => {
+    if (controller.visible) void controller.reloadProducts();
+  }, [controller.visible, controller.reloadProducts]);
 
   function openApplePurchases() {
     void Linking.openURL(APPLE_PURCHASES_URL).catch(() =>
       Alert.alert(t("support.link.errorTitle"), t("support.link.error")),
     );
   }
+
+  // Also protect a stale route retained during development or state recovery.
+  if (!controller.visible) return null;
 
   return (
     <SupportScreen

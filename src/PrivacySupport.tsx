@@ -2,6 +2,7 @@ import React, { useContext, useState } from "react";
 import { Linking, Pressable, View } from "react-native";
 import { Card, Theme, T, heading, row } from "./ui";
 import { t, useI18n } from "./i18n";
+import { SUPPORT_PURCHASES_ENABLED } from "./support/release";
 
 const supportEmail = "contact@reticle.com.au";
 
@@ -182,11 +183,13 @@ export default function PrivacySupport({ onBack }: { onBack: () => void }) {
           title="备份与删除"
           children="个人备份支持导入；家庭资料仅可下载，暂不支持从文件恢复。导出文件未加密；选择云端保存位置时，由你选择的服务处理文件。退出、移除成员、删除家庭或账户不会撤回已保存或分享的副本，请自行管理这些文件。卸载应用不会删除服务端记录或账户；删除账户请使用「我的账户」中的相应流程。"
         />
-        <PrivacySection
-          icon="♡"
-          title="可选支持"
-          children="iOS 上可以选择单次支持。付款由 Apple 处理；小日子不会收到你的银行卡或 Apple 账户详情，也不会把支持与你的宝宝、家庭或应用登录关联。未完成交易仅通过 StoreKit 恢复；收据和购买记录不会上传到小日子服务器。"
-        />
+        {SUPPORT_PURCHASES_ENABLED ? (
+          <PrivacySection
+            icon="♡"
+            title="可选支持"
+            children="iOS 上可以选择单次支持。付款由 Apple 处理；小日子不会收到你的银行卡或 Apple 账户详情，也不会把支持与你的宝宝、家庭或应用登录关联。未完成交易仅通过 StoreKit 恢复；收据和购买记录不会上传到小日子服务器。"
+          />
+        ) : null}
         <PrivacySection
           icon="↻"
           title="软件更新"

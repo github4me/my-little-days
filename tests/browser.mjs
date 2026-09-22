@@ -448,6 +448,10 @@ assert.equal(
 );
 await page.getByRole("tab", { name: "我的", exact: true }).click();
 assert.equal(await page.getByLabel("宝宝名字", { exact: true }).count(), 0);
+assert.equal(
+  await page.getByRole("button", { name: "请我喝杯咖啡", exact: true }).count(),
+  0,
+);
 const languageRow = page.getByTestId("language-picker-row");
 assert.equal(await languageRow.getAttribute("aria-expanded"), "false");
 await languageRow.click();
@@ -565,6 +569,12 @@ await page
 await page.getByRole("radio", { name: "深色", exact: true }).click();
 await chooseEnglish();
 await page.getByText("Care reminders", { exact: true }).waitFor();
+assert.equal(
+  await page
+    .getByRole("button", { name: "Buy me a coffee", exact: true })
+    .count(),
+  0,
+);
 assert.equal(await page.getByText("● This device", { exact: true }).count(), 0);
 await page.getByTestId("language-picker-row").click();
 const languageOptions = [
@@ -603,6 +613,10 @@ await page
   .click();
 await page.getByText("Your data, your choices", { exact: true }).waitFor();
 await page.getByText("Software updates", { exact: true }).waitFor();
+assert.equal(
+  await page.getByText("Optional support", { exact: true }).count(),
+  0,
+);
 await page.getByText("contact@reticle.com.au", { exact: true }).waitFor();
 assert.equal(
   await page

@@ -3143,3 +3143,46 @@ the support screen opens; there is no additional Expo/Azure enable switch or
 BuyMeACoffee.com integration. Product readiness still needs real sandbox
 verification. This follow-up did not accept agreements, upload identity
 documents, create products, modify prices, build, install, upload or publish.
+
+## Coffee deferred for the recording/family-fixes release — 22 September 2026
+
+The user chose to release the other features and fixes without coffee purchases.
+`src/support/release.ts` now sets `SUPPORT_PURCHASES_ENABLED = false`. This
+source-controlled gate hides the More entry in every locale, makes controller
+actions inert, and does not load the iOS store adapter, connect to StoreKit,
+register its foreground listeners, fetch products or process transactions.
+A stale support route returns to More. The optional-purchase privacy paragraph
+is also hidden; normal privacy information and contact help remain available.
+
+Keep the three product IDs, translations, dependency and verified-transaction
+implementation for later. No transaction is consumed or deleted by this gate;
+unfinished StoreKit reconciliation is deferred until an enabled build. Existing
+Apple products, agreements, prices and signing resources have not been changed.
+This section supersedes the assumption in the earlier setup checklist that the
+current client actively loads products. It does not affect an already installed
+older build.
+
+- **Current release location:** the existing Expo checkout/branch
+  `feature/family-invitations`, using the existing Apple team `A9974KXQ4G` and
+  project `@expo4chao/little-days`. Keep the source switch false, build locally,
+  and verify More/Privacy in Chinese/English and light/dark on the signed device
+  candidate. Expected: no coffee entry/page, product loading or purchase prompt;
+  the recording, family, Watch and Widget acceptance checks remain required.
+  Do not enable or submit coffee products as part of this fixes-only release.
+- **Later re-enablement:** after the Account Holder completes the existing
+  Apple agreement/product checklist and approves coffee release, change the
+  source gate in a separate reviewed change and update its regression test.
+  Verify sandbox purchases and unfinished-transaction recovery, then produce a
+  new local signed build. Do not add an environment/remote activation path.
+
+No Azure/API/SQL/Entra change or paid Expo build is required for this gate.
+OTA remains disabled; a new native build and separate release acceptance are
+needed to deliver it. This source change does not itself archive, install,
+upload, publish or alter App Store Connect.
+
+Local verification for this gate: `npm run verify` passed type checking and
+686 tests; the full browser regression and iOS Hermes/web exports passed.
+Provider tests exercise iOS/Android/web with store-module loading forbidden,
+inert callbacks, stale-route recovery and conditional privacy copy. Browser
+checks cover the Chinese/English hidden entry and preserved contact help.
+These checks do not establish signed-device behavior or App Review acceptance.

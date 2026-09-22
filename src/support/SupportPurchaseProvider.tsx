@@ -29,8 +29,12 @@ import {
   supportTransactionKey,
   supportTransactions,
 } from "./purchaseCoordinator";
-import { createSupportPurchaseStore } from "./store";
-import type { SupportStoreError, SupportStoreTransaction } from "./storeTypes";
+import { SUPPORT_PURCHASES_ENABLED } from "./release";
+import type {
+  SupportPurchaseStore,
+  SupportStoreError,
+  SupportStoreTransaction,
+} from "./storeTypes";
 import type {
   SupportErrorReason,
   SupportProductRow,
@@ -52,6 +56,17 @@ const SupportPurchaseContext = createContext<SupportPurchaseController | null>(
   null,
 );
 
+const disabledSupportPurchases: SupportPurchaseController = {
+  visible: false,
+  products: [],
+  selectedProductId: null,
+  status: { kind: "unavailable" },
+  canPurchase: false,
+  selectProduct: () => {},
+  purchase: async () => {},
+  reloadProducts: async () => {},
+};
+
 function thrownStoreError(error: unknown): SupportStoreError {
   if (!error || typeof error !== "object") return { code: "unknown" };
   const candidate = error as { code?: unknown; productId?: unknown };
@@ -67,7 +82,29 @@ export function SupportPurchaseProvider({
 }: {
   children: React.ReactNode;
 }) {
-  const store = useRef(createSupportPurchaseStore()).current;
+  if (!SUPPORT_PURCHASES_ENABLED) {
+    return (
+      <SupportPurchaseContext.Provider value={disabledSupportPurchases}>
+        {children}
+      </SupportPurchaseContext.Provider>
+    );
+  }
+  return (
+    <EnabledSupportPurchaseProvider>{children}</EnabledSupportPurchaseProvider>
+  );
+}
+
+function EnabledSupportPurchaseProvider({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const [store] = useState<SupportPurchaseStore>(() => {
+    // Do not evaluate the iOS adapter (or expo-iap) in a disabled release.
+    const { createSupportPurchaseStore } =
+      require("./store") as typeof import("./store");
+    return createSupportPurchaseStore();
+  });
   const [state, dispatch] = useReducer(
     reduceSupportPurchaseState,
     undefined,

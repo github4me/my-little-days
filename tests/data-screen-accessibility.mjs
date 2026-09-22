@@ -125,6 +125,8 @@ function fixture(file, props, { fontScale = 1, failMail = false } = {}) {
           if (name === "./RecordActionButton")
             return load("src/RecordActionButton.tsx");
           if (name === "./recordRange") return load("src/recordRange.ts");
+          if (name === "./support/release")
+            return load("src/support/release.ts");
           throw new Error(`Unexpected dependency ${name}`);
         },
       },
