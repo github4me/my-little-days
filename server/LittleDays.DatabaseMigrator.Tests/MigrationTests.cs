@@ -64,7 +64,14 @@ public sealed class MigrationTests
         await Assert.ThrowsAsync<SqlException>(() => db.Execute("UPDATE dbo.FamilyRecords SET Collection='care' WHERE Id='avatar'"));
         await Assert.ThrowsAsync<SqlException>(() => db.Execute("UPDATE dbo.FamilyRecords SET RecordJson=REPLACE(RecordJson,'avatar','other') WHERE Id='avatar'"));
         await Assert.ThrowsAsync<SqlException>(() => db.Execute("UPDATE dbo.FamilyRecords SET RecordJson=REPLACE(RecordJson,'kind','missingKind') WHERE Id='avatar'"));
-        Assert.Equal(2, await db.Count("SELECT COUNT(*) FROM sys.check_constraints WHERE parent_object_id=OBJECT_ID('dbo.FamilyRecords') AND is_disabled=0 AND is_not_trusted=0"));
+        // Later additive migrations may add other checks to this table. Verify
+        // both shared-extras safeguards specifically, including their trust state.
+        Assert.Equal(2, await db.Count("""
+            SELECT COUNT(*) FROM sys.check_constraints
+            WHERE parent_object_id=OBJECT_ID(N'dbo.FamilyRecords')
+              AND name IN (N'CK_FamilyRecords_Collection',N'CK_FamilyRecords_Json')
+              AND is_disabled=0 AND is_not_trusted=0
+            """));
     }
 
     [SqlFact]
