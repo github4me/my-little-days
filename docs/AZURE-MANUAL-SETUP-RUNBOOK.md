@@ -3186,3 +3186,87 @@ Provider tests exercise iOS/Android/web with store-module loading forbidden,
 inert callbacks, stale-route recovery and conditional privacy copy. Browser
 checks cover the Chinese/English hidden entry and preserved contact help.
 These checks do not establish signed-device behavior or App Review acceptance.
+
+## Local fixes-only release — TestFlight build 42, 22 September 2026
+
+- **Frozen app source:** `6cb55d8febae3972022fe8b2a908accd3145c01d` on
+  `feature/family-invitations`, including `fef491ec6170ab8b867c924688180f714e005863`
+  (care-save confirmation and family-import privacy feedback) and the disabled
+  coffee feature. Both commits were pushed through the GitHub plugin. An isolated
+  `git archive` matched all 430 tracked source files before building; the only
+  release configuration difference was the staged build number, incremented to
+  **0.2.1 (42)**. Build 41 remains the older, unsubmitted local candidate. The
+  repository build-number baseline is now 42; choose the next unused number for
+  a future build rather than rebuilding/uploading 42.
+- **Verification:** 686 unit tests, TypeScript, full browser regression and iOS
+  Hermes/web exports passed. Fresh isolated-source native tests passed: Watch
+  **22**, Widget **6**. [GitHub CI run 69](https://github.com/github4me/my-little-days/actions/runs/35722666872)
+  passed both **TypeScript and browser** and **API and SQL integration** for
+  `6cb55d8f...`.
+- **Environment and signing:** the signed-in Expo owner was `expo4chao`, project
+  `@expo4chao/little-days` / `a5210f78-8729-46d4-82a4-7d1d40d30ac6`.
+  `eas config --platform ios --profile production` resolved Store distribution,
+  production channel/environment and existing remote credentials. A production
+  `eas env:exec` check matched all five public values in section 12.1, including
+  demo `0`. No local secrets or `.env.local` were copied into the release source.
+  Apple team `A9974KXQ4G`, existing distribution certificate and all three existing
+  Store provisioning profiles were reused with `--freeze-credentials`.
+- **Local archive:** EAS CLI `24.7.0` with `--local --non-interactive`,
+  `EAS_NO_VCS=1` and `NODE_ENV=production`; Xcode `26.5` (`17F42`), Node
+  `24.21.0`, CocoaPods `1.16.2`, Fastlane `2.240.1`. The previously documented
+  Tahoe cached-tool workaround was already present; no certificate/profile or
+  trust setting was changed. Build completed at about `2026-09-22T11:54:15Z`.
+  Expo Doctor still reports the two documented maintenance gaps (legacy splash
+  schema and ten package patch recommendations); dependencies were not changed
+  inside this frozen release.
+- **Signed artifact inspection:** `codesign --verify --deep --strict` passed for
+  Phone `com.littledays.babylog`, Watch `com.littledays.babylog.watchkitapp` and
+  Widget `com.littledays.babylog.widget`, each at **0.2.1 (42)**. Verified all
+  twelve locale bundles, Watch companion, Widget extension point, production
+  push, disabled debug access, Store/TestFlight entitlements, unexpired Store
+  profiles and the App Group only on Phone/Widget. No Apple Pay entitlement.
+  Embedded Hermes JavaScript is 4,510,965 bytes with the expected production
+  endpoint/identity values; OTA remains disabled, runtime `0.2.1`, coffee gate
+  false. This artifact does not need Metro to obtain its JavaScript bundle.
+  IPA SHA-256:
+  `0a38c618bcee50d7c6000d93ef4d3c2749e7bc3134b3a2007493e3eed87b2d54`.
+- **Local recovery artifacts:** ignored files
+  `artifacts/MyLittleDays-0.2.1-42.ipa`,
+  `artifacts/MyLittleDays-0.2.1-42.dSYM.zip` and
+  `artifacts/MyLittleDays-0.2.1-42.inspection.json`. Xcode Organizer retains
+  `~/Library/Developer/Xcode/Archives/2026-09-22/MyLittleDays 2026-09-22 21.47.43.xcarchive`.
+  Do not commit credentials, private build logs or these generated binaries.
+- **Apple submission location:** App Store Connect → Apps → My Little Days
+  (`6809826484`, `com.littledays.babylog`) → TestFlight → iOS → **0.2.1 (42)**.
+  Upload directly using local `xcrun altool --upload-app`, the existing
+  Expo-managed App Store Connect API key for team `A9974KXQ4G`, and a temporary
+  owner-readable key file removed after the uploader exits. Expected: upload
+  accepted, then Apple `VALID` processing and internal `IN_BETA_TESTING` status.
+  Verify these independently through Apple's build and buildBetaDetail API;
+  read existing group access with `betaGroups?filter[builds]=<build-id>` (Apple
+  allows only one relationship filter here). Do not replace signing resources
+  or create another Expo/Apple project.
+- **Upload result:** Apple's local uploader returned **UPLOAD SUCCEEDED with no
+  errors** at `2026-09-22T11:57:58Z`, delivery UUID
+  `985a6b71-b789-4de9-a7ec-8357a934fb53`, for the exact inspected 16,951,888-byte
+  IPA. The temporary upload key file was removed after success; EAS also removed
+  its temporary signing keychain and imported profiles after the local build.
+  No credential was committed or placed in `.env.local`.
+- **Processing checkpoint (`2026-09-22T12:03Z`):** Apple's filtered builds API
+  had not yet returned build 42 after the successful upload. Processing,
+  compliance and tester availability are therefore **not yet verified**. Do not
+  upload the same IPA again merely because initial ingestion has not appeared.
+  Before declaring TestFlight ready, read back this build's Apple ID, `VALID`
+  processing state, internal/external beta states and existing group access.
+  Existing groups are `Team (Expo)` and `Early Birds` (internal, all builds),
+  plus `Outside birds` (external); no group membership or Beta App Review
+  submission was changed. The previous build 40 remains available while Apple
+  processes the new upload.
+- **Scope and acceptance:** no EAS cloud build/Workflow, EAS cloud submission,
+  Azure/API/SQL/Entra deployment, IAP creation, agreement acceptance, tester
+  invitation or public App Store release is part of this operation. Physical
+  iPhone/Watch/Widget acceptance remains outstanding. Update over the existing
+  installation via TestFlight, without uninstalling. Check cold launch with
+  Metro stopped, Chinese/English and light/dark coffee hiding, care-save feedback,
+  family export/import restrictions, synchronization, Watch recording and Widget
+  refresh. Artifact inspection and Apple processing do not prove those behaviors.
