@@ -62,3 +62,14 @@
 "error.watch_clock" = "Controlla l’ora del Watch, poi riprova.";
 "notice.short_sleep_cancelled" = "Meno di un minuto: sonno annullato; non verrà conservato alcun sonno completato.";
 "error.sync_status_save_failed" = "Impossibile salvare lo stato di sincronizzazione. Le registrazioni in sospeso restano conservate.";
+"sync.conflict.title" = "Controlla conflitto";
+"sync.conflict.changed_by" = "Versione attuale di %@";
+"sync.conflict.current" = "Versione famiglia";
+"sync.conflict.mine" = "La mia modifica";
+"sync.conflict.pending" = "In attesa dell’iPhone";
+"sync.conflict.keep" = "Mantieni versione famiglia";
+"sync.conflict.replace" = "Sostituisci con la mia modifica";
+"sync.conflict.ongoing" = "In corso";
+"sync.conflict.sleep" = "Sonno";
+"sync.conflict.feed" = "Poppata";
+"sync.recording_paused" = "La registrazione è in pausa su iPhone. Puoi ancora controllare i conflitti esistenti qui sotto.";

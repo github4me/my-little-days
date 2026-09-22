@@ -1,5 +1,7 @@
 # Security review — My Little Days
 
+> Policy update, 22 September 2026: active members can now explicitly download confirmed family records as unencrypted JSON for backup/analysis; family-file import/restore remains unavailable. Historical statements about suppressing family exports below describe the audited version. SQLite OS-backup exclusion remains a separate safeguard; it cannot exclude or recall files saved/shared outside the app. See the [current export contract](FAMILY-API-CONTRACT.md#member-initiated-family-backup-client-implementation-22-september-2026). This update does not close the audit's native or operational acceptance gaps.
+
 Date: **17 September 2026 (Australia/Sydney)**
 
 Reviewed branch: `feature/family-invitations`

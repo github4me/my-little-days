@@ -806,13 +806,35 @@ export default function EntryEditor({
                 onPress={() => void save()}
                 style={[
                   s.save,
-                  { backgroundColor: accent, opacity: busy ? 0.6 : 1 },
+                  {
+                    backgroundColor:
+                      entry.type === "feed" && !hasEnd && !entry.feedRunning
+                        ? palette.soft
+                        : accent,
+                    opacity: busy ? 0.6 : 1,
+                  },
                 ]}
               >
                 {busy ? (
-                  <ActivityIndicator color={palette.onPrimary} />
+                  <ActivityIndicator
+                    color={
+                      entry.type === "feed" && !hasEnd && !entry.feedRunning
+                        ? accent
+                        : palette.onPrimary
+                    }
+                  />
                 ) : (
-                  <Text style={[s.saveText, { color: palette.onPrimary }]}>
+                  <Text
+                    style={[
+                      s.saveText,
+                      {
+                        color:
+                          entry.type === "feed" && !hasEnd && !entry.feedRunning
+                            ? accent
+                            : palette.onPrimary,
+                      },
+                    ]}
+                  >
                     {t(
                       !hasEnd && (entry.type === "sleep" || entry.feedRunning)
                         ? "保存 · 继续计时"
@@ -831,13 +853,13 @@ export default function EntryEditor({
                   style={[
                     s.save,
                     {
-                      backgroundColor: palette.soft,
+                      backgroundColor: accent,
                       opacity: busy ? 0.6 : 1,
                       marginTop: 10,
                     },
                   ]}
                 >
-                  <Text style={[s.saveText, { color: accent }]}>
+                  <Text style={[s.saveText, { color: palette.onPrimary }]}>
                     {t("开始计时")}
                   </Text>
                 </Pressable>

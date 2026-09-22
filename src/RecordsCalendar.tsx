@@ -109,7 +109,7 @@ export default function RecordsCalendar({
   const [dateError, setDateError] = useState(false);
   const [width, setWidth] = useState(280);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [expandedList, setExpandedList] = useState(false);
+  const [visibleRecordCount, setVisibleRecordCount] = useState(3);
   const pendingAction = useRef<(() => void) | null>(null);
   const verticalScroll = useRef<ScrollView>(null);
   const today = shiftCalendarDay(new Date(now), 0);
@@ -161,7 +161,7 @@ export default function RecordsCalendar({
   const fills = { feed: c.feed, diaper: c.diaper, sleep: c.sleep };
   function chooseDate(next: Date) {
     setChosenDay(calendarDayKey(next > today ? today : next));
-    setExpandedList(false);
+    setVisibleRecordCount(3);
     setDateError(false);
   }
   function act(action: () => void) {
@@ -179,7 +179,7 @@ export default function RecordsCalendar({
   }
   function chooseFilter(value: CalendarKind) {
     setKind(value);
-    setExpandedList(false);
+    setVisibleRecordCount(3);
     setFiltersOpen(false);
   }
   function filterOption(value: CalendarKind, showLabel = false) {
@@ -248,7 +248,7 @@ export default function RecordsCalendar({
               onPress={() => {
                 if (option === "today") setChosenDay(null);
                 else setMode(option);
-                setExpandedList(false);
+                setVisibleRecordCount(3);
               }}
               style={({ pressed }) => ({
                 minWidth: 44,
@@ -656,10 +656,7 @@ export default function RecordsCalendar({
         >
           {t("日历明细（{count}）", { count: visibleEntries.length })}
         </T>
-        {(largeText || expandedList
-          ? visibleEntries
-          : visibleEntries.slice(0, 5)
-        ).map((entry) => (
+        {visibleEntries.slice(0, visibleRecordCount).map((entry) => (
           <Pressable
             key={entry.id}
             accessibilityRole="button"
@@ -682,11 +679,20 @@ export default function RecordsCalendar({
             >{`${formatDate(entry.start, { month: "short", day: "numeric" })} · ${formatTime(entry.start)}`}</T>
           </Pressable>
         ))}
-        {!largeText && visibleEntries.length > 5 && (
+        {visibleEntries.length > visibleRecordCount && (
           <Button
             secondary
-            label={expandedList ? "收起日历明细" : "展开全部日历明细"}
-            onPress={() => setExpandedList((value) => !value)}
+            label={t("显示 {count} 条更早记录", {
+              count: Math.min(5, visibleEntries.length - visibleRecordCount),
+            })}
+            onPress={() => setVisibleRecordCount((count) => count + 5)}
+          />
+        )}
+        {Math.min(visibleRecordCount, visibleEntries.length) > 3 && (
+          <Button
+            secondary
+            label="收起日历明细"
+            onPress={() => setVisibleRecordCount(3)}
           />
         )}
       </Card>

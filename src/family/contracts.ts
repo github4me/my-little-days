@@ -8,10 +8,27 @@ export type SharedRecord<T> = {
   recordedBy: string;
   lastEditedBy: string;
 } & T;
+export type ReplacedEntrySummary = {
+  id: string;
+  type: "feed" | "sleep";
+  start: string;
+  end?: string | null;
+  amount?: number | null;
+  feedKind?: Entry["feedKind"] | null;
+  noteChanged?: boolean;
+};
+export type SharedRecordReplacement = {
+  replacedBy: string;
+  previousEditedBy?: string | null;
+  replacedAt: string;
+  previousEntry: ReplacedEntrySummary;
+};
 export type SharedEntryRecord = SharedRecord<{ entry: Entry }> & {
   // Set by the service only when a running feed or sleep is finished. Older
   // snapshots omit it, so the client must keep the field optional.
   endedBy?: string | null;
+  // A later ordinary edit clears this direct replacement audit.
+  replacement?: SharedRecordReplacement | null;
 };
 export type FullFamilySnapshot = FamilySnapshot & {
   schemaVersion: 2;
@@ -22,6 +39,8 @@ export type FullFamilySnapshot = FamilySnapshot & {
   // Older APIs omit this. Cross-member timer completion must stay disabled
   // until the server explicitly advertises the narrow permission.
   crossMemberTimerCompletionEnabled?: boolean;
+  // Never send replacement envelopes to an older API that omits this flag.
+  conflictReplacementEnabled?: boolean;
   profile: State["profile"];
   entries: SharedEntryRecord[];
   careRecords: SharedRecord<{ record: CareRecord }>[];
@@ -34,6 +53,7 @@ export type FamilyCapabilities = {
   recordKinds: string[];
   maxSeedBytes: number;
   extrasSchemaVersion?: 1;
+  conflictReplacementEnabled?: boolean;
 };
 export type FamilyActivation = {
   operationId: string;
@@ -54,6 +74,8 @@ export type RecordOperation = Omit<FeedOperation, "feed"> & {
   entry?: Entry;
   careRecord?: CareRecord;
   extraRecord?: FamilyExtraRecord;
+  replacesOperationId?: string;
+  timerCompletion?: "sleep" | "feed";
 };
 export type FamilyRole = "owner" | "caregiver";
 export type FamilyUser = { id: string; displayName: string; email: string };

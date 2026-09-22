@@ -62,3 +62,14 @@
 "error.watch_clock" = "Kiểm tra đồng hồ Watch rồi thử lại.";
 "notice.short_sleep_cancelled" = "Dưới một phút: đã hủy giấc ngủ; không lưu bản ghi giấc ngủ đã hoàn thành.";
 "error.sync_status_save_failed" = "Không thể lưu trạng thái đồng bộ. Các bản ghi đang chờ vẫn được giữ lại.";
+"sync.conflict.title" = "Xem lại xung đột";
+"sync.conflict.changed_by" = "Bản hiện tại do %@ sửa";
+"sync.conflict.current" = "Bản gia đình";
+"sync.conflict.mine" = "Thay đổi của tôi";
+"sync.conflict.pending" = "Đang chờ iPhone";
+"sync.conflict.keep" = "Giữ bản gia đình";
+"sync.conflict.replace" = "Thay bằng thay đổi của tôi";
+"sync.conflict.ongoing" = "Đang diễn ra";
+"sync.conflict.sleep" = "Giấc ngủ";
+"sync.conflict.feed" = "Cho bú";
+"sync.recording_paused" = "Tính năng ghi đang tạm dừng trên iPhone. Bạn vẫn có thể xem các xung đột hiện có bên dưới.";

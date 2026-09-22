@@ -124,6 +124,7 @@
     },
     "ios": {
       "supportsTablet": true,
+      "appleTeamId": "A9974KXQ4G",
       "bundleIdentifier": "com.littledays.babylog",
       "buildNumber": "40",
       "runtimeVersion": {

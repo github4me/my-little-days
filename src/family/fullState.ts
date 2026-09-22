@@ -35,6 +35,9 @@ export type QueuedRecord = {
   operation: RecordOperation;
   status: "pending" | "accepted" | "failed";
   error?: string;
+  // Only an authoritative 412 from a replacement-capable API sets this.
+  // Snapshot drift alone is not proof that the server issued a conflict receipt.
+  serverConflict?: boolean;
   receiptRevision?: string;
   // Only enqueueTimerFinish can create this marker. A fresh snapshot rechecks
   // the exact active-to-finished transition before the operation may send.
@@ -96,6 +99,11 @@ export function validateFullSnapshot(
     typeof value.crossMemberTimerCompletionEnabled !== "boolean"
   )
     throw new Error("invalid_response");
+  if (
+    value.conflictReplacementEnabled !== undefined &&
+    typeof value.conflictReplacementEnabled !== "boolean"
+  )
+    throw new Error("invalid_response");
   const profile = validateState({
     schemaVersion: 1,
     profile: value.profile,
@@ -121,9 +129,52 @@ export function validateFullSnapshot(
       (typeof item.endedBy !== "string" || !item.endedBy)
     )
       throw new Error("invalid_response");
+    const replacement = item.replacement;
+    if (replacement !== undefined && replacement !== null) {
+      const previous = replacement.previousEntry;
+      if (
+        typeof replacement.replacedBy !== "string" ||
+        !replacement.replacedBy ||
+        (replacement.previousEditedBy !== undefined &&
+          replacement.previousEditedBy !== null &&
+          (typeof replacement.previousEditedBy !== "string" ||
+            !replacement.previousEditedBy)) ||
+        typeof replacement.replacedAt !== "string" ||
+        !Number.isFinite(Date.parse(replacement.replacedAt)) ||
+        !previous ||
+        previous.id !== item.entry.id ||
+        (previous.type !== "feed" && previous.type !== "sleep") ||
+        previous.type !== item.entry.type ||
+        typeof previous.start !== "string" ||
+        !Number.isFinite(Date.parse(previous.start)) ||
+        (previous.end !== undefined &&
+          previous.end !== null &&
+          (typeof previous.end !== "string" ||
+            !Number.isFinite(Date.parse(previous.end)))) ||
+        (previous.amount !== undefined &&
+          previous.amount !== null &&
+          (typeof previous.amount !== "number" ||
+            !Number.isFinite(previous.amount) ||
+            previous.amount < 0 ||
+            previous.amount > 2000)) ||
+        (previous.feedKind !== undefined &&
+          previous.feedKind !== null &&
+          ![
+            "formula",
+            "expressed",
+            "breast-left",
+            "breast-right",
+            "breast-both",
+          ].includes(previous.feedKind)) ||
+        (previous.noteChanged !== undefined &&
+          typeof previous.noteChanged !== "boolean")
+      )
+        throw new Error("invalid_response");
+    }
     return {
       ...metadata(item),
       ...(item.endedBy ? { endedBy: item.endedBy } : {}),
+      ...(replacement ? { replacement } : {}),
       entry: validateEntry(item.entry),
     };
   });
@@ -439,6 +490,9 @@ function enqueueTimerFinish(
       membershipId: snapshot.family.membershipId,
       historyId: snapshot.historyId,
       ...(finished ? { entry: finished } : {}),
+      ...(finished && snapshot.conflictReplacementEnabled === true
+        ? { timerCompletion: type }
+        : {}),
     },
     finished ? type : undefined,
   );
@@ -580,6 +634,13 @@ function promoteTimerFinish(
         membershipId: q.origin.membershipId,
         historyId: q.origin.historyId,
         ...(finished ? { entry: finished } : {}),
+        ...(finished && snapshot.conflictReplacementEnabled === true
+          ? {
+              timerCompletion: q.sleepFollowUp
+                ? ("sleep" as const)
+                : ("feed" as const),
+            }
+          : {}),
       },
     },
   ];
@@ -633,6 +694,129 @@ function isTimerCompletionOperation(
     return false;
   return type === "sleep" || previous.feedRunning === true;
 }
+
+function isCompletedTimer(entry: Entry, type: "sleep" | "feed") {
+  return (
+    entry.type === type &&
+    !!entry.end &&
+    (type === "sleep" || entry.feedRunning !== true)
+  );
+}
+
+export function canReplaceRecordConflict(
+  state: PilotState,
+  operationId: string,
+): boolean {
+  const snapshot = state.snapshot;
+  if (
+    state.transition ||
+    !isFullSnapshot(snapshot) ||
+    snapshot.conflictReplacementEnabled !== true
+  )
+    return false;
+  const item = (state.records ?? []).find(
+    (record) =>
+      record.operation.operationId === operationId &&
+      record.status === "failed" &&
+      record.serverConflict === true &&
+      matchesOrigin(record.origin, snapshot),
+  );
+  const intended = item?.operation.entry;
+  if (
+    !item ||
+    item.operation.kind !== "update" ||
+    item.operation.collection !== "entry" ||
+    !intended ||
+    (intended.type !== "feed" && intended.type !== "sleep")
+  )
+    return false;
+  const current = snapshot.entries.find(
+    ({ entry }) => entry.id === item.operation.recordId,
+  );
+  if (
+    !current ||
+    current.version === item.operation.baseVersion ||
+    current.entry.type !== intended.type ||
+    (state.records ?? []).some(
+      (record) =>
+        record !== item &&
+        record.status !== "failed" &&
+        record.operation.collection === "entry" &&
+        record.operation.recordId === item.operation.recordId,
+    )
+  )
+    return false;
+  if (canEditRecord(snapshot, "entry", item.operation.recordId)) return true;
+  return (
+    item.timerCompletion === intended.type &&
+    item.operation.timerCompletion === intended.type &&
+    isCompletedTimer(current.entry, intended.type) &&
+    isCompletedTimer(intended, intended.type) &&
+    sameTimerFields(current.entry, intended, intended.type)
+  );
+}
+
+export function replaceRecordConflict(
+  state: PilotState,
+  operationId: string,
+  replacementOperationId: string,
+  expectedVersion?: string,
+): PilotState {
+  if (!replacementOperationId) throw new Error("invalid_operation");
+  if (!canReplaceRecordConflict(state, operationId))
+    throw new Error("conflict_resolution_unavailable");
+  const snapshot = state.snapshot as FullFamilySnapshot;
+  const item = state.records!.find(
+    (record) => record.operation.operationId === operationId,
+  )!;
+  const current = snapshot.entries.find(
+    ({ entry }) => entry.id === item.operation.recordId,
+  )!;
+  if (expectedVersion !== undefined && current.version !== expectedVersion)
+    throw new Error("conflict_resolution_changed");
+  if (
+    (state.records ?? []).some(
+      (record) =>
+        record.operation.operationId === replacementOperationId ||
+        record.sleepFollowUp?.operationId === replacementOperationId ||
+        record.feedFollowUp?.operationId === replacementOperationId,
+    )
+  )
+    throw new Error("invalid_operation");
+  return {
+    ...state,
+    records: [
+      ...(state.records ?? []).filter((record) => record !== item),
+      {
+        origin: item.origin,
+        operation: {
+          ...item.operation,
+          operationId: replacementOperationId,
+          baseVersion: current.version,
+          replacesOperationId: item.operation.operationId,
+        },
+        status: "pending",
+        ...(item.timerCompletion
+          ? { timerCompletion: item.timerCompletion }
+          : {}),
+      },
+    ],
+  };
+}
+
+export function discardRecordConflict(
+  state: PilotState,
+  operationId: string,
+): PilotState {
+  return {
+    ...state,
+    records: (state.records ?? []).filter(
+      (record) =>
+        record.operation.operationId !== operationId ||
+        record.status !== "failed",
+    ),
+  };
+}
 export function applyFullSnapshot(
   state: PilotState,
   incoming: FullFamilySnapshot,
@@ -665,7 +849,22 @@ export function applyFullSnapshot(
     }
     if (q.timerCompletion) {
       if (timerCompletionAlreadyApplied(snapshot, q)) continue;
-      if (completedTimerRecord(snapshot, q.operation, q.timerCompletion)) {
+      const completed = completedTimerRecord(
+        snapshot,
+        q.operation,
+        q.timerCompletion,
+      );
+      if (completed) {
+        // Let the immutable stale completion reach only a replacement-capable
+        // API. Its authoritative 412 creates the conflict receipt required for
+        // a safe overwrite. Legacy APIs keep the previous local-only behavior.
+        if (
+          q.status === "pending" &&
+          snapshot.conflictReplacementEnabled === true
+        ) {
+          records.push(q);
+          continue;
+        }
         records.push({
           ...q,
           status: "failed",
@@ -734,7 +933,8 @@ export function recordsForSend(durable: PilotState, visible: PilotState) {
     if (
       q.status !== "pending" ||
       (durable.watchLedger?.[q.operation.operationId] &&
-        !watchRecordingEnabled) ||
+        !watchRecordingEnabled &&
+        !q.operation.replacesOperationId) ||
       !matchesOrigin(q.origin, snapshot)
     )
       return false;
@@ -769,6 +969,10 @@ export function projectedFullState(state: PilotState): State | null {
   for (const q of state.records ?? []) {
     if (q.status === "failed" || !matchesOrigin(q.origin, snapshot)) continue;
     const op = q.operation;
+    // A conflict replacement is intentionally non-optimistic. Keep charts and
+    // records on the reviewed family version until a fresh authoritative
+    // snapshot contains the accepted replacement.
+    if (op.replacesOperationId) continue;
     if (op.collection === "entry") {
       if (op.kind === "delete") entries.delete(op.recordId);
       else if (op.entry) entries.set(op.recordId, op.entry);

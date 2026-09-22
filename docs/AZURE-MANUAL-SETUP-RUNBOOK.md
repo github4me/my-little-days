@@ -888,13 +888,21 @@ Record these real-device results separately from automated tests; implementation
 
 ## 19. Moving this version to TestFlight
 
+**Current cost policy (confirmed 21 September 2026): local builds only.** The
+cloud-build commands retained below are historical and must not be run without a
+new, explicit user-approved cost exception. Build the Phone, Watch and Widget on
+this Mac using the verified local path, inspect the signed IPA, and upload directly
+to Apple through Xcode Organizer. Expo may be used for read-only configuration and
+existing managed-credential retrieval; do not schedule an EAS cloud build or paid
+Workflow.
+
 Checklist refreshed 17 September 2026: local app configuration is version `0.2.1`, build `21`, with remote updates disabled (`updates.enabled=false`). The production build profile uses channel `production`, `autoIncrement=true`, and local version management. Submission is already linked to App Store Connect app `6809826484`, bundle identifier `com.littledays.babylog`. At the earlier read-only checkpoint on 16 September, `eas env:list production` did not list any of the five required family connection/demo variables; preview was verified. That historical check does not establish today's production environment: verify it again before building. This checklist update did not change Expo/Apple configuration, build, submit, deploy Azure resources or notify testers.
 
 1. **Confirm the backend release.** The security API/database release from source `d41b7a132700bd8e96ca377fdbb918e3e52edbfe` completed successfully in [run 35167068255](https://github.com/github4me/my-little-days/actions/runs/35167068255), including migration `0004_FamilyAvailabilityBounds.sql`. Subsequent checks verified public liveness/readiness and unauthenticated rejection. TestFlight packaging itself does not require another API, database or Bicep deployment, or merging the feature branch. Before wider testing, complete the outstanding signed-in, two-device and security acceptance checks recorded in `SECURITY-REMEDIATION-2026-09-17.md`; successful deployment alone does not close them.
 2. **Configure Expo production variables.** In Expo dashboard, open **expo4chao → little-days → Environment variables**. Assign the existing, verified section 12.1 values to **production** as well as preview: `EXPO_PUBLIC_FAMILY_API_URL`, `EXPO_PUBLIC_ENTRA_TENANT_ID`, `EXPO_PUBLIC_ENTRA_CLIENT_ID`, `EXPO_PUBLIC_ENTRA_API_SCOPE`, and `EXPO_PUBLIC_FAMILY_UI_DEMO=0`. Reusing those values connects TestFlight to the same Azure service and family data; it does not create an isolated test backend. Do not add Graph credentials or SQL secrets. Check for duplicate account/project definitions, then verify the five values with `npx --yes eas-cli@24.6.0 env:list production` without exposing unrelated secrets. See [EAS environment configuration](https://docs.expo.dev/eas/environment-variables/).
 3. **Verify the build profile and source.** Use the reviewed `feature/family-invitations` source and the `production` profile, not `preview` or `ui-preview`. Run `npx --yes eas-cli@24.6.0 config --platform ios --profile production` and confirm the resolved environment is `production` and distribution is App Store (`store`), not internal/ad hoc. These are the expected defaults for the current profile; optionally make `environment: production` and `distribution: store` explicit before release. Review/commit any configuration changes through the GitHub plugin. The current signed ad hoc preview cannot be submitted as the TestFlight build. Confirm the next build number against App Store Connect; local build 21 plus `autoIncrement` does not prove 22 is unused. Keep version `0.2.1` only if compatible with the current App Store version state. Preserve the bundle identifier. Confirm active Apple Developer membership, valid signing credentials and EAS submission credentials; complete Apple authentication privately if requested. Because version management is local, review and commit the resulting build-number change through the GitHub plugin after building so the next release does not reuse it.
 4. **Finish native smoke checks.** On disposable accounts/data, verify email-code registration/sign-in, create/join/remove/reinvite, two-phone sync, offline restart/reconnection, and account deletion. Check privacy/support text reflects server-based family sharing and prepare a reviewer-access route that actually works with email OTP. Reviewers cannot use a developer-owned mailbox's one-time code without an access arrangement. Do not bypass authentication or use the UI-only demo as a substitute for testing the live service.
-5. **Build and submit after the checks above.** From the reviewed source, run `npx --yes eas-cli@24.6.0 build --platform ios --profile production --auto-submit`. This creates a new App Store-signed IPA and uploads that build to the existing App Store Connect app. If building and submitting separately, record the successful store build ID and run `npx --yes eas-cli@24.6.0 submit --platform ios --profile production --id <STORE_BUILD_ID>`; do not select an internal preview or an ambiguous latest build. Record source SHA, version/build, build ID and submission result. See [Expo's iOS submission guide](https://docs.expo.dev/submit/ios/).
+5. **Build locally and upload directly to Apple after the checks above.** From an isolated archive of the reviewed source, run the verified `eas build --platform ios --profile production --local --non-interactive --freeze-credentials --output <LOCAL_IPA>` path, or archive the generated workspace in Xcode. Inspect the resulting IPA and retain its SHA-256. Then use Xcode **Window → Organizer → Archives → Distribute App → App Store Connect → Upload**. Do not add `--auto-submit`, start an EAS cloud build, select an internal preview or upload an ambiguous artifact. Record source SHA, version/build, IPA hash, archive path and Apple's upload/processing result separately.
 6. **Finish TestFlight setup in App Store Connect.** Open **Apps → My Little Days → TestFlight**, wait for processing, and address any compliance prompts accurately. Enter the beta description, **What to Test**, feedback email `contact@reticle.com.au`, review contact details and working login/registration instructions. Add the build to the intended internal group and validate it before external distribution. Then select the external testing group, **Add Builds**, and follow **Submit Review** or **Start Testing** according to the build's state. Apple requires a full review for the first external build; later builds of the same version may not require it. See [test information](https://developer.apple.com/help/app-store-connect/test-a-beta-version/provide-test-information) and [external testing](https://developer.apple.com/help/app-store-connect/test-a-beta-version/invite-external-testers).
 7. **Distribute only to the intended testers.** Internal testers must be eligible App Store Connect users; family/friends who are not team users belong in an external group, not an administrative role added just for testing. After any required beta approval, use the intended external group or its approved invitation link. Testers install through Apple's TestFlight app; ad hoc device registration is not this distribution route. Do not uninstall a data-bearing preview app as a routine preparation step; verify its pending family changes have synced and validate the installation transition on a disposable device/account first. Record actual phone acceptance separately from successful upload. Uploading to TestFlight does not publish the app publicly: App Store review/release is a separate action. With `updates.enabled=false`, this version receives no EAS OTA updates from either channel; future mobile changes require a new native build and submission unless that policy is deliberately changed and reviewed.
 
@@ -2644,3 +2652,454 @@ native build as needed, retain transaction recovery, do not erase family data,
 and do not enable OTA as a shortcut. See
 [Apple's availability/discontinuation guidance](https://developer.apple.com/help/app-store-connect/manage-in-app-purchases/set-availability-for-in-app-purchases).
 Record actual execution evidence here only after approved steps occur.
+
+### Mac setup and preview preflight — 21 September 2026 (Melbourne)
+
+- The Intel Mac checkout was verified clean at
+  `093683b7fc885216179c9bebc152504c9a669882` on
+  `feature/family-invitations`. Node `24.21.0` and npm `11.19.0` satisfy the
+  repository engine range. The local ignored `.env.local` and the EAS `preview`
+  environment both matched the five public section 12.1 values, including demo
+  `0`; no secret value was added or printed.
+- `npm ci`, `npm run verify` and `npm run export:ios` passed. Apple autolinking
+  includes `expo-iap` while Android excludes it. A clean local prebuild generated
+  the Phone, Watch and Widget identifiers and the Phone/Widget App Group without
+  an Apple Pay entitlement. `pod install` completed with CocoaPods `1.16.2`; the
+  resulting lockfile contains `ExpoIap 5.6.3` and `openiap 3.4.0`.
+- Homebrew is not available on this Intel host, and its current official installer
+  refused the architecture. The system Ruby `2.6.10` was left untouched. rbenv,
+  Ruby `3.3.12`, Fastlane `2.240.1` and CocoaPods `1.16.2` were installed under
+  `/Users/chao/.rbenv`; `/Users/chao/.zprofile` initializes rbenv. libyaml `0.2.5`
+  is user-local at `/Users/chao/.rbenv/deps/libyaml`. A fresh login shell must
+  report those versions before a release build.
+- Xcode `26.5` (`17F42`) is installed at `/Applications/Xcode.app`; its licence
+  check passes and the iOS/watchOS 26.5 device and simulator SDKs are present.
+  This account could not change the global `xcode-select` path without the Mac
+  administrator password, so `/Users/chao/.zprofile` exports
+  `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`. New login shells
+  therefore use full Xcode even though the system-wide selector remains on the
+  Command Line Tools.
+- `swift test --package-path watch` passed all 21 tests. A local
+  `npx expo run:ios --device "iPhone 17 Pro" --no-bundler` simulator compile
+  then passed with zero errors and one duplicate-`-lc++` warning. The installed
+  app contains `LittleDaysWatch.app` and `LittleDaysTodayWidget.appex` with the
+  expected identifiers, the Phone/Widget App Group, StoreKit/OpenIAP resources,
+  runtime `0.2.1`, and Expo updates disabled. This proves local simulator
+  compilation and packaging, not signing or behaviour on physical hardware.
+- EAS CLI `24.7.0` browser login completed as `expo4chao`. Readback confirmed
+  project `@expo4chao/little-days`, ID
+  `a5210f78-8729-46d4-82a4-7d1d40d30ac6`, and resolved preview profile
+  `internal` / channel `preview` / environment `preview`, with OTA disabled.
+  Recent build readback found production build `40` as the highest assigned iOS
+  number, so the next candidate was prepared as build `41` in an isolated copy of
+  the exact source SHA.
+- No preview build was created. A noninteractive, frozen-credentials preflight
+  reused the existing phone credentials but found no internal-distribution
+  credential suitable for the Watch target. It stopped before queueing or
+  consuming a build and did not replace any profile. EAS also reported that the
+  account was already 25 builds beyond included credits with USD 5 additional
+  usage so far; obtain a deliberate cost decision before retrying. If an ad hoc
+  preview is still required, run interactively in the Expo project, select Apple
+  team `A9974KXQ4G`, create only the missing Watch/Widget internal profiles, keep
+  existing working profiles, verify the registered test devices, and use build
+  number `42` or a newer unused number so it cannot be confused with the local
+  production candidate below.
+- The Account Holder signed in to App Store Connect. Read-only verification found
+  the Free Apps Agreement **Active** and the Paid Apps Agreement **New**, with
+  Apple requiring a legal-entity update before the paid agreement can be signed.
+  No private legal, banking or tax details are recorded here. **My Little Days →
+  In-App Purchases** is empty: none of the three consumables exists yet. The
+  browser is left on that page, but the Account Holder must first update the
+  legal entity and complete the Paid Apps agreement, banking and tax workflow.
+  No agreement, product, price, localization, review metadata, build, submission,
+  tester group or Apple entitlement was created or changed by this checkpoint.
+- No physical iPhone is currently visible to `xcrun devicectl`, and the login
+  keychain contains no valid Apple Development/Distribution identity or local
+  provisioning profiles. After connecting the iPhone by USB (or pairing it for
+  Wi-Fi), enabling Developer Mode and selecting team `A9974KXQ4G` in Xcode, use
+  `npx expo run:ios --device` for a free local development build. The same native
+  project includes the Watch and Widget; keep their three target identifiers and
+  the shared App Group unchanged.
+- The least-cost release path is local compilation: Expo CLI for repeated device
+  development, and either Xcode **Product → Archive → Distribute App → App Store
+  Connect** or `eas build --platform ios --profile production --local` followed
+  by a TestFlight upload. A local EAS build uses Mac compute rather than an EAS
+  cloud-build credit, while still contacting Expo to verify the project and
+  download managed credentials. Production readback on this date matched the
+  five public configuration values and resolved to `store`, `production`, remote
+  credentials, auto-increment and OTA disabled. Never add `--auto-submit` until
+  the generated archive has been checked and an upload is deliberately approved.
+- That production path was proven from an isolated `git archive` of
+  `093683b7fc885216179c9bebc152504c9a669882`. With `EAS_NO_VCS=1`, `NODE_ENV=production`,
+  `--local --non-interactive --freeze-credentials` and an explicit output path,
+  EAS reused the active App Store certificate and three existing profiles, bumped
+  only the staged copy from build `40` to `41`, ran the 21 Watch and 6 Widget
+  Swift tests, and produced the signed, unsubmitted artifact at
+  `artifacts/MyLittleDays-0.2.1-local.ipa`. `codesign --verify --deep --strict`
+  passed. Inspection found version `0.2.1` build `41`, the correct Phone, Watch
+  and Widget identifiers, the App Group only on Phone/Widget, production push and
+  TestFlight entitlements, `openiap-versions.json`, OTA disabled, and no Apple Pay
+  entitlement. Upload/processing/device acceptance remain outstanding.
+- macOS Tahoe 26 currently makes EAS CLI `24.7.0` falsely reject an imported
+  certificate because `@expo/build-tools` calls `security find-identity -v`
+  against an isolated temporary keychain. The build succeeded after applying the
+  upstream-reported one-line cache workaround: remove only `-v` from
+  `findIdentitiesByTeamId` in both generated `@expo/build-tools/.../keychain.js`
+  copies under the active `~/.npm/_npx/<hash>/node_modules` directory. Reapply
+  only if the npm cache is replaced and the exact Tahoe error returns; first
+  prefer a newer EAS release once Expo ships the fix. This verifies certificate
+  presence and does not alter the certificate, profile or trust settings. See
+  [Expo eas-cli issue 3678](https://github.com/expo/eas-cli/issues/3678).
+- Expo Doctor reported two non-blocking source-maintenance gaps during the local
+  build: SDK 57's current schema rejects the legacy top-level `splash` property,
+  and ten locked Expo packages are behind the SDK's current patch recommendations.
+  The archive still passed. Upgrade these together in a separate tested source
+  change; do not silently change the frozen release candidate.
+
+## Native iOS migration — planned manual gates (21 September 2026)
+
+The [native iOS migration plan](NATIVE-IOS-MIGRATION-PLAN.md) proposes replacing
+the Expo phone with Swift/SwiftUI while reusing the native Watch and Widget.
+**This is a future checklist, not an executed migration or authorization to change
+Apple/Entra/Azure configuration.** The current application still uses Expo. All
+Apple builds remain local-only under section 19's cost policy.
+
+### A. Mac, signing and disposable-device access
+
+1. **Location: this Mac, Xcode → Settings → Components and Accounts.** Confirm the
+   installed Xcode can build for the actual iPhone/watchOS versions; install only
+   missing required platform support. Select the existing Apple team
+   `A9974KXQ4G`. Authentication/2FA stays in Apple's UI. Expected: usable device
+   SDKs and a valid signing identity; verify with `xcodebuild -version`, device
+   discovery and signing metadata, without printing private keys.
+2. **Location: proposed `apple/MyLittleDays.xcodeproj` → each target → Signing &
+   Capabilities.** The project is not created yet. Preserve Phone
+   `com.littledays.babylog`, Watch `com.littledays.babylog.watchkitapp` and Widget
+   `com.littledays.babylog.widget`. Phone and Widget use App Group
+   `group.com.littledays.babylog.widgets`; Phone retains Push Notifications;
+   StoreKit must not add Apple Pay. Match the existing application-identifier
+   prefix/Keychain access group. Expected: a local archive containing all three
+   correctly signed products. Inspect its actual profiles/entitlements; reuse
+   working profiles rather than routinely replacing them.
+3. **Location: Xcode → Window → Devices and Simulators; iPhone → Privacy & Security
+   → Developer Mode when required.** Connect/trust the designated test phone by
+   USB, pair the Watch, and optionally enable network debugging after pairing.
+   Use synthetic data and a disposable test installation/device for early native
+   upgrades. The same bundle ID replaces the existing app; it does not provide
+   side-by-side isolation. Expected: phone Run, Watch installation and Widget
+   gallery placement each verified separately. Never uninstall a data-bearing
+   application as setup or troubleshooting.
+
+### B. Public configuration and Entra compatibility
+
+1. **Location: proposed native public configuration in `apple/Config/`.** The
+   implementation should define `FamilyApiURL`, `EntraTenantID`, `EntraClientID`,
+   `EntraScope` and `FamilyUIDemo`. Map them to the existing section 12.1 values;
+   production demo is false. These are proposed names, not current live settings.
+   Expected: the built app embeds the same HTTPS origin/tenant/client/scope.
+   Verify the resolved artifact/configuration; no EAS environment download should
+   be necessary for the final native build. Never include Graph, SQL, APNs,
+   signing or Apple-account secrets.
+2. **Location: Microsoft Entra admin center → customer tenant
+   `deab2578-7cd3-4152-b5db-f430d6b638f8` → App registrations → existing mobile
+   client `abce8eb9-baf9-4c17-8801-20d0716a0e4d` → Authentication.** Read back the
+   existing `mylittledays://auth` redirect and current public-client/user-flow
+   configuration before the native authentication spike. Do not create another
+   registration or remove existing redirects. Default plan: the existing
+   system-browser flow with PKCE and existing delegated scope.
+3. Only if the selected supported native library demonstrably requires another
+   callback: document the exact URI and platform, obtain approval, and add it to
+   this same registration. Preserve the old callback for installed clients.
+   Expected: disposable-account email-code sign-in returns to the native app and
+   the existing API identifies the same account. Verify separately: token
+   recognition, authorized `/v1/me`, SQL-backed snapshot, refresh, cancellation
+   and in-place Keychain compatibility. No raw tokens/auth responses in evidence.
+
+### C. Direct APNs — only after the compatible backend is implemented
+
+The existing backend understands Expo tokens, not native APNs registration.
+Setting an APNs key on today's deployment does not implement the migration.
+
+1. **Location: Apple Developer → Certificates, Identifiers & Profiles → Identifiers
+   / Keys, team `A9974KXQ4G`.** Verify Phone push capability and inspect an existing
+   suitable APNs key's ID/topic/environment permissions. Reuse an available private
+   key from protected operator storage/managed credentials. An APNs key is not an
+   App Store Connect upload key. If none is recoverable/usable, stop for approval
+   before creating an additional key; never revoke a shared working key.
+2. **Location: GitHub → existing API/database deployment workflow and protected
+   environment.** After reviewed schema/API changes and disposable SQL tests,
+   deploy the additive APNs migration before the compatible API. Keep the existing
+   Expo v2 routes/queue functional. APNs work must not be consumable by the old
+   Expo-only worker. Verify catalog/journal/permissions and exact release SHA;
+   no Bicep resize or reopening of paused infrastructure gates is required.
+3. **Location: Azure portal → hosting tenant
+   `7b7e6e31-a778-4334-aee2-e969fa27fd0e` → resource group
+   `my-little-days-pilot-rg` → App Service `little-days-api-522fpstfbtds2` → Settings
+   → Environment variables → App settings.** Proposed new configuration contract
+   below must first be implemented and tested; these keys do not exist in the
+   current code. Preserve all existing `Push__*`, SQL, Graph and history settings.
+
+   | Proposed field | Initial value / handling |
+   | --- | --- |
+   | `ApnsPush__RegistrationEnabled` | `false` |
+   | `ApnsPush__EventCreationEnabled` | `false` |
+   | `ApnsPush__DeliveryEnabled` | `false` |
+   | `ApnsPush__AllowAllUsers` | `false` |
+   | `ApnsPush__AllowedUserIds__0`, `__1`, … | Approved disposable customer account IDs only, recorded privately |
+   | `ApnsPush__TeamId` | `A9974KXQ4G` |
+   | `ApnsPush__Topic` | `com.littledays.babylog` |
+   | `ApnsPush__KeyId` | Existing suitable APNs key's actual identifier |
+   | `ApnsPush__PrivateKeyPem` | Existing private APNs key, server-only protected input; never in Git/app/logs |
+   | `ApnsPush__TokenEncryptionKey` | Persistent protected key for the new provider's token storage; do not rotate the legacy Expo encryption key |
+   | `ApnsPush__SandboxEnabled` | `false`; enable only for an approved development acceptance cohort if needed |
+
+4. Keep the existing recovery/maintenance gate authoritative for both senders.
+   After compatible deployment, enable APNs registration, then event creation,
+   then delivery only for the explicitly approved cohort. Keep broad rollout off.
+   After each save/restart, allow bounded startup propagation and verify the
+   expected API revision/capability before the next step. Do not infer SQL-backed
+   readiness from an ARM result or token-only endpoint.
+5. **Location: native test app's family-notification settings.** Opt in
+   deliberately. Verify old Expo binding disablement and durable handoff, current
+   generation/lease, no dual-provider duplicate, correct Debug sandbox versus
+   TestFlight production routing, two-account delivery and actor exclusion.
+   Verify Watch mirroring separately; Apple controls presentation. Record safe
+   status/error metadata, not tokens or family payloads. APNs acceptance is not
+   evidence the user saw the alert.
+6. Stop a failing APNs rollout using `ApnsPush__DeliveryEnabled=false`, leaving
+   existing Expo clients and family record operations unaffected. Do not
+   down-migrate SQL or erase device/operation evidence. Retire the Expo sender
+   only after old-client registrations/leases and pending work permit it; do not
+   delete the Expo project or cancel a subscription as an implicit cleanup step.
+
+### D. Native TestFlight cutover and commerce
+
+1. Follow migration phases P0–P9 before a release candidate. Record in-place
+   upgrade results with pending operations, Keychain guards, Watch commands,
+   reminder cleanup and Widget scope invalidation. Use the same current API;
+   preview is not an isolated production-data sandbox.
+2. **Location: Xcode Organizer → Archives → Distribute App → App Store Connect.**
+   Freeze the source/configuration, choose the next unused Apple build number,
+   archive locally, inspect all three targets, then deliberately upload the exact
+   approved archive. Local candidate `0.2.1 (41)` is already allocated in the
+   earlier checkpoint; do not assume a cloud build list alone identifies the next
+   number. Retain archive/dSYMs/IPA hash and upload result without private data.
+3. **Location: App Store Connect → Apps → My Little Days (`6809826484`) →
+   TestFlight.** Verify processing/compliance, intended tester group and any beta
+   review, then iPhone/Watch/Widget installation. A new native phone app under the
+   same ID is an update to this listing, not another Apple product.
+4. **Location: App Store Connect → Business agreements/banking/tax and My Little
+   Days → In-App Purchases.** Recheck the existing coffee checklist: complete
+   Account Holder legal steps and the three existing planned consumable IDs,
+   localization/pricing/review details. A local StoreKit test configuration is
+   not proof of sandbox availability. Do not add Apple Pay or create replacement
+   product IDs. Record sandbox purchase acceptance separately from processing.
+
+Planning verification: source and storage/transport contracts inspected, current
+local Xcode/architecture checked, official Apple/Expo/authentication documentation
+reviewed. No native rewrite, APNs backend change, Azure setting, Apple credential,
+upload, subscription action or device acceptance was performed in this planning
+task.
+
+## Feed and sleep conflict replacement — prepared 21 September 2026
+
+This source change adds reviewed conflict replacement across the Expo iPhone app,
+its native Watch companion and the family API. It is **not deployed** by writing
+this checklist. Existing Azure, SQL, Entra, Expo and Apple resources stay in use;
+there is no new service, secret, entitlement, EAS cloud build or recurring cost.
+The Widget does not edit records, but its aggregate must follow the confirmed
+replacement after the phone publishes a fresh snapshot.
+
+### Schema and API release
+
+1. **Location: this repository and GitHub → Actions → Deploy family API and
+   database.** Freeze the reviewed source SHA on the trusted
+   `feature/family-invitations` branch, confirm no competing release/settings
+   change, and review `0009_ConflictReplacementAudit.sql`. It only adds four
+   nullable `FamilyRecords` audit columns, two filtered indexes and one bounded
+   JSON constraint. Never edit an applied DbUp file or enable the paused ordinary
+   infrastructure apply path for this release.
+2. Run the complete mobile tests, API/DbUp build and SQL-backed suites against a
+   disposable SQL database. The SQL tests must exercise exact-intent replacement,
+   a second race requiring re-review, cross-member timer limits, migration data
+   preservation and schema drift detection. A skipped SQL suite is not release
+   evidence; set `FAMILY_TEST_SQL_CONNECTION` only to a disposable test server and
+   do not point tests at the live family database.
+3. Dispatch the existing protected workflow for the frozen SHA. Keep EF adoption
+   disabled. Apply and verify DbUp migration **0009 before the dependent API**;
+   require the journal checksum, all four columns, both indexes, the check
+   constraint and **zero pending scripts**. Preserve the current paid Basic SQL
+   database, identities, firewall, backup policy and all existing app settings.
+4. Deploy the matching API, then allow bounded startup propagation with one
+   health check in flight. Verify the exact revision and authenticated
+   `/v2/capabilities` plus a fresh full snapshot both report
+   `conflictReplacementEnabled:true`. Generic liveness, an ARM success or an
+   unauthenticated response does not prove SQL-backed family readiness.
+5. Do not roll the API back after it has issued `record-conflict-v2` receipts.
+   The schema is additive, but an older API does not understand that durable
+   receipt action. Stop new client rollout if necessary and ship a compatible
+   corrective API. Never delete receipts or family records as rollback.
+
+### Local-only Apple build and TestFlight
+
+1. **Location: this Mac.** Use the verified Xcode command-line selection and local
+   Node/CocoaPods installation. From the frozen checkout run `npm ci`,
+   `npm run verify`, `npm run export:ios`, `npx expo prebuild --platform ios
+   --no-install`, `cd ios && pod install`, then compile the generated workspace.
+   Confirm Phone, Watch and Widget schemes/embedded products all build. This uses
+   Expo tooling as source/native generation only; it does not consume an EAS cloud
+   build credit and does not bypass the family API.
+2. **Location: generated Xcode workspace → Signing & Capabilities.** Reuse team
+   `A9974KXQ4G`, Phone `com.littledays.babylog`, Watch
+   `com.littledays.babylog.watchkitapp`, Widget
+   `com.littledays.babylog.widget`, and App Group
+   `group.com.littledays.babylog.widgets` on Phone/Widget. Do not replace a
+   working certificate/profile without an actual signing error. StoreKit tips do
+   not use Apple Pay; do not add that entitlement.
+3. For quick device development, connect/trust the iPhone, enable Developer Mode
+   if Xcode requests it, choose the phone in Xcode and Run. Before opening the
+   installed **Debug** app, run `npx expo start --host lan --port 8081` from this
+   checkout and keep that terminal running. Check the Mac's current LAN address,
+   keep the iPhone on a network that can reach it, and allow local-network access
+   if iOS asks. If `No script URL provided` appears, check that
+   `http://<Mac-LAN-IP>:8081/status` returns `packager-status:running` in iPhone
+   Safari; then reopen the app without uninstalling it. Debug has no embedded JS;
+   a Release/archive build does. Verify the paired Watch installs separately and
+   add the Widget from the gallery. This local development route needs no Expo
+   cloud build. It still needs Apple device signing and cannot replace TestFlight
+   acceptance.
+4. For TestFlight, choose the next unused build number, use **Product → Archive**
+   locally, inspect all three signed products/entitlements, then deliberately use
+   Organizer **Distribute App → App Store Connect** for that exact archive. Record
+   SHA, archive/build number, upload, Apple processing, tester availability and
+   device installation as separate results. Do not publish an OTA: updates remain
+   disabled and this native/server contract needs a new binary.
+
+Mac signing checkpoint, 22 September 2026: `app.json` now declares
+`expo.ios.appleTeamId=A9974KXQ4G`; a clean prebuild verified that Debug and Release
+for Phone, Watch and Widget all inherit that team. The connected device inventory
+shows `MyPhone` (iPhone 11). One existing App Store profile for
+`com.littledays.babylog` is present, belongs to team `A9974KXQ4G` and expires in
+September 2027, but `security find-identity -v -p codesigning` currently reports
+zero valid local identities. A profile alone cannot sign without its matching
+private key.
+
+To finish, use **Xcode → Settings → Accounts**, sign in to the existing Apple
+account privately, select **Chao Wang (Individual) / A9974KXQ4G**, then use
+**Manage Certificates** to obtain an Apple Development identity only if Xcode
+still reports it missing. Do not revoke the existing distribution certificate.
+Open `ios/MyLittleDays.xcworkspace`, select the `MyLittleDays` target and confirm
+**Signing & Capabilities → Automatically manage signing → Team A9974KXQ4G**;
+verify the embedded Watch and Widget targets show the same team and their existing
+bundle IDs/capabilities. Expected result: the connected iPhone Run action signs
+and installs all eligible products. Verification is a successful signed device
+build plus Keychain showing a valid identity; the current unsigned simulator
+success is not that verification. For a local archive, reuse/import the matching
+existing distribution identity or let Xcode resolve managed distribution signing
+only after login; do not create replacement profiles unless Xcode gives a concrete
+profile error.
+
+Physical Debug checkpoint, 22 September 2026: after Xcode account setup,
+`security find-identity -v -p codesigning` reported one valid Apple Development
+identity for team `A9974KXQ4G`. Xcode built and signed `0.2.1 (40)` for the connected
+iPhone 11, and the phone reported the app installed. The generated Debug app had
+`ip.txt` pointing to the Mac's current LAN IP and **no** `main.jsbundle`. Initially
+Metro was not listening on 8081 and the phone showed `No script URL provided` /
+`unsanitizedScriptURLString = (null)`. After starting the local Expo/Metro server
+on port 8081, the user confirmed that the app runs. This confirms phone Debug
+launch only; Watch/Widget behavior, Release offline launch, TestFlight processing
+and StoreKit sandbox acceptance remain unverified.
+
+Local reinstall checkpoint, 22 September 2026: from the current dirty working
+tree at base commit `093683b7fc885216179c9bebc152504c9a669882`,
+`npx expo run:ios --device 00008030-000458143ADA402E --no-bundler
+--no-install --scheme MyLittleDays` built and signed Phone, Watch and Widget with
+team `A9974KXQ4G` (zero build errors). Expo's subsequent device-install step
+returned `InvalidHostID`; this was not a build or signing failure. Without
+uninstalling the data-bearing app, `xcrun devicectl device install app --device
+F396A40C-A97F-58E3-A56C-B0DBC3D7BA5B <built MyLittleDays.app>` installed it
+in place, and `xcrun devicectl device process launch --device
+F396A40C-A97F-58E3-A56C-B0DBC3D7BA5B com.littledays.babylog` launched it.
+The phone reported `0.2.1 (40)`, the app process was present, and local Metro
+on port 8081 returned HTTP 200. The built app contains
+`Watch/LittleDaysWatch.app` and `PlugIns/LittleDaysTodayWidget.appex`; their
+presence is not physical Watch/Widget acceptance. This Debug installation
+requires the phone to reach this Mac's Metro server. The family backup export
+and conflict flows still require user-visible on-device testing, and the
+server-dependent conflict replacement is not confirmed deployed.
+
+### Physical acceptance after both releases
+
+Use disposable accounts/records and two authorized members; preview still reaches
+production data. Do not uninstall a data-bearing app, reset a family, or test
+leave/removal/deletion as part of this feature check.
+
+1. Create a feed and a sleep record, sync both devices, then edit each same record
+   concurrently in both directions: iPhone A versus iPhone B, Watch versus its
+   phone, and owner versus caregiver where the existing edit authorization permits
+   it. Also race two members finishing the same live timer.
+2. On the losing device verify the prompt identifies the current editor and shows
+   current versus proposed start/end and milk amount. Check **Keep family version**,
+   **Decide later**, and destructive **Replace with my change**; VoiceOver,
+   Dynamic Type, Light/Night, Chinese/English and a small Watch must remain usable.
+   A caregiver must not gain arbitrary permission to overwrite someone else's
+   non-timer record.
+3. While the replacement is pending, confirm the record list, daily totals,
+   charts and Widget retain the server winner. After server acceptance plus a
+   fresh snapshot, all surfaces must use the replacement and the record screen
+   must show replacer, previous editor, time and before/current summary. Force a
+   second concurrent edit and verify it requires a new review instead of silently
+   rebasing.
+4. Check offline/relaunch durability, phone-to-Watch receipt delivery, Watch
+   discard/replace actions, sign-out/account switch while pending, and an older
+   capability response. The older path must preserve the failed change for review
+   but never expose an unverified replacement action. Record server-deployed,
+   binary-built, Apple-processed and physical-device outcomes separately.
+
+Prepared verification on this Mac: TypeScript and source tests, Watch/Widget
+static tests, Swift package tests, .NET build and non-SQL API/DbUp tests pass.
+SQL integration currently reports explicit skips because
+`FAMILY_TEST_SQL_CONNECTION` is not configured; live deployment and physical
+iPhone/Watch/Widget acceptance remain outstanding until the steps above are
+deliberately performed.
+
+### Family backup export — device acceptance (client only, 22 September 2026)
+
+This supersedes earlier entries in this runbook that say family exports are
+disabled. Current policy allows every active member to download confirmed server
+records, while family-file import/restore remains disabled. In-app backup, care
+help and privacy copy plus both READMEs describe the same boundary. External
+saved/shared files are unencrypted, are not anonymized, and cannot be recalled
+by logout, revocation or account/family deletion. The SQLite OS-backup exclusion
+does not cover them. No App Store Connect text or externally hosted privacy
+policy was published by this source update.
+
+No Azure, SQL, Entra or Expo configuration change is required for this read-only
+client feature. It uses the existing authenticated v2 snapshot endpoint; do not
+start an EAS cloud build. The generated family file is **not** an import or a
+server restore. Source changes still need a new signed native build for release
+because OTA is disabled; a local Xcode Debug build with Metro is sufficient for
+development checks.
+
+1. **Location: a disposable family on two signed-in iPhones.** After creating
+   the family from the reviewed admin seed, let the owner and a caregiver each
+   open **My → Backup and restore**. Confirm both can tap **Download and export
+   family backup** and see the system share sheet. Save into a private Files
+   location for this test, then remove only these test copies when done. Do not
+   export a real family's data into chat, Git, logs or test fixtures.
+2. Add one safe test record on the other phone, wait for server confirmation,
+   then export again. Verify the second JSON's `family.revision` and record set
+   reflect the authorized server snapshot; inspect only synthetic data. Check
+   a pending offline edit/conflict is absent and the screen states that clearly.
+   Confirm the file includes profile, entries, care and extras but omits member
+   emails, invitations and tokens.
+3. Retry without network, after account switch/sign-out, and after removing the
+   disposable member. No stale file should be offered when the fresh authorized
+   request fails or its session changes. Confirm family mode offers **no import
+   or restore** action. Test Chinese/English, both appearances, larger text,
+   VoiceOver, and Files save/cancel. Opening a share sheet is not proof the file
+   was saved; verify in Files. Do not delete the installed data-bearing app or
+   restore production family data as a test.
+
+As of this source change, automated tests cover validation and read/session
+isolation; physical Files export and two-device acceptance remain outstanding.

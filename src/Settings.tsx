@@ -92,6 +92,7 @@ export default function Settings({
   accountDeletionPanel,
   familySharingVisible = false,
   sharedMode = false,
+  onExportFamilyBackup,
   sharedOwner = false,
   sharedAvatarEditable = false,
   sharedReminders,
@@ -117,6 +118,7 @@ export default function Settings({
   accountDeletionPanel?: React.ReactNode;
   familySharingVisible?: boolean;
   sharedMode?: boolean;
+  onExportFamilyBackup?: () => Promise<void>;
   sharedOwner?: boolean;
   sharedAvatarEditable?: boolean;
   sharedReminders?: React.ReactNode;
@@ -1215,12 +1217,47 @@ export default function Settings({
       ) : null}
       <SettingsSection title="备份与恢复" busy={busy}>
         {sharedMode ? (
-          <T raw style={{ color: c.muted, fontSize: 13 }}>
-            {copy(
-              "家庭记录保存在服务器，共享期间不能导出或导入本机备份。",
-              "Family records are stored on the server. Local backup export and import are unavailable while sharing.",
-            )}
-          </T>
+          <>
+            <T raw style={{ color: c.muted, fontSize: 13 }}>
+              {copy(
+                "每位当前家庭成员都可下载服务器已确认的最新资料，包括宝宝档案、全部记录、照片、共享提醒和早教资料。JSON 文件未加密，含家庭私密信息，请妥善保存。",
+                "Every active family member can download the latest confirmed server data: baby profile, all records, photo, shared reminders and play data. The JSON file is unencrypted and contains private family information; store it privately.",
+              )}
+            </T>
+            <Button
+              label={copy(
+                "下载并导出家庭备份",
+                "Download and export family backup",
+              )}
+              disabled={busy || !onExportFamilyBackup}
+              onPress={() =>
+                run(async () => {
+                  if (!sharing.current || !onExportFamilyBackup) return;
+                  await onExportFamilyBackup();
+                  const notice = copy(
+                    "分享操作已结束，请确认文件已保存。",
+                    "Sharing finished. Check that the file was saved.",
+                  );
+                  setMessage(notice);
+                  setBackupNotice(notice);
+                })
+              }
+            />
+            <T raw style={{ color: c.muted, fontSize: 13 }}>
+              {copy(
+                "下载不包含本机待同步修改或未解决的冲突，也不会改动共享资料。家庭文件仅供备份或个人分析，暂不支持导入或恢复。",
+                "Downloads exclude pending local edits and unresolved conflicts, and do not change shared data. Family files are for backup or personal analysis; importing or restoring them is not supported.",
+              )}
+            </T>
+            {!onExportFamilyBackup ? (
+              <T raw style={{ color: c.muted, fontSize: 13 }}>
+                {copy(
+                  "请先联网刷新家庭权限，才能下载备份。",
+                  "Connect and refresh family access before downloading a backup.",
+                )}
+              </T>
+            ) : null}
+          </>
         ) : (
           <>
             <T style={{ color: c.muted, fontSize: 13 }}>
@@ -1254,20 +1291,6 @@ export default function Settings({
                 })
               }
             />
-            {backupNotice ? (
-              <View
-                style={{
-                  backgroundColor: c.soft,
-                  borderRadius: 14,
-                  paddingHorizontal: 14,
-                  paddingVertical: 12,
-                }}
-              >
-                <T style={{ color: c.muted, fontSize: 12 }}>
-                  {t(backupNotice)}
-                </T>
-              </View>
-            ) : null}
             {pending && (
               <View
                 style={{
@@ -1328,35 +1351,61 @@ export default function Settings({
             )}
           </>
         )}
+        {backupNotice ? (
+          <View
+            style={{
+              backgroundColor: c.soft,
+              borderRadius: 14,
+              paddingHorizontal: 14,
+              paddingVertical: 12,
+            }}
+          >
+            <T style={{ color: c.muted, fontSize: 12 }}>{t(backupNotice)}</T>
+          </View>
+        ) : null}
       </SettingsSection>
       {onOpenSupport ? (
-        <Card>
-          <View style={[row, { alignItems: "flex-start" }]}>
-            <View
-              accessibilityElementsHidden
-              aria-hidden
-              importantForAccessibility="no-hide-descendants"
-              style={{
-                width: 44,
-                height: 44,
-                borderRadius: 22,
-                backgroundColor: c.soft,
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
+        <Card style={{ padding: 0 }}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t("请我喝杯咖啡")}
+            accessibilityHint={t("查看支持选项")}
+            onPress={onOpenSupport}
+            style={({ pressed }) => ({
+              minHeight: 72,
+              padding: 20,
+              opacity: pressed ? 0.7 : 1,
+            })}
+          >
+            <View style={[row, { alignItems: "center" }]}>
+              <View
+                accessibilityElementsHidden
+                aria-hidden
+                importantForAccessibility="no-hide-descendants"
+                style={{
+                  width: 44,
+                  height: 44,
+                  borderRadius: 22,
+                  backgroundColor: c.soft,
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <T raw style={{ color: c.primary, fontSize: 22 }}>
+                  ☕︎
+                </T>
+              </View>
+              <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
+                <T style={{ fontSize: 18, fontWeight: "700" }}>请我喝杯咖啡</T>
+                <T style={{ color: c.muted, fontSize: 13, lineHeight: 19 }}>
+                  自愿、单次支持，不会订阅或解锁额外功能
+                </T>
+              </View>
               <T raw style={{ color: c.primary, fontSize: 22 }}>
-                ☕︎
+                ›
               </T>
             </View>
-            <View style={{ flex: 1, gap: 3 }}>
-              <T style={{ fontSize: 18, fontWeight: "700" }}>请我喝杯咖啡</T>
-              <T style={{ color: c.muted, fontSize: 13, lineHeight: 19 }}>
-                自愿、单次支持，不会订阅或解锁额外功能
-              </T>
-            </View>
-          </View>
-          <Button label="查看支持选项" secondary onPress={onOpenSupport} />
+          </Pressable>
         </Card>
       ) : null}
       <Card>

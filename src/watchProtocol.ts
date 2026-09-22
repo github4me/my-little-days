@@ -12,13 +12,22 @@ export type WatchCommand = {
   bridgeId?: string;
   snapshotSequence?: number;
   createdAt: string;
-  kind: "create" | "finish-sleep" | "finish-feed";
+  kind: "create" | "finish-sleep" | "finish-feed" | "resolve-conflict";
   entry?: Entry;
   stoppedAt?: string;
   amount?: number;
   baseVersion?: string;
   expectedEntry?: Entry;
   dependsOn?: string;
+  resolution?: "discard" | "replace";
+  conflictOperationId?: string;
+};
+export type WatchConflict = {
+  currentVersion: string;
+  currentEditedBy: string;
+  currentEntry: Entry;
+  proposedEntry: Entry;
+  canReplace: boolean;
 };
 export type WatchReceipt = {
   schemaVersion: 1;
@@ -29,6 +38,7 @@ export type WatchReceipt = {
   bridgeId?: string;
   status: "saved" | "pending" | "shared" | "rejected";
   error?: string;
+  conflict?: WatchConflict;
 };
 export type WatchLedger = Record<
   string,
@@ -46,6 +56,8 @@ export type WatchContext = {
   locale?: SupportedLocale;
   /** Regional formatting locale; optional for version 1 compatibility. */
   formattingLocale?: string;
+  /** New recording can be paused without hiding already-issued conflicts. */
+  recordingEnabled?: boolean;
   profile: { name: string; birthDate: string };
   entries: (Entry & {
     version?: string;
@@ -89,13 +101,33 @@ export function parseWatchCommand(raw: string): WatchCommand {
     c.generation < 1 ||
     (c.bridgeId !== undefined && !uuid.test(c.bridgeId)) ||
     !instant(c.createdAt) ||
-    !["create", "finish-sleep", "finish-feed"].includes(c.kind) ||
+    !["create", "finish-sleep", "finish-feed", "resolve-conflict"].includes(
+      c.kind,
+    ) ||
     (c.dependsOn !== undefined && !uuid.test(c.dependsOn)) ||
     (c.baseVersion !== undefined &&
       (typeof c.baseVersion !== "string" || c.baseVersion.length > 128))
   )
     throw new Error("invalid_watch_command");
-  if (c.kind === "create") {
+  if (c.kind === "resolve-conflict") {
+    if (
+      !["discard", "replace"].includes(c.resolution ?? "") ||
+      !c.conflictOperationId ||
+      !uuid.test(c.conflictOperationId) ||
+      c.conflictOperationId === c.commandId ||
+      c.entry !== undefined ||
+      c.stoppedAt !== undefined ||
+      c.amount !== undefined ||
+      c.expectedEntry !== undefined ||
+      c.dependsOn !== undefined ||
+      (c.resolution === "replace"
+        ? !c.baseVersion
+        : c.baseVersion !== undefined)
+    )
+      throw new Error("invalid_watch_command");
+  } else if (c.resolution !== undefined || c.conflictOperationId !== undefined)
+    throw new Error("invalid_watch_command");
+  else if (c.kind === "create") {
     c.entry = validateEntry(c.entry);
     if (
       c.entry.id !== c.recordId ||
@@ -107,6 +139,31 @@ export function parseWatchCommand(raw: string): WatchCommand {
   if (c.expectedEntry !== undefined)
     c.expectedEntry = validateEntry(c.expectedEntry);
   return c;
+}
+
+function validateWatchConflict(value: unknown): WatchConflict {
+  const conflict = value as WatchConflict;
+  if (
+    !conflict ||
+    typeof conflict !== "object" ||
+    typeof conflict.currentVersion !== "string" ||
+    !conflict.currentVersion ||
+    conflict.currentVersion.length > 128 ||
+    typeof conflict.currentEditedBy !== "string" ||
+    !conflict.currentEditedBy ||
+    conflict.currentEditedBy.length > 80 ||
+    typeof conflict.canReplace !== "boolean"
+  )
+    throw new Error("local_data_invalid");
+  const currentEntry = validateEntry(conflict.currentEntry);
+  const proposedEntry = validateEntry(conflict.proposedEntry);
+  if (
+    (currentEntry.type !== "feed" && currentEntry.type !== "sleep") ||
+    currentEntry.type !== proposedEntry.type ||
+    currentEntry.id !== proposedEntry.id
+  )
+    throw new Error("local_data_invalid");
+  return { ...conflict, currentEntry, proposedEntry };
 }
 function canonical(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonical);
@@ -181,9 +238,12 @@ export function validateWatchLedger(value: unknown): WatchLedger | undefined {
       receipt.workspaceKey !== command.workspaceKey ||
       receipt.generation !== command.generation ||
       receipt.bridgeId !== command.bridgeId ||
-      !["saved", "pending", "shared", "rejected"].includes(receipt.status)
+      !["saved", "pending", "shared", "rejected"].includes(receipt.status) ||
+      (receipt.conflict !== undefined && receipt.status !== "rejected")
     )
       throw new Error("local_data_invalid");
+    if (receipt.conflict !== undefined)
+      receipt.conflict = validateWatchConflict(receipt.conflict);
   }
   return value as WatchLedger;
 }
@@ -218,6 +278,8 @@ export function watchEntryChange(
   now = Date.now(),
 ): Entry | null {
   checkWatchTime(command, state, now);
+  if (command.kind === "resolve-conflict")
+    throw new Error("invalid_watch_command");
   const entry = state.entries.find((e) => e.id === command.recordId);
   if (command.kind === "create") {
     if (entry) throw new Error("record_changed");

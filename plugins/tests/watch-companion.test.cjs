@@ -316,10 +316,12 @@ test("Watch UI uses keyed resources with complete locale coverage and an English
   );
   assert.doesNotMatch(app + store, /func text\(_ en:|\?\s*"[^\"]+"\s*:\s*"/);
   assert.match(contract, /formattingLocale\?: string/);
+  assert.match(contract, /recordingEnabled\?: boolean/);
   assert.match(
     phone,
-    /language: isChineseLocale\(locale\)[\s\S]{0,120}locale,\s*formattingLocale,\s*profile:/,
+    /language: isChineseLocale\(locale\)[\s\S]{0,180}locale,\s*formattingLocale,\s*recordingEnabled,\s*profile:/,
   );
+  assert.match(app, /disabled\(!store\.ready \|\| !store\.recordingEnabled\)/);
   assert.match(localizer, /path\(forResource: "en", ofType: "lproj"\)/);
   assert.doesNotMatch(localizer, /localizedStringWithFormat/);
   assert.match(

@@ -40,6 +40,7 @@ import {
   acceptRecordReceipt,
   applyFullSnapshot,
   canEditRecord,
+  canReplaceRecordConflict,
   canControlSleep,
   canControlFeed,
   enqueueRecord,
@@ -48,6 +49,8 @@ import {
   isFullSnapshot,
   projectedFullState,
   projectedExtraRecords,
+  replaceRecordConflict,
+  discardRecordConflict,
   recordsForSend,
   requireExtraCapabilities,
   validateFullSnapshot,
@@ -1085,7 +1088,16 @@ export function useFamilyPilot(notificationLocale: SupportedLocale = "en") {
               ...s,
               records: (s.records ?? []).map((q) =>
                 q.operation.operationId === item.operation.operationId
-                  ? { ...q, status: "failed", error: code }
+                  ? {
+                      ...q,
+                      status: "failed",
+                      error: code,
+                      ...(code === "record_changed" &&
+                      cause instanceof PilotApiError &&
+                      cause.status === 412
+                        ? { serverConflict: true }
+                        : {}),
+                    }
                   : q,
               ),
             }),
@@ -1248,6 +1260,59 @@ export function useFamilyPilot(notificationLocale: SupportedLocale = "en") {
         return;
     }
     return sync();
+  }
+  async function downloadSnapshotForBackup(): Promise<FullFamilySnapshot> {
+    const e = epoch.current;
+    check(e);
+    requireAuthentication();
+    if (!verified.current) throw new Error("refresh_required");
+    const f = family();
+    const before = current.current.snapshot;
+    if (!isFullSnapshot(before) || !who.current)
+      throw new Error("refresh_required");
+    const origin = originForSnapshot(before);
+    if (origin.userId !== who.current.user.id)
+      throw new Error("membership_changed");
+    // Fetch from the authorized server rather than exporting the optimistic
+    // projection or the device cache. Do not disturb queued local changes.
+    let result: FullFamilySnapshot;
+    try {
+      result = await familyRequest<FullFamilySnapshot>(
+        `/v2/families/${f.id}/snapshot`,
+        undefined,
+        requests.current.signal,
+      );
+    } catch (cause) {
+      if (isCurrent(e) && authenticationRequired(cause)) pauseAuthentication();
+      else if (
+        isCurrent(e) &&
+        cause instanceof PilotApiError &&
+        cause.status === 403
+      ) {
+        clearRecognition();
+        markReady(false);
+        setAuthStatus("unverified");
+        setError(errorCode(cause));
+      }
+      throw cause;
+    }
+    check(e);
+    requireAuthentication();
+    if (
+      !verified.current ||
+      !matchesOrigin(origin, current.current.snapshot) ||
+      !Array.isArray(result.members) ||
+      !matchesOrigin(origin, result) ||
+      who.current?.user.id !== origin.userId ||
+      !result.members?.some(
+        (member) =>
+          member.id === origin.userId &&
+          member.membershipId === origin.membershipId &&
+          member.status === "active",
+      )
+    )
+      throw new Error("membership_changed");
+    return validateFullSnapshot(result);
   }
   async function refreshActiveTimer(type: "sleep" | "feed") {
     const e = epoch.current;
@@ -1719,7 +1784,8 @@ export function useFamilyPilot(notificationLocale: SupportedLocale = "en") {
           throw new Error("membership_changed");
         if (
           !isFullSnapshot(current.current.snapshot) ||
-          current.current.snapshot.watchRecordingEnabled !== true
+          (command.kind !== "resolve-conflict" &&
+            current.current.snapshot.watchRecordingEnabled !== true)
         )
           throw new Error("watch_recording_unavailable");
         family();
@@ -1746,6 +1812,8 @@ export function useFamilyPilot(notificationLocale: SupportedLocale = "en") {
         : null,
     recordPending: state.records?.filter((q) => q.status !== "failed") ?? [],
     recordConflicts: state.records?.filter((q) => q.status === "failed") ?? [],
+    canReplaceRecordConflict: (operationId: string) =>
+      ready && canReplaceRecordConflict(state, operationId),
     canEditRecord: (collection: "entry" | "care" | "extra", id: string) =>
       ready &&
       !state.transition &&
@@ -1859,19 +1927,26 @@ export function useFamilyPilot(notificationLocale: SupportedLocale = "en") {
         );
         void refreshNow();
       }),
-    discardRecordConflict: (operationId: string) =>
+    replaceRecordConflict: (operationId: string, expectedVersion?: string) =>
       action(async (e) => {
+        if (!verified.current) throw new Error("refresh_required");
+        family();
         await persist(
-          (s) => ({
-            ...s,
-            records: (s.records ?? []).filter(
-              (q) =>
-                q.operation.operationId !== operationId ||
-                q.status !== "failed",
+          (s) =>
+            replaceRecordConflict(
+              s,
+              operationId,
+              randomUUID(),
+              expectedVersion,
             ),
-          }),
           e,
         );
+        setNotice("saved_locally");
+        void refreshNow();
+      }),
+    discardRecordConflict: (operationId: string) =>
+      action(async (e) => {
+        await persist((s) => discardRecordConflict(s, operationId), e);
       }),
     saveFullProfile: (profile: State["profile"], baseVersion: string) =>
       action(async (e) => {
@@ -2189,6 +2264,7 @@ export function useFamilyPilot(notificationLocale: SupportedLocale = "en") {
         }
       }, true),
     refresh: () => refreshNow(),
+    downloadSnapshotForBackup,
     refreshActiveTimer,
     refreshForNotification: async (): Promise<boolean> => {
       const e = epoch.current;

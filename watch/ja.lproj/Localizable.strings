@@ -62,3 +62,14 @@
 "error.watch_clock" = "Watchの時刻を確認して、もう一度試してください。";
 "notice.short_sleep_cancelled" = "1分未満：睡眠を取り消しました。完了した睡眠記録は残りません。";
 "error.sync_status_save_failed" = "同期状況を保存できませんでした。保留中の記録は保持されています。";
+"sync.conflict.title" = "競合を確認";
+"sync.conflict.changed_by" = "現在の変更者：%@";
+"sync.conflict.current" = "家族版";
+"sync.conflict.mine" = "自分の変更";
+"sync.conflict.pending" = "iPhone の処理待ち";
+"sync.conflict.keep" = "家族版を残す";
+"sync.conflict.replace" = "自分の変更で置き換える";
+"sync.conflict.ongoing" = "進行中";
+"sync.conflict.sleep" = "睡眠";
+"sync.conflict.feed" = "授乳";
+"sync.recording_paused" = "iPhoneで記録が一時停止されています。既存の競合は下で引き続き確認できます。";

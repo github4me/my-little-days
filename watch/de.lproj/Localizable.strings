@@ -62,3 +62,14 @@
 "error.watch_clock" = "Prüfe die Uhrzeit deiner Watch und versuche es erneut.";
 "notice.short_sleep_cancelled" = "Unter einer Minute: Schlaf abgebrochen; es wird kein abgeschlossener Schlaf gespeichert.";
 "error.sync_status_save_failed" = "Synchronisierungsstatus konnte nicht gespeichert werden. Deine ausstehenden Einträge bleiben erhalten.";
+"sync.conflict.title" = "Konflikt prüfen";
+"sync.conflict.changed_by" = "Aktuelle Version von %@";
+"sync.conflict.current" = "Familienversion";
+"sync.conflict.mine" = "Meine Änderung";
+"sync.conflict.pending" = "Wartet auf das iPhone";
+"sync.conflict.keep" = "Familienversion behalten";
+"sync.conflict.replace" = "Durch meine Änderung ersetzen";
+"sync.conflict.ongoing" = "Läuft";
+"sync.conflict.sleep" = "Schlaf";
+"sync.conflict.feed" = "Füttern";
+"sync.recording_paused" = "Die Aufzeichnung wurde auf dem iPhone pausiert. Bestehende Konflikte können unten weiter geprüft werden.";

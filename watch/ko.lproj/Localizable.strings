@@ -62,3 +62,14 @@
 "error.watch_clock" = "Watch 시간을 확인한 후 다시 시도하세요.";
 "notice.short_sleep_cancelled" = "1분 미만: 수면이 취소되었으며 완료된 수면 기록은 저장되지 않습니다.";
 "error.sync_status_save_failed" = "동기화 상태를 저장할 수 없습니다. 대기 중인 기록은 유지됩니다.";
+"sync.conflict.title" = "충돌 확인";
+"sync.conflict.changed_by" = "현재 변경한 사람: %@";
+"sync.conflict.current" = "가족 버전";
+"sync.conflict.mine" = "내 변경사항";
+"sync.conflict.pending" = "iPhone 처리 대기 중";
+"sync.conflict.keep" = "가족 버전 유지";
+"sync.conflict.replace" = "내 변경사항으로 대체";
+"sync.conflict.ongoing" = "진행 중";
+"sync.conflict.sleep" = "수면";
+"sync.conflict.feed" = "수유";
+"sync.recording_paused" = "iPhone에서 기록이 일시 중지되었습니다. 기존 충돌은 아래에서 계속 검토할 수 있습니다.";

@@ -30,6 +30,15 @@ final class WatchProtocolTests: XCTestCase {
     let decoded = try JSONDecoder().decode(WatchContext.self, from: encoded)
     XCTAssertNil(decoded.locale, "Version 1 contexts without locale must still decode")
     XCTAssertNil(decoded.formattingLocale)
+    XCTAssertNil(decoded.recordingEnabled)
+
+    var paused = context()
+    paused.recordingEnabled = false
+    let restoredPaused = try JSONDecoder().decode(WatchContext.self,
+      from: JSONEncoder().encode(paused))
+    XCTAssertEqual(restoredPaused.recordingEnabled, false)
+    XCTAssertTrue(restoredPaused.isValid(at: WatchClock.date("2026-09-19T11:59:59Z")!),
+      "Pausing new records must not hide an already-issued conflict context")
   }
 
   func testContextExpiresAndOldSnapshotsCannotCrossInvalidation() {
@@ -95,6 +104,37 @@ final class WatchProtocolTests: XCTestCase {
     var disk = WatchDisk(context: context(), outbox: Array(repeating: .init(command: command, receipt: receipt), count: 150))
     disk.acceptContext(context(sequence: 9))
     XCTAssertEqual(disk.outbox.count, 150)
+  }
+
+  func testTerminalConflictResolutionRemovesReviewedReceiptAndKeepsResolutionHistory() throws {
+    let current = WatchEntry(id: "record-1", type: "sleep", start: "2026-09-18T12:00:00Z",
+      end: "2026-09-18T12:05:00Z")
+    let proposed = WatchEntry(id: current.id, type: "sleep", start: current.start,
+      end: "2026-09-18T12:06:00Z")
+    let original = WatchCommand(schemaVersion: 1, commandId: UUID().uuidString, recordId: current.id,
+      workspaceKey: "family-a", bridgeId: "bridge-a", generation: 3, snapshotSequence: 8,
+      createdAt: proposed.end!, kind: "finish-sleep", stoppedAt: proposed.end)
+    let conflict = WatchConflict(currentVersion: "current-version", currentEditedBy: "Other Parent",
+      currentEntry: current, proposedEntry: proposed, canReplace: true)
+    let rejected = WatchReceipt(schemaVersion: 1, commandId: original.id, recordId: original.recordId,
+      workspaceKey: original.workspaceKey, bridgeId: original.bridgeId, generation: original.generation,
+      status: "rejected", error: "record_changed", contextSequence: 8, conflict: conflict)
+    let resolution = WatchCommand(schemaVersion: 1, commandId: UUID().uuidString, recordId: current.id,
+      workspaceKey: "family-a", bridgeId: "bridge-a", generation: 3, snapshotSequence: 8,
+      createdAt: "2026-09-18T12:07:00Z", kind: "resolve-conflict", baseVersion: "current-version",
+      resolution: "replace", conflictOperationId: original.id)
+    var disk = WatchDisk(context: context(entries: [current]),
+      outbox: [.init(command: original, receipt: rejected), .init(command: resolution)])
+    disk.outbox[1].receipt = WatchReceipt(schemaVersion: 1, commandId: resolution.id,
+      recordId: resolution.recordId, workspaceKey: resolution.workspaceKey, bridgeId: resolution.bridgeId,
+      generation: resolution.generation, status: "shared", error: nil, contextSequence: 8)
+    disk.reconcileProjection()
+    XCTAssertFalse(disk.outbox.contains { $0.id == original.id })
+    XCTAssertEqual(disk.outbox.first { $0.id == resolution.id }?.projectionReconciled, true)
+
+    let restored = try JSONDecoder().decode(WatchDisk.self, from: JSONEncoder().encode(disk))
+    XCTAssertEqual(restored.outbox.first?.command.resolution, "replace")
+    XCTAssertEqual(restored.outbox.first?.command.conflictOperationId, original.id)
   }
 
   func testSharedFixturesDecodeAndReencodeTheDomainNoteAndBottlePlaceholder() throws {

@@ -403,7 +403,20 @@ export function parseStoredPilot(raw: string | null): PilotState {
       !q.origin ||
       !["entry", "care", "extra"].includes(q.operation.collection) ||
       !["create", "update", "delete"].includes(q.operation.kind) ||
-      !["pending", "accepted", "failed"].includes(q.status)
+      !["pending", "accepted", "failed"].includes(q.status) ||
+      (q.serverConflict !== undefined &&
+        (q.serverConflict !== true || q.status !== "failed")) ||
+      (q.operation.replacesOperationId !== undefined &&
+        (typeof q.operation.replacesOperationId !== "string" ||
+          !q.operation.replacesOperationId ||
+          q.operation.replacesOperationId === q.operation.operationId ||
+          q.operation.collection !== "entry" ||
+          q.operation.kind !== "update")) ||
+      (q.operation.timerCompletion !== undefined &&
+        (!["sleep", "feed"].includes(q.operation.timerCompletion) ||
+          q.operation.collection !== "entry" ||
+          q.operation.kind !== "update" ||
+          q.operation.entry?.type !== q.operation.timerCompletion))
     )
       throw new Error("local_data_invalid");
   for (const q of state.records ?? [])

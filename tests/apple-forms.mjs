@@ -58,6 +58,7 @@ function fixture(component, platform = "ios", fontScale = 1, overrides = {}) {
     card: "#222",
     elevated: "#333",
     input: "#222",
+    soft: "#334",
   };
   const translate = (text, values = {}) =>
     Object.entries(values).reduce(
@@ -320,6 +321,15 @@ test("native optional end time is a switch; web retains the existing form action
 });
 
 test("feed Save records a start-only feed; Start timer explicitly starts timing", async () => {
+  const initial = fixture("EntryEditor");
+  assert.equal(
+    initial.action("开始计时").props.style.at(-1).backgroundColor,
+    "#8bc",
+  );
+  assert.equal(
+    initial.action("保存记录").props.style.at(-1).backgroundColor,
+    "#334",
+  );
   for (const [label, running] of [
     ["保存记录", undefined],
     ["开始计时", true],

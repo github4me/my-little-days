@@ -149,7 +149,7 @@ function fixture(file, props, { fontScale = 1, failMail = false } = {}) {
   return { render, nodes: () => nodes };
 }
 
-test("record history reveals seven date groups at a time and resets on filter changes", () => {
+test("record history shows Today plus three days, then seven more at a time, and resets on filter changes", () => {
   const screen = fixture("src/Records.tsx", {
     view: "bars",
     entries: Array.from({ length: 22 }, (_, index) => ({
@@ -201,9 +201,9 @@ test("record history reveals seven date groups at a time and resets on filter ch
     screen.render();
   };
   changeRange("all");
-  assert.equal(days(), 7);
-  for (const expected of [14, 21, 22]) {
-    const more = button(`更多：显示前 ${expected === 22 ? 1 : 7} 天`);
+  assert.equal(days(), 4);
+  for (const expected of [11, 18, 22]) {
+    const more = button(`更多：显示前 ${expected === 22 ? 4 : 7} 天`);
     assert.ok(more);
     assert.ok(more.props.style({ pressed: false }).minHeight >= 44);
     more.props.onPress();
@@ -211,15 +211,15 @@ test("record history reveals seven date groups at a time and resets on filter ch
     assert.equal(days(), expected);
   }
   assert.ok(!button("更多：显示前 7 天"));
-  assert.ok(!button("更多：显示前 1 天"));
+  assert.ok(!button("更多：显示前 4 天"));
   button("收起历史日期").props.onPress();
   screen.render();
-  assert.equal(days(), 7);
+  assert.equal(days(), 4);
   assert.ok(!button("收起历史日期"));
   button("更多：显示前 7 天").props.onPress();
   screen.render();
   changeRange("1m");
-  assert.equal(days(), 7);
+  assert.equal(days(), 4);
   button("更多：显示前 7 天").props.onPress();
   screen.render();
   const changeKind = (value) => {
@@ -237,7 +237,7 @@ test("record history reveals seven date groups at a time and resets on filter ch
   assert.equal(days(), 0);
   assert.ok(!button("更多：显示前 7 天"));
   changeKind("feed");
-  assert.equal(days(), 7);
+  assert.equal(days(), 4);
 });
 
 test("record actions have 44-point targets and announced readonly state; notes stay complete", () => {

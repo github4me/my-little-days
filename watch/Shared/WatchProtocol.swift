@@ -116,6 +116,9 @@ struct WatchContext: Codable {
   // Regional formatting locale. Optional so previously persisted version 1
   // contexts continue to decode and use the catalog's stable default region.
   var formattingLocale: String? = nil
+  // Keep an authenticated read/conflict context usable if the phone pauses new
+  // Watch recording. Older phone contexts omit this and remain enabled.
+  var recordingEnabled: Bool? = nil
 
   func isValid(at now: Date) -> Bool {
     guard schemaVersion == 1, status == "ready", !workspaceKey.isEmpty,
@@ -146,6 +149,10 @@ struct WatchCommand: Codable, Identifiable {
   var baseVersion: String?
   var expectedEntry: WatchEntry?
   var dependsOn: String?
+  // A conflict resolution is a new immutable command that refers to the
+  // rejected command the person reviewed; it never mutates that old command.
+  var resolution: String?
+  var conflictOperationId: String?
   var id: String { commandId }
 
   func json() throws -> String {
@@ -153,6 +160,14 @@ struct WatchCommand: Codable, Identifiable {
     encoder.outputFormatting = [.sortedKeys]
     return String(decoding: try encoder.encode(self), as: UTF8.self)
   }
+}
+
+struct WatchConflict: Codable {
+  let currentVersion: String
+  let currentEditedBy: String
+  let currentEntry: WatchEntry
+  let proposedEntry: WatchEntry
+  let canReplace: Bool
 }
 
 struct WatchReceipt: Codable {
@@ -165,6 +180,7 @@ struct WatchReceipt: Codable {
   let status: String
   let error: String?
   let contextSequence: Int?
+  var conflict: WatchConflict?
 }
 
 struct WatchOutboxItem: Codable, Identifiable {
@@ -343,7 +359,9 @@ struct WatchDisk: Codable {
             let receipt = item.receipt, receipt.status != "rejected",
             value.sequence >= (receipt.contextSequence ?? Int.max) else { continue }
       let present = value.entries?.contains { $0.id == item.command.recordId && $0.isActive } ?? false
-      if item.command.kind == "create" {
+      if item.command.kind == "resolve-conflict" {
+        outbox[index].projectionReconciled = item.terminal
+      } else if item.command.kind == "create" {
         // Only replace an active local start once the phone snapshot contains it.
         outbox[index].projectionReconciled = item.command.entry?.isActive != true || present ||
           (item.terminal && value.sequence > (receipt.contextSequence ?? Int.max))
@@ -351,6 +369,14 @@ struct WatchDisk: Codable {
         outbox[index].projectionReconciled = !present
       }
     }
+    // A terminal resolution supersedes the rejected command it reviewed. If
+    // replacement raced with another edit, the resolution command itself is
+    // rejected with a fresh conflict and remains available for another review.
+    let resolved = Set(outbox.compactMap { item in
+      item.command.kind == "resolve-conflict" && item.terminal
+        ? item.command.conflictOperationId : nil
+    })
+    outbox.removeAll { resolved.contains($0.id) }
     // Retain bounded terminal receipt history, not unsynced work. Quarantined old
     // generations are never replayed or rendered under the new workspace.
     if let ids = summaryCommandIds, ids.allSatisfy({ id in

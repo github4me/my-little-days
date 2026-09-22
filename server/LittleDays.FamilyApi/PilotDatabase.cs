@@ -117,9 +117,13 @@ public sealed partial class PilotDatabase(DbContextOptions<PilotDatabase> option
             entity.HasIndex(x => x.RecordedBy);
             entity.HasIndex(x => x.LastEditedBy);
             entity.HasIndex(x => x.TimerEndedBy).HasFilter("[TimerEndedBy] IS NOT NULL");
+            entity.Property(x => x.ConflictPreviousJson).HasMaxLength(1024);
+            entity.HasIndex(x => x.ConflictReplacedBy).HasFilter("[ConflictReplacedBy] IS NOT NULL");
+            entity.HasIndex(x => x.ConflictPreviousEditedBy).HasFilter("[ConflictPreviousEditedBy] IS NOT NULL");
             entity.HasOne<FamilyRow>().WithMany().HasForeignKey(x => x.FamilyId).OnDelete(DeleteBehavior.Restrict);
             entity.ToTable(t => t.HasCheckConstraint("CK_FamilyRecords_Collection", "[Collection] IN ('entry', 'care', 'extra')"));
             entity.ToTable(t => t.HasCheckConstraint("CK_FamilyRecords_Json", "ISJSON([RecordJson]) = 1 AND (DATALENGTH([RecordJson]) <= 131072 OR ([Collection] = 'extra' AND [Id] = 'avatar' AND COALESCE(JSON_VALUE([RecordJson], '$.kind'), '') = 'avatar' AND DATALENGTH([RecordJson]) <= 35651584))"));
+            entity.ToTable(t => t.HasCheckConstraint("CK_FamilyRecords_ConflictReplacement", "([ConflictReplacedBy] IS NULL AND [ConflictPreviousEditedBy] IS NULL AND [ConflictReplacedAt] IS NULL AND [ConflictPreviousJson] IS NULL) OR ([ConflictReplacedBy] IS NOT NULL AND [ConflictReplacedAt] IS NOT NULL AND [ConflictPreviousJson] IS NOT NULL AND [Collection] = 'entry' AND ISJSON([ConflictPreviousJson]) = 1 AND DATALENGTH([ConflictPreviousJson]) <= 2048)"));
         });
     }
 }
@@ -230,6 +234,10 @@ public sealed class FamilyRecordRow
     public Guid RecordedBy { get; set; }
     public Guid LastEditedBy { get; set; }
     public Guid? TimerEndedBy { get; set; }
+    public Guid? ConflictReplacedBy { get; set; }
+    public Guid? ConflictPreviousEditedBy { get; set; }
+    public DateTimeOffset? ConflictReplacedAt { get; set; }
+    public string? ConflictPreviousJson { get; set; }
     public bool Deleted { get; set; }
     public byte[] Version { get; set; } = [];
 }

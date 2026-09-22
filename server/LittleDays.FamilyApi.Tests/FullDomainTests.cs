@@ -161,5 +161,6 @@ public sealed class FullDomainTests
         Assert.Equal(FullDomainValidation.RecordKinds, capabilities.RecordKinds);
         Assert.Equal(33554432, capabilities.MaxSeedBytes);
         Assert.Equal(1, capabilities.ExtrasSchemaVersion);
+        Assert.True(capabilities.ConflictReplacementEnabled);
     }
 }

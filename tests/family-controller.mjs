@@ -510,6 +510,7 @@ function makeWorld({ offline = true, queued = false } = {}) {
           await world.beforeSnapshot(signal);
           if (world.snapshotOffline)
             throw new PilotApiError("network_unavailable");
+          if (world.snapshotDenied) throw new PilotApiError("forbidden", 403);
           if (world.snapshotUnsupported)
             throw new PilotApiError("family_schema_unsupported", 409);
           return structuredClone(world.server);
@@ -1484,6 +1485,97 @@ test("idle refresh downloads one snapshot and coalesces repeated refresh taps", 
     );
   } finally {
     gate.resolve();
+    c.unmount();
+  }
+});
+
+test("family backup reads a fresh authorized server snapshot without exporting local projections", async () => {
+  const world = makeWorld({ offline: false });
+  const c = await boot(world);
+  try {
+    world.http.length = 0;
+    world.server.revision = "9";
+    world.server.entries.push({
+      version: "AAAA",
+      recordedBy: "user-a",
+      lastEditedBy: "user-a",
+      entry: {
+        id: "confirmed-feed",
+        type: "feed",
+        start: new Date(Date.now() - 60_000).toISOString(),
+        end: new Date().toISOString(),
+        feedKind: "expressed",
+        amount: 83,
+        note: "",
+      },
+    });
+    const localBefore = JSON.stringify(world.read());
+    const downloaded = await c.result().downloadSnapshotForBackup();
+    assert.equal(downloaded.revision, "9");
+    assert.equal(downloaded.entries[0].entry.id, "confirmed-feed");
+    assert.equal(c.result().fullSnapshot.revision, "0");
+    assert.equal(JSON.stringify(world.read()), localBefore);
+    assert.deepEqual(
+      world.http.map((request) => request.url),
+      ["/v2/families/family-a/snapshot"],
+    );
+  } finally {
+    c.unmount();
+  }
+});
+
+test("family backup discards a late server response after sign-out", async () => {
+  const world = makeWorld({ offline: false });
+  const c = await boot(world);
+  const gate = deferred();
+  try {
+    world.http.length = 0;
+    world.beforeSnapshot = () => gate.promise;
+    const download = c.result().downloadSnapshotForBackup();
+    await until(
+      () => world.http.some((request) => request.url.endsWith("/snapshot")),
+      "family backup download",
+    );
+    await c.result().signOut();
+    gate.resolve();
+    await assert.rejects(download, /session_changed/);
+    assert.equal(c.result().fullSnapshot, null);
+  } finally {
+    gate.resolve();
+    c.unmount();
+  }
+});
+
+test("family backup never falls back to cached data or a different server history", async () => {
+  const world = makeWorld({ offline: false });
+  const c = await boot(world);
+  try {
+    world.snapshotOffline = true;
+    await assert.rejects(
+      c.result().downloadSnapshotForBackup(),
+      /network_unavailable/,
+    );
+    assert.ok(c.result().fullSnapshot, "the readable cache is not exported");
+    world.snapshotOffline = false;
+    world.server.historyId = "restored-other-history";
+    await assert.rejects(
+      c.result().downloadSnapshotForBackup(),
+      /membership_changed/,
+    );
+  } finally {
+    c.unmount();
+  }
+});
+
+test("family backup revocation denies export and hides the stale shared workspace", async () => {
+  const world = makeWorld({ offline: false });
+  const c = await boot(world);
+  try {
+    world.snapshotDenied = true;
+    await assert.rejects(c.result().downloadSnapshotForBackup(), /forbidden/);
+    assert.equal(c.result().ready, false);
+    assert.equal(c.result().fullSnapshot, null);
+  } finally {
     c.unmount();
   }
 });

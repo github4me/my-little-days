@@ -280,7 +280,7 @@ function BarRecords({
     [kind, setKind] = useState<Kind>("feed"),
     [unit, setUnit] = useState("mL"),
     [range, setRange] = useState<RecordRange>("7d"),
-    [visibleDayCount, setVisibleDayCount] = useState(7),
+    [olderDayPages, setOlderDayPages] = useState(0),
     [expandedDays, setExpandedDays] = useState<Set<string>>(() => new Set()),
     [expandedDayEntries, setExpandedDayEntries] = useState<Set<string>>(
       () => new Set(),
@@ -345,6 +345,10 @@ function BarRecords({
   const rangeDays = days.filter(
     (day) => day.date >= rangeStart && day.date <= new Date(now),
   );
+  const initialDayCount = rangeDays.some((day) => dayKey(day.date) === today)
+    ? 4
+    : 3;
+  const visibleDayCount = initialDayCount + olderDayPages * 7;
   const visibleDays = rangeDays.slice(0, visibleDayCount);
   const nextDayCount = Math.min(7, rangeDays.length - visibleDays.length);
   const perDay = (date: Date, events: Entry[]) => {
@@ -401,7 +405,7 @@ function BarRecords({
         ]}
         onChange={(v) => {
           setKind(v as Kind);
-          setVisibleDayCount(7);
+          setOlderDayPages(0);
           setExpandedDays(new Set());
           setExpandedDayEntries(new Set());
         }}
@@ -416,7 +420,7 @@ function BarRecords({
             options={ranges}
             onChange={(next) => {
               setRange(next as RecordRange);
-              setVisibleDayCount(7);
+              setOlderDayPages(0);
               setExpandedDays(new Set());
               setExpandedDayEntries(new Set());
             }}
@@ -846,7 +850,7 @@ function BarRecords({
           accessibilityLabel={t("更多：显示前 {count} 天", {
             count: nextDayCount,
           })}
-          onPress={() => setVisibleDayCount((count) => count + 7)}
+          onPress={() => setOlderDayPages((count) => count + 1)}
           style={({ pressed }) => ({
             minHeight: 44,
             minWidth: 44,
@@ -864,11 +868,11 @@ function BarRecords({
           </T>
         </Pressable>
       ) : null}
-      {visibleDayCount > 7 && rangeDays.length > 7 ? (
+      {olderDayPages > 0 ? (
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={t("收起历史日期")}
-          onPress={() => setVisibleDayCount(7)}
+          onPress={() => setOlderDayPages(0)}
           style={({ pressed }) => ({
             minHeight: 44,
             minWidth: 44,

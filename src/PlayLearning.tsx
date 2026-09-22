@@ -851,6 +851,14 @@ export default function PlayLearning({
                     "Play settings and dated check-ins stay locally and are not included in record backups.",
                   )}
             </T>
+            {sharedMode && sharedPlay ? (
+              <T raw style={{ color: c.muted, fontSize: 12 }}>
+                {text(
+                  "早教设置和打卡与家庭共享。管理员选择活动；成员可打卡并取消自己添加的打卡，管理员可管理全部打卡。",
+                  "Play settings and check-ins are shared with your family. The admin chooses activities. Members can add or undo their own check-ins; the admin can manage all check-ins.",
+                )}
+              </T>
+            ) : null}
             <Pressable
               accessibilityRole="link"
               onPress={() => void openSource(learningSources.who.url)}
@@ -866,18 +874,6 @@ export default function PlayLearning({
           </HelpDisclosure>
         </>
       )}
-      {sharedMode && sharedPlay ? (
-        <HelpDisclosure
-          title={text("家庭共享说明与参考", "Family sharing help & references")}
-        >
-          <T raw style={{ color: c.muted, fontSize: 12 }}>
-            {text(
-              "早教设置和打卡与家庭共享。管理员选择活动；成员可打卡并取消自己添加的打卡，管理员可管理全部打卡。",
-              "Play settings and check-ins are shared with your family. The admin chooses activities. Members can add or undo their own check-ins; the admin can manage all check-ins.",
-            )}
-          </T>
-        </HelpDisclosure>
-      ) : null}
     </View>
   );
 }

@@ -62,3 +62,14 @@
 "error.watch_clock" = "请检查手表时间后重试。";
 "notice.short_sleep_cancelled" = "不足一分钟：已取消睡眠，不保留已完成的睡眠记录。";
 "error.sync_status_save_failed" = "同步状态保存失败。待同步记录仍保留。";
+"sync.conflict.title" = "检查冲突";
+"sync.conflict.changed_by" = "当前版本修改人：%@";
+"sync.conflict.current" = "家庭版本";
+"sync.conflict.mine" = "我的修改";
+"sync.conflict.pending" = "等待 iPhone 处理";
+"sync.conflict.keep" = "保留家庭版本";
+"sync.conflict.replace" = "用我的修改替换";
+"sync.conflict.ongoing" = "进行中";
+"sync.conflict.sleep" = "睡眠";
+"sync.conflict.feed" = "喂奶";
+"sync.recording_paused" = "iPhone 已暂停手表记录。仍可在下方检查现有冲突。";

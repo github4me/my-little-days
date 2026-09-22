@@ -96,27 +96,57 @@ public sealed partial class FamilyService
         await ExpireInvitations(family, ct);
         // The capability is current host configuration, not part of a family's
         // data revision. A gate change must invalidate a cached enabled result.
-        var etag = $"\"v2-extras1-care{careSchemaVersion}-watch{(config.Family.EnforceSingleActiveTimers ? 1 : 0)}-cross-timer1:{config.Family.HistoryId:D}:{Revision(family)}:{grant.Id:D}\"";
+        var etag = $"\"v2-extras1-care{careSchemaVersion}-watch{(config.Family.EnforceSingleActiveTimers ? 1 : 0)}-cross-timer1-replace1:{config.Family.HistoryId:D}:{Revision(family)}:{grant.Id:D}\"";
         if (ifNoneMatch == etag) return new ConditionalSnapshot<FullFamilySnapshot>(etag, null);
         return new ConditionalSnapshot<FullFamilySnapshot>(etag, (await FullSnapshotData(family, grant, ct, expire: false)).ForCareSchema(careSchemaVersion));
     }, ct);
 
-    public Task<FeedReceipt> ApplyFullRecord(PilotIdentity user, Guid familyId, FullRecordOperation operation, CancellationToken ct)
+    private sealed record RecordConflictReceipt(string BaseVersion, string CurrentVersion,
+        Guid? ReplacesOperationId, string? TimerCompletion);
+    private sealed record RecordApplyOutcome(FeedReceipt? Receipt = null, string? Error = null);
+
+    public async Task<FeedReceipt> ApplyFullRecord(PilotIdentity user, Guid familyId, FullRecordOperation operation, CancellationToken ct)
     {
         var value = FullDomainValidation.Operation(operation);
         var hash = Fingerprint("record-v2", new { familyId, operation });
         var json = value is null ? null : RecordJson(operation.Collection, value.Value);
-        return FamilyTransaction(familyId, async () =>
+        var outcome = await FamilyTransaction(familyId, async () =>
         {
             var grant = await RequireGrant(user, familyId, operation.MembershipId, ct);
             if (operation.HistoryId != config.Family.HistoryId) throw new ApiException(409, "history_changed");
             var family = await Family(familyId, ct);
             RequireFullFamily(family);
             var old = await Receipt(user, operation.OperationId, hash, ct);
-            if (old is not null) return ReadResult<FeedReceipt>(old);
+            if (old is not null)
+                return old.Action == "record-conflict-v2"
+                    ? new RecordApplyOutcome(Error: "record_changed")
+                    : new RecordApplyOutcome(ReadResult<FeedReceipt>(old));
             if (operation.Collection == "extra" && FullDomainValidation.IsExtraSingleton(operation.RecordId) && grant.Role != "owner")
                 throw new ApiException(403, "record_forbidden");
             if (operation.Kind != "delete") await CheckCapacity(familyId, ct);
+            RecordConflictReceipt? replacement = null;
+            if (operation.ReplacesOperationId is Guid replacedOperationId)
+            {
+                var source = await db.Operations.SingleOrDefaultAsync(x =>
+                    x.UserId == user.ObjectId && x.OperationId == replacedOperationId, ct);
+                if (source is null || source.Action != "record-conflict-v2" || source.FamilyId != familyId ||
+                    source.MembershipId != operation.MembershipId || source.HistoryId != operation.HistoryId)
+                    throw new ApiException(409, "conflict_resolution_unavailable");
+                replacement = ReadResult<RecordConflictReceipt>(source);
+                if (operation.BaseVersion != replacement.CurrentVersion ||
+                    operation.TimerCompletion != replacement.TimerCompletion)
+                    throw new ApiException(409, "conflict_resolution_changed");
+                var original = operation with
+                {
+                    OperationId = replacedOperationId,
+                    BaseVersion = replacement.BaseVersion,
+                    ReplacesOperationId = replacement.ReplacesOperationId,
+                    TimerCompletion = replacement.TimerCompletion
+                };
+                var originalHash = Fingerprint("record-v2", new { familyId, operation = original });
+                if (source.Fingerprint != originalHash)
+                    throw new ApiException(409, "conflict_resolution_changed");
+            }
             var idHash = RecordIdHash(operation.RecordId);
             var row = await db.FamilyRecords.SingleOrDefaultAsync(x => x.FamilyId == familyId && x.Collection == operation.Collection && x.IdHash == idHash, ct);
             if (operation.Kind == "create")
@@ -131,22 +161,39 @@ public sealed partial class FamilyService
             else
             {
                 if (row is null || row.Deleted || Convert.ToBase64String(row.Version) != operation.BaseVersion)
+                {
+                    if (row is not null && !row.Deleted && value is not null &&
+                        CanOfferConflictReplacement(grant, user, row, operation, value.Value))
+                    {
+                        var currentVersion = Convert.ToBase64String(row.Version);
+                        SaveReceipt(user, operation.OperationId, familyId, grant.Id, "record-conflict-v2", hash,
+                            new RecordConflictReceipt(operation.BaseVersion!, currentVersion,
+                                operation.ReplacesOperationId, operation.TimerCompletion));
+                        return new RecordApplyOutcome(Error: "record_changed");
+                    }
                     throw new ApiException(412, "record_changed");
+                }
                 var previous = ReadRecord(row);
                 var timerCompletion = operation.Collection == "entry" && value is not null &&
                     IsTimerCompletion(previous, value.Value);
+                var competingTimerReplacement = replacement?.TimerCompletion is not null && value is not null &&
+                    IsCompetingTimerCompletion(previous, value.Value, replacement.TimerCompletion);
+                if (operation.TimerCompletion is not null && replacement is null && !timerCompletion) Invalid();
                 if (grant.Role != "owner" && row.RecordedBy != user.ObjectId &&
-                    !(timerCompletion && IsPureTimerCompletion(previous, value!.Value)))
+                    !(timerCompletion && IsPureTimerCompletion(previous, value!.Value)) && !competingTimerReplacement)
                     throw new ApiException(403, "record_forbidden");
                 if (operation.Collection == "extra" && value is not null &&
                     previous.GetProperty("kind").GetString() != value.Value.GetProperty("kind").GetString()) Invalid();
                 if (operation.Collection == "entry" && value is not null)
                     await GuardActiveTimer(familyId, operation.RecordId, value.Value, ct);
-                if (operation.Kind != "delete") await CheckRecordBudget(familyId, row, json!, ct);
+                var replacementJson = replacement is null || value is null ? null : ReplacementJson(previous, value.Value);
+                if (operation.Kind != "delete") await CheckRecordBudget(familyId, row, json!, ct, replacementJson);
+                var previousEditor = row.LastEditedBy;
                 row.LastEditedBy = user.ObjectId;
                 if (operation.Kind == "delete")
                 {
                     row.Deleted = true; row.RecordJson = "{}"; row.TimerEndedBy = null;
+                    ClearConflictReplacement(row);
                     if (operation.Collection == "entry") await CancelRecordPush(familyId, operation.RecordId, ct);
                 }
                 else
@@ -162,10 +209,18 @@ public sealed partial class FamilyService
                             await CancelRecordPush(familyId, operation.RecordId, ct);
                             await QueueRecordPush(user, family, operation, value.Value, ct);
                         }
-                        if (timerCompletion) row.TimerEndedBy = user.ObjectId;
+                        if (timerCompletion || competingTimerReplacement) row.TimerEndedBy = user.ObjectId;
                         else if (!PreservesTimerCompletion(previous, value!.Value)) row.TimerEndedBy = null;
                     }
                     row.RecordJson = json!;
+                    if (replacement is not null)
+                    {
+                        row.ConflictReplacedBy = user.ObjectId;
+                        row.ConflictPreviousEditedBy = previousEditor;
+                        row.ConflictReplacedAt = Now;
+                        row.ConflictPreviousJson = replacementJson;
+                    }
+                    else ClearConflictReplacement(row);
                 }
                 // A logically unchanged accepted update still consumes the base rowversion.
                 db.Entry(row).Property(x => x.LastEditedBy).IsModified = true;
@@ -173,8 +228,10 @@ public sealed partial class FamilyService
             family.Revision++;
             var result = new FeedReceipt(operation.OperationId, config.Family.HistoryId, Revision(family));
             SaveReceipt(user, operation.OperationId, familyId, grant.Id, "record-v2", hash, result);
-            return result;
+            return new RecordApplyOutcome(result);
         }, ct);
+        if (outcome.Error is not null) throw new ApiException(412, outcome.Error);
+        return outcome.Receipt!;
     }
 
     public Task<FamilySummary> UpdateFullProfile(PilotIdentity user, Guid familyId, FullProfileRequest request, CancellationToken ct) => FamilyTransaction(familyId, async () =>
@@ -214,14 +271,15 @@ public sealed partial class FamilyService
         var snapshot = new FullFamilySnapshot(2, new(family.BabyName, family.BabyBirthDate ?? "", family.BabySex),
             records.Where(x => x.Collection == "entry").OrderBy(x => x.Id, StringComparer.Ordinal)
                 .Select(x => new SharedEntry(ReadRecord(x), Convert.ToBase64String(x.Version), x.RecordedBy, x.LastEditedBy,
-                    x.TimerEndedBy)).ToArray(),
+                    x.TimerEndedBy, ReadReplacement(x))).ToArray(),
             records.Where(x => x.Collection == "care").OrderBy(x => x.Id, StringComparer.Ordinal)
                 .Select(x => new SharedCareRecord(ReadRecord(x), Convert.ToBase64String(x.Version), x.RecordedBy, x.LastEditedBy)).ToArray(),
             Summary(family, grant), config.Family.HistoryId, Revision(family), members.Select(x => Member(x, grant.Role == "owner")).ToArray(),
             invitations.Select(Invitation).ToArray(), [], transfer is null ? null : Transfer(transfer), 1,
             records.Where(x => x.Collection == "extra").OrderBy(x => x.Id, StringComparer.Ordinal)
                 .Select(x => new SharedExtraRecord(ReadRecord(x), Convert.ToBase64String(x.Version), x.RecordedBy, x.LastEditedBy)).ToArray(),
-            config.Family.EnforceSingleActiveTimers, CrossMemberTimerCompletionEnabled: true);
+            config.Family.EnforceSingleActiveTimers, CrossMemberTimerCompletionEnabled: true,
+            ConflictReplacementEnabled: true);
         return FamilyAvailability.RequireResponseBudget(snapshot);
     }
 
@@ -229,9 +287,11 @@ public sealed partial class FamilyService
     {
         public int Records { get; set; }
         public int LiveRecords { get; set; }
+        public int AuditRecords { get; set; }
         public long StoredBytes { get; set; }
     }
-    private async Task CheckRecordBudget(Guid familyId, FamilyRecordRow? replaced, string? addedJson, CancellationToken ct)
+    private async Task CheckRecordBudget(Guid familyId, FamilyRecordRow? replaced, string? addedJson,
+        CancellationToken ct, string? addedAuditJson = null)
     {
         // Aggregate in SQL before loading any record bodies. DATALENGTH of an LOB
         // does not require parsing/allocating its JSON in the API. Reject oversized
@@ -239,15 +299,24 @@ public sealed partial class FamilyService
         var usage = await db.Database.SqlQuery<RecordUsage>($"""
             SELECT COUNT(*) AS Records,
                 COALESCE(SUM(CASE WHEN Deleted = 0 THEN 1 ELSE 0 END), 0) AS LiveRecords,
-                COALESCE(SUM(CONVERT(bigint, DATALENGTH(RecordJson))), 0) AS StoredBytes
+                COALESCE(SUM(CASE WHEN Deleted = 0 AND ConflictPreviousJson IS NOT NULL THEN 1 ELSE 0 END), 0) AS AuditRecords,
+                COALESCE(SUM(CONVERT(bigint, DATALENGTH(RecordJson)) + COALESCE(DATALENGTH(ConflictPreviousJson), 0)), 0) AS StoredBytes
             FROM dbo.FamilyRecords WHERE FamilyId = {familyId}
             """).SingleAsync(ct);
-        var stored = usage.StoredBytes - (replaced is null ? 0 : 2L * replaced.RecordJson.Length) + (addedJson is null ? 0 : 2L * addedJson.Length);
+        var stored = usage.StoredBytes - (replaced is null ? 0 : 2L *
+            (replaced.RecordJson.Length + (replaced.ConflictPreviousJson?.Length ?? 0))) +
+            (addedJson is null ? 0 : 2L * (addedJson.Length + (addedAuditJson?.Length ?? 0)));
         var count = usage.Records + (addedJson is not null && replaced is null ? 1 : 0);
         var liveCount = usage.LiveRecords + (addedJson is not null && replaced is null ? 1 : 0);
         var growingCount = addedJson is not null && replaced is null;
-        var reducing = replaced is not null && addedJson is not null && addedJson.Length <= replaced.RecordJson.Length &&
-            FamilyAvailability.MeasureRecordResponse(addedJson) <= FamilyAvailability.MeasureRecordResponse(replaced.RecordJson);
+        var oldResponseBytes = replaced is null ? 0 : FamilyAvailability.MeasureRecordResponse(replaced.RecordJson) +
+            (replaced.ConflictPreviousJson is null ? 0 : Encoding.UTF8.GetByteCount(replaced.ConflictPreviousJson) + 256);
+        var newResponseBytes = addedJson is null ? 0 : FamilyAvailability.MeasureRecordResponse(addedJson) +
+            (addedAuditJson is null ? 0 : Encoding.UTF8.GetByteCount(addedAuditJson) + 256);
+        var reducing = replaced is not null && addedJson is not null &&
+            addedJson.Length + (addedAuditJson?.Length ?? 0) <=
+                replaced.RecordJson.Length + (replaced.ConflictPreviousJson?.Length ?? 0) &&
+            newResponseBytes <= oldResponseBytes;
         // Legacy histories over the new count cap can still read/edit/delete.
         // Oversized legacy payloads can be reduced without permitting further
         // growth; a snapshot remains explicitly blocked until it fits safely.
@@ -264,9 +333,17 @@ public sealed partial class FamilyService
         await foreach (var json in db.FamilyRecords.AsNoTracking().Where(x => x.FamilyId == familyId && !x.Deleted && x.Collection == "extra")
             .Select(x => x.RecordJson).AsAsyncEnumerable().WithCancellation(ct))
             jsonBytes += FamilyAvailability.MeasureRecordResponse(json);
+        jsonBytes += await db.Database.SqlQuery<long>($"""
+            SELECT COALESCE(SUM(CONVERT(bigint, DATALENGTH(CONVERT(varchar(max), ConflictPreviousJson COLLATE Latin1_General_100_BIN2_UTF8)))), 0) AS Value
+            FROM dbo.FamilyRecords WHERE FamilyId = {familyId} AND Deleted = 0 AND ConflictPreviousJson IS NOT NULL
+            """).SingleAsync(ct);
+        jsonBytes += (long)usage.AuditRecords * 256;
         jsonBytes -= replaced is null ? 0 : replaced.Collection == "extra"
             ? FamilyAvailability.MeasureRecordResponse(replaced.RecordJson) : Encoding.UTF8.GetByteCount(replaced.RecordJson);
+        if (replaced?.ConflictPreviousJson is not null)
+            jsonBytes -= Encoding.UTF8.GetByteCount(replaced.ConflictPreviousJson) + 256;
         jsonBytes += addedJson is null ? 0 : Encoding.UTF8.GetByteCount(addedJson);
+        if (addedAuditJson is not null) jsonBytes += Encoding.UTF8.GetByteCount(addedAuditJson) + 256;
         FamilyAvailability.RequireBudget(stored, jsonBytes, count, liveCount, growingCount);
     }
 
@@ -290,6 +367,65 @@ public sealed partial class FamilyService
         JsonSerializer.Serialize(value, collection == "extra" ? FamilyAvailability.SnapshotJson : Json);
     private static string RecordIdHash(string id) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(id)));
 
+    private static bool CanOfferConflictReplacement(MembershipRow grant, PilotIdentity user,
+        FamilyRecordRow row, FullRecordOperation operation, JsonElement intended)
+    {
+        if (operation.Kind != "update" || operation.Collection != "entry") return false;
+        var current = ReadRecord(row);
+        var kind = current.GetProperty("type").GetString();
+        if (kind is not ("feed" or "sleep") || intended.GetProperty("type").GetString() != kind) return false;
+        if (grant.Role == "owner" || row.RecordedBy == user.ObjectId) return true;
+        return operation.TimerCompletion == kind && IsCompetingTimerCompletion(current, intended, kind);
+    }
+
+    private static bool IsCompetingTimerCompletion(JsonElement current, JsonElement intended, string kind)
+    {
+        if (kind is not ("feed" or "sleep") ||
+            current.GetProperty("type").GetString() != kind || intended.GetProperty("type").GetString() != kind ||
+            !current.TryGetProperty("end", out _) || !intended.TryGetProperty("end", out _) ||
+            current.TryGetProperty("feedRunning", out _) || intended.TryGetProperty("feedRunning", out _)) return false;
+        return IsPureTimerCompletionFields(current, intended, kind);
+    }
+
+    private static bool IsPureTimerCompletionFields(JsonElement previous, JsonElement next, string kind)
+    {
+        static bool Same(JsonElement left, JsonElement right, string name) =>
+            left.TryGetProperty(name, out var one) && right.TryGetProperty(name, out var two) &&
+            JsonElement.DeepEquals(one, two);
+        return Same(previous, next, "id") && Same(previous, next, "type") &&
+            Same(previous, next, "start") && Same(previous, next, "note") &&
+            (kind == "sleep" || Same(previous, next, "feedKind"));
+    }
+
+    private static string ReplacementJson(JsonElement previous, JsonElement next)
+    {
+        var kind = previous.GetProperty("type").GetString()!;
+        var summary = new ReplacedEntrySummary(
+            previous.GetProperty("id").GetString()!, kind,
+            previous.GetProperty("start").GetDateTimeOffset(),
+            previous.TryGetProperty("end", out var end) ? end.GetDateTimeOffset() : null,
+            previous.TryGetProperty("amount", out var amount) ? amount.GetDecimal() : null,
+            previous.TryGetProperty("feedKind", out var feedKind) ? feedKind.GetString() : null,
+            !JsonElement.DeepEquals(previous.GetProperty("note"), next.GetProperty("note")));
+        return JsonSerializer.Serialize(summary, Json);
+    }
+
+    private static SharedRecordReplacement? ReadReplacement(FamilyRecordRow row)
+    {
+        if (row.ConflictReplacedBy is null || row.ConflictReplacedAt is null || row.ConflictPreviousJson is null)
+            return null;
+        return new(row.ConflictReplacedBy.Value, row.ConflictPreviousEditedBy, row.ConflictReplacedAt.Value,
+            JsonSerializer.Deserialize<ReplacedEntrySummary>(row.ConflictPreviousJson, Json)!);
+    }
+
+    private static void ClearConflictReplacement(FamilyRecordRow row)
+    {
+        row.ConflictReplacedBy = null;
+        row.ConflictPreviousEditedBy = null;
+        row.ConflictReplacedAt = null;
+        row.ConflictPreviousJson = null;
+    }
+
     private static bool IsTimerCompletion(JsonElement previous, JsonElement next)
     {
         var kind = PushPolicy.ActiveTimer(previous);
@@ -300,15 +436,9 @@ public sealed partial class FamilyService
     private static bool IsPureTimerCompletion(JsonElement previous, JsonElement next)
     {
         if (!IsTimerCompletion(previous, next)) return false;
-        static bool Same(JsonElement left, JsonElement right, string name) =>
-            left.TryGetProperty(name, out var one) && right.TryGetProperty(name, out var two) &&
-            JsonElement.DeepEquals(one, two);
-        if (!Same(previous, next, "id") || !Same(previous, next, "type") ||
-            !Same(previous, next, "start") || !Same(previous, next, "note")) return false;
-        if (previous.GetProperty("type").GetString() == "sleep") return true;
         // Finishing a bottle feed may replace its provisional amount with the
         // measured amount. All other feed content belongs to the starter.
-        return Same(previous, next, "feedKind");
+        return IsPureTimerCompletionFields(previous, next, previous.GetProperty("type").GetString()!);
     }
 
     private static bool IsCompletedTimer(JsonElement value) =>

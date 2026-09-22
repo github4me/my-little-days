@@ -62,3 +62,14 @@
 "error.watch_clock" = "Check your Watch clock, then try again.";
 "notice.short_sleep_cancelled" = "Under one minute: sleep cancelled; no completed sleep will be kept.";
 "error.sync_status_save_failed" = "Couldn't save sync status. Your pending records are retained.";
+"sync.conflict.title" = "Review conflict";
+"sync.conflict.changed_by" = "Current version by %@";
+"sync.conflict.current" = "Family version";
+"sync.conflict.mine" = "My change";
+"sync.conflict.pending" = "Waiting for iPhone";
+"sync.conflict.keep" = "Keep family version";
+"sync.conflict.replace" = "Replace with my change";
+"sync.conflict.ongoing" = "Ongoing";
+"sync.conflict.sleep" = "Sleep";
+"sync.conflict.feed" = "Feed";
+"sync.recording_paused" = "Recording is paused on iPhone. Existing conflicts can still be reviewed below.";

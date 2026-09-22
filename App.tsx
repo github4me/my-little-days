@@ -52,7 +52,7 @@ import {
   loadWatchWorkspace,
   savePersonalWatchCommand,
 } from "./src/storage";
-import { importBackup } from "./src/backup";
+import { exportFamilyBackup, importBackup } from "./src/backup";
 import EntryEditor, { newEntry } from "./src/EntryEditor";
 import GrowthChart, { Metric } from "./src/GrowthChart";
 import Records, { RecordsViewToggle } from "./src/Records";
@@ -67,7 +67,10 @@ import {
 } from "./src/support/SupportPurchaseProvider";
 import FamilyScreen from "./src/family/FamilyScreen";
 import FamilyScreenView from "./src/family/FamilyScreenView";
-import { FamilySyncBanner } from "./src/family/FamilySyncStatus";
+import {
+  FamilyConflictPrompt,
+  FamilySyncBanner,
+} from "./src/family/FamilySyncStatus";
 import { useFamilyPilot } from "./src/family/useFamilyPilot";
 import { useFamilyPush } from "./src/family/useFamilyPush";
 import FamilyPushSettings from "./src/family/FamilyPushSettings";
@@ -77,6 +80,8 @@ import { summarizeToday } from "./src/todaySummary";
 import { watchBridgeAvailable } from "./src/watchBridge";
 import type { WatchContext } from "./src/watchProtocol";
 import { familyErrorMessage } from "./src/family/messages";
+import { createFamilyBackup } from "./src/family/backup";
+import { conflictMessage } from "./src/family/conflictMessages";
 import SharedReminders from "./src/family/SharedReminders";
 import type { FamilyExtraRecord } from "./src/family/extras";
 import { readSelectedAvatarDataUrl } from "./src/avatar";
@@ -138,6 +143,29 @@ function sleepTime(iso: string, now: number) {
       ? { year: "numeric" as const }
       : {}),
   })} ${time(iso)}`;
+}
+function sleepRange(start: string, end: string, now: number) {
+  const startDate = new Date(start);
+  const endDate = new Date(end);
+  const today = new Date(now);
+  const shortDate = (date: Date) =>
+    formatDate(date, {
+      month: "numeric",
+      day: "numeric",
+      ...(date.getFullYear() !== today.getFullYear()
+        ? { year: "numeric" as const }
+        : {}),
+    });
+  const startLabel =
+    localDay(startDate) === localDay(today)
+      ? time(start)
+      : `${shortDate(startDate)} ${time(start)}`;
+  const endLabel =
+    localDay(startDate) === localDay(endDate) ||
+    localDay(endDate) === localDay(today)
+      ? time(end)
+      : `${shortDate(endDate)} ${time(end)}`;
+  return `${startLabel}–${endLabel}`;
 }
 function detail(e: Entry, now: number) {
   if (e.type === "feed")
@@ -441,6 +469,50 @@ function BabyApp({
       return text("记录人：家庭成员", "Recorded by a family member");
     }
     const starter = familyMemberName(record.recordedBy);
+    const replacementDetail = (value: {
+      type: "feed" | "sleep";
+      start: string;
+      end?: string | null;
+      amount?: number | null;
+      noteChanged?: boolean;
+    }) =>
+      [
+        conflictMessage(locale, value.type),
+        `${time(value.start)}–${value.end ? time(value.end) : conflictMessage(locale, "ongoing")}`,
+        value.type === "feed" &&
+        value.amount !== undefined &&
+        value.amount !== null
+          ? `${value.amount} mL`
+          : null,
+        value.noteChanged ? conflictMessage(locale, "noteChanged") : null,
+      ]
+        .filter(Boolean)
+        .join(" · ");
+    const withReplacement = (label: string) => {
+      const replacement = record.replacement;
+      if (!replacement) return label;
+      const replacedAt = new Date(replacement.replacedAt);
+      const audit = conflictMessage(locale, "replacementAudit", {
+        replacer: familyMemberName(replacement.replacedBy),
+        previous: familyMemberName(replacement.previousEditedBy),
+        date: Number.isFinite(replacedAt.getTime())
+          ? replacedAt.toLocaleString(formattingLocale)
+          : replacement.replacedAt,
+      });
+      return [
+        label,
+        audit,
+        conflictMessage(locale, "previousVersion", {
+          detail: replacementDetail(replacement.previousEntry),
+        }),
+        conflictMessage(locale, "currentVersion", {
+          detail: replacementDetail({
+            ...record.entry,
+            type: replacement.previousEntry.type,
+          }),
+        }),
+      ].join("\n");
+    };
     const pendingCompletion = family.recordPending.find(
       (item) =>
         item.operation.recordId === id &&
@@ -453,16 +525,20 @@ function BabyApp({
       if (pendingEnderId !== record.recordedBy) {
         const ender =
           family.user?.displayName ?? familyMemberName(pendingEnderId);
-        return text(
-          "开始：{starter} · {startedAt}　结束：{ender} · {endedAt}（等待同步）",
-          "Started by {starter} · {startedAt} · Ended by {ender} · {endedAt} (waiting to sync)",
-          { starter, startedAt: time(record.entry.start), ender, endedAt },
+        return withReplacement(
+          text(
+            "开始：{starter} · {startedAt}　结束：{ender} · {endedAt}（等待同步）",
+            "Started by {starter} · {startedAt} · Ended by {ender} · {endedAt} (waiting to sync)",
+            { starter, startedAt: time(record.entry.start), ender, endedAt },
+          ),
         );
       }
-      return text(
-        "记录人：{starter} · {endedAt} 结束（等待同步）",
-        "Recorded by {starter} · Ended at {endedAt} (waiting to sync)",
-        { starter, endedAt },
+      return withReplacement(
+        text(
+          "记录人：{starter} · {endedAt} 结束（等待同步）",
+          "Recorded by {starter} · Ended at {endedAt} (waiting to sync)",
+          { starter, endedAt },
+        ),
       );
     }
     const isRunning =
@@ -471,10 +547,12 @@ function BabyApp({
         !!record.entry.feedRunning &&
         !record.entry.end);
     if (isRunning)
-      return text(
-        "{starter} 于 {startedAt} 开始 · 仍在进行",
-        "Started by {starter} at {startedAt} · Ongoing",
-        { starter, startedAt: time(record.entry.start) },
+      return withReplacement(
+        text(
+          "{starter} 于 {startedAt} 开始 · 仍在进行",
+          "Started by {starter} at {startedAt} · Ongoing",
+          { starter, startedAt: time(record.entry.start) },
+        ),
       );
     if (
       record.endedBy &&
@@ -482,18 +560,22 @@ function BabyApp({
       record.entry.end
     ) {
       const ender = familyMemberName(record.endedBy);
-      return text(
-        "开始：{starter} · {startedAt}　结束：{ender} · {endedAt}",
-        "Started by {starter} · {startedAt} · Ended by {ender} · {endedAt}",
-        {
-          starter,
-          startedAt: time(record.entry.start),
-          ender,
-          endedAt: time(record.entry.end),
-        },
+      return withReplacement(
+        text(
+          "开始：{starter} · {startedAt}　结束：{ender} · {endedAt}",
+          "Started by {starter} · {startedAt} · Ended by {ender} · {endedAt}",
+          {
+            starter,
+            startedAt: time(record.entry.start),
+            ender,
+            endedAt: time(record.entry.end),
+          },
+        ),
       );
     }
-    return text("记录人：{starter}", "Recorded by {starter}", { starter });
+    return withReplacement(
+      text("记录人：{starter}", "Recorded by {starter}", { starter }),
+    );
   };
   function beginEditor(entry: Entry) {
     if (family.sharedMode && !family.canEditRecord("entry", entry.id)) return;
@@ -801,10 +883,12 @@ function BabyApp({
       if (!watchBridgeAvailable || family.booting) return null;
       const shared = sharingRef.current;
       const familyState = family.getWatchState();
+      const recordingEnabled =
+        !shared || familyState.snapshot?.watchRecordingEnabled === true;
       const current = familyState.admissionBlocked
         ? null
         : shared
-          ? familyState.state
+          ? familyState.readableState
           : stateRef.current;
       const workspaceKey = shared
         ? familyState.workspaceKey
@@ -836,6 +920,7 @@ function BabyApp({
         language: isChineseLocale(locale) ? "zh" : "en",
         locale,
         formattingLocale,
+        recordingEnabled,
         profile: current
           ? { name: current.profile.name, birthDate: current.profile.birthDate }
           : { name: "", birthDate: "" },
@@ -857,18 +942,19 @@ function BabyApp({
               ...entry,
               note: "",
               canControl:
-                !shared ||
-                (!pending &&
-                  !!server &&
-                  (familyState.snapshot?.family.role === "owner" ||
-                    server.recordedBy === family.user?.id ||
-                    familyState.snapshot?.crossMemberTimerCompletionEnabled ===
-                      true)) ||
-                (!!pending &&
-                  familyState.receipts.some(
-                    (receipt) =>
-                      receipt.commandId === pending.operation.operationId,
-                  )),
+                recordingEnabled &&
+                (!shared ||
+                  (!pending &&
+                    !!server &&
+                    (familyState.snapshot?.family.role === "owner" ||
+                      server.recordedBy === family.user?.id ||
+                      familyState.snapshot
+                        ?.crossMemberTimerCompletionEnabled === true)) ||
+                  (!!pending &&
+                    familyState.receipts.some(
+                      (receipt) =>
+                        receipt.commandId === pending.operation.operationId,
+                    ))),
               ...(shared && server && !pending
                 ? { version: server.version }
                 : {}),
@@ -1263,6 +1349,7 @@ function BabyApp({
                 }
               }}
             />
+            <FamilyConflictPrompt pilot={family} />
             {deleting ? (
               <Modal
                 transparent
@@ -1474,9 +1561,14 @@ function BabyApp({
                       : type === "diaper"
                         ? latestDiaper
                         : latestSleep;
+                  const feedAmount =
+                    type === "feed" && latestFeed
+                      ? (activeFeed ?? latestFeed).amount
+                      : undefined;
                   return (
                     <Card key={type} style={{ padding: 18 }}>
                       <View
+                        testID={`today-${type}-header`}
                         style={[
                           row,
                           { flexWrap: largeType ? "wrap" : "nowrap" },
@@ -1504,48 +1596,6 @@ function BabyApp({
                                 ? "正在睡觉"
                                 : kinds[type].label}
                           </T>
-                          <T style={{ fontSize: 12, color: c.muted }}>
-                            {type === "feed" && activeFeed
-                              ? feedTimer
-                              : type === "sleep" && active
-                                ? t("已睡 {duration}", {
-                                    duration: elapsed(
-                                      now - Date.parse(active.start),
-                                    ),
-                                  })
-                                : last
-                                  ? type === "sleep"
-                                    ? t("{time} 醒来 · 已清醒 {duration}", {
-                                        time: sleepTime(last.end!, now),
-                                        duration: elapsed(
-                                          now - Date.parse(last.end!),
-                                        ),
-                                      })
-                                    : t("上次 {time} · {duration}前", {
-                                        time: time(last.start),
-                                        duration: elapsed(
-                                          now - Date.parse(last.start),
-                                        ),
-                                      })
-                                  : "还没有记录，轻点开始"}
-                          </T>
-                          {((type === "feed" && activeFeed) ||
-                            (type === "sleep" && active)) &&
-                          family.sharedMode ? (
-                            <T
-                              raw
-                              style={{
-                                marginTop: 2,
-                                fontSize: 11,
-                                lineHeight: 16,
-                                color: c.muted,
-                              }}
-                            >
-                              {authorLabel(
-                                type === "feed" ? activeFeed!.id : active!.id,
-                              )}
-                            </T>
-                          ) : null}
                         </View>
                         {type === "feed" && activeFeed ? (
                           <FeedStopButton
@@ -1594,27 +1644,102 @@ function BabyApp({
                           />
                         )}
                       </View>
-                      {type === "feed" && latestFeed ? (
-                        <T style={{ color: c.muted, fontSize: 13 }}>
-                          {detail(activeFeed ?? latestFeed, now)}
+                      <View style={{ gap: 2 }}>
+                        <T
+                          testID={
+                            type === "feed"
+                              ? "today-feed-recency"
+                              : type === "diaper"
+                                ? "today-diaper-recency"
+                                : undefined
+                          }
+                          style={{ fontSize: 12, color: c.muted }}
+                        >
+                          {type === "feed" && activeFeed
+                            ? `${feedTimer}${feedAmount !== undefined ? ` · ${formatNumber(feedAmount)} mL` : ""}`
+                            : type === "sleep" && active
+                              ? t("已睡 {duration}", {
+                                  duration: elapsed(
+                                    now - Date.parse(active.start),
+                                  ),
+                                })
+                              : last
+                                ? type === "sleep"
+                                  ? t("已清醒 · {duration}", {
+                                      duration: elapsed(
+                                        now - Date.parse(last.end!),
+                                      ),
+                                    })
+                                  : `${t("{duration}前", {
+                                      duration: elapsed(
+                                        now - Date.parse(last.start),
+                                      ),
+                                    })}${type === "feed" && feedAmount !== undefined ? ` · ${formatNumber(feedAmount)} mL` : ""}`
+                                : "还没有记录，轻点开始"}
                         </T>
-                      ) : null}
-                      {type === "sleep" && latestSleep && !active ? (
-                        <T style={{ color: c.muted, fontSize: 13 }}>
-                          {t("上一觉：{start}–{end} · 共睡 {duration}", {
-                            start: sleepTime(latestSleep.start, now),
-                            end: sleepTime(latestSleep.end!, now),
-                            duration: elapsed(
-                              Date.parse(latestSleep.end!) -
-                                Date.parse(latestSleep.start),
-                            ),
-                          })}
-                        </T>
-                      ) : null}
+                        {((type === "feed" && activeFeed) ||
+                          (type === "sleep" && active)) &&
+                        family.sharedMode ? (
+                          <T
+                            raw
+                            style={{
+                              fontSize: 11,
+                              lineHeight: 16,
+                              color: c.muted,
+                            }}
+                          >
+                            {authorLabel(
+                              type === "feed" ? activeFeed!.id : active!.id,
+                            )}
+                          </T>
+                        ) : null}
+                        {type === "sleep" && latestSleep && !active ? (
+                          <T
+                            testID="today-last-sleep"
+                            accessibilityLabel={t(
+                              "上一觉：{start}–{end} · 共睡 {duration}",
+                              {
+                                start: sleepTime(latestSleep.start, now),
+                                end: sleepTime(latestSleep.end!, now),
+                                duration: elapsed(
+                                  Date.parse(latestSleep.end!) -
+                                    Date.parse(latestSleep.start),
+                                ),
+                              },
+                            )}
+                            style={{
+                              color: c.muted,
+                              fontSize: 12,
+                              fontWeight: "600",
+                            }}
+                          >
+                            {width < 360
+                              ? elapsed(
+                                  Date.parse(latestSleep.end!) -
+                                    Date.parse(latestSleep.start),
+                                )
+                              : t("上一觉 · {duration}", {
+                                  duration: elapsed(
+                                    Date.parse(latestSleep.end!) -
+                                      Date.parse(latestSleep.start),
+                                  ),
+                                })}{" "}
+                            ·{" "}
+                            {sleepRange(
+                              latestSleep.start,
+                              latestSleep.end!,
+                              now,
+                            )}
+                          </T>
+                        ) : null}
+                      </View>
                       {type === "sleep" ? (
                         <Pressable
                           accessibilityRole="button"
-                          onPress={() => beginEditor(newEntry("sleep"))}
+                          onPress={() => {
+                            const entry = newEntry("sleep");
+                            beginEditor({ ...entry, end: entry.start });
+                          }}
                           style={{
                             alignSelf: "flex-start",
                             minHeight: 44,
@@ -1920,6 +2045,36 @@ function BabyApp({
                     ) : undefined
                   }
                   sharedMode={family.sharedMode}
+                  onExportFamilyBackup={
+                    family.fullSnapshot
+                      ? async () => {
+                          const context = familyContext;
+                          let document;
+                          try {
+                            const latest =
+                              await family.downloadSnapshotForBackup();
+                            if (activeFamilyContext.current !== context)
+                              throw new Error("session_changed");
+                            document = createFamilyBackup(latest);
+                          } catch (cause) {
+                            throw new Error(
+                              familyErrorMessage(
+                                locale,
+                                cause instanceof Error
+                                  ? cause.message
+                                  : "request_failed",
+                              ),
+                            );
+                          }
+                          await exportFamilyBackup(document, () => {
+                            if (activeFamilyContext.current !== context)
+                              throw new Error(
+                                familyErrorMessage(locale, "session_changed"),
+                              );
+                          });
+                        }
+                      : undefined
+                  }
                   sharedOwner={family.fullSnapshot?.family.role === "owner"}
                   sharedAvatarEditable={
                     !!extrasAvailable && family.canEditRecord("extra", "avatar")

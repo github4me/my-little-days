@@ -78,8 +78,12 @@ export function useFamilyDemo(scenario: FamilyDemoScenario): ReturnType<
     notificationError: null,
     setNotificationsEnabled: unavailable,
     fullSnapshot: null,
+    downloadSnapshotForBackup: async () => {
+      throw new Error("native_required");
+    },
     recordPending: [],
     recordConflicts: [],
+    canReplaceRecordConflict: () => false,
     canEditRecord: () => false,
     canControlSleep: () => false,
     finishSleep: unavailable,
@@ -87,6 +91,7 @@ export function useFamilyDemo(scenario: FamilyDemoScenario): ReturnType<
     finishFeed: unavailable,
     saveRecord: unavailable,
     deleteRecord: unavailable,
+    replaceRecordConflict: unavailable,
     discardRecordConflict: unavailable,
     saveFullProfile: unavailable,
     demoSource,

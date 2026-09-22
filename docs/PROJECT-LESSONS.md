@@ -1,6 +1,6 @@
 # My Little Days — project lessons and working memory
 
-Last reviewed: **17 September 2026**, after the in-place SQL Basic conversion.
+Last reviewed: **22 September 2026**, after local conflict-resolution, iOS build/signing checks and family backup export verification.
 
 This retrospective records the project's observed failures, decisions and safeguards—not a new security audit or a claim that every device scenario passed. Durable rules live in [AGENTS.md](../AGENTS.md); current environment values and deployment evidence belong in the [manual runbook](AZURE-MANUAL-SETUP-RUNBOOK.md). Historical observations below must not be treated as today's live configuration without checking.
 
@@ -25,6 +25,118 @@ We should have established a clearer identity/configuration inventory, productio
 
 Evidence and recovery instructions: [runbook sections 2–14 and 23–24](AZURE-MANUAL-SETUP-RUNBOOK.md), [GitHub infrastructure](AZURE-GITHUB-INFRA.md), [database deployment](AZURE-DATABASE-DEPLOYMENT.md).
 
+### Local-first Apple build and release lessons
+
+The Intel Mac can build the complete iOS product locally, including the Watch app,
+Widget extension and StoreKit module. Prefer the lowest-cost path that proves the
+required boundary:
+
+1. Use `npx expo start` for JavaScript-only iteration against an already installed
+   development client.
+2. Use `npx expo run:ios --device` or the generated Xcode workspace when native
+   dependencies/configuration changed or a physical-device build is required.
+3. Use a local Xcode archive or `eas build --platform ios --profile production
+   --local` for a TestFlight candidate. EAS may still resolve the project,
+   environment and managed credentials, but Mac compute avoids an EAS cloud-build
+   credit.
+4. The user selected local-only builds to control cost. Do not start an EAS cloud
+   build, paid EAS Workflow or paid preview build unless the user later gives
+   explicit exception approval after seeing the expected charge. Read-only EAS
+   checks and downloading existing managed credentials for a local build are fine.
+
+An Xcode Debug install is not a standalone offline app. Its generated
+`AppDelegate.swift` requests the JS URL from Metro and the Debug build omits
+`main.jsbundle`. On the first physical iPhone run, Xcode successfully signed and
+installed the app, but Metro was not listening, so React Native reported
+`No script URL provided` / `unsanitizedScriptURLString = (null)`. Start
+`npx expo start --host lan --port 8081` before opening the installed Debug app;
+keep the phone able to reach the Mac's LAN address and allow local-network access
+if iOS asks. The user then confirmed the app running. Do not uninstall a
+data-bearing app to solve this error. A local Release/archive embeds JS and is the
+path to a Metro-independent TestFlight binary; test that separately.
+
+Family backup is a **fresh authorized server read**, not serialization of the
+optimistic phone cache. A file labelled complete must include the negotiated
+care and extras schemas; otherwise supplements, photos or shared reminders could
+silently disappear. Every active member may export confirmed data for their own
+backup or study. Preserve provenance without exporting invitation emails or the
+member roster, and disclose that pending edits are absent. Family-file import is
+intentionally disabled: restoring old data into the shared history would affect
+other members and requires a separate reviewed server protocol.
+
+Declare the confirmed Apple team in `expo.ios.appleTeamId`; otherwise every
+`expo prebuild` can erase a team chosen only in the generated Xcode project. The
+team ID is public build metadata, not a credential. It does not install a private
+key: check `security find-identity -v -p codesigning` separately and complete any
+Apple-account login or certificate creation privately in Xcode. Preserve working
+distribution certificates and profiles; a valid profile without its matching
+private key cannot sign a device build or local archive.
+
+Freeze release input before signing. The successful build used an isolated
+`git archive` of the reviewed SHA and incremented the build number only in that
+staging copy, leaving the checkout unchanged. Never upload merely because archive
+creation passed: verify the IPA signature, version/build, Phone/Watch/Widget bundle
+identifiers, App Group placement, entitlements, OTA setting and expected native
+resources first. Preserve the archive and hash the exact IPA intended for upload.
+
+Watch and Widget support are release targets, not incidental files. A passing phone
+compile does not prove extension signing or packaging. The successful production
+archive assigned the existing App Store profiles to all three targets, ran both
+Swift suites, signed both embedded products and passed a deep signature check.
+Physical acceptance still separately requires a connected iPhone, paired Watch,
+Widget placement, background transfer/refresh and StoreKit sandbox purchase tests.
+
+Toolchain failures must be diagnosed before rotating Apple credentials. On macOS
+Tahoe 26, EAS CLI `24.7.0` imported the existing distribution certificate into its
+temporary keychain but falsely rejected it because its presence check used
+`security find-identity -v` without the full trust chain. The narrow upstream
+workaround—dropping only `-v` in the cached build tool—allowed the same certificate
+and profiles to build successfully. This cache edit is fragile: on a future run,
+first test whether a newer EAS release fixes the issue, and reapply the workaround
+only for the identical verified failure. Never revoke or replace a working
+certificate/profile as the first response.
+
+Keep Apple commerce setup separate from compilation and upload. A signed TestFlight
+candidate can exist while the Paid Apps Agreement, legal-entity details, banking,
+tax, products, pricing, localization and review metadata remain incomplete. StoreKit
+tips use in-app purchases, not Apple Pay. Do not add the Apple Pay entitlement, and
+do not claim purchase acceptance until the three consumables exist and pass sandbox
+tests in a fresh installed build.
+
+Finally, report the Apple pipeline as distinct checkpoints: simulator built,
+archive signed, IPA inspected, uploaded, Apple processed, tester-accessible,
+installed on iPhone/Watch, Widget exercised and purchases sandbox-tested. Success at
+one checkpoint must never be reported as success at the later ones. Detailed setup,
+versions, artifact evidence and the current manual blockers live in the
+[manual runbook](AZURE-MANUAL-SETUP-RUNBOOK.md#mac-setup-and-preview-preflight--21-september-2026-melbourne).
+
+### Native migration planning lessons
+
+The [whole-product native migration plan](NATIVE-IOS-MIGRATION-PLAN.md) was prepared
+on 21 September 2026; it is **not an implemented rewrite**. Watch and Widget are
+already Swift/SwiftUI. A native phone rewrite should reuse them and preserve the
+existing Apple identifiers, App Group, backend and account/family contracts.
+Local build savings are already available without rewriting the phone.
+
+Three compatibility boundaries must be proven before a broad UI port:
+
+- Existing SQLite/WAL data, Keychain deny/identity/deletion/push records, pending
+  family operations, Watch journals and system notification requests all belong
+  to the upgrade. Importing only the visible baby records is insufficient.
+- Owner-seed receipts bind exact JSON bytes. A normal Swift re-encoding can change
+  ordering/escaping/numeric spelling and break a durable legacy retry. Preserve
+  byte-stable requests and test the cross-language contract.
+- Removing Expo from builds does not remove its current remote push dependency.
+  Native APNs requires compatible backend registration/delivery and a controlled
+  old-client handoff; it is not just a new phone notification API.
+
+Keep the new tracked native project separate from Expo's generated `ios/` tree,
+keep Android/web unless a separate scope decision changes them, and favor a
+forward-compatible corrective release over restoring stale family snapshots.
+Implementation, manual configuration and physical acceptance remain future work;
+the [planned runbook gates](AZURE-MANUAL-SETUP-RUNBOOK.md#native-ios-migration--planned-manual-gates-21-september-2026)
+must not be mistaken for executed setup.
+
 ## 2. Authentication, responsiveness and UI lessons
 
 ### Diagnose each sign-in stage separately
@@ -39,6 +151,7 @@ Token recognition, current account access and family membership are distinct sta
 
 - Sleep/feed controls were confusing when visible state waited for the API. Ordinary records should project locally, persist their intent, then synchronize. Show local failure, pending sync and server conflict honestly; never call a pending write synchronized.
 - Stopping a timer while its start request is in flight needs a durable follow-up, not alteration of an already-sent request. Preserve operation IDs and version checks so retries cannot duplicate data or overwrite another member's edit.
+- A rowversion mismatch alone is not authority to offer last-write-wins. Persist a bounded conflict receipt tied to account, grant, history, exact intent and the reviewed server version; resolve with a new operation ID. If another write wins again, require another review. Keep replacement non-optimistic so records and charts remain on the authoritative version until a fresh snapshot confirms success. Phone and Watch must use the same durable queue and receipt semantics rather than inventing platform-specific overwrite paths. A terminal Watch rejection can arrive before that fresh snapshot, so recompute its displayed conflict detail instead of freezing the stale cached version; an already-issued resolution must remain deliverable if the separate gate for creating new Watch records is later paused.
 - Foreground retry improvements initially missed cold-process startup. Test both, plus logout/account switching during each. Render permitted same-account cache first; use bounded quiet retries for temporary connectivity failures, without suppressing confirmed expiry/removal or real storage/conflict errors.
 - A token-refresh timeout and HTTP timeout need separate budgets. Late results must not restore an obsolete account after logout. Do not retry non-idempotent management writes blindly after an ambiguous response.
 - Create/join, invitations, removal, ownership transfer and deletion still require authoritative outcomes. “Move the UI update before the API” is not a blanket rule for changing permissions or replacing data.

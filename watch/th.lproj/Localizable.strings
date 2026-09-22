@@ -62,3 +62,14 @@
 "error.watch_clock" = "ตรวจสอบเวลาบน Watch แล้วลองอีกครั้ง";
 "notice.short_sleep_cancelled" = "น้อยกว่าหนึ่งนาที: ยกเลิกการนอนและจะไม่เก็บรายการการนอนที่เสร็จสิ้น";
 "error.sync_status_save_failed" = "บันทึกสถานะการซิงค์ไม่ได้ รายการที่รอดำเนินการยังคงถูกเก็บไว้";
+"sync.conflict.title" = "ตรวจสอบข้อขัดแย้ง";
+"sync.conflict.changed_by" = "เวอร์ชันปัจจุบันโดย %@";
+"sync.conflict.current" = "เวอร์ชันครอบครัว";
+"sync.conflict.mine" = "การแก้ไขของฉัน";
+"sync.conflict.pending" = "กำลังรอ iPhone";
+"sync.conflict.keep" = "เก็บเวอร์ชันครอบครัว";
+"sync.conflict.replace" = "แทนที่ด้วยการแก้ไขของฉัน";
+"sync.conflict.ongoing" = "กำลังดำเนินอยู่";
+"sync.conflict.sleep" = "นอน";
+"sync.conflict.feed" = "ให้นม";
+"sync.recording_paused" = "การบันทึกถูกพักไว้บน iPhone แต่ยังตรวจสอบข้อขัดแย้งที่มีอยู่ด้านล่างได้";

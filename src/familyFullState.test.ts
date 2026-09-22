@@ -6,10 +6,12 @@ import {
   canEditRecord,
   canControlSleep,
   canControlFeed,
+  canReplaceRecordConflict,
   enqueueRecord,
   enqueueSleepFinish,
   enqueueFeedFinish,
   projectedFullState,
+  replaceRecordConflict,
   recordsForSend,
   requireFullCapabilities,
   validateFullSnapshot,
@@ -172,6 +174,185 @@ test("supplement sharing requires explicit capability and survives offline queue
   assert.throws(
     () => validateFullSnapshot(value),
     /supplement_sharing_unavailable/,
+  );
+});
+
+test("reviewed feed conflicts replace by receipt without optimistic chart projection", () => {
+  const initial = snapshot();
+  initial.conflictReplacementEnabled = true;
+  const intended = { ...initial.entries[0].entry, amount: 120 };
+  const queued = enqueueRecord(applyFullSnapshot(emptyPilotState(), initial), {
+    ...operation(intended),
+    operationId: "stale-edit",
+  });
+  const failed = {
+    ...queued,
+    records: queued.records!.map((item) => ({
+      ...item,
+      status: "failed" as const,
+      error: "record_changed",
+      serverConflict: true,
+    })),
+  };
+  const latest: FullFamilySnapshot = {
+    ...initial,
+    revision: "2",
+    entries: initial.entries.map((record) =>
+      record.entry.id === "feed"
+        ? {
+            ...record,
+            version: "new-family-version",
+            lastEditedBy: "other-parent",
+            entry: { ...record.entry, amount: 95 },
+          }
+        : record,
+    ),
+  };
+  const reviewed = applyFullSnapshot(failed, latest);
+  assert.equal(canReplaceRecordConflict(reviewed, "stale-edit"), true);
+  const replacement = replaceRecordConflict(
+    reviewed,
+    "stale-edit",
+    "replacement-edit",
+    "new-family-version",
+  );
+  assert.equal(replacement.records!.length, 1);
+  assert.equal(
+    replacement.records![0].operation.operationId,
+    "replacement-edit",
+  );
+  assert.equal(
+    replacement.records![0].operation.replacesOperationId,
+    "stale-edit",
+  );
+  assert.equal(
+    replacement.records![0].operation.baseVersion,
+    "new-family-version",
+  );
+  assert.equal(
+    projectedFullState(replacement)?.entries.find((item) => item.id === "feed")
+      ?.amount,
+    95,
+    "charts retain the authoritative family value until a fresh accepted snapshot",
+  );
+  assert.throws(
+    () =>
+      replaceRecordConflict(
+        reviewed,
+        "stale-edit",
+        "another-edit",
+        "version-reviewed-before-a-new-race",
+      ),
+    /conflict_resolution_changed/,
+  );
+  const accepted = acceptRecordReceipt(replacement, "replacement-edit", {
+    operationId: "replacement-edit",
+    historyId: "history",
+    revision: "3",
+  });
+  const confirmed = applyFullSnapshot(accepted, {
+    ...latest,
+    revision: "3",
+    entries: latest.entries.map((record) =>
+      record.entry.id === "feed"
+        ? {
+            ...record,
+            version: "replacement-version",
+            lastEditedBy: "owner",
+            entry: intended,
+          }
+        : record,
+    ),
+  });
+  assert.equal(confirmed.records?.length, 0);
+  assert.equal(
+    projectedFullState(confirmed)?.entries.find((item) => item.id === "feed")
+      ?.amount,
+    120,
+  );
+});
+
+test("only an authoritative replacement-capable conflict can be replaced", () => {
+  const value = snapshot();
+  value.conflictReplacementEnabled = true;
+  const base = applyFullSnapshot(emptyPilotState(), value);
+  const pending = enqueueRecord(base, {
+    ...operation({ ...value.entries[0].entry, amount: 130 }),
+    operationId: "local-edit",
+  });
+  const failed = {
+    ...pending,
+    records: pending.records!.map((item) => ({
+      ...item,
+      status: "failed" as const,
+      error: "record_changed",
+    })),
+  };
+  assert.equal(canReplaceRecordConflict(failed, "local-edit"), false);
+  const marked = {
+    ...failed,
+    records: failed.records!.map((item) => ({
+      ...item,
+      serverConflict: true,
+    })),
+  };
+  assert.equal(
+    canReplaceRecordConflict(marked, "local-edit"),
+    false,
+    "the current version must differ from the reviewed base version",
+  );
+  value.conflictReplacementEnabled = false;
+  const unsupported = applyFullSnapshot(marked, {
+    ...value,
+    revision: "2",
+    entries: value.entries.map((record) =>
+      record.entry.id === "feed"
+        ? { ...record, version: "new-version" }
+        : record,
+    ),
+  });
+  assert.equal(canReplaceRecordConflict(unsupported, "local-edit"), false);
+});
+
+test("replacement audit metadata validates and remains attached to the authoritative record", () => {
+  const value = snapshot();
+  value.entries[0] = {
+    ...value.entries[0],
+    replacement: {
+      replacedBy: "owner",
+      previousEditedBy: "other-parent",
+      replacedAt: "2026-09-01T02:00:00.000Z",
+      previousEntry: {
+        id: "feed",
+        type: "feed",
+        start,
+        amount: 95,
+        feedKind: "expressed",
+        noteChanged: true,
+      },
+    },
+  };
+  const parsed = validateFullSnapshot(value);
+  assert.equal(parsed.entries[0].replacement?.previousEntry.amount, 95);
+  assert.throws(
+    () =>
+      validateFullSnapshot({
+        ...value,
+        entries: [
+          {
+            ...value.entries[0],
+            replacement: {
+              ...value.entries[0].replacement!,
+              previousEntry: {
+                ...value.entries[0].replacement!.previousEntry,
+                id: "another-record",
+              },
+            },
+          },
+          ...value.entries.slice(1),
+        ],
+      }),
+    /invalid_response/,
   );
 });
 test("full snapshot preserves all domain fields, numeric precision, source IDs and independent running sleeps", () => {

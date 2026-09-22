@@ -364,7 +364,7 @@ test("play help starts collapsed and retains the mode-specific intro and referen
   assert.deepEqual(world.calls, []);
 });
 
-test("sharing explanation is collapsed below content while capability and safety notices stay visible", async () => {
+test("sharing explanation is combined with play help while capability and safety notices stay visible", async () => {
   const world = fixture();
   await world.ready();
   await world.press("Play");
@@ -373,10 +373,7 @@ test("sharing explanation is collapsed below content while capability and safety
       .visibleText()
       .includes("Play settings and check-ins are shared with your family"),
   );
-  assert.equal(
-    world.node("Family sharing help & references").props["aria-expanded"],
-    false,
-  );
+  assert.equal(world.node("Family sharing help & references"), undefined);
   const nodes = world.render();
   assert.ok(
     nodes.indexOf(world.node("Daily care")) < nodes.indexOf(world.node("Play")),
@@ -385,11 +382,8 @@ test("sharing explanation is collapsed below content while capability and safety
     nodes.indexOf(world.node("Play")) <
       nodes.indexOf(world.node("Play settings")),
   );
-  assert.ok(
-    nodes.indexOf(world.node("Family sharing help & references")) >
-      nodes.indexOf(world.node("Play help & references")),
-  );
-  await world.press("Family sharing help & references");
+  assert.ok(nodes.indexOf(world.node("Play help & references")) >= 0);
+  await world.press("Play help & references");
   assert.ok(
     world
       .visibleText()
@@ -399,7 +393,7 @@ test("sharing explanation is collapsed below content while capability and safety
   assert.ok(world.visibleText().includes("Keep it safe:"));
   assert.equal(
     world.node("Play help & references").props["aria-expanded"],
-    false,
+    true,
   );
   world.sharedPlay = undefined;
   await world.ready();

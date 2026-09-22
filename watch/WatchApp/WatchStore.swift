@@ -30,6 +30,7 @@ final class WatchStore: NSObject, ObservableObject, WCSessionDelegate {
     localizer.plural(key, count: count)
   }
   var ready: Bool { storageAvailable && disk.context?.isValid(at: Date()) == true }
+  var recordingEnabled: Bool { disk.context?.recordingEnabled != false }
   var entries: [WatchEntry] { disk.visibleEntries() }
   var activeFeed: WatchEntry? { entries.first { $0.type == "feed" } }
   var activeSleep: WatchEntry? { entries.first { $0.type == "sleep" } }
@@ -41,6 +42,34 @@ final class WatchStore: NSObject, ObservableObject, WCSessionDelegate {
   }
   var rejectedItems: [WatchOutboxItem] {
     disk.outbox.filter { $0.receipt?.status == "rejected" && $0.command.bridgeId == disk.context?.bridgeId && $0.command.workspaceKey == disk.context?.workspaceKey && $0.command.generation == disk.context?.generation }
+  }
+  func conflictResolutionPending(_ item: WatchOutboxItem) -> Bool {
+    disk.outbox.contains {
+      $0.command.kind == "resolve-conflict" &&
+        $0.command.conflictOperationId == item.id && !$0.terminal
+    }
+  }
+  func conflictSummary(_ entry: WatchEntry) -> String {
+    let style = Date.FormatStyle(date: .numeric, time: .shortened).locale(locale)
+    let start = WatchClock.date(entry.start)?.formatted(style) ?? entry.start
+    let end = entry.end.flatMap(WatchClock.date)?.formatted(style) ?? text("sync.conflict.ongoing")
+    let kindKey: String
+    if entry.type == "sleep" {
+      kindKey = "sync.conflict.sleep"
+    } else {
+      kindKey = "sync.conflict.feed"
+    }
+    var values = [
+      text(kindKey),
+      "\(start)–\(end)",
+    ]
+    if entry.type == "feed", let amount = entry.amount {
+      let formatter = NumberFormatter()
+      formatter.locale = locale
+      formatter.maximumFractionDigits = 1
+      values.append("\(formatter.string(from: NSNumber(value: amount)) ?? String(amount)) mL")
+    }
+    return values.joined(separator: " · ")
   }
   func rejectionMessage(_ code: String?) -> String {
     switch code {
@@ -97,6 +126,10 @@ final class WatchStore: NSObject, ObservableObject, WCSessionDelegate {
   private func enqueue(_ kind: String, entry: WatchEntry, stoppedAt: Date? = nil, amount: Double? = nil, initialMilkAmount: Int? = nil) -> Bool {
     guard ready, let context = disk.context else {
       notice = text("error.verify_access")
+      return false
+    }
+    guard recordingEnabled else {
+      notice = text("sync.recording_paused")
       return false
     }
     guard disk.outbox.count < maximumCommands else {
@@ -169,6 +202,44 @@ final class WatchStore: NSObject, ObservableObject, WCSessionDelegate {
       return result
     }
     return enqueue("create", entry: WatchEntry(id: UUID().uuidString.lowercased(), type: "sleep", start: WatchClock.string()))
+  }
+
+  @discardableResult func resolveConflict(_ item: WatchOutboxItem, replace: Bool) -> Bool {
+    guard ready, let context = disk.context, let conflict = item.receipt?.conflict,
+          item.receipt?.status == "rejected", !conflictResolutionPending(item),
+          !replace || conflict.canReplace else {
+      notice = text("error.verify_access")
+      return false
+    }
+    guard disk.outbox.count < maximumCommands else {
+      notice = text("error.storage_full")
+      return false
+    }
+    let resolution: String
+    if replace {
+      resolution = "replace"
+    } else {
+      resolution = "discard"
+    }
+    let command = WatchCommand(schemaVersion: 1, commandId: UUID().uuidString.lowercased(),
+      recordId: item.command.recordId, workspaceKey: context.workspaceKey,
+      bridgeId: context.bridgeId, generation: context.generation,
+      snapshotSequence: context.sequence, createdAt: WatchClock.string(), kind: "resolve-conflict",
+      baseVersion: replace ? conflict.currentVersion : nil,
+      resolution: resolution, conflictOperationId: item.id)
+    var value = disk
+    value.append(command)
+    do {
+      try persist(value)
+      WKInterfaceDevice.current().play(.success)
+      notice = text("notice.saved")
+      flush()
+      return true
+    } catch {
+      notice = text("error.save_failed")
+      WKInterfaceDevice.current().play(.failure)
+      return false
+    }
   }
 
   func reconnect() {

@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { familyBackupEnglish } from "./locales/familyBackupOverrides";
 import {
   MANUAL_OVERRIDE_KEYS,
   manualEnglishOverride,
@@ -21,6 +22,17 @@ const locales = [
 
 const placeholders = (value: string) =>
   [...value.matchAll(/\{[A-Za-z0-9_]+\}/g)].map((match) => match[0]).sort();
+
+test("family download help and privacy policy have translations in every additional locale", () => {
+  for (const locale of locales) {
+    for (const template of Object.values(familyBackupEnglish)) {
+      const translated = manualEnglishOverride(locale, template);
+      assert.ok(translated?.trim(), `${locale}: ${template}`);
+      assert.notEqual(translated, template, `${locale}: English fallback`);
+      assert.deepEqual(placeholders(translated!), placeholders(template));
+    }
+  }
+});
 
 test("manual safety glossary is complete and preserves placeholders", () => {
   for (const locale of locales) {
@@ -69,4 +81,26 @@ test("reviewed locale-specific corrections override generated drafts", () => {
     manualEnglishOverride("th", "No recovery copy available"),
     "ไม่มีสำเนาสำหรับกู้คืน",
   );
+});
+
+test("compact sleep summary is localized without dropping its duration", () => {
+  for (const locale of locales) {
+    for (const key of ["Awake · {duration}", "Last sleep · {duration}"]) {
+      const value = manualEnglishOverride(locale, key);
+      assert.ok(value?.trim(), `${locale}: ${key}`);
+      assert.deepEqual(
+        placeholders(value!),
+        ["{duration}"],
+        `${locale}: ${key}`,
+      );
+    }
+  }
+});
+
+test("compact feed and diaper recency displays elapsed time only", () => {
+  for (const locale of locales) {
+    const value = manualEnglishOverride(locale, "{duration} ago");
+    assert.ok(value?.trim(), locale);
+    assert.deepEqual(placeholders(value!), ["{duration}"], locale);
+  }
 });

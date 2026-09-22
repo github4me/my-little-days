@@ -1,5 +1,12 @@
-import React, { useContext, useEffect, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, View } from "react-native";
+import React, { useContext, useEffect, useRef, useState } from "react";
+import {
+  ActivityIndicator,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  useWindowDimensions,
+  View,
+} from "react-native";
 import Modal from "../AccessibleModal";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { localize, useI18n, type AppLocale } from "../i18n";
@@ -11,6 +18,7 @@ import {
 } from "./messages";
 import type { QueuedRecord } from "./fullState";
 import type { useFamilyPilot } from "./useFamilyPilot";
+import { conflictMessage } from "./conflictMessages";
 import {
   dismissSyncIssues,
   familySyncIssues,
@@ -347,6 +355,339 @@ function recordDescription(
     .join(" · ");
 }
 
+type SelectedConflict = {
+  item: QueuedRecord;
+  reviewedVersion: string;
+};
+
+function currentConflictRecord(pilot: Pilot, item: QueuedRecord) {
+  const proposed = item.operation.entry;
+  if (
+    !item.serverConflict ||
+    item.operation.collection !== "entry" ||
+    item.operation.kind !== "update" ||
+    !proposed ||
+    (proposed.type !== "feed" && proposed.type !== "sleep")
+  )
+    return undefined;
+  const current = pilot.fullSnapshot?.entries.find(
+    ({ entry }) => entry.id === item.operation.recordId,
+  );
+  return current?.entry.type === proposed.type &&
+    current.version !== item.operation.baseVersion
+    ? current
+    : undefined;
+}
+
+function openConflict(
+  pilot: Pilot,
+  item: QueuedRecord,
+): SelectedConflict | null {
+  const current = currentConflictRecord(pilot, item);
+  return current ? { item, reviewedVersion: current.version } : null;
+}
+
+function displayConflictTime(value: string, formattingLocale: string) {
+  const date = new Date(value);
+  return Number.isFinite(date.getTime())
+    ? date.toLocaleString(formattingLocale, {
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : value;
+}
+
+function conflictEntryLines(
+  entry: NonNullable<QueuedRecord["operation"]["entry"]>,
+  locale: AppLocale,
+  formattingLocale: string,
+) {
+  const message = (key: Parameters<typeof conflictMessage>[1]) =>
+    conflictMessage(locale, key);
+  const lines = [
+    {
+      label: message("start"),
+      value: displayConflictTime(entry.start, formattingLocale),
+    },
+    {
+      label: message("end"),
+      value: entry.end
+        ? displayConflictTime(entry.end, formattingLocale)
+        : message("ongoing"),
+    },
+  ];
+  if (entry.type === "feed" && entry.amount !== undefined)
+    lines.push({ label: message("amount"), value: `${entry.amount} mL` });
+  if (entry.note)
+    lines.push({
+      label: message("notes"),
+      value:
+        entry.note.length > 240 ? `${entry.note.slice(0, 240)}…` : entry.note,
+    });
+  return lines;
+}
+
+function ConflictVersionCard({
+  title,
+  actor,
+  entry,
+  locale,
+  formattingLocale,
+}: {
+  title: string;
+  actor?: string;
+  entry: NonNullable<QueuedRecord["operation"]["entry"]>;
+  locale: AppLocale;
+  formattingLocale: string;
+}) {
+  const c = useContext(Theme);
+  return (
+    <View style={[styles.versionCard, { borderColor: c.line }]}>
+      <T raw style={styles.versionTitle}>
+        {title}
+      </T>
+      {actor ? (
+        <T raw style={{ color: c.muted }}>
+          {conflictMessage(locale, "changedBy", { name: actor })}
+        </T>
+      ) : null}
+      {conflictEntryLines(entry, locale, formattingLocale).map((line) => (
+        <View key={line.label} style={styles.detailRow}>
+          <T raw style={[styles.detailLabel, { color: c.muted }]}>
+            {line.label}
+          </T>
+          <T raw style={styles.detailValue}>
+            {line.value}
+          </T>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function ConflictResolutionModal({
+  pilot,
+  selected,
+  onClose,
+}: {
+  pilot: Pilot;
+  selected: SelectedConflict | null;
+  onClose: () => void;
+}) {
+  const c = useContext(Theme);
+  const { width } = useWindowDimensions();
+  const { locale, formattingLocale } = useI18n();
+  const [busy, setBusy] = useState<"keep" | "replace" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const item = selected?.item;
+  const current = item ? currentConflictRecord(pilot, item) : undefined;
+  const proposed = item?.operation.entry;
+  const currentActor = current
+    ? (pilot.fullSnapshot?.members.find(
+        (member) => member.id === current.lastEditedBy,
+      )?.displayName ?? conflictMessage(locale, "unknownMember"))
+    : conflictMessage(locale, "unknownMember");
+  const changedAgain =
+    !!selected && !!current && current.version !== selected.reviewedVersion;
+  const replaceAllowed =
+    !!item &&
+    !!current &&
+    !!proposed &&
+    !changedAgain &&
+    pilot.canReplaceRecordConflict(item.operation.operationId);
+  const close = () => {
+    if (busy) return;
+    setError(null);
+    onClose();
+  };
+  const fail = (cause: unknown) => {
+    const code = cause instanceof Error ? cause.message : "request_failed";
+    setError(
+      code === "conflict_resolution_changed"
+        ? conflictMessage(locale, "changedAgain")
+        : code === "conflict_resolution_unavailable"
+          ? conflictMessage(locale, "unavailable")
+          : sharingText(familyErrorMessage(locale, code)),
+    );
+  };
+  const resolve = (resolution: "keep" | "replace") => {
+    if (!item || busy || (resolution === "replace" && !replaceAllowed)) return;
+    setBusy(resolution);
+    setError(null);
+    const action =
+      resolution === "replace"
+        ? pilot.replaceRecordConflict(
+            item.operation.operationId,
+            selected?.reviewedVersion,
+          )
+        : pilot.discardRecordConflict(item.operation.operationId);
+    void action.then(onClose, fail).finally(() => setBusy(null));
+  };
+
+  return (
+    <Modal
+      visible={!!selected}
+      transparent
+      animationType="slide"
+      onRequestClose={close}
+    >
+      <SafeAreaView
+        style={[
+          styles.backdrop,
+          { justifyContent: width >= 600 ? "center" : "flex-end" },
+        ]}
+      >
+        <View
+          accessibilityViewIsModal
+          style={[
+            styles.modal,
+            styles.conflictModal,
+            { backgroundColor: c.elevated },
+          ]}
+        >
+          <ScrollView
+            contentContainerStyle={styles.stack}
+            keyboardShouldPersistTaps="handled"
+          >
+            <T raw accessibilityRole="header" style={styles.heading}>
+              {conflictMessage(locale, "title")}
+            </T>
+            <T raw>{conflictMessage(locale, "explanation")}</T>
+            {current && proposed ? (
+              <>
+                <ConflictVersionCard
+                  title={conflictMessage(locale, "familyVersion")}
+                  actor={currentActor}
+                  entry={current.entry}
+                  locale={locale}
+                  formattingLocale={formattingLocale}
+                />
+                <ConflictVersionCard
+                  title={conflictMessage(locale, "yourChange")}
+                  entry={proposed}
+                  locale={locale}
+                  formattingLocale={formattingLocale}
+                />
+              </>
+            ) : null}
+            {changedAgain ? (
+              <T raw accessibilityRole="alert" style={{ color: c.danger }}>
+                {conflictMessage(locale, "changedAgain")}
+              </T>
+            ) : !replaceAllowed && selected ? (
+              <T raw style={{ color: c.muted }}>
+                {conflictMessage(locale, "unavailable")}
+              </T>
+            ) : null}
+            {error ? (
+              <T raw accessibilityRole="alert" style={{ color: c.danger }}>
+                {error}
+              </T>
+            ) : null}
+            <Button
+              secondary
+              label={conflictMessage(locale, "keep")}
+              busy={busy === "keep"}
+              disabled={!!busy || !item}
+              onPress={() => resolve("keep")}
+            />
+            {replaceAllowed ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={conflictMessage(locale, "replace")}
+                accessibilityState={{
+                  disabled: !!busy,
+                  busy: busy === "replace",
+                }}
+                disabled={!!busy}
+                onPress={() => resolve("replace")}
+                style={({ pressed }) => [
+                  styles.destructiveButton,
+                  {
+                    backgroundColor: c.danger,
+                    opacity: busy ? 0.65 : pressed ? 0.8 : 1,
+                  },
+                ]}
+              >
+                {busy === "replace" ? (
+                  <ActivityIndicator accessible={false} color={c.onPrimary} />
+                ) : null}
+                <T
+                  raw
+                  style={{
+                    color: c.onPrimary,
+                    fontWeight: "600",
+                    textAlign: "center",
+                    flexShrink: 1,
+                  }}
+                >
+                  {conflictMessage(locale, "replace")}
+                </T>
+              </Pressable>
+            ) : null}
+            <Button
+              secondary
+              label={conflictMessage(locale, "later")}
+              disabled={!!busy}
+              onPress={close}
+            />
+          </ScrollView>
+        </View>
+      </SafeAreaView>
+    </Modal>
+  );
+}
+
+export function FamilyConflictPrompt({ pilot }: { pilot: Pilot }) {
+  const [selected, setSelected] = useState<SelectedConflict | null>(null);
+  const observedContext = useRef<string | null>(null);
+  const seen = useRef(new Set<string>());
+  const snapshot = pilot.fullSnapshot;
+  const context =
+    pilot.authStatus === "authenticated" &&
+    pilot.ready &&
+    snapshot &&
+    pilot.user
+      ? `${pilot.user.id}|${snapshot.family.id}|${snapshot.family.membershipId}|${snapshot.historyId}`
+      : null;
+  const candidates = reviewableRecordConflicts(pilot).filter((item) =>
+    Boolean(currentConflictRecord(pilot, item)),
+  );
+
+  useEffect(() => {
+    if (!context) {
+      observedContext.current = null;
+      seen.current = new Set();
+      setSelected(null);
+      return;
+    }
+    const ids = candidates.map((item) => item.operation.operationId);
+    if (observedContext.current !== context) {
+      observedContext.current = context;
+      seen.current = new Set(ids);
+      setSelected(null);
+      return;
+    }
+    const newlyConflicted = candidates.find(
+      (item) => !seen.current.has(item.operation.operationId),
+    );
+    if (!selected && newlyConflicted) {
+      seen.current.add(newlyConflicted.operation.operationId);
+      setSelected(openConflict(pilot, newlyConflicted));
+    }
+  }, [candidates, context, pilot, selected]);
+
+  return (
+    <ConflictResolutionModal
+      pilot={pilot}
+      selected={selected}
+      onClose={() => setSelected(null)}
+    />
+  );
+}
+
 export function FamilySyncDetails({ pilot }: { pilot: Pilot }) {
   const c = useContext(Theme);
   const { locale, formattingLocale, localize: text } = useI18n();
@@ -356,6 +697,7 @@ export function FamilySyncDetails({ pilot }: { pilot: Pilot }) {
   } | null>(null);
   const [discardBusy, setDiscardBusy] = useState(false);
   const [discardError, setDiscardError] = useState<string | null>(null);
+  const [conflict, setConflict] = useState<SelectedConflict | null>(null);
   const issues = familySyncIssues(pilot);
   const snapshot = pilot.fullSnapshot;
   const canReview =
@@ -389,8 +731,18 @@ export function FamilySyncDetails({ pilot }: { pilot: Pilot }) {
         <View accessibilityLiveRegion="polite" style={styles.stack}>
           <IssueMessages issues={issues} pilot={pilot} />
         </View>
+        {recordConflicts.some((item) => currentConflictRecord(pilot, item)) ? (
+          <T raw style={{ color: c.muted }}>
+            {text(
+              "请逐条打开“检查冲突”，比较当前家庭版本和你的修改。替换需等待服务器确认；确认前记录和柱状图仍显示家庭版本。",
+              "Open Review conflict for each item and compare the family version with your change. A replacement waits for server confirmation; records and charts keep showing the family version until then.",
+            )}
+          </T>
+        ) : null}
         {recordConflicts.some(
-          (item) => item.error !== "active_timer_conflict",
+          (item) =>
+            item.error !== "active_timer_conflict" &&
+            !currentConflictRecord(pilot, item),
         ) ? (
           <T raw style={{ color: c.muted }}>
             {text(
@@ -420,22 +772,38 @@ export function FamilySyncDetails({ pilot }: { pilot: Pilot }) {
                 {item.operation.entry?.note ?? item.operation.careRecord?.note}
               </T>
             ) : null}
-            <Button
-              secondary
-              label={fullFamilyMessage(locale, "discardPreserved")}
-              disabled={!canDiscard}
-              onPress={() => {
-                if (!canDiscard) return;
-                setDiscardError(null);
-                setDiscard({
-                  operationId: item.operation.operationId,
-                  origin: JSON.stringify(item.origin),
-                });
-              }}
-            />
+            {currentConflictRecord(pilot, item) ? (
+              <Button
+                label={conflictMessage(locale, "review")}
+                disabled={!canReview || busy}
+                onPress={() => {
+                  if (!canReview || busy) return;
+                  setConflict(openConflict(pilot, item));
+                }}
+              />
+            ) : (
+              <Button
+                secondary
+                label={fullFamilyMessage(locale, "discardPreserved")}
+                disabled={!canDiscard}
+                onPress={() => {
+                  if (!canDiscard) return;
+                  setDiscardError(null);
+                  setDiscard({
+                    operationId: item.operation.operationId,
+                    origin: JSON.stringify(item.origin),
+                  });
+                }}
+              />
+            )}
           </View>
         ))}
       </Card>
+      <ConflictResolutionModal
+        pilot={pilot}
+        selected={conflict}
+        onClose={() => setConflict(null)}
+      />
       <Modal
         visible={!!selected}
         transparent
@@ -529,6 +897,27 @@ const styles = StyleSheet.create({
   },
   closeText: { fontSize: 24, lineHeight: 28 },
   conflict: { borderTopWidth: 1, paddingTop: 12, gap: 8 },
+  versionCard: {
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 14,
+    gap: 8,
+  },
+  versionTitle: { fontWeight: "700" },
+  detailRow: { gap: 2 },
+  detailLabel: { fontSize: 14, lineHeight: 19 },
+  detailValue: { flexShrink: 1 },
+  destructiveButton: {
+    minHeight: 48,
+    minWidth: 44,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderRadius: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
   backdrop: {
     flex: 1,
     padding: 20,
@@ -543,4 +932,5 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     padding: 20,
   },
+  conflictModal: { borderRadius: 24 },
 });

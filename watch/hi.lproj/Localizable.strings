@@ -62,3 +62,14 @@
 "error.watch_clock" = "Watch की घड़ी जाँचें, फिर कोशिश करें।";
 "notice.short_sleep_cancelled" = "एक मिनट से कम: नींद रद्द; पूरी हुई नींद का रिकॉर्ड नहीं रखा जाएगा।";
 "error.sync_status_save_failed" = "सिंक स्थिति सहेजी नहीं जा सकी। आपके लंबित रिकॉर्ड सुरक्षित हैं।";
+"sync.conflict.title" = "टकराव जाँचें";
+"sync.conflict.changed_by" = "मौजूदा संस्करण: %@";
+"sync.conflict.current" = "परिवार संस्करण";
+"sync.conflict.mine" = "मेरा बदलाव";
+"sync.conflict.pending" = "iPhone की प्रतीक्षा";
+"sync.conflict.keep" = "परिवार संस्करण रखें";
+"sync.conflict.replace" = "मेरे बदलाव से बदलें";
+"sync.conflict.ongoing" = "जारी";
+"sync.conflict.sleep" = "नींद";
+"sync.conflict.feed" = "दूध";
+"sync.recording_paused" = "iPhone पर रिकॉर्डिंग रुकी हुई है। मौजूदा टकराव नीचे अब भी जाँचे जा सकते हैं।";

@@ -99,6 +99,7 @@ const english: Record<string, string> = {
   头像地址无效: "The baby photo address is invalid.",
   "打开成长记录…": "Opening your records…",
   保存成长记录备份: "Save a Little Days backup",
+  保存家庭记录备份: "Save a family backup",
   数据格式无效: "The data format is invalid.",
   出生日期无效: "The birth date is invalid.",
   "出生日期格式应为 YYYY-MM-DD":
@@ -355,8 +356,8 @@ const english: Record<string, string> = {
   "个人模式的提醒仅保存在本机。家庭模式会共享提醒规则与设置，但通知由每台手机自行安排。下载规则不会自动开启通知，需在该手机选择启用并取得系统权限；关闭本机通知不会删除家庭规则。":
     "Personal reminders stay on-device. Family mode shares reminder rules and settings, but each phone schedules its own notifications. Downloading rules does not enable notifications: opt in on that phone and grant system permission. Disabling notifications on one phone does not delete family rules.",
   备份与删除: "Backups and deletion",
-  "个人离线模式可主动导出备份，换机或卸载前请妥善保存；家庭共享期间不提供本机备份导出或导入。卸载应用不会删除服务器上的家庭记录或账户；如需删除账户，请使用「我的账户」中的删除流程并查看确认说明。":
-    "In personal offline mode, export and keep a backup before changing phones or uninstalling. Local backup export and import are unavailable while sharing. Uninstalling does not delete server-side family records or your account. To delete your account, use My account and review the deletion confirmation.",
+  "个人备份支持导入；家庭资料仅可下载，暂不支持从文件恢复。导出文件未加密；选择云端保存位置时，由你选择的服务处理文件。退出、移除成员、删除家庭或账户不会撤回已保存或分享的副本，请自行管理这些文件。卸载应用不会删除服务端记录或账户；删除账户请使用「我的账户」中的相应流程。":
+    "Personal backups can be imported; family data is download-only, with no file restore. Exports are unencrypted; a cloud destination uses your chosen service. Signing out, member removal, or family/account deletion cannot recall saved or shared copies; manage those files yourself. Uninstalling does not delete server records or your account; use My account to request account deletion.",
   可选支持: "Optional support",
   "iOS 上可以选择单次支持。付款由 Apple 处理；小日子不会收到你的银行卡或 Apple 账户详情，也不会把支持与你的宝宝、家庭或应用登录关联。未完成交易仅通过 StoreKit 恢复；收据和购买记录不会上传到小日子服务器。":
     "On iOS, you can choose a one-time support purchase. Apple handles payment; My Little Days does not receive your card or Apple Account details or link support to your baby, family or app sign-in. Unfinished transactions are recovered only through StoreKit; receipts and purchase history are not uploaded to My Little Days servers.",
@@ -541,8 +542,11 @@ const english: Record<string, string> = {
   "正在睡 · {duration}": "Sleeping · {duration}",
   "已睡 {duration}": "Asleep for {duration}",
   "{time} 醒来 · 已清醒 {duration}": "Woke at {time} · Awake for {duration}",
+  "已清醒 · {duration}": "Awake · {duration}",
+  "上一觉 · {duration}": "Last sleep · {duration}",
   "上一觉：{start}–{end} · 共睡 {duration}":
     "Last sleep: {start}–{end} · Slept for {duration}",
+  "{duration}前": "{duration} ago",
   "上次 {time} · {duration}前": "Last {time} · {duration} ago",
   "身长 {value} cm": "Length {value} cm",
   "头围 {value} cm": "Head {value} cm",

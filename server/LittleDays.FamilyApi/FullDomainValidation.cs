@@ -147,10 +147,15 @@ public static partial class FullDomainValidation
             string.IsNullOrWhiteSpace(operation.RecordId) || operation.RecordId.Length > 128 ||
             operation.Kind is not ("create" or "update" or "delete") || operation.Collection is not ("entry" or "care" or "extra")) Invalid();
         if (operation.Kind == "create" ? operation.BaseVersion is not null : !RowVersion(operation.BaseVersion)) Invalid();
+        if (operation.ReplacesOperationId is Guid replacement &&
+            (replacement == Guid.Empty || replacement == operation.OperationId || operation.Kind != "update" || operation.Collection != "entry")) Invalid();
+        if (operation.TimerCompletion is not null &&
+            (operation.TimerCompletion is not ("sleep" or "feed") || operation.Kind != "update" || operation.Collection != "entry")) Invalid();
         if (operation.Kind == "delete")
         {
             if (operation.Entry is not null || operation.CareRecord is not null || operation.ExtraRecord is not null ||
-                operation.Collection == "extra" && IsExtraSingleton(operation.RecordId)) Invalid();
+                operation.Collection == "extra" && IsExtraSingleton(operation.RecordId) ||
+                operation.ReplacesOperationId is not null || operation.TimerCompletion is not null) Invalid();
             return null;
         }
         var value = operation.Collection switch { "entry" => operation.Entry, "care" => operation.CareRecord, _ => operation.ExtraRecord };
@@ -161,6 +166,11 @@ public static partial class FullDomainValidation
         else if (operation.Collection == "care") CareRecord(value!.Value);
         else ExtraRecord(value!.Value);
         if (Property(value!.Value, "id").GetString() != operation.RecordId) Invalid();
+        if (operation.ReplacesOperationId is not null &&
+            Property(value.Value, "type").GetString() is not ("feed" or "sleep")) Invalid();
+        if (operation.TimerCompletion is { } timer &&
+            (Property(value.Value, "type").GetString() != timer || !value.Value.TryGetProperty("end", out _) ||
+             value.Value.TryGetProperty("feedRunning", out _))) Invalid();
         return value;
     }
 

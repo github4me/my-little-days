@@ -28,17 +28,23 @@ public sealed record FamilySnapshot(FamilySummary Family, Guid HistoryId, string
 public sealed record FeedOperation(Guid OperationId, Guid RecordId, Guid MembershipId, Guid HistoryId,
     string Kind, string? BaseVersion, SharedFeedInput? Feed);
 public sealed record FeedReceipt(Guid OperationId, Guid HistoryId, string Revision);
-public sealed record FullFamilyCapabilities(int SchemaVersion, string[] RecordKinds, int MaxSeedBytes, int ExtrasSchemaVersion = 1, int CareSchemaVersion = 2);
+public sealed record FullFamilyCapabilities(int SchemaVersion, string[] RecordKinds, int MaxSeedBytes,
+    int ExtrasSchemaVersion = 1, int CareSchemaVersion = 2, bool ConflictReplacementEnabled = true);
 public sealed record FullFamilyProfile(string Name, string BirthDate, string Sex);
+public sealed record ReplacedEntrySummary(string Id, string Type, DateTimeOffset Start,
+    DateTimeOffset? End = null, decimal? Amount = null, string? FeedKind = null, bool NoteChanged = false);
+public sealed record SharedRecordReplacement(Guid ReplacedBy, Guid? PreviousEditedBy,
+    DateTimeOffset ReplacedAt, ReplacedEntrySummary PreviousEntry);
 public sealed record SharedEntry(JsonElement Entry, string Version, Guid RecordedBy, Guid LastEditedBy,
-    Guid? EndedBy = null);
+    Guid? EndedBy = null, SharedRecordReplacement? Replacement = null);
 public sealed record SharedCareRecord(JsonElement Record, string Version, Guid RecordedBy, Guid LastEditedBy);
 public sealed record SharedExtraRecord(JsonElement Record, string Version, Guid RecordedBy, Guid LastEditedBy);
 public sealed record FullFamilySnapshot(int SchemaVersion, FullFamilyProfile Profile,
     SharedEntry[] Entries, SharedCareRecord[] CareRecords, FamilySummary Family, Guid HistoryId, string Revision,
     FamilyMember[] Members, FamilyInvitation[] Invitations, SharedFeed[] Feeds, OwnershipTransfer? OwnershipTransfer,
     int ExtrasSchemaVersion = 1, SharedExtraRecord[]? ExtraRecords = null, bool WatchRecordingEnabled = false,
-    int CareSchemaVersion = 2, bool CrossMemberTimerCompletionEnabled = false)
+    int CareSchemaVersion = 2, bool CrossMemberTimerCompletionEnabled = false,
+    bool ConflictReplacementEnabled = false)
 {
     // Legacy apps reject new care kinds. Omit them from the old representation,
     // never relabel them or delete the underlying records. Existing per-record
@@ -53,7 +59,9 @@ public sealed record CreateFullFamilyRequest(Guid OperationId, string ConsentRev
 public sealed record CreateFullFamilyResult(Guid OperationId, Guid FamilyId, Guid MembershipId, Guid HistoryId, string SeedDigest, FullFamilySnapshot Snapshot);
 public sealed record FullRecordOperation(Guid OperationId, string RecordId, Guid MembershipId, Guid HistoryId,
     string Kind, string Collection, string? BaseVersion, JsonElement? Entry, JsonElement? CareRecord,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] JsonElement? ExtraRecord = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] JsonElement? ExtraRecord = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? ReplacesOperationId = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TimerCompletion = null);
 public sealed record FullProfileRequest(Guid OperationId, Guid? MembershipId, Guid? HistoryId,
     string BaseVersion, JsonElement Profile) : IGrantContext;
 public sealed record CreateFamilyRequest(Guid OperationId, string BabyName);

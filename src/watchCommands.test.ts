@@ -18,6 +18,7 @@ import {
   acceptRecordReceipt,
   applyFullSnapshot,
   projectedFullState,
+  recordsForSend,
 } from "./family/fullState";
 import type { FullFamilySnapshot } from "./family/contracts";
 
@@ -44,6 +45,7 @@ function snapshot(): FullFamilySnapshot {
   return {
     schemaVersion: 2,
     watchRecordingEnabled: true,
+    conflictReplacementEnabled: true,
     historyId: "history",
     revision: "1",
     family: {
@@ -115,6 +117,33 @@ test("Watch protocol restricts the record surface and preserves imported timer i
   ])
     assert.throws(() =>
       parseWatchCommand(JSON.stringify({ ...command(), ...overrides })),
+    );
+});
+test("Watch conflict resolution commands require an immutable source and reviewed version", () => {
+  const valid = command({
+    commandId: "44444444-4444-4444-8444-444444444444",
+    kind: "resolve-conflict",
+    entry: undefined,
+    conflictOperationId: stopId,
+    resolution: "replace",
+    baseVersion: "reviewed-version",
+  });
+  assert.equal(parseWatchCommand(JSON.stringify(valid)).resolution, "replace");
+  for (const invalid of [
+    { ...valid, conflictOperationId: undefined },
+    { ...valid, conflictOperationId: valid.commandId },
+    { ...valid, resolution: "overwrite" },
+    { ...valid, baseVersion: undefined },
+    { ...valid, entry },
+    {
+      ...valid,
+      resolution: "discard",
+      baseVersion: "discard-must-not-adopt-a-version",
+    },
+  ])
+    assert.throws(
+      () => parseWatchCommand(JSON.stringify(invalid)),
+      /invalid_watch_command/,
     );
 });
 test("personal ingestion commits a dedup receipt with exactly one record and rejects ID reuse", () => {
@@ -275,6 +304,115 @@ test("failed family receipt survives conflict dismissal; revocation removes its 
     "rejected",
   );
   assert.equal(revokeCache(failed).watchLedger, undefined);
+});
+test("Watch shows authoritative conflict details and queues replace or discard resolution", () => {
+  const activeSnapshot = snapshot();
+  activeSnapshot.entries = [
+    {
+      entry,
+      version: "active-version",
+      recordedBy: "owner",
+      lastEditedBy: "owner",
+    },
+  ];
+  const stop = command({
+    commandId: stopId,
+    kind: "finish-sleep",
+    entry: undefined,
+    stoppedAt: new Date(now).toISOString(),
+    baseVersion: "active-version",
+    expectedEntry: entry,
+  });
+  const pending = enqueueFamilyWatchCommand(
+    { ...emptyPilotState(), snapshot: activeSnapshot },
+    stop,
+    now,
+  );
+  const currentEnd = new Date(now - 30_000).toISOString();
+  const currentSnapshot: FullFamilySnapshot = {
+    ...activeSnapshot,
+    revision: "2",
+    members: [
+      ...activeSnapshot.members,
+      {
+        id: "other",
+        displayName: "Other Parent",
+        email: null,
+        role: "caregiver",
+        membershipId: "other-grant",
+        status: "active",
+        endedAt: null,
+      },
+    ],
+    entries: [
+      {
+        entry: { ...entry, end: currentEnd },
+        version: "current-version",
+        recordedBy: "owner",
+        lastEditedBy: "other",
+        endedBy: "other",
+      },
+    ],
+  };
+  const staleConflict = reconcileWatchReceipts({
+    ...pending,
+    records: pending.records!.map((item) => ({
+      ...item,
+      status: "failed" as const,
+      error: "timer_already_finished",
+      serverConflict: true,
+    })),
+  });
+  assert.equal(familyWatchReceipts(staleConflict)[0].conflict, undefined);
+  const conflicted = reconcileWatchReceipts({
+    ...staleConflict,
+    snapshot: currentSnapshot,
+  });
+  const rejected = familyWatchReceipts(conflicted)[0];
+  assert.equal(rejected.status, "rejected");
+  assert.equal(rejected.conflict?.currentEditedBy, "Other Parent");
+  assert.equal(rejected.conflict?.currentEntry.end, currentEnd);
+  assert.equal(rejected.conflict?.proposedEntry.end, stop.stoppedAt);
+  assert.equal(rejected.conflict?.canReplace, true);
+
+  // Pausing new Watch recording must not strand an already issued conflict.
+  currentSnapshot.watchRecordingEnabled = false;
+
+  const replace = command({
+    commandId: "44444444-4444-4444-8444-444444444444",
+    kind: "resolve-conflict",
+    entry: undefined,
+    resolution: "replace",
+    conflictOperationId: stopId,
+    baseVersion: "current-version",
+  });
+  const replacing = enqueueFamilyWatchCommand(conflicted, replace, now);
+  assert.equal(replacing.records![0].operation.operationId, replace.commandId);
+  assert.equal(replacing.records![0].operation.replacesOperationId, stopId);
+  assert.equal(recordsForSend(replacing, replacing).length, 1);
+  assert.equal(
+    familyWatchReceipts(replacing).find(
+      (receipt) => receipt.commandId === replace.commandId,
+    )?.status,
+    "pending",
+  );
+
+  const discard = command({
+    commandId: "55555555-5555-4555-8555-555555555555",
+    kind: "resolve-conflict",
+    entry: undefined,
+    resolution: "discard",
+    conflictOperationId: stopId,
+    baseVersion: undefined,
+  });
+  const discarded = enqueueFamilyWatchCommand(conflicted, discard, now);
+  assert.equal(discarded.records?.length, 0);
+  assert.equal(
+    familyWatchReceipts(discarded).find(
+      (receipt) => receipt.commandId === discard.commandId,
+    )?.status,
+    "shared",
+  );
 });
 test("bottle completion requires actual volume while breastfeeding keeps no estimate", () => {
   for (const feedKind of ["formula", "breast-left"] as const) {

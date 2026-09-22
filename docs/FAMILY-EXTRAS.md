@@ -6,6 +6,7 @@ Released to the existing Azure API/database and iOS Expo preview on 16 September
 
 - The family creator should be the member with the most complete baby history. Creation uploads the reviewed history, current baby avatar, reminder rules, all play check-ins and activity selection.
 - Joining does not upload or preserve the joiner's personal records. Validate and durably save the downloaded family snapshot before clearing/replacing personal data. No recoverable personal backup is created.
+- Active family members may explicitly download a fresh authorized server snapshot, including shared extras, for backup or personal analysis. This unencrypted family file is separate from personal backups and cannot be imported/restored. Saved or shared copies cannot be recalled on removal or deletion. See the [member-export contract](FAMILY-API-CONTRACT.md#member-initiated-family-backup-client-implementation-22-september-2026).
 - Invite capacity is five other people, excluding the administrator. Active members and distinct live pending invitations reserve places.
 - Shared reminder rules are visible to the family. Notifications remain opt-in on each phone; downloading a rule never grants notification permission or enables delivery. Expired one-time reminders do not restart.
 - Avatar and activity selection are family-wide settings managed by the administrator. Members can add reminders and check-ins, and edit/delete their own contributions; the administrator can manage all contributions.

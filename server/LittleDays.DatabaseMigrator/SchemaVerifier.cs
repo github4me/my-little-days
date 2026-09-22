@@ -15,7 +15,8 @@ internal static class SchemaVerifier
         "0001_LegacySchemaBaseline.sql", "0002_VerifyBaselineAndRuntimeGrants.sql",
         "0003_FamilySharedExtras.sql", "0004_FamilyAvailabilityBounds.sql",
         "0005_QueryIndexesAndOperationCounts.sql", "0006_FamilyPushAndTimerIndex.sql",
-        "0007_TimerEndAttribution.sql", "0008_WidenPushLocale.sql"
+        "0007_TimerEndAttribution.sql", "0008_WidenPushLocale.sql",
+        "0009_ConflictReplacementAudit.sql"
     ];
 
     internal static int Version(IEnumerable<string> applied) => applied
@@ -74,6 +75,13 @@ internal static class SchemaVerifier
         }
         if (version >= 7)
             expected[("FamilyRecords", "TimerEndedBy")] = new(36, 16, Nullable: true);
+        if (version >= 9)
+        {
+            expected[("FamilyRecords", "ConflictReplacedBy")] = new(36, 16, Nullable: true);
+            expected[("FamilyRecords", "ConflictPreviousEditedBy")] = new(36, 16, Nullable: true);
+            expected[("FamilyRecords", "ConflictReplacedAt")] = new(43, 10, 34, 7, true);
+            expected[("FamilyRecords", "ConflictPreviousJson")] = new(231, 2048, Nullable: true);
+        }
         using var command = factory();
         command.CommandText = """
             SELECT t.name, c.name, c.system_type_id, c.max_length, c.precision, c.scale, c.is_nullable, c.is_computed
@@ -183,6 +191,13 @@ internal static class SchemaVerifier
         if (version >= 7)
             indexes.Add(new("FamilyRecords", "IX_FamilyRecords_TimerEndedBy", ["TimerEndedBy"],
                 Filter: "TimerEndedBy IS NOT NULL"));
+        if (version >= 9)
+            indexes.AddRange([
+                new("FamilyRecords", "IX_FamilyRecords_ConflictReplacedBy", ["ConflictReplacedBy"],
+                    Filter: "ConflictReplacedBy IS NOT NULL"),
+                new("FamilyRecords", "IX_FamilyRecords_ConflictPreviousEditedBy", ["ConflictPreviousEditedBy"],
+                    Filter: "ConflictPreviousEditedBy IS NOT NULL")
+            ]);
         return indexes;
     }
 
@@ -290,6 +305,12 @@ internal static class SchemaVerifier
                 : "ISJSON(RecordJson) = 1 AND DATALENGTH(RecordJson) <= 131072";
         }
         if (version >= 5) expected["FamilyOperationCounts.CK_FamilyOperationCounts_ReceiptCount"] = "ReceiptCount >= 0";
+        if (version >= 9)
+            expected["FamilyRecords.CK_FamilyRecords_ConflictReplacement"] = """
+                (ConflictReplacedBy IS NULL AND ConflictPreviousEditedBy IS NULL AND ConflictReplacedAt IS NULL AND ConflictPreviousJson IS NULL)
+                OR (ConflictReplacedBy IS NOT NULL AND ConflictReplacedAt IS NOT NULL AND ConflictPreviousJson IS NOT NULL AND
+                    Collection = 'entry' AND ISJSON(ConflictPreviousJson) = 1 AND DATALENGTH(ConflictPreviousJson) <= 2048)
+                """;
         if (version >= 6)
         {
             expected["PushInstallations.CK_PushInstallations_Generation"] = "Generation >= 0";

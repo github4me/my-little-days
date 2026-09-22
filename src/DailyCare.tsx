@@ -121,7 +121,7 @@ export default function DailyCare({
   const history = records
     .filter((r) => r.kind === kind)
     .sort((a, b) => Date.parse(b.time) - Date.parse(a.time));
-  const shown = expanded ? history : history.slice(0, 5);
+  const shown = expanded ? history : history.slice(0, 3);
   function openPicker(mode: CarePickerMode) {
     Keyboard.dismiss();
     setPicker({
@@ -370,19 +370,6 @@ export default function DailyCare({
               maxLength={8}
               placeholder={text("请输入实际读数", "Enter the measured reading")}
             />
-            <T raw style={{ fontSize: 12, color: c.muted }}>
-              {text(
-                "预填 {value}°C，并非测量结果，请按实际读数修改；支持小数点或逗号。",
-                "{value}°C is prefilled, not a measurement. Adjust to the actual reading; a decimal point or comma is accepted.",
-                {
-                  value: formatNumber(
-                    Number(defaultTemperatureInput),
-                    {},
-                    formattingLocale,
-                  ),
-                },
-              )}
-            </T>
             <T raw style={{ fontSize: 13, lineHeight: 20, fontWeight: "600" }}>
               {text(
                 "未满 3 个月且体温 ≥38°C，请立即就医。任何年龄出现呼吸困难、难以唤醒或抽搐，应立即寻求急救，不要等记录完成。",
@@ -706,7 +693,7 @@ export default function DailyCare({
             ) : null}
           </View>
         ))}
-        {history.length > 5 ? (
+        {history.length > 3 ? (
           <Button
             label={
               expanded
@@ -714,7 +701,7 @@ export default function DailyCare({
                 : text(
                     "展开更早的 {count} 条照护记录",
                     "Show {count} older care records",
-                    { count: history.length - 5 },
+                    { count: history.length - 3 },
                   )
             }
             secondary
@@ -826,8 +813,8 @@ export default function DailyCare({
         <T raw style={{ fontSize: 12, color: c.muted }}>
           {sharedMode
             ? text(
-                "照护记录保存到家庭服务器，不允许本机导出；每天可记多次，不替代医疗评估。",
-                "Care records are saved to the family server; local export is unavailable. Multiple sessions per day are supported; this is not a medical assessment.",
+                "已同步的家庭照护记录可在「我的 → 备份与恢复」下载。每天可记多次，记录不替代医疗评估。",
+                "Download confirmed family care records in More → Backup and restore. Multiple sessions per day are supported; records do not replace medical assessment.",
               )
             : text(
                 "照护历史保存在本机并包含在记录备份中；每天可记多次，不替代医疗评估。",

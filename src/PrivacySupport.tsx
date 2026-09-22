@@ -149,14 +149,14 @@ export default function PrivacySupport({ onBack }: { onBack: () => void }) {
         </T>
         <T raw style={{ color: c.muted, fontSize: 17 }}>
           {copy(
-            "语言、主题、视图偏好、通知权限和本机通知启用状态不共享。家庭模式下，记录保存在服务器；本机缓存和待同步修改不等于备份，也不会写回个人离线资料。共享期间不能导出或导入本机备份。",
-            "Language, theme, view preferences, notification permissions and this phone’s notification opt-in are not shared. Family records are stored on the server; local cache and pending changes are not a backup and are not copied into personal offline records. Local backup export and import are unavailable while sharing.",
+            "语言、主题、视图偏好、通知权限和本机通知启用状态不共享。家庭模式下，记录保存在服务器；本机缓存和待同步修改不等于备份，也不会写回个人离线资料。每位成员可下载并导出服务器已确认的家庭资料，但不能从文件恢复到共享家庭。",
+            "Language, theme, view preferences, notification permissions and this phone’s notification opt-in are not shared. Family records are stored on the server; local cache and pending changes are not a backup and are not copied into personal offline records. Every member can download and export confirmed server data, but cannot restore a file into the shared family.",
           )}
         </T>
         <T raw style={{ color: c.muted, fontSize: 17 }}>
           {copy(
-            "此版本在 iOS 上将应用的 SQLite 数据目录排除在系统备份之外，包括家庭缓存、待同步修改和个人离线记录。个人模式仍可手动导出备份；换机或卸载前请保存。更新应用不能撤回旧系统备份、截图或先前导出的副本。",
-            "On iOS this version excludes the app’s SQLite data directory from system backups, including family cache, pending changes and personal offline records. Personal mode still supports manual backup export; save a copy before changing phones or uninstalling. An app update cannot recall older system backups, screenshots or previously exported copies.",
+            "iOS 系统备份不包含应用的 SQLite 数据目录，包括个人记录、家庭缓存和待同步修改。个人记录可手动导出，当前家庭成员可下载服务器已确认的记录。此排除规则不涵盖你在应用外保存或分享的文件。",
+            "iOS system backups exclude the app’s SQLite directory, including personal records, family cache and pending changes. Personal records can be exported manually; active family members can download confirmed server records. This exclusion does not cover files you save or share outside the app.",
           )}
         </T>
       </Card>
@@ -180,7 +180,7 @@ export default function PrivacySupport({ onBack }: { onBack: () => void }) {
         <PrivacySection
           icon="⇧"
           title="备份与删除"
-          children="个人离线模式可主动导出备份，换机或卸载前请妥善保存；家庭共享期间不提供本机备份导出或导入。卸载应用不会删除服务器上的家庭记录或账户；如需删除账户，请使用「我的账户」中的删除流程并查看确认说明。"
+          children="个人备份支持导入；家庭资料仅可下载，暂不支持从文件恢复。导出文件未加密；选择云端保存位置时，由你选择的服务处理文件。退出、移除成员、删除家庭或账户不会撤回已保存或分享的副本，请自行管理这些文件。卸载应用不会删除服务端记录或账户；删除账户请使用「我的账户」中的相应流程。"
         />
         <PrivacySection
           icon="♡"

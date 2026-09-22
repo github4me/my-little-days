@@ -6,7 +6,7 @@ Current full-history schema is version 2, with shared extras schema version 1. T
 
 | Method and path | Result |
 | --- | --- |
-| `GET /v2/capabilities` | `{schemaVersion:2,recordKinds:["feed","diaper","sleep","growth","milestone","care"],maxSeedBytes:33554432,extrasSchemaVersion:1,careSchemaVersion:2}` |
+| `GET /v2/capabilities` | `{schemaVersion:2,recordKinds:["feed","diaper","sleep","growth","milestone","care"],maxSeedBytes:33554432,extrasSchemaVersion:1,careSchemaVersion:2,conflictReplacementEnabled:true}` |
 | `POST /v2/families` | Atomic owner setup and full snapshot |
 | `GET /v2/families/{familyId}/snapshot` | Authorized full snapshot; supports `If-None-Match` |
 | `POST /v2/families/{familyId}/record-operations` | Versioned entry/care/extra create, update or delete |
@@ -88,6 +88,7 @@ Mobile activation waits for validation and durable storage of the authorized ful
   extrasSchemaVersion: 1,
   extraRecords: [{record: FamilyExtraRecord, version, recordedBy, lastEditedBy}],
   crossMemberTimerCompletionEnabled: boolean,
+  conflictReplacementEnabled: boolean,
   family: {id, babyName, role, membershipId, babyBirthDate, profileVersion},
   historyId, revision,
   members: [{id, displayName, email, role, membershipId, status, endedAt}],
@@ -103,7 +104,34 @@ Full clients consume entries, careRecords and extraRecords; empty feeds preserve
 
 `crossMemberTimerCompletionEnabled` is true only when the serving API enforces the narrow completion contract. Clients must treat a missing or false value as unsupported and keep cross-member completion controls disabled; author and owner behavior remains available under the ordinary permission rules. The flag is represented in the snapshot ETag so an API rollback cannot reuse a cached enabled response.
 
+`conflictReplacementEnabled` is true only when the serving API can issue and verify durable feed/sleep conflict receipts. Clients must treat a missing or false value as unsupported. The flag is also represented in the ETag. A replacement-capable client must not infer permission from a changed rowversion alone.
+
 Owners receive invitation administration and ended membership history. Caregivers receive active members, null member emails and no invitations. Invitation expiry advances revision before computing the ETag. The ETag includes schema/history/revision/membership; authorization always precedes a possible 304 response.
+
+#### Member-initiated family backup (client implementation, 22 September 2026)
+
+An active owner or caregiver can use **Settings → Backup and restore → Download
+and export family backup**. The client makes a new authorized v2 snapshot GET,
+validates the same account, membership and history before sharing, and requires
+care schema 2 plus extras schema 1 so the file cannot silently omit supplements
+or shared extras. The exported JSON is a distinct
+`my-little-days-family-backup` version-1 document containing export time,
+family/history IDs, server revision, baby profile, confirmed entries, care
+records and extra records with their record versions/authorship. It deliberately
+excludes the member roster, invitation emails, tokens, pending local operations
+and notification permission/opt-in state. Shared extras can include the baby
+photo, reminders and play data. This download does not mutate server records or
+local queues. The OS share sheet hands the file to the member's chosen storage;
+the app cannot confirm that the member saved it. The JSON is unencrypted and
+must be stored privately. Do not treat this file as a
+personal offline `State` backup or offer import into an active family. A future
+server restore needs a separately reviewed, coordinated design and authorization.
+The file is not anonymized: authorship can contain contribution user IDs. Leaving,
+member removal, family/account deletion and uninstalling cannot recall copies
+already saved or shared outside the app. Members manage those copies themselves.
+The SQLite OS-backup exclusion does not apply to these external files. Personal
+import validation must also reject this family format rather than stripping its
+family scope and treating it as personal data.
 
 #### Supplement compatibility (19 September 2026 implementation; deployment separate)
 
@@ -120,7 +148,8 @@ Deploy this API before the corresponding app release. No SQL migration is needed
   operationId: GUID, recordId: string, membershipId: GUID, historyId: GUID,
   kind: "create" | "update" | "delete", collection: "entry" | "care" | "extra",
   baseVersion?: string, entry?: Entry, careRecord?: CareRecord,
-  extraRecord?: FamilyExtraRecord
+  extraRecord?: FamilyExtraRecord, replacesOperationId?: GUID,
+  timerCompletion?: "feed" | "sleep"
 }
 ```
 
@@ -129,6 +158,25 @@ Create omits baseVersion; update/delete uses the exact last-read record version.
 Owners can edit/delete any record; caregivers ordinarily edit/delete only their original contributions. There is one narrow timer exception: any active family member may update another member's currently active sleep or feed entry to finish that same timer. The update must preserve the ID, type, start, note and, for feeds, feed kind; it may add the end timestamp and finalize a bottle amount. It cannot change the starter's other content, reopen a timer or convert it to another entry kind. The server keeps `recordedBy`, sets `endedBy` and `lastEditedBy` to the finishing account, and applies the usual base-version check, so concurrent attempts resolve as one success and `412 record_changed` for a stale attempt. The completed entry retains both timestamps and both participant identities.
 
 A cross-member stop always uses that auditable active-to-completed update, including when a sleep has run for less than 60 seconds. It creates a completed sleep entry with its end timestamp and `endedBy`; there is no cross-member timer-deletion exception. Delete remains limited to the existing record author or owner permission, supplies no payload and cannot be authorized merely by active family membership. Ordinary record editing and deletion permissions are otherwise unchanged.
+
+#### Reviewed feed/sleep conflict replacement
+
+When an otherwise authorized feed or sleep update uses a stale `baseVersion`, a replacement-capable API commits a minimal `record-conflict-v2` receipt before returning `412 record_changed`. The receipt is bound to the authenticated account, family, membership, history, exact request fingerprint, stale base version and the then-current rowversion. It contains no note or child-history payload. Retrying that exact operation deterministically returns the same conflict; reusing its ID with different content fails.
+
+After showing both versions, the client may discard its preserved operation, or submit a **new** operation ID with the exact same intended payload, the reviewed current rowversion in `baseVersion`, and the failed operation ID in `replacesOperationId`. A timer finish also repeats its server-issued `timerCompletion` marker. The service reconstructs and hashes the original request from its receipt before applying anything. A missing, cross-account, cross-grant, altered or forged source returns `409 conflict_resolution_unavailable` or `409 conflict_resolution_changed`. If the record changes again, the replacement receives a new `412 record_changed`; refresh and review the new current version instead of silently rebasing.
+
+Ordinary edit permissions remain unchanged: an owner may edit any record and a caregiver may edit their original record. Any active member may replace only the narrow competing completion of another member's feed/sleep timer, with ID/type/start/note and feed kind still identical. This supports phone-versus-Watch and member-versus-member races without granting arbitrary edit access.
+
+Replacement is deliberately non-optimistic. Until its receipt is accepted and a sufficiently fresh snapshot arrives, lists and charts keep the authoritative family version. A successful snapshot exposes a bounded audit on that entry:
+
+```text
+replacement: {
+  replacedBy, previousEditedBy?, replacedAt,
+  previousEntry: {id,type,start,end?,amount?,feedKind?,noteChanged}
+}
+```
+
+`previousEntry` contains only the replaced feed/sleep summary; note content is never copied. The current `entry` is the accepted replacement and therefore drives charts. The record screen can show who replaced whose version, when, and the before/current amount or sleep interval. A later ordinary edit clears this direct-replacement marker so it cannot mislabel a subsequently changed value as the original replacement result.
 
 The singleton extras `avatar`, `play-selection` and `reminder-settings` are owner-only for all mutations. An extra's kind cannot change. Editing never changes the original author. An accepted no-op update still advances rowversion. Success returns `{operationId,historyId,revision}`; refresh to obtain the new versions.
 

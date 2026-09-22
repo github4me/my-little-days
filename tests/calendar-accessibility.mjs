@@ -5,14 +5,14 @@ import test from "node:test";
 import ts from "typescript";
 
 // Native-boundary contract only; no claim of rendered iOS layout.
-function fixture({ fontScale = 1, isDark = false } = {}) {
+function fixture({ fontScale = 1, isDark = false, todayCount = 7 } = {}) {
   const state = [],
     refs = [],
     cache = new Map();
   let slot = 0,
     nodes = [];
-  const today = new Date(2026, 8, 18, 12);
-  const entries = Array.from({ length: 7 }, (_, index) => ({
+  const today = new Date(2026, 8, 18, todayCount > 7 ? 23 : 12);
+  const entries = Array.from({ length: todayCount }, (_, index) => ({
     id: `today-${index}`,
     type: index === 6 ? "sleep" : "feed",
     start: new Date(2026, 8, 18, 1 + index).toISOString(),
@@ -142,7 +142,9 @@ function fixture({ fontScale = 1, isDark = false } = {}) {
     nodes: () => nodes,
     press(label) {
       const control = nodes.find(
-        (node) => node.props.accessibilityLabel === label,
+        (node) =>
+          node.props.accessibilityLabel === label ||
+          (node.type === "Button" && node.props.label === label),
       );
       assert.ok(control, label);
       control.props.onPress();
@@ -159,17 +161,49 @@ function fixture({ fontScale = 1, isDark = false } = {}) {
   };
 }
 
-test("larger reading sizes replace truncated timeline labels with every full record row", () => {
+test("larger reading sizes replace truncated timeline labels with paged full record rows", () => {
   const regular = fixture();
   assert.equal(regular.chart().length, 7);
-  assert.equal(regular.list().length, 5);
+  assert.equal(regular.list().length, 3);
   for (const fontScale of [1.3, 2, 3]) {
     const large = fixture({ fontScale });
     assert.equal(large.chart().length, 0);
+    assert.equal(large.list().length, 3);
+    large.press("显示 4 条更早记录");
     assert.equal(large.list().length, 7);
     assert.equal(new Set(large.list().map((node) => node.props.key)).size, 7);
     assert.ok(large.list().every((node) => node.props.style.minHeight >= 44));
   }
+});
+
+test("calendar details reveal five records per tap and collapse back to three", () => {
+  const screen = fixture({ todayCount: 13 });
+  assert.equal(screen.chart().length, 13);
+  assert.equal(screen.list().length, 3);
+  screen.press("显示 5 条更早记录");
+  assert.equal(screen.list().length, 8);
+  screen.press("显示 5 条更早记录");
+  assert.equal(screen.list().length, 13);
+  screen.press("收起日历明细");
+  assert.equal(screen.list().length, 3);
+});
+
+test("calendar pagination resets when the date, period, or record filter changes", () => {
+  const screen = fixture({ todayCount: 13 });
+  screen.press("显示 5 条更早记录");
+  screen.press("前一天");
+  assert.equal(screen.list().length, 1);
+  screen.press("回到今天");
+  assert.equal(screen.list().length, 3);
+  screen.press("显示 5 条更早记录");
+  screen.press("周");
+  assert.equal(screen.list().length, 3);
+  screen.press("显示 5 条更早记录");
+  screen.press("筛选记录：全部");
+  screen.press("筛选：睡眠");
+  screen.press("筛选记录：睡眠");
+  screen.press("筛选：全部");
+  assert.equal(screen.list().length, 3);
 });
 
 test("accessible calendar list preserves selected date and type filters", () => {

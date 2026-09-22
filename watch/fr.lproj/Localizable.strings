@@ -62,3 +62,14 @@
 "error.watch_clock" = "Vérifiez l’heure de la montre, puis réessayez.";
 "notice.short_sleep_cancelled" = "Moins d’une minute : sommeil annulé ; aucun sommeil terminé ne sera conservé.";
 "error.sync_status_save_failed" = "Impossible d’enregistrer l’état de synchronisation. Vos saisies en attente sont conservées.";
+"sync.conflict.title" = "Vérifier le conflit";
+"sync.conflict.changed_by" = "Version actuelle par %@";
+"sync.conflict.current" = "Version familiale";
+"sync.conflict.mine" = "Ma modification";
+"sync.conflict.pending" = "En attente de l’iPhone";
+"sync.conflict.keep" = "Garder la version familiale";
+"sync.conflict.replace" = "Remplacer par ma modification";
+"sync.conflict.ongoing" = "En cours";
+"sync.conflict.sleep" = "Sommeil";
+"sync.conflict.feed" = "Repas";
+"sync.recording_paused" = "L’enregistrement est suspendu sur l’iPhone. Les conflits existants restent vérifiables ci-dessous.";

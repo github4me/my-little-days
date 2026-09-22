@@ -68,7 +68,11 @@ private struct WatchHome: View {
                 Text(store.text("timer.manage_on_iphone"))
                   .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
               }
-            }.disabled(!store.ready)
+              if !store.recordingEnabled {
+                Text(store.text("sync.recording_paused"))
+                  .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+              }
+            }.disabled(!store.ready || !store.recordingEnabled)
           } else {
             Section {
               Label(store.text("setup.open_iphone.title"), systemImage: "iphone")
@@ -280,14 +284,70 @@ private struct SyncStatusView: View {
       if !store.rejectedItems.isEmpty {
         Section(store.text("sync.not_applied")) {
           ForEach(store.rejectedItems) { item in
-            VStack(alignment: .leading) {
-              if let date = WatchClock.date(item.command.createdAt) { Text(date, style: .time).font(.caption) }
-              Text(store.rejectionMessage(item.receipt?.error)).font(.caption)
-            }.fixedSize(horizontal: false, vertical: true)
+            if item.receipt?.conflict != nil {
+              WatchConflictView(item: item)
+            } else {
+              VStack(alignment: .leading) {
+                if let date = WatchClock.date(item.command.createdAt) { Text(date, style: .time).font(.caption) }
+                Text(store.rejectionMessage(item.receipt?.error)).font(.caption)
+              }.fixedSize(horizontal: false, vertical: true)
+            }
           }
         }
       }
     }.navigationTitle(store.text("sync.status"))
+  }
+}
+
+private struct WatchConflictView: View {
+  @EnvironmentObject private var store: WatchStore
+  let item: WatchOutboxItem
+
+  var body: some View {
+    if let conflict = item.receipt?.conflict {
+      let pending = store.conflictResolutionPending(item)
+      VStack(alignment: .leading, spacing: 8) {
+        Text(store.text("sync.conflict.title"))
+          .font(.headline).accessibilityAddTraits(.isHeader)
+        Text(store.text("sync.conflict.changed_by", conflict.currentEditedBy))
+          .font(.caption).foregroundStyle(.secondary)
+        version(store.text("sync.conflict.current"), entry: conflict.currentEntry)
+        version(store.text("sync.conflict.mine"), entry: conflict.proposedEntry)
+        if pending {
+          HStack {
+            ProgressView()
+            Text(store.text("sync.conflict.pending")).font(.caption)
+          }
+        }
+        Button(store.text("sync.conflict.keep")) {
+          store.resolveConflict(item, replace: false)
+        }
+        .buttonStyle(.bordered)
+        .frame(minHeight: 44)
+        .disabled(pending)
+        if conflict.canReplace {
+          Button(role: .destructive) {
+            store.resolveConflict(item, replace: true)
+          } label: {
+            Text(store.text("sync.conflict.replace"))
+              .multilineTextAlignment(.center)
+          }
+          .buttonStyle(.borderedProminent)
+          .frame(minHeight: 44)
+          .disabled(pending)
+        }
+      }
+      .fixedSize(horizontal: false, vertical: true)
+    }
+  }
+
+  private func version(_ title: String, entry: WatchEntry) -> some View {
+    VStack(alignment: .leading, spacing: 2) {
+      Text(title).font(.caption).fontWeight(.semibold)
+      Text(store.conflictSummary(entry))
+        .font(.caption2).foregroundStyle(.secondary)
+    }
+    .accessibilityElement(children: .combine)
   }
 }
 

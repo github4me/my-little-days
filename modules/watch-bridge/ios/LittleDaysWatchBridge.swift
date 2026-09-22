@@ -232,7 +232,7 @@ private final class WatchBridgeTransport: NSObject, WCSessionDelegate {
             let bridgeId = command["bridgeId"] as? String, UUID(uuidString: bridgeId) != nil,
             let generation = command["generation"] as? Int,
             let kind = command["kind"] as? String,
-            ["create", "finish-sleep", "finish-feed"].contains(kind) else {
+            ["create", "finish-sleep", "finish-feed", "resolve-conflict"].contains(kind) else {
         throw failure("invalid-command")
       }
       var value = try load()

@@ -144,6 +144,34 @@ simultaneous family timers are rejected.
 No Apple/Expo credentials, Azure resources or feature gates are changed by adding
 this code. Manual environment/release steps belong in the existing runbook.
 
+### Reviewed feed/sleep conflict replacement
+
+Apply additive migration `0009_ConflictReplacementAudit.sql` before this API.
+It adds nullable, bounded audit fields and filtered attribution indexes without
+rewriting existing records or rowversions. The API advertises
+`conflictReplacementEnabled: true` in capabilities and full snapshots; older
+clients and older APIs continue with their existing preserve/discard behavior.
+
+An eligible stale feed/sleep update first commits a minimal
+`record-conflict-v2` operation receipt and then returns `412 record_changed`.
+A replacement is a new operation with the reviewed current rowversion and
+`replacesOperationId` pointing to that failed operation. The server verifies the
+same account, family, grant, history and exact original request fingerprint; it
+never accepts an arbitrary last-write-wins flag. A second race produces another
+durable conflict for another review. Successful replacement stores only the
+previous interval/amount/kind plus a `noteChanged` boolean and actor/time
+attribution. It never copies note text into the audit envelope.
+
+Owners and original record authors retain their existing edit rights. The only
+cross-author replacement is the already-authorized narrow competing feed/sleep
+timer completion, with immutable timer fields preserved. Client charts remain on
+the authoritative version until the replacement is accepted and refreshed.
+Deploy and validate this schema/API before shipping a client that offers the
+replacement action. After conflict receipts have been issued, prefer a
+forward-compatible API fix over rolling back to code that does not understand
+their receipt action. See the [full contract](../docs/FAMILY-API-CONTRACT.md#reviewed-feedsleep-conflict-replacement)
+and [manual release checklist](../docs/AZURE-MANUAL-SETUP-RUNBOOK.md#feed-and-sleep-conflict-replacement--prepared-21-september-2026).
+
 ### Existing account configuration
 
 Use environment variables or a restricted host provider. Colons in setting names become double underscores in environment variables. Credentials must stay outside source control, mobile settings and artifacts.

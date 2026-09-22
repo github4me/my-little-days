@@ -1,4 +1,5 @@
 import type { SupportedLocale } from "../locales";
+import { familyBackupEnglishOverride } from "./familyBackupOverrides";
 
 /**
  * Context-sensitive and safety-critical terms that generic machine translation
@@ -61,11 +62,57 @@ const reviewedEnglishOverrides: Partial<
 > = {
   "zh-Hant": {
     "{name}'s little days": "{name}的小日子",
+    "Awake · {duration}": "已清醒 · {duration}",
+    "Last sleep · {duration}": "上一覺 · {duration}",
+    "{duration} ago": "{duration}前",
+  },
+  fr: {
+    "Awake · {duration}": "Éveillé · {duration}",
+    "Last sleep · {duration}": "Dernier sommeil · {duration}",
+    "{duration} ago": "Il y a {duration}",
+  },
+  de: {
+    "Awake · {duration}": "Wach · {duration}",
+    "Last sleep · {duration}": "Letzter Schlaf · {duration}",
+    "{duration} ago": "Vor {duration}",
+  },
+  hi: {
+    "Awake · {duration}": "जागे हुए · {duration}",
+    "Last sleep · {duration}": "पिछली नींद · {duration}",
+    "{duration} ago": "{duration} पहले",
+  },
+  it: {
+    "Awake · {duration}": "Sveglio · {duration}",
+    "Last sleep · {duration}": "Ultimo sonno · {duration}",
+    "{duration} ago": "{duration} fa",
+  },
+  ja: {
+    "Awake · {duration}": "起きてから · {duration}",
+    "Last sleep · {duration}": "前回の睡眠 · {duration}",
+    "{duration} ago": "{duration}前",
+  },
+  ko: {
+    "Awake · {duration}": "깨어 있는 시간 · {duration}",
+    "Last sleep · {duration}": "마지막 수면 · {duration}",
+    "{duration} ago": "{duration} 전",
+  },
+  es: {
+    "Awake · {duration}": "Despierto · {duration}",
+    "Last sleep · {duration}": "Último sueño · {duration}",
+    "{duration} ago": "Hace {duration}",
   },
   th: {
+    "Awake · {duration}": "ตื่นมาแล้ว · {duration}",
+    "Last sleep · {duration}": "การนอนครั้งล่าสุด · {duration}",
+    "{duration} ago": "{duration} ที่แล้ว",
     "An older reminder has no reliable time or rule to migrate. In More → Care reminders, delete and recreate it, then review again. Your existing records have not been cleared.":
       "รายการเตือนเก่าไม่มีเวลาหรือกฎที่เชื่อถือได้สำหรับการย้ายข้อมูล ใน เพิ่มเติม → เตือนความจำเกี่ยวกับการดูแล ให้ลบรายการนี้แล้วสร้างใหม่ จากนั้นตรวจสอบอีกครั้ง บันทึกที่มีอยู่ของคุณไม่ได้ถูกลบ",
     "No recovery copy available": "ไม่มีสำเนาสำหรับกู้คืน",
+  },
+  vi: {
+    "Awake · {duration}": "Đã thức · {duration}",
+    "Last sleep · {duration}": "Giấc ngủ gần nhất · {duration}",
+    "{duration} ago": "Cách đây {duration}",
   },
 };
 
@@ -541,6 +588,7 @@ export function manualEnglishOverride(
 ): string | undefined {
   if (locale === "en" || locale === "zh-Hans") return undefined;
   return (
+    familyBackupEnglishOverride(locale, template) ??
     reviewedEnglishOverrides[locale]?.[template] ??
     manualEnglishOverrides[locale][template as ManualOverrideKey]
   );

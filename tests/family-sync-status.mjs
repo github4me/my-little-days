@@ -77,6 +77,66 @@ const finishedTimerConflict = (
   },
 });
 
+function replaceableConflict(type = "feed", id = `replace-${type}`) {
+  const recordId = `conflicted-${type}`;
+  return {
+    ...conflict(id),
+    serverConflict: true,
+    operation: {
+      operationId: id,
+      recordId,
+      kind: "update",
+      collection: "entry",
+      baseVersion: "old-version",
+      entry: {
+        id: recordId,
+        type,
+        start: "2026-09-19T21:56:00.000Z",
+        end: "2026-09-19T22:05:00.000Z",
+        note: "My reviewed note",
+        ...(type === "feed" ? { amount: 145, feedKind: "formula" } : {}),
+      },
+    },
+  };
+}
+
+function fullSnapshotWithRecordConflict(type = "feed") {
+  const item = replaceableConflict(type);
+  return {
+    family: {
+      id: origin.familyId,
+      membershipId: origin.membershipId,
+      role: "owner",
+    },
+    historyId: origin.historyId,
+    conflictReplacementEnabled: true,
+    members: [
+      {
+        id: "winning-parent",
+        displayName: "Lin Chen",
+        email: null,
+        role: "caregiver",
+        membershipId: "winning-grant",
+        status: "active",
+        endedAt: null,
+      },
+    ],
+    entries: [
+      {
+        entry: {
+          ...item.operation.entry,
+          end: "2026-09-19T22:04:00.000Z",
+          note: "Current family note",
+          ...(type === "feed" ? { amount: 95 } : {}),
+        },
+        version: "current-version",
+        recordedBy: "winning-parent",
+        lastEditedBy: "winning-parent",
+      },
+    ],
+  };
+}
+
 function fullSnapshotWithActiveTimer(type = "sleep") {
   const entry = {
     id: `active-${type}`,
@@ -141,10 +201,13 @@ function fixture(overrides = {}, locale = "en") {
     calls = [];
   const palette = {
     card: "#FFFFFF",
+    elevated: "#FFFFFF",
     text: "#29475E",
     muted: "#60798D",
     line: "#DCE8F1",
     primary: "#34759D",
+    danger: "#AC241B",
+    onPrimary: "#FFFFFF",
     soft: "#E3F1FB",
   };
   const react = {
@@ -171,6 +234,11 @@ function fixture(overrides = {}, locale = "en") {
         effects.push(callback);
       }
     },
+    useRef(initial) {
+      const key = `${active}:ref:${slot++}`;
+      if (!values.has(key)) values.set(key, { current: initial });
+      return values.get(key);
+    },
     useState(initial) {
       const key = `${active}:state:${slot++}`;
       if (!values.has(key))
@@ -196,9 +264,12 @@ function fixture(overrides = {}, locale = "en") {
   };
   const native = {
     ...Object.fromEntries(
-      ["View", "Pressable", "Modal", "ScrollView"].map((name) => [name, name]),
+      ["View", "Pressable", "Modal", "ScrollView", "ActivityIndicator"].map(
+        (name) => [name, name],
+      ),
     ),
     StyleSheet: { create: (styles) => styles },
+    useWindowDimensions: () => ({ width: 390, height: 844, fontScale: 1 }),
   };
   const pilot = {
     user: { id: origin.userId },
@@ -224,6 +295,9 @@ function fixture(overrides = {}, locale = "en") {
     transitionPending: false,
     discardRecordConflict: async (id) =>
       calls.push({ name: "discardRecordConflict", id }),
+    replaceRecordConflict: async (id, version) =>
+      calls.push({ name: "replaceRecordConflict", id, version }),
+    canReplaceRecordConflict: () => false,
     discardConflict: async (id) => calls.push({ name: "discardConflict", id }),
     ...overrides,
   };
@@ -270,7 +344,7 @@ function fixture(overrides = {}, locale = "en") {
               }),
               localize,
               useI18n: () => ({
-                locale,
+                locale: locale === "zh-CN" ? "zh-Hans" : locale,
                 formattingLocale: locale === "zh-CN" ? "zh-CN" : "en-AU",
                 localize,
               }),
@@ -278,6 +352,8 @@ function fixture(overrides = {}, locale = "en") {
           })();
         if (name === "../ui") return ui;
         if (name === "./messages") return load("src/family/messages.ts");
+        if (name === "./conflictMessages")
+          return load("src/family/conflictMessages.ts");
         if (name === "./syncIssues") return load("src/family/syncIssues.ts");
         throw new Error(`Unexpected sync component dependency: ${name}`);
       },
@@ -324,6 +400,11 @@ function fixture(overrides = {}, locale = "en") {
     buttons: (label) =>
       nodes.filter(
         (node) => node.type === "Button" && node.props.label === label,
+      ),
+    pressable: (label) =>
+      nodes.find(
+        (node) =>
+          node.type === "Pressable" && node.props.accessibilityLabel === label,
       ),
     close: () =>
       nodes.find(
@@ -570,4 +651,72 @@ test("Chinese failures, dismissal and conflict actions are localized", () => {
   assert.match(world.text(), /暂时无法连接家庭共享服务/);
   world.render("FamilySyncDetails");
   assert.equal(world.buttons("丢弃此修改").length, 1);
+});
+
+test("feed and sleep conflicts compare the current editor and exact values before replacement", async () => {
+  for (const type of ["feed", "sleep"]) {
+    const item = replaceableConflict(type);
+    const world = fixture({
+      recordConflicts: [item],
+      fullSnapshot: fullSnapshotWithRecordConflict(type),
+      canReplaceRecordConflict: () => true,
+    });
+    world.render("FamilySyncDetails");
+    world.buttons("Review conflict")[0].props.onPress();
+    world.render("FamilySyncDetails");
+    assert.match(world.text(), /Review conflicting change/);
+    assert.match(world.text(), /Current family version/);
+    assert.match(world.text(), /Changed by Lin Chen/);
+    assert.match(world.text(), /Your change/);
+    const shown = (value) =>
+      new Date(value).toLocaleString("en-AU", {
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    assert.ok(world.text().includes(shown("2026-09-19T21:56:00.000Z")));
+    assert.ok(world.text().includes(shown("2026-09-19T22:04:00.000Z")));
+    assert.ok(world.text().includes(shown("2026-09-19T22:05:00.000Z")));
+    if (type === "feed") {
+      assert.match(world.text(), /95 mL/);
+      assert.match(world.text(), /145 mL/);
+    }
+    const replace = world.pressable("Replace with my change");
+    assert.ok(replace);
+    const style = Object.assign({}, ...replace.props.style({ pressed: false }));
+    assert.ok(style.minHeight >= 44 && style.minWidth >= 44);
+    replace.props.onPress();
+    await tick();
+    assert.deepEqual(world.calls, [
+      {
+        name: "replaceRecordConflict",
+        id: `replace-${type}`,
+        version: "current-version",
+      },
+    ]);
+  }
+});
+
+test("a newly returned server conflict opens a prompt but a restored old conflict does not", () => {
+  const world = fixture({
+    recordConflicts: [],
+    fullSnapshot: fullSnapshotWithRecordConflict("feed"),
+    canReplaceRecordConflict: () => true,
+  });
+  world.render("FamilyConflictPrompt");
+  assert.doesNotMatch(world.text(), /Review conflicting change/);
+  world.pilot.recordConflicts = [replaceableConflict("feed")];
+  world.render("FamilyConflictPrompt");
+  world.render("FamilyConflictPrompt");
+  assert.match(world.text(), /Review conflicting change/);
+
+  const restored = fixture({
+    recordConflicts: [replaceableConflict("feed")],
+    fullSnapshot: fullSnapshotWithRecordConflict("feed"),
+    canReplaceRecordConflict: () => true,
+  });
+  restored.render("FamilyConflictPrompt");
+  restored.render("FamilyConflictPrompt");
+  assert.doesNotMatch(restored.text(), /Review conflicting change/);
 });

@@ -231,6 +231,10 @@ function fixture(
         if (name === "../AccessibleModal") return "Modal";
         if (name === "../NativeDateTimeField") return "NativeDateTimeField";
         if (name === "./messages") return messages;
+        // Conflict copy and locale completeness have their own focused tests;
+        // this broad screen harness only needs messages.ts to load.
+        if (name === "./conflictMessages")
+          return { conflictMessage: (_locale, key) => key };
         if (name === "./invitationCapacity")
           return load("src/family/invitationCapacity.ts");
         if (name === "./syncIssues") return load("src/family/syncIssues.ts");

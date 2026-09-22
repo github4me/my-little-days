@@ -199,6 +199,52 @@ await page.evaluate(() => {
 await page.reload();
 await page.getByText("QQ的小日子", { exact: true }).waitFor();
 assert.equal(await page.getByText("● 仅此设备", { exact: true }).count(), 0);
+assert.match(
+  await page.getByTestId("today-feed-recency").innerText(),
+  /前 · 100 mL$/,
+);
+assert.doesNotMatch(
+  await page.getByTestId("today-feed-recency").innerText(),
+  /\d{2}:\d{2}/,
+);
+assert.match(await page.getByTestId("today-diaper-recency").innerText(), /前$/);
+assert.doesNotMatch(
+  await page.getByTestId("today-diaper-recency").innerText(),
+  /\d{2}:\d{2}/,
+);
+await page.setViewportSize({ width: 320, height: 740 });
+for (const kind of ["feed", "sleep", "diaper"]) {
+  const header = await page.getByTestId(`today-${kind}-header`).boundingBox();
+  assert.ok(
+    header && header.height <= 60,
+    `${kind} action should stay beside its icon`,
+  );
+}
+for (const kind of ["feed", "diaper"]) {
+  const box = await page.getByTestId(`today-${kind}-recency`).boundingBox();
+  assert.ok(box && box.height <= 25, `${kind} recency should stay on one line`);
+}
+const sleepLine = await page.getByTestId("today-last-sleep").boundingBox();
+assert.ok(
+  sleepLine && sleepLine.height <= 25,
+  "sleep duration and range should share one line",
+);
+await page.setViewportSize({ width: 390, height: 844 });
+await page.getByRole("tab", { name: "我的", exact: true }).click();
+await chooseEnglish();
+await page.getByRole("tab", { name: "Today", exact: true }).click();
+assert.match(
+  await page.getByTestId("today-feed-recency").innerText(),
+  / ago · 100 mL$/,
+);
+assert.match(
+  await page.getByTestId("today-diaper-recency").innerText(),
+  / ago$/,
+);
+await page.getByRole("tab", { name: "More", exact: true }).click();
+await page.getByTestId("language-picker-row").click();
+await page.getByRole("radio", { name: "中文（简体）", exact: true }).click();
+await page.getByRole("tab", { name: "今天", exact: true }).click();
 await page.evaluate(() => document.fonts.ready);
 await page.screenshot({ path: path.join(screenshotDir, "home-preview.png") });
 await page.getByRole("tab", { name: "记录", exact: true }).click();
@@ -225,7 +271,7 @@ assert.equal(
 );
 assert.equal(
   await page.getByRole("button", { name: "展开当日明细", exact: true }).count(),
-  6,
+  3,
 );
 await page
   .getByRole("button", { name: "展开当日明细", exact: true })
@@ -287,7 +333,7 @@ assert.ok(quickAmountButtons.every(Boolean));
 const quickAmountTop = quickAmountButtons[0].y;
 assert.ok(
   quickAmountButtons.every((box) => Math.abs(box.y - quickAmountTop) < 1),
-  "quick amount choices should stay on one row",
+  `quick amount choices should stay on one row: ${JSON.stringify(quickAmountButtons)}`,
 );
 await page.getByLabel("实际喝奶量", { exact: true }).fill("110");
 await page.getByRole("button", { name: "保存记录", exact: true }).click();
@@ -693,7 +739,25 @@ assert.equal(
   await page
     .getByRole("button", { name: "Show day details", exact: true })
     .count(),
+  3,
+);
+await page
+  .getByRole("button", { name: "More: show 4 earlier days", exact: true })
+  .click();
+assert.equal(
+  await page
+    .getByRole("button", { name: "Show day details", exact: true })
+    .count(),
   7,
+);
+await page
+  .getByRole("button", { name: "Hide earlier days", exact: true })
+  .click();
+assert.equal(
+  await page
+    .getByRole("button", { name: "Show day details", exact: true })
+    .count(),
+  3,
 );
 assert.equal(
   await page.getByRole("button", { name: "Edit Feed", exact: true }).count(),
@@ -1382,6 +1446,21 @@ for (let i = 0; i < 5; i++) {
     "true",
   );
 }
+assert.equal(
+  await page
+    .getByRole("button", { name: "Delete care record", exact: true })
+    .count(),
+  3,
+);
+await page
+  .getByRole("button", { name: "Show 3 older care records", exact: true })
+  .click();
+assert.equal(
+  await page
+    .getByRole("button", { name: "Delete care record", exact: true })
+    .count(),
+  6,
+);
 // Editing an older non-armpit reading must retain its actual measurement site.
 await page
   .getByRole("button", { name: "Edit care record", exact: true })
@@ -1399,21 +1478,6 @@ assert.equal(
     .getByRole("button", { name: "Armpit", exact: true })
     .getAttribute("aria-pressed"),
   "true",
-);
-assert.equal(
-  await page
-    .getByRole("button", { name: "Delete care record", exact: true })
-    .count(),
-  5,
-);
-await page
-  .getByRole("button", { name: "Show 1 older care records", exact: true })
-  .click();
-assert.equal(
-  await page
-    .getByRole("button", { name: "Delete care record", exact: true })
-    .count(),
-  6,
 );
 await page
   .getByRole("button", { name: "Delete care record", exact: true })
@@ -1448,6 +1512,16 @@ await page
   .click();
 await page.getByText("Care record saved", { exact: true }).waitFor();
 await assertNoUntranslatedChinese("Bath care");
+await page.getByRole("button", { name: "Temp", exact: true }).click();
+assert.equal(
+  await page
+    .getByRole("button", { name: "Delete care record", exact: true })
+    .count(),
+  3,
+);
+await page
+  .getByRole("button", { name: "Show 2 older care records", exact: true })
+  .waitFor();
 for (const kind of ["Wash", "Teeth", "Nails"]) {
   await page.getByRole("button", { name: kind, exact: true }).click();
   await assertNoUntranslatedChinese(`Daily care ${kind}`);
@@ -1486,7 +1560,7 @@ await page.getByRole("tab", { name: "照护", exact: true }).click();
 await page.getByRole("button", { name: "日常", exact: true }).click();
 assert.equal(
   await page.getByRole("button", { name: "删除照护记录", exact: true }).count(),
-  5,
+  3,
 );
 assert.equal(
   await page.evaluate(
@@ -1521,7 +1595,7 @@ await page.getByRole("tab", { name: "照护", exact: true }).click();
 await page.getByRole("button", { name: "日常", exact: true }).click();
 assert.equal(
   await page.getByRole("button", { name: "删除照护记录", exact: true }).count(),
-  5,
+  3,
 );
 assert.deepEqual(
   await page.evaluate(
@@ -1957,8 +2031,12 @@ assert.equal(
   await page.getByRole("button", { name: /^View record:/ }).count(),
   7,
 );
+assert.equal(
+  await page.getByRole("button", { name: /^Open calendar record:/ }).count(),
+  3,
+);
 await page
-  .getByRole("button", { name: "Show all calendar records", exact: true })
+  .getByRole("button", { name: "Show 4 older entries", exact: true })
   .click();
 assert.equal(
   await page.getByRole("button", { name: /^Open calendar record:/ }).count(),
@@ -2232,7 +2310,7 @@ assert.equal(await page.getByText("0", { exact: true }).count(), 3);
 
 // An explicitly backfilled zero-minute record is allowed, unlike live reversal.
 await page.getByRole("button", { name: "补录睡眠 ›", exact: true }).click();
-await page.getByRole("button", { name: "已睡醒 / 补录", exact: true }).click();
+await page.getByLabel("醒来时间日期", { exact: true }).waitFor();
 await page.getByLabel("入睡时间日期", { exact: true }).fill("2026-09-17");
 await page.getByLabel("入睡时间时刻", { exact: true }).fill("03:10");
 await page.getByLabel("醒来时间日期", { exact: true }).fill("2026-09-17");
@@ -2254,10 +2332,11 @@ await page.getByText("正在睡觉", { exact: true }).waitFor();
 await page.clock.setFixedTime(new Date(sleepClock.getTime() + 60_000));
 await page.getByRole("button", { name: "醒了", exact: true }).click();
 await page.getByRole("button", { name: "睡了", exact: true }).waitFor();
-await page.getByText("03:15 醒来 · 已清醒 0分钟", { exact: true }).waitFor();
-await page
-  .getByText("上一觉：03:14–03:15 · 共睡 1分钟", { exact: true })
-  .waitFor();
+await page.getByText("已清醒 · 0分钟", { exact: true }).waitFor();
+assert.equal(
+  await page.getByTestId("today-last-sleep").innerText(),
+  "1分钟 · 03:14–03:15",
+);
 const sleepRecords = await page.evaluate(
   () => JSON.parse(localStorage.getItem("little-days-v1")).entries,
 );
@@ -2320,30 +2399,28 @@ await page.evaluate(() => {
   );
 });
 await page.reload();
-await page.getByText("06:05 醒来 · 已清醒 7分钟", { exact: true }).waitFor();
-await page
-  .getByText("上一觉：9月16日 22:05–06:05 · 共睡 8小时0分", { exact: true })
-  .waitFor();
+await page.getByText("已清醒 · 7分钟", { exact: true }).waitFor();
+assert.match(
+  await page.getByTestId("today-last-sleep").innerText(),
+  /^(?:上一觉 · )?8小时0分 · .*22:05–06:05$/,
+);
 await page.getByText("6.1", { exact: true }).waitFor();
 await page.getByRole("tab", { name: "我的", exact: true }).click();
 await chooseEnglish();
 await page.getByRole("tab", { name: "Today", exact: true }).click();
-await page.getByText("Woke at 06:05 · Awake for 7m", { exact: true }).waitFor();
-await page
-  .getByText("Last sleep: 16 Sept 22:05–06:05 · Slept for 8h 0m", {
-    exact: true,
-  })
-  .waitFor();
+await page.getByText("Awake · 7m", { exact: true }).waitFor();
+assert.match(
+  await page.getByTestId("today-last-sleep").innerText(),
+  /^(?:Last sleep · )?8h 0m · .*22:05–06:05$/,
+);
 await assertNoUntranslatedChinese("overnight sleep and wake duration");
 await page.getByRole("button", { name: "Sleep", exact: true }).click();
 await page.getByText("Asleep for 0m", { exact: true }).waitFor();
-assert.equal(await page.getByText(/^Woke at /).count(), 0);
+assert.equal(await page.getByText(/^Awake ·/).count(), 0);
 await page.getByRole("button", { name: "Awake", exact: true }).click();
-await page.getByText("Woke at 06:05 · Awake for 7m", { exact: true }).waitFor();
+await page.getByText("Awake · 7m", { exact: true }).waitFor();
 await page.clock.setFixedTime(new Date("2026-09-17T07:12:00+10:00"));
-await page
-  .getByText("Woke at 06:05 · Awake for 1h 7m", { exact: true })
-  .waitFor();
+await page.getByText("Awake · 1h 7m", { exact: true }).waitFor();
 
 // Suggested feeding ends never go past now, including across midnight.
 // Saving a feed started in the current minute must preserve valid seconds.
@@ -2510,6 +2587,123 @@ assert.equal(
     .getAttribute("aria-expanded"),
   "false",
 );
+// Today stays visible with three other record days; older days appear in
+// seven-day increments, with the remainder still collapsed.
+await page.clock.setFixedTime(new Date("2026-09-22T08:08:00+10:00"));
+await page.evaluate(() => {
+  const today = new Date();
+  const entries = Array.from({ length: 15 }, (_, index) => {
+    const start = new Date(today);
+    start.setDate(start.getDate() - index);
+    start.setHours(7, 0, 0, 0);
+    return {
+      id: `paged-feed-${index}`,
+      type: "feed",
+      feedKind: "formula",
+      start: start.toISOString(),
+      amount: 60,
+      note: "",
+    };
+  });
+  localStorage.setItem(
+    "little-days-v1",
+    JSON.stringify({
+      schemaVersion: 1,
+      profile: { name: "Paged records", birthDate: "", sex: "unspecified" },
+      entries,
+    }),
+  );
+  localStorage.setItem("little-days-v1-record-view", "bars");
+});
+await page.reload();
+await page.getByRole("tab", { name: "记录", exact: true }).click();
+await page.getByRole("button", { name: "全部", exact: true }).click();
+assert.equal(
+  await page.getByRole("button", { name: "展开当日明细", exact: true }).count(),
+  3,
+);
+await page
+  .getByRole("button", { name: "更多：显示前 7 天", exact: true })
+  .click();
+assert.equal(
+  await page.getByRole("button", { name: "展开当日明细", exact: true }).count(),
+  10,
+);
+await page
+  .getByRole("button", { name: "更多：显示前 4 天", exact: true })
+  .click();
+assert.equal(
+  await page.getByRole("button", { name: "展开当日明细", exact: true }).count(),
+  14,
+);
+await page.getByRole("button", { name: "收起历史日期", exact: true }).click();
+assert.equal(
+  await page.getByRole("button", { name: "展开当日明细", exact: true }).count(),
+  3,
+);
+// Every selectable language must keep the compact Today care summaries legible
+// on the smallest supported phone width. Use only synthetic local records.
+await page.clock.setFixedTime(new Date("2026-09-22T08:08:00+10:00"));
+await page.evaluate(() => {
+  localStorage.setItem(
+    "little-days-v1",
+    JSON.stringify({
+      schemaVersion: 1,
+      profile: { name: "Locale test", birthDate: "", sex: "unspecified" },
+      entries: [
+        {
+          id: "locale-feed",
+          type: "feed",
+          feedKind: "formula",
+          start: "2026-09-22T07:56:00+10:00",
+          end: "2026-09-22T08:01:00+10:00",
+          amount: 60,
+          note: "",
+        },
+        {
+          id: "locale-diaper",
+          type: "diaper",
+          diaperKind: "wet",
+          start: "2026-09-22T07:19:00+10:00",
+          note: "",
+        },
+        {
+          id: "locale-sleep",
+          type: "sleep",
+          start: "2026-09-21T23:23:00+10:00",
+          end: "2026-09-22T07:01:00+10:00",
+          note: "",
+        },
+      ],
+    }),
+  );
+});
+await page.setViewportSize({ width: 320, height: 740 });
+await page.reload();
+for (const language of languageOptions.slice(1)) {
+  await page.getByRole("tab").last().click();
+  await page.getByTestId("language-picker-row").click();
+  await page.getByRole("radio", { name: language, exact: true }).click();
+  await page.getByRole("tab").first().click();
+  const feed = await page.getByTestId("today-feed-recency").innerText();
+  const diaper = await page.getByTestId("today-diaper-recency").innerText();
+  const sleep = await page.getByTestId("today-last-sleep").innerText();
+  assert.match(feed, /60 mL$/, language);
+  assert.doesNotMatch(feed, /\d{2}:\d{2}/, language);
+  assert.doesNotMatch(diaper, /\d{2}:\d{2}/, language);
+  assert.match(sleep, /23:23–07:01$/, language);
+  for (const [kind, selector] of [
+    ["feed", "today-feed-recency"],
+    ["diaper", "today-diaper-recency"],
+    ["sleep", "today-last-sleep"],
+  ]) {
+    const box = await page.getByTestId(selector).boundingBox();
+    assert.ok(
+      box && box.height <= 30,
+      `${language}: ${kind} wrapped: ${box?.height}`,
+    );
+  }
+}
 assert.deepEqual(errors, []);
 console.log(
   "PASS: existing local flows, calendar/history, dark/narrow layout, bilingual family/account and live sleep/today summaries, preserved local history.",

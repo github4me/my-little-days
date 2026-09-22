@@ -1,4 +1,5 @@
 import { localize, type AppLocale } from "../i18n";
+import { conflictMessage } from "./conflictMessages";
 
 const messages = {
   errorWatchPending: [
@@ -848,6 +849,10 @@ const errorMessages: Record<string, FamilyMessageKey> = {
 };
 
 export function familyErrorMessage(locale: AppLocale, code: string): string {
+  if (code === "conflict_resolution_unavailable")
+    return conflictMessage(locale, "unavailable");
+  if (code === "conflict_resolution_changed")
+    return conflictMessage(locale, "changedAgain");
   if (code === "supplement_sharing_unavailable")
     return localize(
       "家庭服务尚未支持补充剂记录，请更新 API 后刷新。原本机资料不会因此清理。",
