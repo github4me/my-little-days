@@ -1,5 +1,12 @@
-import React, { useCallback, useContext, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import {
+  Alert,
   Keyboard,
   Linking,
   Platform,
@@ -115,6 +122,15 @@ export default function DailyCare({
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<LearningText | null>(null);
   const lock = useRef(false);
+  const mounted = useRef(true);
+  const currentSharedMode = useRef(sharedMode);
+  currentSharedMode.current = sharedMode;
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const editingVersion = useRef<string | undefined>(undefined);
   const deleteVersion = useRef<string | undefined>(undefined);
   const option = careOptions.find((o) => o.id === kind)!;
@@ -264,8 +280,22 @@ export default function DailyCare({
     setBusy(true);
     try {
       await onSave(record, editingVersion.current);
+      if (!mounted.current || currentSharedMode.current !== sharedMode) return;
       reset();
-      setMessage({ zh: "照护记录已保存", en: "Care record saved" });
+      const savedMessage = sharedMode
+        ? {
+            zh: "家庭共享记录 · 保存后等待同步确认",
+            en: "Family-shared records · saved changes await sync confirmation",
+          }
+        : { zh: "照护记录已保存", en: "Care record saved" };
+      setMessage(savedMessage);
+      Keyboard.dismiss();
+      const title = text("照护记录已保存", "Care record saved");
+      const detail = sharedMode
+        ? copy(savedMessage)
+        : text("已保存到本机", "Saved on this device");
+      if (Platform.OS === "web") window.alert(`${title}\n\n${detail}`);
+      else Alert.alert(title, detail, [{ text: text("好", "OK") }]);
     } catch {
       setMessage({
         zh: "照护记录未保存，请重试。",

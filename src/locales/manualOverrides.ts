@@ -61,47 +61,56 @@ const reviewedEnglishOverrides: Partial<
   Record<DraftLocale, Readonly<Record<string, string>>>
 > = {
   "zh-Hant": {
+    OK: "好",
     "{name}'s little days": "{name}的小日子",
     "Awake · {duration}": "已清醒 · {duration}",
     "Last sleep · {duration}": "上一覺 · {duration}",
     "{duration} ago": "{duration}前",
   },
   fr: {
+    OK: "OK",
     "Awake · {duration}": "Éveillé · {duration}",
     "Last sleep · {duration}": "Dernier sommeil · {duration}",
     "{duration} ago": "Il y a {duration}",
   },
   de: {
+    OK: "OK",
     "Awake · {duration}": "Wach · {duration}",
     "Last sleep · {duration}": "Letzter Schlaf · {duration}",
     "{duration} ago": "Vor {duration}",
   },
   hi: {
+    OK: "ठीक है",
     "Awake · {duration}": "जागे हुए · {duration}",
     "Last sleep · {duration}": "पिछली नींद · {duration}",
     "{duration} ago": "{duration} पहले",
   },
   it: {
+    OK: "OK",
     "Awake · {duration}": "Sveglio · {duration}",
     "Last sleep · {duration}": "Ultimo sonno · {duration}",
     "{duration} ago": "{duration} fa",
   },
   ja: {
+    OK: "OK",
     "Awake · {duration}": "起きてから · {duration}",
     "Last sleep · {duration}": "前回の睡眠 · {duration}",
     "{duration} ago": "{duration}前",
   },
   ko: {
+    OK: "확인",
     "Awake · {duration}": "깨어 있는 시간 · {duration}",
     "Last sleep · {duration}": "마지막 수면 · {duration}",
     "{duration} ago": "{duration} 전",
   },
   es: {
+    OK: "Aceptar",
     "Awake · {duration}": "Despierto · {duration}",
     "Last sleep · {duration}": "Último sueño · {duration}",
     "{duration} ago": "Hace {duration}",
   },
   th: {
+    OK: "ตกลง",
     "Awake · {duration}": "ตื่นมาแล้ว · {duration}",
     "Last sleep · {duration}": "การนอนครั้งล่าสุด · {duration}",
     "{duration} ago": "{duration} ที่แล้ว",
@@ -110,6 +119,7 @@ const reviewedEnglishOverrides: Partial<
     "No recovery copy available": "ไม่มีสำเนาสำหรับกู้คืน",
   },
   vi: {
+    OK: "Đồng ý",
     "Awake · {duration}": "Đã thức · {duration}",
     "Last sleep · {duration}": "Giấc ngủ gần nhất · {duration}",
     "{duration} ago": "Cách đây {duration}",

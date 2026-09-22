@@ -15,7 +15,13 @@ const context = await browser.newContext({
   timezoneId: "Australia/Melbourne",
 });
 const page = await context.newPage();
-const screenshotDir = process.env.SCREENSHOT_OUTPUT_DIR ?? "docs";
+const saveDialogs = [];
+page.on("dialog", async (dialog) => {
+  saveDialogs.push({ type: dialog.type(), message: dialog.message() });
+  await dialog.accept();
+});
+const screenshotDir =
+  process.env.SCREENSHOT_OUTPUT_DIR ?? "artifacts/browser-screenshots";
 await fs.mkdir(screenshotDir, { recursive: true });
 page.setDefaultTimeout(8000);
 async function chooseEnglish() {
@@ -366,10 +372,7 @@ assert.ok(
 );
 await page.evaluate(() => window.scrollTo(0, 0));
 await page.screenshot({
-  path: path.join(
-    process.env.TEMP ?? "docs",
-    "little-days-diaper-options-preview.png",
-  ),
+  path: path.join(screenshotDir, "little-days-diaper-options-preview.png"),
 });
 await page.getByLabel("关闭记录编辑", { exact: true }).click();
 await page.getByRole("button", { name: "删除尿布", exact: true }).click();
@@ -483,7 +486,7 @@ assert.equal(
   1,
 );
 await page.screenshot({
-  path: path.join(process.env.TEMP ?? "docs", "little-days-more-collapsed.png"),
+  path: path.join(screenshotDir, "little-days-more-collapsed.png"),
 });
 await page.getByRole("button", { name: "展开主题", exact: true }).click();
 assert.equal(
@@ -628,10 +631,7 @@ await page
 assert.equal(await creditsHeader.getAttribute("aria-expanded"), "false");
 await page.getByText("Care reminders", { exact: true }).waitFor();
 await page.screenshot({
-  path: path.join(
-    process.env.TEMP ?? "docs",
-    "little-days-language-preview.png",
-  ),
+  path: path.join(screenshotDir, "little-days-language-preview.png"),
 });
 await assertNoUntranslatedChinese("Settings");
 await page.getByRole("tab", { name: "Today", exact: true }).click();
@@ -703,10 +703,7 @@ assert.ok(
 );
 await assertNoUntranslatedChinese("Growth");
 await page.screenshot({
-  path: path.join(
-    process.env.TEMP ?? "docs",
-    "little-days-growth-picker-preview.png",
-  ),
+  path: path.join(screenshotDir, "little-days-growth-picker-preview.png"),
 });
 await page.getByRole("button", { name: "+ Measure", exact: true }).click();
 await page.getByText("Measurement", { exact: true }).waitFor();
@@ -733,7 +730,7 @@ for (const [label, title] of [
 }
 await assertNoUntranslatedChinese("Records date ranges");
 await page.screenshot({
-  path: path.join(process.env.TEMP ?? "docs", "little-days-record-ranges.png"),
+  path: path.join(screenshotDir, "little-days-record-ranges.png"),
 });
 assert.equal(
   await page
@@ -1052,10 +1049,7 @@ await page.getByText("Confirm play activity", { exact: true }).waitFor();
 await assertNoUntranslatedChinese("Cross-age selection confirmation");
 await page.getByText(/Activity reference age: 18 to under 25 months/).waitFor();
 await page.screenshot({
-  path: path.join(
-    process.env.TEMP ?? "docs",
-    "little-days-selection-warning.png",
-  ),
+  path: path.join(screenshotDir, "little-days-selection-warning.png"),
 });
 await page.getByRole("button", { name: "Not now", exact: true }).click();
 await page
@@ -1068,10 +1062,7 @@ assert.equal(
   true,
 );
 await page.screenshot({
-  path: path.join(
-    process.env.TEMP ?? "docs",
-    "little-days-choose-activities.png",
-  ),
+  path: path.join(screenshotDir, "little-days-choose-activities.png"),
 });
 // A corrupt selection must not be overwritten by computed defaults.
 await page.evaluate(() =>
@@ -1288,7 +1279,7 @@ await page
   .getByRole("button", { name: "Temp", exact: true })
   .scrollIntoViewIfNeeded();
 await page.screenshot({
-  path: path.join(process.env.TEMP ?? "docs", "little-days-care-icons-en.png"),
+  path: path.join(screenshotDir, "little-days-care-icons-en.png"),
 });
 assert.equal(
   await page.getByRole("button", { name: "By setting", exact: true }).count(),
@@ -1313,6 +1304,10 @@ await page
   .getByRole("button", { name: "Save care record", exact: true })
   .click();
 await page.getByText("Care record saved", { exact: true }).waitFor();
+assert.deepEqual(saveDialogs.at(-1), {
+  type: "alert",
+  message: "Care record saved\n\nSaved on this device",
+});
 assert.deepEqual(
   await page.evaluate(() => {
     const records = JSON.parse(
@@ -1569,7 +1564,7 @@ assert.equal(
   true,
 );
 await page.screenshot({
-  path: path.join(process.env.TEMP ?? "docs", "little-days-daily-care.png"),
+  path: path.join(screenshotDir, "little-days-daily-care.png"),
 });
 await page.getByRole("tab", { name: "我的", exact: true }).click();
 await page.getByRole("button", { name: "展开备份与恢复", exact: true }).click();
@@ -1579,6 +1574,45 @@ const careDownload = await careDownloadPromise;
 const careBackupBytes = await fs.readFile(await careDownload.path());
 const careBackup = JSON.parse(careBackupBytes.toString());
 assert.equal(careBackup.careRecords.length, 6);
+const beforeFamilyImport = await page.evaluate(() =>
+  localStorage.getItem("little-days-v1"),
+);
+const familyImportMessage =
+  "这是家庭共享记录导出文件。为保护家庭隐私，不能将其导入个人记录或共享家庭，离线时也不支持。现有记录未改变。";
+for (const offline of [false, true]) {
+  await context.setOffline(offline);
+  const familyChooserPromise = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "选择备份文件", exact: true }).click();
+  await (
+    await familyChooserPromise
+  ).setFiles({
+    name: "little-days-family-test.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(
+      JSON.stringify({
+        format: "my-little-days-family-backup",
+        formatVersion: 1,
+        profile: careBackup.profile,
+        entries: [],
+      }),
+    ),
+  });
+  await page
+    .getByRole("alert")
+    .filter({ hasText: familyImportMessage })
+    .waitFor();
+  assert.equal(
+    await page
+      .getByRole("button", { name: "确认替换当前数据", exact: true })
+      .count(),
+    0,
+  );
+  assert.equal(
+    await page.evaluate(() => localStorage.getItem("little-days-v1")),
+    beforeFamilyImport,
+  );
+}
+// A normal personal backup remains importable offline after the rejection.
 const careChooserPromise = page.waitForEvent("filechooser");
 await page.getByRole("button", { name: "选择备份文件", exact: true }).click();
 await (
@@ -1591,6 +1625,11 @@ await (
 await page
   .getByRole("button", { name: "确认替换当前数据", exact: true })
   .click();
+assert.equal(
+  await page.getByText(familyImportMessage, { exact: true }).count(),
+  0,
+);
+await context.setOffline(false);
 await page.getByRole("tab", { name: "照护", exact: true }).click();
 await page.getByRole("button", { name: "日常", exact: true }).click();
 assert.equal(
@@ -1613,6 +1652,10 @@ await page
   .fill("３６．７");
 await page.getByRole("button", { name: "保存照护记录", exact: true }).click();
 await page.getByText("照护记录已保存", { exact: true }).waitFor();
+assert.deepEqual(saveDialogs.at(-1), {
+  type: "alert",
+  message: "照护记录已保存\n\n已保存到本机",
+});
 assert.equal(
   await page.evaluate(
     () => JSON.parse(localStorage.getItem("little-days-v1")).careRecords.length,
@@ -1621,10 +1664,7 @@ assert.equal(
 );
 await context.setOffline(false);
 await page.screenshot({
-  path: path.join(
-    process.env.TEMP ?? "docs",
-    "little-days-daily-care-dark.png",
-  ),
+  path: path.join(screenshotDir, "little-days-daily-care-dark.png"),
 });
 // Formula shortcuts follow age on the feed date without replacing actual intake.
 await page.setViewportSize({ width: 320, height: 844 });
@@ -1703,10 +1743,7 @@ for (const label of ["Time date", "Time time"]) {
   );
 }
 await page.screenshot({
-  path: path.join(
-    process.env.TEMP ?? "docs",
-    "little-days-feed-presets-en-dark.png",
-  ),
+  path: path.join(screenshotDir, "little-days-feed-presets-en-dark.png"),
 });
 await page.getByLabel("Amount fed", { exact: true }).fill("57.5");
 await page.getByLabel("Time date", { exact: true }).fill(feedDates.firstWeek);
@@ -1773,10 +1810,7 @@ assert.equal(
 await assertAmountShortcuts([30, 60, 90, 120]);
 await page.getByLabel("实际喝奶量", { exact: true }).scrollIntoViewIfNeeded();
 await page.screenshot({
-  path: path.join(
-    process.env.TEMP ?? "docs",
-    "little-days-feed-presets-zh-light.png",
-  ),
+  path: path.join(screenshotDir, "little-days-feed-presets-zh-light.png"),
 });
 await page.getByLabel("关闭记录编辑", { exact: true }).click();
 await page.evaluate(() => {
@@ -2017,10 +2051,7 @@ assert.equal(
   2,
 );
 await page.screenshot({
-  path: path.join(
-    process.env.TEMP ?? "docs",
-    "little-days-calendar-filter-en.png",
-  ),
+  path: path.join(screenshotDir, "little-days-calendar-filter-en.png"),
 });
 await page.setViewportSize({ width: 320, height: 844 });
 await page
@@ -2089,10 +2120,7 @@ await page
   .getByRole("button", { name: "Choose calendar date", exact: true })
   .scrollIntoViewIfNeeded();
 await page.screenshot({
-  path: path.join(
-    process.env.TEMP ?? "docs",
-    "little-days-calendar-en-dark.png",
-  ),
+  path: path.join(screenshotDir, "little-days-calendar-en-dark.png"),
 });
 await page.getByRole("button", { name: "Bar chart", exact: true }).click();
 await page.getByRole("button", { name: "Sleep", exact: true }).click();
@@ -2178,7 +2206,7 @@ await page
   .getByRole("button", { name: "选择日历日期", exact: true })
   .scrollIntoViewIfNeeded();
 await page.screenshot({
-  path: path.join(process.env.TEMP ?? "docs", "little-days-calendar-zh.png"),
+  path: path.join(screenshotDir, "little-days-calendar-zh.png"),
 });
 await page.getByRole("button", { name: "筛选记录：全部", exact: true }).click();
 await page.getByRole("button", { name: "筛选：尿布", exact: true }).click();
@@ -2200,10 +2228,7 @@ assert.equal(
   6,
 );
 await page.screenshot({
-  path: path.join(
-    process.env.TEMP ?? "docs",
-    "little-days-calendar-filter-zh.png",
-  ),
+  path: path.join(screenshotDir, "little-days-calendar-filter-zh.png"),
 });
 // Account setup lives directly in More. Signed-out users must not have a
 // family-management entry or need another navigation step to see setup status.

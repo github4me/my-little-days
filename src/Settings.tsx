@@ -163,6 +163,7 @@ export default function Settings({
     [message, setMessage] = useState("");
   const [pending, setPending] = useState<State | null>(null),
     [backupNotice, setBackupNotice] = useState("");
+  const [backupImportError, setBackupImportError] = useState("");
   const source = "备份文件";
   const [profileExpanded, setProfileExpanded] = useState(
     initialProfileExpanded,
@@ -199,6 +200,7 @@ export default function Settings({
     if (sharedMode) {
       setPending(null);
       setBackupNotice("");
+      setBackupImportError("");
       setReminders([]);
     }
   }, [sharedMode]);
@@ -1283,14 +1285,31 @@ export default function Settings({
               onPress={() =>
                 run(async () => {
                   if (sharing.current) return;
-                  const next = await importBackup();
-                  if (next && !sharing.current && mounted.current) {
-                    setBackupNotice("");
-                    setPending(next);
+                  setBackupImportError("");
+                  setBackupNotice("");
+                  try {
+                    const next = await importBackup();
+                    if (next && !sharing.current && mounted.current) {
+                      setPending(next);
+                    }
+                  } catch (e) {
+                    if (!sharing.current && mounted.current)
+                      setBackupImportError(
+                        e instanceof Error ? e.message : "操作失败，请重试",
+                      );
                   }
                 })
               }
             />
+            {backupImportError ? (
+              <T
+                accessibilityRole="alert"
+                accessibilityLiveRegion="assertive"
+                style={{ color: c.danger, fontSize: 15 }}
+              >
+                {t(backupImportError)}
+              </T>
+            ) : null}
             {pending && (
               <View
                 style={{

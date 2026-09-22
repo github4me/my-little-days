@@ -2,6 +2,8 @@ import type { SupportedLocale } from "../locales";
 
 // Keep the member-export policy translated even before generated catalogs refresh.
 export const familyBackupEnglish = {
+  importBlocked:
+    "This file contains exported family records. To protect family privacy, it cannot be imported into personal records or a shared family, even offline. Your existing records are unchanged.",
   save: "Save a family backup",
   download: "Download and export family backup",
   contents:
@@ -23,6 +25,8 @@ type TranslatedLocale = Exclude<SupportedLocale, "en" | "zh-Hans">;
 
 const translations: Record<TranslatedLocale, Record<BackupText, string>> = {
   "zh-Hant": {
+    importBlocked:
+      "這是家庭共享記錄匯出檔案。為保護家庭隱私，不能將其匯入個人記錄或共享家庭，離線時也不支援。現有記錄未變更。",
     save: "儲存家庭記錄備份",
     download: "下載並匯出家庭備份",
     contents:
@@ -39,6 +43,8 @@ const translations: Record<TranslatedLocale, Record<BackupText, string>> = {
       "個人備份支援匯入；家庭資料僅可下載，暫不支援從檔案還原。匯出檔案未加密；選擇雲端儲存位置時，由你選擇的服務處理檔案。登出、移除成員、刪除家庭或帳戶不會撤回已儲存或分享的副本，請自行管理這些檔案。解除安裝不會刪除伺服器記錄或帳戶；刪除帳戶請使用「我的帳戶」中的相應流程。",
   },
   fr: {
+    importBlocked:
+      "Ce fichier contient des données familiales exportées. Pour protéger la vie privée de la famille, il ne peut pas être importé dans les données personnelles ou une famille partagée, même hors ligne. Vos données existantes restent inchangées.",
     save: "Enregistrer une sauvegarde familiale",
     download: "Télécharger et exporter la sauvegarde familiale",
     contents:
@@ -57,6 +63,8 @@ const translations: Record<TranslatedLocale, Record<BackupText, string>> = {
       "Les sauvegardes personnelles peuvent être importées ; les données familiales peuvent seulement être téléchargées, sans restauration de fichier. Les exports ne sont pas chiffrés ; une destination cloud utilise le service de votre choix. La déconnexion, le retrait d’un membre ou la suppression de la famille ou du compte ne peuvent pas rappeler les copies enregistrées ou partagées ; gérez vous-même ces fichiers. Désinstaller l’app ne supprime ni les données du serveur ni votre compte ; demandez la suppression dans Mon compte.",
   },
   de: {
+    importBlocked:
+      "Diese Datei enthält exportierte Familiendaten. Zum Schutz der Privatsphäre der Familie kann sie nicht in persönliche Einträge oder eine gemeinsame Familie importiert werden, auch nicht offline. Deine vorhandenen Einträge bleiben unverändert.",
     save: "Familiensicherung speichern",
     download: "Familiensicherung herunterladen und exportieren",
     contents:
@@ -74,6 +82,8 @@ const translations: Record<TranslatedLocale, Record<BackupText, string>> = {
       "Persönliche Sicherungen lassen sich importieren; Familiendaten können nur heruntergeladen, nicht aus einer Datei wiederhergestellt werden. Exporte sind unverschlüsselt; bei einem Cloud-Ziel wird dein gewählter Dienst verwendet. Abmelden, Entfernen eines Mitglieds oder Löschen der Familie oder des Kontos ruft gespeicherte oder geteilte Kopien nicht zurück; verwalte diese Dateien selbst. Eine Deinstallation löscht keine Serverdaten und kein Konto; beantrage die Kontolöschung unter Mein Konto.",
   },
   hi: {
+    importBlocked:
+      "इस फ़ाइल में परिवार के निर्यात किए गए रिकॉर्ड हैं। परिवार की गोपनीयता की रक्षा के लिए इसे व्यक्तिगत रिकॉर्ड या साझा परिवार में आयात नहीं किया जा सकता, ऑफ़लाइन भी नहीं। आपके मौजूदा रिकॉर्ड नहीं बदले हैं।",
     save: "परिवार का बैकअप सहेजें",
     download: "परिवार का बैकअप डाउनलोड और एक्सपोर्ट करें",
     contents:
@@ -92,6 +102,8 @@ const translations: Record<TranslatedLocale, Record<BackupText, string>> = {
       "व्यक्तिगत बैकअप इम्पोर्ट किए जा सकते हैं; पारिवारिक डेटा केवल डाउनलोड किया जा सकता है, फ़ाइल से पुनर्स्थापित नहीं। एक्सपोर्ट एन्क्रिप्ट नहीं होते; क्लाउड में सहेजने पर आपकी चुनी सेवा इस्तेमाल होती है। साइन आउट, सदस्य हटाने या परिवार/खाता मिटाने से सहेजी या साझा की गई प्रतियाँ वापस नहीं ली जा सकतीं; उन फ़ाइलों का प्रबंधन स्वयं करें। ऐप हटाने से सर्वर रिकॉर्ड या खाता नहीं मिटता; खाता मिटाने का अनुरोध मेरा खाता में करें।",
   },
   it: {
+    importBlocked:
+      "Questo file contiene dati familiari esportati. Per tutelare la privacy della famiglia, non può essere importato nei dati personali o in una famiglia condivisa, neanche offline. I dati esistenti non sono stati modificati.",
     save: "Salva un backup familiare",
     download: "Scarica ed esporta il backup familiare",
     contents:
@@ -109,6 +121,8 @@ const translations: Record<TranslatedLocale, Record<BackupText, string>> = {
       "I backup personali possono essere importati; i dati familiari possono solo essere scaricati, senza ripristino da file. Le esportazioni non sono crittografate; una destinazione cloud usa il servizio scelto. Uscire dall’account, rimuovere un membro o eliminare la famiglia o l’account non ritira le copie salvate o condivise; gestisci tu questi file. Disinstallare non elimina i registri del server o l’account; richiedi l’eliminazione in Il mio account.",
   },
   ja: {
+    importBlocked:
+      "このファイルには書き出した家族の記録が含まれています。家族のプライバシーを守るため、オフラインでも個人の記録や共有家族には読み込めません。既存の記録は変更されていません。",
     save: "ファミリーバックアップを保存",
     download: "ファミリーバックアップをダウンロード・書き出し",
     contents:
@@ -127,6 +141,8 @@ const translations: Record<TranslatedLocale, Record<BackupText, string>> = {
       "個人バックアップは読み込めます。ファミリーデータはダウンロード専用で、ファイルからの復元には対応していません。書き出しファイルは暗号化されず、クラウドに保存する場合は選択したサービスで処理されます。サインアウト、メンバーの削除、ファミリーやアカウントの削除で、保存・共有済みのコピーを回収することはできません。ご自身で管理してください。アンインストールしてもサーバーの記録やアカウントは削除されません。アカウントの削除は「マイアカウント」から申請してください。",
   },
   ko: {
+    importBlocked:
+      "이 파일에는 내보낸 가족 기록이 포함되어 있습니다. 가족의 개인정보 보호를 위해 오프라인에서도 개인 기록이나 공유 가족으로 가져올 수 없습니다. 기존 기록은 변경되지 않았습니다.",
     save: "가족 백업 저장",
     download: "가족 백업 다운로드 및 내보내기",
     contents:
@@ -144,6 +160,8 @@ const translations: Record<TranslatedLocale, Record<BackupText, string>> = {
       "개인 백업은 가져올 수 있지만 가족 데이터는 다운로드만 가능하며 파일 복원은 지원하지 않습니다. 내보낸 파일은 암호화되지 않으며 클라우드에 저장하면 선택한 서비스가 파일을 처리합니다. 로그아웃, 구성원 제거, 가족 또는 계정 삭제로 이미 저장하거나 공유한 사본을 회수할 수 없으므로 직접 관리하세요. 앱을 삭제해도 서버 기록이나 계정은 삭제되지 않습니다. 내 계정에서 계정 삭제를 요청하세요.",
   },
   es: {
+    importBlocked:
+      "Este archivo contiene registros familiares exportados. Para proteger la privacidad de la familia, no se puede importar a los registros personales ni a una familia compartida, tampoco sin conexión. Tus registros existentes no han cambiado.",
     save: "Guardar una copia de seguridad familiar",
     download: "Descargar y exportar la copia de seguridad familiar",
     contents:
@@ -162,6 +180,8 @@ const translations: Record<TranslatedLocale, Record<BackupText, string>> = {
       "Se pueden importar copias personales; los datos familiares solo se descargan y no se restauran desde archivos. Las exportaciones no están cifradas; un destino en la nube usa el servicio que elijas. Cerrar sesión, retirar a un miembro o eliminar la familia o la cuenta no permite recuperar las copias guardadas o compartidas; gestiona esos archivos tú mismo. Desinstalar no elimina los registros del servidor ni tu cuenta; solicita eliminarla en Mi cuenta.",
   },
   th: {
+    importBlocked:
+      "ไฟล์นี้มีบันทึกครอบครัวที่ส่งออกมา เพื่อปกป้องความเป็นส่วนตัวของครอบครัว จึงไม่สามารถนำเข้าไปยังบันทึกส่วนตัวหรือครอบครัวที่แชร์ได้ แม้ขณะออฟไลน์ บันทึกเดิมของคุณไม่มีการเปลี่ยนแปลง",
     save: "บันทึกข้อมูลสำรองของครอบครัว",
     download: "ดาวน์โหลดและส่งออกข้อมูลสำรองของครอบครัว",
     contents:
@@ -179,6 +199,8 @@ const translations: Record<TranslatedLocale, Record<BackupText, string>> = {
       "นำเข้าข้อมูลสำรองส่วนตัวได้ แต่ข้อมูลครอบครัวดาวน์โหลดได้เท่านั้นและยังกู้คืนจากไฟล์ไม่ได้ ไฟล์ส่งออกไม่ได้เข้ารหัส หากบันทึกบนคลาวด์จะใช้บริการที่คุณเลือก การออกจากระบบ นำสมาชิกออก หรือลบครอบครัวหรือบัญชี ไม่สามารถเรียกคืนสำเนาที่บันทึกหรือแชร์ไปแล้วได้ โปรดจัดการไฟล์เหล่านั้นเอง การถอนการติดตั้งไม่ลบบันทึกบนเซิร์ฟเวอร์หรือบัญชี ให้ขอลบบัญชีผ่าน บัญชีของฉัน",
   },
   vi: {
+    importBlocked:
+      "Tệp này chứa các bản ghi gia đình đã xuất. Để bảo vệ quyền riêng tư của gia đình, không thể nhập tệp vào bản ghi cá nhân hoặc gia đình dùng chung, kể cả khi ngoại tuyến. Các bản ghi hiện có của bạn không thay đổi.",
     save: "Lưu bản sao lưu gia đình",
     download: "Tải xuống và xuất bản sao lưu gia đình",
     contents:

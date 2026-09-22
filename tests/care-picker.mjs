@@ -9,6 +9,8 @@ import ts from "typescript";
 // This does not claim to render native wheels or test iOS layout/VoiceOver.
 function fixture(platform = "ios", overrides = {}) {
   const states = [],
+    alerts = [],
+    cleanups = [],
     refs = [],
     callbacks = [],
     cache = new Map();
@@ -36,6 +38,10 @@ function fixture(platform = "ios", overrides = {}) {
       props: { ...props, children },
     }),
     useContext: () => palette,
+    useEffect(effect) {
+      // Register the mount effect once; cleanup models leaving the Care screen.
+      if (!cleanups.length) cleanups.push(effect());
+    },
     useState(initial) {
       const key = slot++;
       if (!(key in states)) states[key] = initial;
@@ -82,6 +88,7 @@ function fixture(platform = "ios", overrides = {}) {
       Date,
       Number,
       String,
+      window: { alert: (message) => alerts.push({ message }) },
       require(name) {
         if (name === "react") return react;
         if (name === "react-native-svg")
@@ -92,6 +99,10 @@ function fixture(platform = "ios", overrides = {}) {
               ["Modal", "Pressable", "View"].map((name) => [name, name]),
             ),
             Platform: { OS: platform },
+            Alert: {
+              alert: (title, message, buttons) =>
+                alerts.push({ title, message, buttons }),
+            },
             Linking: {},
             Keyboard: { dismiss: () => keyboardDismissals++ },
             useWindowDimensions: () => ({
@@ -165,6 +176,8 @@ function fixture(platform = "ios", overrides = {}) {
   return {
     render,
     props,
+    alerts,
+    unmount: () => cleanups.forEach((cleanup) => cleanup?.()),
     picker: () => nodes.find((node) => node.type === "DateTimePicker"),
     field: (label) =>
       nodes.find((node) => node.type === "Field" && node.props.label === label),
@@ -185,6 +198,57 @@ function fixture(platform = "ios", overrides = {}) {
     keyboardDismissals: () => keyboardDismissals,
   };
 }
+
+test("care save acknowledges durable success once with an OK action on native platforms", async () => {
+  for (const platform of ["ios", "android", "web"]) {
+    let finish;
+    let saves = 0;
+    const screen = fixture(platform, {
+      onSave: () => {
+        saves++;
+        return new Promise((resolve) => {
+          finish = resolve;
+        });
+      },
+    });
+    screen.control("Bath").props.onPress();
+    screen.render();
+    screen.save().props.onPress();
+    screen.save().props.onPress();
+    assert.equal(saves, 1);
+    assert.equal(screen.alerts.length, 0);
+    finish();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(screen.alerts.length, 1);
+    assert.match(screen.alerts[0].message, /Saved on this device/);
+    if (platform !== "web")
+      assert.equal(screen.alerts[0].buttons[0].text, "OK");
+  }
+});
+
+test("shared care acknowledgement says pending sync, while failed or abandoned saves do not show success", async () => {
+  for (const mode of ["shared", "failed", "unmounted"]) {
+    let finish;
+    const screen = fixture("ios", {
+      sharedMode: mode === "shared",
+      onSave: () =>
+        mode === "failed"
+          ? Promise.reject(new Error("storage unavailable"))
+          : new Promise((resolve) => {
+              finish = resolve;
+            }),
+    });
+    screen.control("Bath").props.onPress();
+    screen.render();
+    screen.save().props.onPress();
+    if (mode === "unmounted") screen.unmount();
+    finish?.();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(screen.alerts.length, mode === "shared" ? 1 : 0);
+    if (mode === "shared")
+      assert.match(screen.alerts[0].message, /await sync confirmation/);
+  }
+});
 
 test("every care category opens themed native wheels without saving the draft", () => {
   const screen = fixture();

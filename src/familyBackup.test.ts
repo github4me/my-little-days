@@ -122,7 +122,21 @@ test("family backup preserves confirmed records and provenance without account r
   assert.equal("members" in document, false);
   assert.equal("invitations" in document, false);
   // Family exports must not accidentally enter the personal replacement path.
-  assert.throws(() => validateState(JSON.parse(json)));
+  assert.throws(() => validateState(JSON.parse(json)), /为保护家庭隐私/);
+});
+
+test("family import rejection is explicit even for a future or incomplete family export", () => {
+  for (const input of [
+    { format: "my-little-days-family-backup", formatVersion: 99 },
+    { ...snapshot(), format: "my-little-days-family-backup", schemaVersion: 1 },
+  ]) {
+    const before = JSON.stringify(input);
+    assert.throws(
+      () => validateState(input),
+      /为保护家庭隐私.*离线时也不支持.*现有记录未改变/,
+    );
+    assert.equal(JSON.stringify(input), before);
+  }
 });
 
 test("family backup refuses partial legacy projections and corrupt records", () => {

@@ -130,6 +130,8 @@ const english: Record<string, string> = {
     "Select Other before entering another supplement name.",
   照护记录包含不支持的字段: "The care record contains unsupported fields.",
   不支持此备份版本: "This backup version is not supported.",
+  "这是家庭共享记录导出文件。为保护家庭隐私，不能将其导入个人记录或共享家庭，离线时也不支持。现有记录未改变。":
+    "This file contains exported family records. To protect family privacy, it cannot be imported into personal records or a shared family, even offline. Your existing records are unchanged.",
   备份包含不支持的字段: "The backup contains unsupported fields.",
   性别设置无效: "The sex setting is invalid.",
   记录列表无效或过大: "The record list is invalid or too large.",

@@ -2596,7 +2596,7 @@ real-money purchase.
    against Apple's field limits and complete the app's privacy declarations
    after auditing the selected SDK.
    [IAP information fields](https://developer.apple.com/help/app-store-connect/reference/in-app-purchases-and-subscriptions/in-app-purchase-information).
-5. **Native sandbox candidate — EAS project `@expo4chao/little-days`.** Freeze the
+5. **Native sandbox candidate — local Mac build, reusing Expo project `@expo4chao/little-days`.** Freeze the
    reviewed SHA, dependency versions, native configuration and resolved production
    environment. Confirm real API URL/Entra IDs/scope and demo flag `0`; do not log
    credentials. Current `eas.json` production lacks an explicit environment field,
@@ -2608,7 +2608,10 @@ real-money purchase.
    enable IAP by default; this is a verification step, not a reason to invent an
    entitlement or add Watch/Widget purchasing. Recheck the latest version/build
    before choosing the next values. Do not regenerate profiles unless actual
-   capability checks require it. Expected result: a finished EAS archive with all targets correctly
+   capability checks require it. Use local Xcode Archive (or EAS with `--local`),
+   never a cloud build unless separately approved. Upload the exact archive
+   through Xcode Organizer → Distribute App → App Store Connect. Expected result:
+   a finished local archive with all targets correctly
    signed, not merely a successful JavaScript export or an ad hoc preview IPA.
    [Apple App ID configuration](https://developer.apple.com/help/account/identifiers/register-an-app-id).
    Before building, confirm `package.json` still pins `expo-iap` **5.6.3** and
@@ -3103,3 +3106,40 @@ development checks.
 
 As of this source change, automated tests cover validation and read/session
 isolation; physical Files export and two-device acceptance remain outstanding.
+
+## Coffee setup read-only follow-up — 22 September 2026
+
+The existing App Store Connect Business page for Chao Wang was inspected without
+changing or dismissing its open form. The visible Free Apps Agreement now says
+**Pending User Info**, and **Legal Entity Compliance Screening** requests proof
+of the legal entity name in English. This supersedes the earlier Free Apps
+Agreement status, not the unverified product or Paid Apps Agreement state. No
+current Paid Apps Agreement row was visible; do not treat it as Active. The
+product catalog was not rechecked in this follow-up.
+
+1. **Location: App Store Connect → Business → Agreements → Add info; existing
+   team `A9974KXQ4G`.** The Account Holder privately completes Apple's existing
+   compliance form: passport/national-ID evidence (the page specifies a 7 MB
+   maximum), Birth Country, Birth City and the applicable Public Company choice.
+   Do not copy identity documents or entered values into chat, Git or this
+   runbook. Expected result: Apple accepts the submission for verification;
+   separately recheck the warning and agreement status after Apple's review.
+   Submission alone does not prove verification is complete. The page also
+   requests a DSA trader declaration for EU distribution; the Account Holder
+   must supply the correct status rather than assuming trader/non-trader.
+2. **Location: the same Business → Agreements page.** Follow the existing
+   commercial-readiness checklist above: Account Holder acceptance of the Paid
+   Apps Agreement and private banking/tax completion. Verify Active status and
+   absence of unresolved required information before claiming commerce ready.
+3. **Location: Apps → My Little Days (`6809826484`) → Monetization → In-App
+   Purchases.** Recheck the three exact existing-code product IDs before creating
+   anything. Complete only owner-approved consumable prices, availability,
+   localizations and review information. A$2.99/A$4.99/A$9.99 remain proposals,
+   not approved or saved prices. Then perform the existing local-build,
+   sandbox/TestFlight and first-consumable App Review steps above.
+
+The current client already loads these IDs and StoreKit-localized prices when
+the support screen opens; there is no additional Expo/Azure enable switch or
+BuyMeACoffee.com integration. Product readiness still needs real sandbox
+verification. This follow-up did not accept agreements, upload identity
+documents, create products, modify prices, build, install, upload or publish.

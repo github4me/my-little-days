@@ -104,3 +104,9 @@ test("compact feed and diaper recency displays elapsed time only", () => {
     assert.deepEqual(placeholders(value!), ["{duration}"], locale);
   }
 });
+
+test("care acknowledgement action is localized in every additional locale", () => {
+  for (const locale of locales) {
+    assert.ok(manualEnglishOverride(locale, "OK")?.trim(), locale);
+  }
+});

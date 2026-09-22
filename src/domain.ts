@@ -234,8 +234,12 @@ export function validateCareRecord(input: unknown): CareRecord {
   return out;
 }
 export function validateState(input: unknown): State {
-  const s = object(input),
-    p = object(s.profile);
+  const s = object(input);
+  if (s.format === "my-little-days-family-backup")
+    return fail(
+      "这是家庭共享记录导出文件。为保护家庭隐私，不能将其导入个人记录或共享家庭，离线时也不支持。现有记录未改变。",
+    );
+  const p = object(s.profile);
   if (s.schemaVersion !== 1) return fail("不支持此备份版本");
   if (
     Object.keys(s).some(
