@@ -35,6 +35,24 @@ Sources: [Apple Dark Mode](https://developer.apple.com/design/human-interface-gu
 `#B5B5BA`, and interactive blue `#84B9E5` with a dark on-primary foreground.
 Automated checks cover foreground/background contrast and surface ordering.
 
+### Calendar filter toolbar — 22 September 2026
+
+The Records calendar's existing day/week/today and record-type controls now sit
+inside one compact rounded frame: semantic `card` background, `line` border
+(1 point), 14-point radius and 4-point inset. Keep blue on selected controls, not
+the outer frame; no shadow, fixed height or clipping is added. The inner row
+measures the space left after the border/inset, so narrow layouts still use the
+existing filter menu and large Dynamic Type keeps its accessible list fallback.
+Button order, 44-point targets, labels, selected states and translations are
+unchanged. The frame is not itself a focusable/grouped accessibility element.
+
+Review follows Apple's [layout grouping](https://developer.apple.com/design/human-interface-guidelines/layout)
+and [adaptive Dark Mode colors](https://developer.apple.com/design/human-interface-guidelines/dark-mode).
+Regression coverage checks both appearances/high-contrast palettes, compact
+filter boundaries, larger text, all selectable languages at 320 points and
+Chinese/English at phone/iPad widths. Browser/native-boundary tests do not certify
+physical iOS Dynamic Type or VoiceOver; those remain device acceptance checks.
+
 Save-location copy must describe the active workspace, not assume that sign-in
 uploads records. Shared records can be saved locally while waiting to synchronize;
 the message must not claim they are already synchronized.

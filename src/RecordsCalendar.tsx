@@ -216,95 +216,112 @@ export default function RecordsCalendar({
   return (
     <View style={{ gap: 16 }}>
       <View
-        onLayout={(event) => setToolbarWidth(event.nativeEvent.layout.width)}
+        testID="calendar-toolbar"
         style={{
-          flexDirection: "row",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 8,
-          flexWrap: "wrap",
+          backgroundColor: c.card,
+          borderColor: c.line,
+          borderWidth: 1,
+          borderRadius: 14,
+          padding: 4,
         }}
       >
         <View
-          onLayout={(event) => setPeriodWidth(event.nativeEvent.layout.width)}
+          testID="calendar-toolbar-content"
+          onLayout={(event) => setToolbarWidth(event.nativeEvent.layout.width)}
           style={{
             flexDirection: "row",
             alignItems: "center",
-            flexShrink: 1,
+            justifyContent: "space-between",
+            gap: 8,
             flexWrap: "wrap",
           }}
         >
-          {(["day", "week", "today"] as const).map((option) => (
+          <View
+            testID="calendar-period-controls"
+            onLayout={(event) => setPeriodWidth(event.nativeEvent.layout.width)}
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              flexShrink: 1,
+              flexWrap: "wrap",
+            }}
+          >
+            {(["day", "week", "today"] as const).map((option) => (
+              <Pressable
+                key={option}
+                accessibilityRole="button"
+                accessibilityLabel={t(
+                  option === "day"
+                    ? "日"
+                    : option === "week"
+                      ? "周"
+                      : "回到今天",
+                )}
+                accessibilityState={{
+                  selected: option !== "today" && mode === option,
+                }}
+                aria-selected={option !== "today" && mode === option}
+                onPress={() => {
+                  if (option === "today") setChosenDay(null);
+                  else setMode(option);
+                  setVisibleRecordCount(3);
+                }}
+                style={({ pressed }) => ({
+                  minWidth: 44,
+                  minHeight: 44,
+                  paddingHorizontal: 8,
+                  paddingVertical: 8,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  borderRadius: 10,
+                  backgroundColor: mode === option ? c.soft : "transparent",
+                  opacity: pressed ? 0.65 : 1,
+                })}
+              >
+                <T
+                  style={{
+                    fontSize: 13,
+                    fontWeight: mode === option ? "700" : "400",
+                    color: mode === option ? c.primary : c.muted,
+                  }}
+                >
+                  {option === "day" ? "日" : option === "week" ? "周" : "今天"}
+                </T>
+              </Pressable>
+            ))}
+          </View>
+          {compactFilters ? (
             <Pressable
-              key={option}
               accessibilityRole="button"
-              accessibilityLabel={t(
-                option === "day" ? "日" : option === "week" ? "周" : "回到今天",
-              )}
-              accessibilityState={{
-                selected: option !== "today" && mode === option,
-              }}
-              aria-selected={option !== "today" && mode === option}
-              onPress={() => {
-                if (option === "today") setChosenDay(null);
-                else setMode(option);
-                setVisibleRecordCount(3);
-              }}
-              style={({ pressed }) => ({
-                minWidth: 44,
+              accessibilityLabel={t("筛选记录：{kind}", {
+                kind: filterLabel(kind),
+              })}
+              accessibilityState={{ expanded: filtersOpen }}
+              aria-expanded={filtersOpen}
+              onPress={() => setFiltersOpen(true)}
+              style={{
+                width: 56,
                 minHeight: 44,
-                paddingHorizontal: 8,
-                paddingVertical: 8,
+                flexDirection: "row",
+                gap: 4,
                 alignItems: "center",
                 justifyContent: "center",
                 borderRadius: 10,
-                backgroundColor: mode === option ? c.soft : "transparent",
-                opacity: pressed ? 0.65 : 1,
-              })}
+                backgroundColor: c.soft,
+                flexShrink: 0,
+              }}
             >
-              <T
-                style={{
-                  fontSize: 13,
-                  fontWeight: mode === option ? "700" : "400",
-                  color: mode === option ? c.primary : c.muted,
-                }}
-              >
-                {option === "day" ? "日" : option === "week" ? "周" : "今天"}
+              <FilterIcon kind={kind} color={c.primary} />
+              <T raw style={{ fontSize: 12, color: c.primary }}>
+                ▾
               </T>
             </Pressable>
-          ))}
+          ) : (
+            <View style={{ flexDirection: "row", flexShrink: 0 }}>
+              {filterKinds.map((value) => filterOption(value))}
+            </View>
+          )}
         </View>
-        {compactFilters ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={t("筛选记录：{kind}", {
-              kind: filterLabel(kind),
-            })}
-            accessibilityState={{ expanded: filtersOpen }}
-            aria-expanded={filtersOpen}
-            onPress={() => setFiltersOpen(true)}
-            style={{
-              width: 56,
-              minHeight: 44,
-              flexDirection: "row",
-              gap: 4,
-              alignItems: "center",
-              justifyContent: "center",
-              borderRadius: 10,
-              backgroundColor: c.soft,
-              flexShrink: 0,
-            }}
-          >
-            <FilterIcon kind={kind} color={c.primary} />
-            <T raw style={{ fontSize: 12, color: c.primary }}>
-              ▾
-            </T>
-          </Pressable>
-        ) : (
-          <View style={{ flexDirection: "row", flexShrink: 0 }}>
-            {filterKinds.map((value) => filterOption(value))}
-          </View>
-        )}
       </View>
       <View style={[row, { gap: 6 }]}>
         <Pressable

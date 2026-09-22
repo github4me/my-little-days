@@ -5,7 +5,12 @@ import test from "node:test";
 import ts from "typescript";
 
 // Native-boundary contract only; no claim of rendered iOS layout.
-function fixture({ fontScale = 1, isDark = false, todayCount = 7 } = {}) {
+function fixture({
+  fontScale = 1,
+  isDark = false,
+  highContrast = false,
+  todayCount = 7,
+} = {}) {
   const state = [],
     refs = [],
     cache = new Map();
@@ -32,7 +37,7 @@ function fixture({ fontScale = 1, isDark = false, todayCount = 7 } = {}) {
       type,
       props: { ...props, children },
     }),
-    useContext: () => ({ isDark }),
+    useContext: () => palette,
     useState(initial) {
       const key = slot++;
       if (!(key in state)) state[key] = initial;
@@ -124,6 +129,7 @@ function fixture({ fontScale = 1, isDark = false, todayCount = 7 } = {}) {
     cache.set(file, module.exports);
     return module.exports;
   }
+  const palette = load("src/palette.ts").selectPalette(isDark, highContrast);
   const Screen = load("src/RecordsCalendar.tsx").default;
   function walk(node) {
     if (Array.isArray(node)) return node.forEach(walk);
@@ -138,8 +144,15 @@ function fixture({ fontScale = 1, isDark = false, todayCount = 7 } = {}) {
   }
   render();
   return {
+    palette,
     render,
     nodes: () => nodes,
+    layout(testID, width) {
+      const node = nodes.find((node) => node.props.testID === testID);
+      assert.ok(node, testID);
+      node.props.onLayout({ nativeEvent: { layout: { width } } });
+      render();
+    },
     press(label) {
       const control = nodes.find(
         (node) =>
@@ -160,6 +173,65 @@ function fixture({ fontScale = 1, isDark = false, todayCount = 7 } = {}) {
       ),
   };
 }
+
+test("calendar toolbar uses a compact adaptive border without hiding or grouping accessible controls", () => {
+  for (const isDark of [false, true]) {
+    for (const highContrast of [false, true]) {
+      const screen = fixture({ isDark, highContrast });
+      const toolbar = screen
+        .nodes()
+        .find((node) => node.props.testID === "calendar-toolbar");
+      assert.equal(toolbar.props.style.backgroundColor, screen.palette.card);
+      assert.equal(toolbar.props.style.borderColor, screen.palette.line);
+      assert.equal(toolbar.props.style.borderWidth, 1);
+      assert.equal(toolbar.props.style.borderRadius, 14);
+      assert.equal(toolbar.props.style.padding, 4);
+      assert.equal(toolbar.props.style.overflow, undefined);
+      assert.equal(toolbar.props.style.height, undefined);
+      assert.equal(toolbar.props.accessible, undefined);
+      assert.equal(toolbar.props.onPress, undefined);
+    }
+  }
+});
+
+test("calendar filters use the measured inner width and preserve 44-point targets", () => {
+  const screen = fixture();
+  screen.layout("calendar-period-controls", 144);
+  screen.layout("calendar-toolbar-content", 328);
+  let filters = screen
+    .nodes()
+    .filter((node) => node.props.accessibilityLabel?.startsWith("筛选："));
+  assert.equal(filters.length, 4);
+  for (const filter of filters) {
+    const style = filter.props.style({ pressed: false });
+    assert.ok(style.minWidth >= 44 && style.minHeight >= 44);
+  }
+  screen.press("筛选：睡眠");
+  screen.layout("calendar-toolbar-content", 327);
+  const collapsed = screen
+    .nodes()
+    .find((node) => node.props.accessibilityLabel === "筛选记录：睡眠");
+  assert.ok(collapsed);
+  assert.ok(
+    collapsed.props.style.width >= 44 && collapsed.props.style.minHeight >= 44,
+  );
+  screen.press("筛选记录：睡眠");
+  screen.press("筛选：全部");
+  assert.equal(screen.list().length, 3);
+});
+
+test("large text keeps the filter menu even when the bordered toolbar has ample space", () => {
+  for (const fontScale of [1.3, 2, 3]) {
+    const screen = fixture({ fontScale });
+    screen.layout("calendar-period-controls", 240);
+    screen.layout("calendar-toolbar-content", 720);
+    assert.ok(
+      screen
+        .nodes()
+        .some((node) => node.props.accessibilityLabel === "筛选记录：全部"),
+    );
+  }
+});
 
 test("larger reading sizes replace truncated timeline labels with paged full record rows", () => {
   const regular = fixture();

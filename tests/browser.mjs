@@ -1934,7 +1934,39 @@ assert.equal(
   "true",
 );
 await page.getByRole("button", { name: "Calendar", exact: true }).click();
+async function assertCalendarToolbarFrame() {
+  const toolbar = page.getByTestId("calendar-toolbar");
+  await toolbar.scrollIntoViewIfNeeded();
+  const frame = await toolbar.boundingBox();
+  assert.ok(
+    frame && frame.x >= 0 && frame.x + frame.width <= page.viewportSize().width,
+  );
+  const style = await toolbar.evaluate((node) => {
+    const style = getComputedStyle(node);
+    return {
+      border: style.borderTopWidth,
+      radius: style.borderTopLeftRadius,
+      background: style.backgroundColor,
+      shadow: style.boxShadow,
+    };
+  });
+  assert.equal(style.border, "1px");
+  assert.equal(style.radius, "14px");
+  assert.notEqual(style.background, "rgba(0, 0, 0, 0)");
+  assert.equal(style.shadow, "none");
+  for (const button of await toolbar.getByRole("button").all()) {
+    const box = await button.boundingBox();
+    assert.ok(box && box.width >= 44 && box.height >= 44);
+    assert.ok(
+      box.x >= frame.x && box.x + box.width <= frame.x + frame.width + 1,
+    );
+    assert.ok(
+      box.y >= frame.y && box.y + box.height <= frame.y + frame.height + 1,
+    );
+  }
+}
 async function assertCompactCalendarToolbar(labels) {
+  await assertCalendarToolbarFrame();
   const boxes = await Promise.all(
     labels.map((name) =>
       page.getByRole("button", { name, exact: true }).boundingBox(),
@@ -2038,6 +2070,7 @@ assert.equal(
 );
 await page.setViewportSize({ width: 390, height: 844 });
 await page.getByRole("button", { name: "Filter: All", exact: true }).waitFor();
+await assertCalendarToolbarFrame();
 const fullFilterBoxes = await Promise.all(
   ["All", "Feed", "Diaper", "Sleep"].map((label) =>
     page
@@ -2230,6 +2263,7 @@ assert.equal(
 );
 await page.setViewportSize({ width: 390, height: 844 });
 await page.getByRole("button", { name: "筛选：尿布", exact: true }).waitFor();
+await assertCalendarToolbarFrame();
 assert.equal(
   await page
     .getByRole("button", { name: "筛选：尿布", exact: true })
@@ -2718,6 +2752,9 @@ await page.evaluate(() => {
   );
 });
 await page.setViewportSize({ width: 320, height: 740 });
+await page.evaluate(() =>
+  localStorage.setItem("little-days-v1-record-view", "calendar"),
+);
 await page.reload();
 for (const language of languageOptions.slice(1)) {
   await page.getByRole("tab").last().click();
@@ -2742,6 +2779,8 @@ for (const language of languageOptions.slice(1)) {
       `${language}: ${kind} wrapped: ${box?.height}`,
     );
   }
+  await page.getByRole("tab").nth(2).click();
+  await assertCalendarToolbarFrame();
 }
 assert.deepEqual(errors, []);
 console.log(

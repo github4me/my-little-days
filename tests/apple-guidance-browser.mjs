@@ -12,6 +12,8 @@ const scenarios = [
   { width: 320, language: "zh", dark: false, contrast: "more" },
   { width: 390, language: "en", dark: false, contrast: "no-preference" },
   { width: 390, language: "zh", dark: true, contrast: "no-preference" },
+  { width: 375, language: "en", dark: false, contrast: "no-preference" },
+  { width: 375, language: "zh", dark: true, contrast: "no-preference" },
   { width: 768, language: "en", dark: true, contrast: "more" },
 ];
 const copy = {
@@ -200,6 +202,62 @@ try {
       await select(index);
       await noPageOverflow();
     }
+
+    // A subtle adaptive frame separates the calendar's controls from its data.
+    // The inner row measures its usable width after border/padding are removed.
+    await select(2);
+    await page
+      .getByRole("button", {
+        name: language === "en" ? "Calendar" : "日历视图",
+        exact: true,
+      })
+      .click();
+    const toolbar = page.getByTestId("calendar-toolbar");
+    await bounded(toolbar, "calendar toolbar", 44);
+    const toolbarStyle = await toolbar.evaluate((node) => {
+      const style = getComputedStyle(node);
+      return {
+        background: style.backgroundColor,
+        border: style.borderTopColor,
+        width: style.borderTopWidth,
+        radius: style.borderTopLeftRadius,
+      };
+    });
+    assert.deepEqual(toolbarStyle, {
+      background: dark
+        ? contrast === "more"
+          ? "rgb(16, 17, 19)"
+          : "rgb(28, 28, 30)"
+        : "rgb(255, 255, 255)",
+      border: dark
+        ? contrast === "more"
+          ? "rgb(152, 152, 159)"
+          : "rgb(72, 72, 74)"
+        : contrast === "more"
+          ? "rgb(98, 98, 107)"
+          : "rgb(209, 209, 214)",
+      width: "1px",
+      radius: "14px",
+    });
+    const frame = await toolbar.boundingBox();
+    assert.ok(
+      frame.height <= 56,
+      `${name}: regular-size toolbar should stay compact`,
+    );
+    for (const button of await toolbar.getByRole("button").all()) {
+      await bounded(button, "calendar control", 44);
+      const box = await button.boundingBox();
+      assert.ok(
+        box.width >= 44 &&
+          box.x >= frame.x &&
+          box.x + box.width <= frame.x + frame.width + 1,
+      );
+    }
+    await noPageOverflow();
+    await page.screenshot({
+      path: path.join(output, `calendar-toolbar-${name}.png`),
+    });
+    await select(4);
 
     // Settings sections are discoverable controls and report expansion state.
     await bounded(
