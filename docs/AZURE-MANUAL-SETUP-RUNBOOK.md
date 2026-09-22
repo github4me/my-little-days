@@ -3270,3 +3270,90 @@ These checks do not establish signed-device behavior or App Review acceptance.
   Metro stopped, Chinese/English and light/dark coffee hiding, care-save feedback,
   family export/import restrictions, synchronization, Watch recording and Widget
   refresh. Artifact inspection and Apple processing do not prove those behaviors.
+
+## Compact calendar toolbar — local TestFlight build 43, 22 September 2026 UTC
+
+- **Source:** `07ed2ed66feab247699df56c2ab0f65994cbeda5` on
+  `feature/family-invitations`, committed and pushed through the GitHub plugin.
+  Records calendar now groups the existing period/type controls in one 1-point
+  semantic border with adaptive surface, 14-point corners and 4-point inset.
+  Button order, labels/translations, 44-point targets, filtering and large-text
+  fallbacks are unchanged. Coffee remains disabled. No API/schema change.
+- **Local verification:** TypeScript and **689 tests**, full browser regression
+  (including every selectable language's calendar toolbar at 320-point width),
+  and six isolated Apple-guidance browser scenarios passed. The latter cover
+  Chinese/English, 320/375/390/768 widths, light/dark and increased contrast.
+  Light and dark screenshots were inspected. Fresh frozen-source Swift suites
+  passed **22 Watch** and **6 Widget model** tests. The final test-log wording
+  reports the dynamic scenario count rather than the obsolete capture count;
+  this reporting-only follow-up does not change the archived app.
+- **Remote verification:** [Family sharing CI](https://github.com/github4me/my-little-days/actions/runs/35736608635)
+  passed both **TypeScript and browser** and **API and SQL integration** for the
+  exact frozen app source `07ed2ed6...`.
+- **Freeze and configuration:** all **431** tracked files in the isolated
+  `git archive` matched the source SHA before building. EAS auto-increment changes
+  only the staged iOS build number from 42 to **43**; version/runtime remain
+  **0.2.1**, OTA disabled. Production readback again verified Expo owner
+  `expo4chao`, project `a5210f78-8729-46d4-82a4-7d1d40d30ac6`, Store distribution,
+  channel/environment `production`, exact five public variables from section
+  12.1 and demo `0`. Browser acceptance instead used an isolated no-service web
+  export (`EXPO_NO_DOTENV=1`, empty public API/auth values); `.env.local` was not
+  edited or copied into the release archive.
+  The builder applies the existing `.easignore` exclusions for `server/` and
+  `docs/FAMILY-SHARING-TECH-PLAN.md`. Expo prebuild rewrites only the generated
+  copy's `android`/`ios` launch scripts to `expo run:android`/`expo run:ios`;
+  dependency versions and lockfile must still match the frozen input. Account
+  for these exact expected transformations when comparing builder inputs, not
+  arbitrary missing files or package changes.
+- **Build path:** local EAS CLI `24.7.0` with `--local --non-interactive
+  --freeze-credentials`, `EAS_NO_VCS=1`, `NODE_ENV=production`. Same Xcode
+  `26.5` (`17F42`), Node `24.21.0`, CocoaPods `1.16.2` and Fastlane `2.240.1`.
+  Existing Apple team `A9974KXQ4G`, three Store profiles and certificate are
+  reused. The previously documented Tahoe cached-tool workaround and Expo
+  Doctor maintenance warnings remain; no dependency upgrade or signing-resource
+  replacement is part of this UI release.
+- **Archive and inspection result:** local build succeeded at about
+  `2026-09-22T14:11:44Z` (23 September, 00:11 Melbourne). Strict deep signature
+  verification passed for Phone, Watch and Widget, each **0.2.1 (43)**, using
+  the same profile UUIDs as build 42. Verified all 12 locale bundles, companion
+  and extension identifiers, Store profiles, production push, disabled debug
+  access, App Group only on Phone/Widget, and no Apple Pay entitlement. The
+  4,511,142-byte embedded Hermes bundle contains the new toolbar and expected
+  production configuration; OTA is disabled and coffee remains off. Inspection
+  matched all **431** staged tracked files and **353** packaged files, allowing
+  only the exact transformations/exclusions above. IPA size: **16,952,163 bytes**;
+  SHA-256 `7ff43985aa95e711f8a2dcb0a4f991d95bfdb690b71e607e5aae3e147739b0c8`.
+  Ignored recovery files: `artifacts/MyLittleDays-0.2.1-43.ipa`,
+  `artifacts/MyLittleDays-0.2.1-43.dSYM.zip` and
+  `artifacts/MyLittleDays-0.2.1-43.inspection.json`. Xcode Organizer retains
+  `~/Library/Developer/Xcode/Archives/2026-09-23/MyLittleDays 2026-09-23 00.02.28.xcarchive`.
+  EAS removed its temporary signing keychain and imported provisioning profiles
+  after the successful local build.
+- **Apple location and sequence:** App Store Connect → Apps → My Little Days
+  (`6809826484`) → TestFlight → iOS → **0.2.1 (43)**. After strict IPA signature,
+  target/configuration and embedded-JavaScript checks, upload that exact file via
+  local `xcrun altool` using the existing managed submission key. Then separately
+  verify Apple's build ID/processing and beta states. Keep tester groups and
+  agreements unchanged. The preflight now confirms previous build 42 is `VALID`
+  and `IN_BETA_TESTING` internally/externally, with its existing three groups;
+  this supersedes its earlier ingestion-pending checkpoint.
+- **Upload result:** local `altool` returned **UPLOAD SUCCEEDED with no errors**
+  at `2026-09-22T14:15:40Z` (23 September, 00:15 Melbourne), delivery UUID
+  `0dbd42ea-dde9-449b-a65b-ae724e1f21fa`, for the exact inspected
+  16,952,163-byte IPA. The temporary owner-readable submission key file was
+  removed after upload. This is upload acceptance, not yet proof of Apple
+  processing or tester availability; do not re-upload because ingestion takes
+  time.
+- **Initial processing checkpoint (`2026-09-22T14:16Z`):** the filtered Apple
+  builds API had not yet listed build 43. Keep processing/compliance/tester access
+  pending until a later readback reports this exact build's state. Existing build
+  42 remains available; no tester groups, external review or public release were
+  changed by this submission.
+- **Acceptance boundary:** local archive/signature verification, Apple upload,
+  processing, tester access and physical acceptance are distinct. No EAS cloud
+  build/Workflow or cloud submission, infrastructure deployment, IAP enablement,
+  new tester invitation or public App Store release is requested. The repository
+  baseline is advanced to 43 to avoid build-number reuse. On the eventual signed
+  TestFlight update, verify the toolbar in both appearances, Chinese/English,
+  largest text sizes and VoiceOver, plus normal Phone/Watch/Widget recording and
+  refresh. Do not uninstall a data-bearing app; physical acceptance is pending.

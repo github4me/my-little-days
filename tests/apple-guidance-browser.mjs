@@ -468,7 +468,7 @@ try {
     await context.close();
   }
   console.log(
-    `PASS: 24 isolated browser captures; no external requests were allowed (${blockedExternalRequests} blocked). Native accessibility and keyboard acceptance remains separate.`,
+    `PASS: ${scenarios.length} isolated browser scenarios; no external requests were allowed (${blockedExternalRequests} blocked). Native accessibility and keyboard acceptance remains separate.`,
   );
 } finally {
   await browser.close();
