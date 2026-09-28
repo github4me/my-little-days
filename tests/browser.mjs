@@ -987,7 +987,31 @@ assert.equal(
   await page.getByRole("button", { name: /个月$/, exact: false }).count(),
   0,
 ); // no age filter on the daily list
+const playSwitcher = await page
+  .getByRole("button", { name: "早教", exact: true })
+  .boundingBox();
 await page.getByRole("button", { name: "设置早教", exact: true }).click();
+const settingsSwitcher = await page
+  .getByRole("button", { name: "早教", exact: true })
+  .boundingBox();
+const firstAgeBand = await page
+  .getByRole("button", { name: "0–1 个月", exact: true })
+  .boundingBox();
+assert.ok(playSwitcher && settingsSwitcher && firstAgeBand);
+assert.ok(
+  Math.abs(playSwitcher.y - settingsSwitcher.y) <= 1,
+  "Care section switcher should not move when the age picker appears",
+);
+assert.ok(
+  firstAgeBand.y >= settingsSwitcher.y + settingsSwitcher.height,
+  "age picker should follow the Care section switcher",
+);
+await page
+  .getByRole("heading", { name: "照护", exact: true })
+  .scrollIntoViewIfNeeded();
+await page.screenshot({
+  path: path.join(screenshotDir, "little-days-care-switcher-order.png"),
+});
 await page
   .getByRole("checkbox", { name: "选择早教活动：看看黑白卡", exact: true })
   .click();

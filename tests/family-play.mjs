@@ -237,6 +237,27 @@ test("daily care is the default Care section", async () => {
   assert.ok(world.render().some((node) => node.type === "DailyCare"));
 });
 
+test("Care section switcher stays before the age picker in every mode", async () => {
+  const world = fixture();
+  await world.ready();
+  const switcherIndex = world
+    .render()
+    .findIndex((node) => node.props.accessibilityLabel === "Daily care");
+  assert.ok(switcherIndex >= 0);
+  for (const mode of ["Play", "Play settings", "Daily care"]) {
+    await world.press(mode);
+    const nodes = world.render();
+    assert.equal(
+      nodes.findIndex((node) => node.props.accessibilityLabel === "Daily care"),
+      switcherIndex,
+    );
+    const agePickerIndex = nodes.findIndex(
+      (node) => node.props.accessibilityLabel === "0–1 months",
+    );
+    assert.equal(agePickerIndex > switcherIndex, mode === "Play settings");
+  }
+});
+
 test("shared play renders family selections and submits check-ins only to the family callback", async () => {
   const world = fixture();
   await world.ready();

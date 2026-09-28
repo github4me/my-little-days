@@ -403,6 +403,31 @@ export default function PlayLearning({
           </ScrollView>
         </SafeAreaView>
       </Modal>
+      <Options
+        value={mode}
+        label={text("切换照护内容", "Choose a section")}
+        onChange={(value) => {
+          setMode(value);
+          setExpanded(null);
+        }}
+        options={[
+          {
+            value: "care",
+            icon: "care",
+            label: text("日常", "Daily care"),
+          },
+          {
+            value: "today",
+            icon: "activities",
+            label: text("早教", "Play"),
+          },
+          {
+            value: "choose",
+            icon: "choose",
+            label: text("设置早教", "Play settings"),
+          },
+        ]}
+      />
       {mode === "choose" ? (
         <View style={{ gap: 8 }}>
           <T raw style={{ fontSize: 13, color: c.muted }}>
@@ -493,31 +518,6 @@ export default function PlayLearning({
           ) : null}
         </View>
       ) : null}
-      <Options
-        value={mode}
-        label={text("切换照护内容", "Choose a section")}
-        onChange={(value) => {
-          setMode(value);
-          setExpanded(null);
-        }}
-        options={[
-          {
-            value: "care",
-            icon: "care",
-            label: text("日常", "Daily care"),
-          },
-          {
-            value: "today",
-            icon: "activities",
-            label: text("早教", "Play"),
-          },
-          {
-            value: "choose",
-            icon: "choose",
-            label: text("设置早教", "Play settings"),
-          },
-        ]}
-      />
       {mode === "care" ? (
         <DailyCare
           supplementsEnabled={supplementsEnabled}
