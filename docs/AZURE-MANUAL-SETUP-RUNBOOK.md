@@ -3357,3 +3357,49 @@ These checks do not establish signed-device behavior or App Review acceptance.
   TestFlight update, verify the toolbar in both appearances, Chinese/English,
   largest text sizes and VoiceOver, plus normal Phone/Watch/Widget recording and
   refresh. Do not uninstall a data-bearing app; physical acceptance is pending.
+
+## Semantic care icons — EAS TestFlight build 45, 28 September 2026 UTC
+
+- **Source and scope:** `625e52fb69d03e1150c20c31efce4777a65875a2`
+  on `feature/family-invitations` was the exact cloud-build source. The release
+  replaces ambiguous feed/growth icons, gives Watch and Widget semantic bottle
+  and nappy symbols, and visually separates the Care section switcher from the
+  care-record type grid. It contains no API, database, Entra, Azure, purchase or
+  family-lifecycle change.
+- **Verification before build:** TypeScript, the 293-test core suite and the
+  focused family/auth/sync/notification/care/Apple/native-security suites passed.
+  The 12-test Watch/Widget native source suite, full browser regression, web
+  export and iOS export also passed. The macOS-only local prebuild check was not
+  run on Windows; the EAS macOS builder subsequently compiled all native targets.
+- **Resolved production configuration:** Expo owner `expo4chao`, project
+  `a5210f78-8729-46d4-82a4-7d1d40d30ac6`, bundle
+  `com.littledays.babylog`, version/runtime **0.2.1**, Store distribution,
+  channel/environment `production`, OTA disabled and demo flag `0`. All five
+  production variables from section 12.1 were present. Existing certificate and
+  all three provisioning profiles were reused with frozen credentials; no
+  signing resource was replaced.
+- **Build-number collision and recovery:** the first successful cloud artifact,
+  EAS build `60b9d5cd-96e2-4ae2-8c22-11b5e412bb04`, used build **44** and
+  fingerprint `14319b918c1e2d29c57df9f323489130058ee406`. Apple already had a
+  different build 44 uploaded on 26 September, so submissions
+  `e912dcae-9e27-44e7-944c-6cbb4b2e6db6` and
+  `1db3a3da-c0aa-4225-936e-009a0ebcd3df` were rejected as duplicates. Do not
+  identify the older Apple build 44 as this release. The repository baseline was
+  advanced and the release rebuilt as 45.
+- **Successful build and submission:** EAS build
+  `ff1e0f1b-64fc-4222-b849-4699fd64b2c1` produced **0.2.1 (45)** from the source
+  above with fingerprint `8b7fca8a8471731d0d3431d6fc759b7bd7022ee0` and
+  completed at `2026-09-28T07:52:38.356Z`. Exact-build submission
+  `4699b611-317f-4da6-bc3f-622f0eb0fefc` finished at
+  `2026-09-28T07:57:10.768Z`. Apple readback for app `6809826484` reports
+  `VALID`, internal `IN_BETA_TESTING`, external `READY_FOR_BETA_SUBMISSION` and
+  not expired. Thus internal TestFlight is available; external Beta App Review
+  has not been submitted or approved. Tester-group membership was not changed.
+- **Cost and acceptance:** the first build showed 25 builds beyond included
+  credits and USD 5 additional usage; the necessary replacement build showed 26
+  and USD 7 respectively. No Azure/API/SQL/Entra deployment or public App Store
+  release occurred. Physical iPhone, Watch and Widget acceptance remains
+  outstanding: update the existing installation without uninstalling, then check
+  the changed icons and Care hierarchy in light/dark, supported locales, Dynamic
+  Type and VoiceOver. The committed iOS baseline is now **45** so the next EAS
+  auto-increment starts above the accepted Apple build.

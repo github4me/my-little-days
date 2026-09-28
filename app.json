@@ -126,7 +126,7 @@
       "supportsTablet": true,
       "appleTeamId": "A9974KXQ4G",
       "bundleIdentifier": "com.littledays.babylog",
-      "buildNumber": "44",
+      "buildNumber": "45",
       "runtimeVersion": {
         "policy": "appVersion"
       },
