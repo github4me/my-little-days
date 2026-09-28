@@ -1,5 +1,15 @@
 # 验证记录
 
+## 本地 TestFlight build 46 · 2026-09-28（Apple 已处理，现有测试组可用）
+
+- 将远端 `feature/family-invitations` 的 5 个提交与本机全部相关应用、Watch、测试和文档变更合并，发布源码提交 `dc15fb8cbbad78ba59ad2f8ea4781b840423a4c8`，Git tree `cce7be0a9ea60b8eef1d7e2243d2fdda9fde87d9`。保留本机 agent/Impeccable 配置，不作为产品源码发布。包含简化后的今日汇总标签、图表与录入改进、Watch 5 mL 档位及远端 Phone/Watch/Widget 语义图标；咖啡入口仍关闭。
+- 合并后的 `npm run verify`、完整浏览器回归、Apple/UI 浏览器、睡眠图专项、Web 导出、Watch Swift 24 项与 Widget 模型 6 项通过。隔离源码 444 个文件逐一与提交 blob 对照，打包的 366 个文件与冻结源码一致，仅允许自动 build 号和原生生成脚本的已知改写。首次本地构建预检因归档缺少 `node_modules` 在 Xcode 前停止；在隔离源码 `npm ci` 后重新构建成功，未替换签名资源。
+- 本机 EAS CLI 24.7.0 `--local --non-interactive --freeze-credentials --clear-cache` 使用生产环境、既有 Apple 团队与三个 Store profiles；没有 EAS 云构建或付费 Workflow。Xcode 26.5 归档、IPA 导出和 Phone/Watch/Widget 深签名通过；各目标 `0.2.1 (46)`，12 种语言、预期 App Group、production push、禁用 OTA 和 Apple Pay entitlement 状态正确。实际 Hermes 含已核对的 API/tenant/client/scope，demo `0`、咖啡关闭，三个目标的 dSYM UUID 均与导出二进制匹配。
+- 2026-09-28 11:05:46 UTC，本机 `altool` 对 17,002,892 字节的 IPA 返回 **UPLOAD SUCCEEDED with no errors**，delivery UUID `99594bcc-404b-498f-b5e1-4c4ee5b99083`，SHA-256 `fa290558b3c42551f89cfe7a6a4c4c7be23ba669194b2074159f695652cf796c`。临时上传密钥与 EAS 临时签名 Keychain/导入 profiles 已删除，原有开发身份保留。11:06:55 UTC 的第一次 Apple readback 未列出 46；仍需核实处理状态和现有测试组，不能因此重复上传。
+- 11:09:25 UTC 再次读取 Apple：应用 `6809826484` 的同一 build ID `99594bcc-404b-498f-b5e1-4c4ee5b99083` 为 `processingState=VALID`，内部与外部状态均为 `IN_BETA_TESTING`；现有 **Team (Expo)**、**Early Birds** 和 **Outside birds** 三组已关联 46。本轮未变更测试组或发起单独的外部审核，也没有重复上传。
+- 保留 IPA、dSYM ZIP、检查、上传与构建日志于忽略的 `artifacts/`，Xcode Organizer 保留归档。iPhone 既有资料保留、真机 UI/VoiceOver/大字号、配对 Watch 5 mL 与同步、Widget 刷新均待独立验收；不能用签名或 Apple 上传结果代替。
+- 校验保留的 IPA 哈希、dSYM、日志、源码清单、Xcode 归档和 Apple 状态后，仅删除了此次生成的隔离源码/构建及 IPA 解包临时目录，释放约 4.5 GB；未删除工作区原有文件或用户资料。仓库 build 号基线更新为 46，后续不得重用。
+
 ## 今日汇总标签简化 · 2026-09-27（源码变更，未发布）
 
 - 根据真机截图反馈，去掉今日汇总中多余的「已记录／recorded」及「换／changes」措辞。保留三个数值和必要的单位/类别：中文「mL 奶量／小时 睡眠／次 尿布」，英文「mL milk／hours sleep／diapers」；全部 12 种语言同步简化。没有改变统计、原始记录、家庭同步、Watch/Widget 或按钮位置，也没有压缩字号或限制文字缩放。

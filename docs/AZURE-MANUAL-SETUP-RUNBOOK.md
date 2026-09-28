@@ -3552,3 +3552,75 @@ locally built, different Apple build 44; retain both release histories.
   VoiceOver, Chinese/English appearances, paired Watch 5 mL choice/sync or Widget
   refresh. Those remain independent device acceptance items; no Simulator,
   uninstall, data reset, family-record export or destructive flow was used.
+
+## Reconciled UI/Watch release — local TestFlight build 46, 28 September 2026 UTC
+
+- **Source and scope:** existing remote `feature/family-invitations` build-45 tip
+  `6ee4de3abacb9ec74baa187eca07b9ce6edecf55` plus reviewed local UI/Watch/test/
+  documentation work produced GitHub commit
+  `dc15fb8cbbad78ba59ad2f8ea4781b840423a4c8`, tree
+  `cce7be0a9ea60b8eef1d7e2243d2fdda9fde87d9`. The original local work was kept
+  in recoverable Git stashes during reconciliation. Unrelated `.claude/`,
+  `.codex/`, `.impeccable/` and `.github/hooks/` remain local and were not
+  published. No API/SQL/Entra/Azure/IAP data change or public App Store release.
+  The source contains the remote semantic Phone/Watch/Widget icons and Care
+  hierarchy plus the local charts, summaries, translations, editor safeguards
+  and Watch 5 mL selection. Coffee remains disabled.
+- **Local preflight:** target App Store Connect → Apps → My Little Days
+  (`6809826484`) → TestFlight → iOS. Apple already had valid `0.2.1 (45)`; a
+  filtered read confirmed build **46** was unused. Expo owner `expo4chao`,
+  project `a5210f78-8729-46d4-82a4-7d1d40d30ac6`, production Store profile,
+  channel/environment, five approved public variables and demo `0` matched.
+  Original team `A9974KXQ4G`, distribution certificate and three Store profiles
+  were reused; no new credentials, testers, groups or agreements were created.
+- **Verification:** merged `npm run verify`, browser regression, Apple/UI and
+  sleep-chart scenarios, isolated Web export, Watch Swift **24** and Widget-model
+  **6** passed. The Git archive's **444** files matched the published blob hashes.
+  An initial local CLI preflight stopped before Xcode because the fresh archive
+  had no installed modules; `npm ci` in that isolated archive resolved it. The
+  successful build retained **366** source files after existing `.easignore`
+  exclusions, all checked against the commit; only the expected 45 → **46**
+  auto-increment and Expo prebuild script transformations were accepted.
+- **Local build:** this Mac's Xcode **26.5**, Node **24.21.0**, EAS CLI **24.7.0**
+  `--local --non-interactive --freeze-credentials --clear-cache`, fresh bundling,
+  `CI` unset, `EXPO_NO_DOTENV=1` and explicit reviewed public values. No EAS cloud
+  build, cloud Workflow or cloud submission was used. Signed Xcode archive:
+  `~/Library/Developer/Xcode/Archives/2026-09-28/MyLittleDays 2026-09-28 20.57.38.xcarchive`.
+  `codesign --verify --deep --strict` passed for Phone, Watch and Widget, all
+  **0.2.1 (46)**. Same Store profile UUIDs as builds 43/44; 12 localizations each,
+  production push, companion/extension IDs, App Group on Phone/Widget only,
+  disabled OTA and no Apple Pay entitlement. The actual **4,548,295-byte** Hermes
+  bundle contains the expected URL/tenant/client/scope and runtime `0.2.1`;
+  support purchases remain off. Phone/Watch/Widget dSYM UUIDs match their
+  exported Mach-O files.
+- **Artifact and upload:** ignored recovery files include
+  `artifacts/MyLittleDays-0.2.1-46.ipa`, `.dSYM.zip`, `.inspection.json`,
+  `.upload.json`, `.apple-state.json`, `.build.log` and `.xcode.log`.
+  The **17,002,892-byte** IPA SHA-256 is
+  `fa290558b3c42551f89cfe7a6a4c4c7be23ba669194b2074159f695652cf796c`.
+  Local `xcrun altool` using the existing managed submission key returned
+  **UPLOAD SUCCEEDED with no errors** at `2026-09-28T11:05:46Z`, delivery UUID
+  `99594bcc-404b-498f-b5e1-4c4ee5b99083`. The temporary private-key file was
+  deleted; EAS removed its temporary signing keychain/profiles. Do not re-upload
+  while Apple ingests this exact build.
+- **Initial Apple readback (`2026-09-28T11:06:55Z`):** filtered build query did
+  not yet list 46. Require the exact app/build ID, `VALID`, beta status and group
+  assignment before claiming TestFlight availability. Existing build 45 remains
+  usable. This upload does not establish installed iPhone, paired Watch or Widget
+  behavior, data preservation, Dynamic Type or VoiceOver acceptance.
+- **Final Apple readback (`2026-09-28T11:09:25Z`):** app `6809826484`, version
+  `0.2.1`, build **46**, Apple build ID
+  `99594bcc-404b-498f-b5e1-4c4ee5b99083` is `processingState=VALID`, internal
+  `IN_BETA_TESTING` and external `IN_BETA_TESTING`. Existing **Team (Expo)** and
+  **Early Birds** internal groups and **Outside birds** external group have this
+  build. No group/tester change, duplicate upload or separate external-review
+  submission occurred during this operation; no public App Store release.
+- **Cleanup and device boundary:** after checking the retained IPA hash, symbols,
+  logs, source manifest, archive and Apple state, remove only this operation's
+  isolated source/build (approximately 4.5 GB) and IPA unpack directories. The
+  signed IPA, dSYMs, Xcode archive and documentation remain. Update the existing
+  TestFlight installation without uninstalling to verify cold launch, previous
+  data, chart/summary labels, editor exit, Watch 5 mL/sync, Widget refresh,
+  Chinese/English and light/dark, large text and VoiceOver. None of those
+  on-device results are implied by archive or TestFlight availability. The
+  repository iOS build baseline is now **46** to prevent reuse.

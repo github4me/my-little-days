@@ -1,6 +1,6 @@
 # My Little Days — project lessons and working memory
 
-Last reviewed: **26 September 2026**, after UI/Watch regression, local device installation and local TestFlight build 44 upload/processing with internal tester availability. External beta review and physical acceptance remain separate checkpoints in the runbook.
+Last reviewed: **28 September 2026**, after reconciling the remote care-icon release with local UI/Watch work and locally building/uploading TestFlight build 46. Apple processing confirmed tester availability; physical acceptance remains a separate checkpoint in the runbook.
 
 This retrospective records the project's observed failures, decisions and safeguards—not a new security audit or a claim that every device scenario passed. Durable rules live in [AGENTS.md](../AGENTS.md); current environment values and deployment evidence belong in the [manual runbook](AZURE-MANUAL-SETUP-RUNBOOK.md). Historical observations below must not be treated as today's live configuration without checking.
 
@@ -43,6 +43,15 @@ required boundary:
    build, paid EAS Workflow or paid preview build unless the user later gives
    explicit exception approval after seeing the expected charge. Read-only EAS
    checks and downloading existing managed credentials for a local build are fine.
+
+The remote build-45 record on 28 September documents two EAS cloud attempts and
+USD 7 additional usage by the replacement build; that historical run does not
+change the local-only instruction. The follow-up build 46 used this Mac, the
+existing profiles and a direct Apple upload. A fresh `git archive` contains no
+`node_modules`; run `npm ci` in the isolated source before invoking local EAS,
+or plugin resolution stops before Xcode. When piping build logs through `tee`,
+enable `pipefail` so a failed build cannot appear successful merely because the
+log copy completed. Keep source, Apple build number and artifact SHA separate.
 
 An Xcode Debug install is not a standalone offline app. Its generated
 `AppDelegate.swift` requests the JS URL from Metro and the Debug build omits
