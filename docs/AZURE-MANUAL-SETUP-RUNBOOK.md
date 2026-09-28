@@ -3403,3 +3403,152 @@ These checks do not establish signed-device behavior or App Review acceptance.
   the changed icons and Care hierarchy in light/dark, supported locales, Dynamic
   Type and VoiceOver. The committed iOS baseline is now **45** so the next EAS
   auto-increment starts above the accepted Apple build.
+
+The following 26 September checkpoints predate build 45 and document the
+locally built, different Apple build 44; retain both release histories.
+
+## Connected-device local Release checkpoint — 26 September 2026
+
+- **Location and scope:** this Mac's existing checkout and
+  `ios/MyLittleDays.xcworkspace`; connected iPhone 11, iOS 26.1, Developer Mode
+  enabled. The user unlocked the phone. Base SHA
+  `38eeb4ee3cf83f63eb3396064ad6018faedb1e27` plus pending UI/Watch changes is a
+  development test input, not a frozen release. Xcode 26.5 and the existing Apple
+  Development identity/team `A9974KXQ4G` remained usable. No certificate/profile
+  was replaced and no cloud build or upload was started.
+- **Generation:** `NODE_ENV=production npx expo prebuild --platform ios
+  --no-install --no-clean --skip-dependency-update react,react-native` reused the
+  native directory. `pod install --deployment` succeeded. Verify generated Watch
+  files against `watch/` so the 5 mL picker change reaches the native target;
+  check Widget files too. Restore only the prebuild-generated `android`/`ios`
+  package scripts to their prior values, preserving pending test-script edits.
+- **Public configuration/cache correction:** validate section 12.1's existing
+  `EXPO_PUBLIC_FAMILY_API_URL`, `EXPO_PUBLIC_ENTRA_TENANT_ID`,
+  `EXPO_PUBLIC_ENTRA_CLIENT_ID`, `EXPO_PUBLIC_ENTRA_API_SCOPE` and
+  `EXPO_PUBLIC_FAMILY_UI_DEMO=0`. Never introduce a server secret or credential.
+  An initial successful native build logged dotenv loading but contained
+  `undefined` connection values left in cached transforms from the deliberately
+  isolated empty-config verification export. The installed Expo `export:embed`
+  code disables `--reset-cache` when `CI=1`; an explicit-environment rebuild with
+  `CI=1` also retained that output. Neither bad artifact was installed.
+- **Corrected build:** unset `CI` for the local command, explicitly pass the five
+  approved public values plus `NODE_ENV=production`, `EXPO_NO_DOTENV=1` and
+  `EXTRA_PACKAGER_ARGS='--max-workers 2'`, then run `xcodebuild -workspace
+  ios/MyLittleDays.xcworkspace -scheme MyLittleDays -configuration Release
+  -destination 'id=<connected device UDID>' -jobs 4 build`. Do not store the UDID
+  here. Expected: the bundler reports a fresh cache and the **actual intermediate
+  JS and signed Hermes bundle** contain the expected URL/tenant/client/scope,
+  not just the environment log. This check passed after the fresh rebuild.
+- **Inspection:** `codesign --verify --deep --strict` passed. Phone, embedded
+  Watch and Widget matched their original bundle IDs, team, `0.2.1 (43)`, valid
+  development profiles including this device, and 12 localization bundles each.
+  Phone/Widget retained `group.com.littledays.babylog.widgets`; no Apple Pay
+  entitlement was added. `Expo.plist` has `EXUpdatesEnabled=false`.
+  `main.jsbundle` is 4,546,235-byte Hermes bytecode, SHA-256
+  `af7c14294321cdc0d90edeaf4e86bf912c8cd73db6ba1395dd6c9992b26bb8bd`.
+  Build logs have nonblocking dependency/compiler warnings, not zero warnings.
+- **Install and launch:** use `xcrun devicectl device install app --device
+  <connected CoreDevice identifier> <built MyLittleDays.app>` to update in place,
+  then `xcrun devicectl device process launch --device <same identifier>
+  com.littledays.babylog`. Installation and launch succeeded at approximately
+  `2026-09-26T10:46:22Z`; filtered inventory reports `0.2.1 (43)` and the same
+  process was still present about 23 seconds later. No app uninstall, family-data
+  export/reset, Metro start or interruption of another project's 8081 service
+  occurred.
+- **Acceptance boundary:** this Release-configuration app embeds JS but is signed
+  for device development, not App Store distribution. Its local build number 43
+  does not replace or update the older TestFlight 43. A future TestFlight release
+  needs a reviewed frozen source/configuration, an unused build number and the
+  existing App Store signing/archive/upload checks. Still require user-visible
+  loading and data-preservation confirmation, native alert/keyboard/Dynamic Type/
+  VoiceOver and Chinese/English light/dark review, paired Watch installation,
+  5 mL choice/sync and Widget placement/refresh. Do not infer those results from
+  signatures, embedded products or a running phone process.
+
+## UI/Watch corrections — local TestFlight build 44, 26 September 2026
+
+- **Authority/source:** the user requested TestFlight submission after completion.
+  No Git commit/push was requested in this turn. Freeze the reviewed working-tree
+  changes with a separate temporary index, preserving the real index and all
+  unrelated files: base commit `38eeb4ee3cf83f63eb3396064ad6018faedb1e27`, Git
+  **tree** `11e68a7e3a9759436ef77f63a2ecc4fa1eaf947c`, **443** files. Do not call
+  this tree a published commit. An isolated archive matched every frozen blob;
+  pending skill/hook configurations, `.env.local`, private work and credentials
+  were excluded. Source manifest is ignored under `work/testflight-20260926/`.
+- **Scope/verification:** includes sleep/summary/growth chart accessibility and
+  collision fixes, translated editor-exit confirmation, recording terminology,
+  accessible record action names, fully visible statistics ranges and the Watch
+  5 mL selector. Coffee stays off. Fresh frozen-source `npm ci`, TypeScript and
+  **716** tests passed; full browser regression, **10** Apple/UI and **12** sleep
+  chart scenarios passed. Fresh Swift suites passed **24 Watch**, **6 Widget**.
+  No new GitHub CI, backend/SQL deployment, family-data test or public release.
+- **Live preflight:** Expo owner `expo4chao`, project
+  `a5210f78-8729-46d4-82a4-7d1d40d30ac6`, production profile with Store distribution,
+  production channel/environment and remote existing credentials. A names-only
+  filtered read compared all five public production fields with section 12.1,
+  including demo `0`, without printing unrelated variables. Existing managed ASC
+  submission key belongs to Apple team `A9974KXQ4G`; no replacement was created.
+  Apple app `6809826484` matches `com.littledays.babylog`. Apple latest build 43
+  is `VALID` and internal `IN_BETA_TESTING`, external `BETA_APPROVED`; its three
+  existing groups remain unchanged. EAS cloud build history ends at 40, so use
+  Apple history and retained local artifacts too when choosing a build number.
+- **Local build:** stage auto-incremented **43 → 44**; version/runtime remain
+  **0.2.1**, OTA disabled. EAS CLI **24.7.0** `--local --non-interactive
+  --freeze-credentials --clear-cache`, `EAS_NO_VCS=1`, `NODE_ENV=production`,
+  `EXPO_NO_DOTENV=1`, approved public values and 2 bundling workers were used.
+  Existing cached Tahoe certificate-presence workaround remains in place; no
+  certificate/profile/trust change was made. Xcode **26.5**, Node **24.21.0**,
+  CocoaPods **1.16.2**, Fastlane **2.240.1**. Prebuild/package scripts and the
+  build-number increment were the only accepted source transformations; all
+  **365** packaged frozen-source files matched, with the existing 78 exclusions.
+  Fresh-cache bundling avoided the empty-config cache problem above. Expo Doctor
+  retained its documented maintenance warnings; no dependency upgrade was made.
+- **Artifact acceptance:** archive/export succeeded and `codesign --verify
+  --deep --strict` passed for all three products. Phone, Watch and Widget each
+  **0.2.1 (44)** reuse the exact build-43 Store profile UUIDs; Store/TestFlight
+  entitlements, `get-task-allow=false`, production push, companion/extension IDs,
+  unexpired profiles, 12 locale bundles and App Group only on Phone/Widget passed.
+  No Apple Pay entitlement. Actual Hermes is **4,546,266 bytes**, contains the
+  expected URL/tenant/client/scope, runtime `0.2.1`, OTA off and coffee off.
+  SHA-256 **`3c59ebe9b96a1204166505f6d6ae6692e5af1022b96a23ba29403bbd0a824a96`**
+  identifies the **16,981,073-byte** IPA. Phone, Watch and Widget dSYM UUIDs match
+  the corresponding exported Mach-O binaries.
+- **Recovery:** ignored `artifacts/MyLittleDays-0.2.1-44.ipa`,
+  `.dSYM.zip`, `.inspection.json`, `.upload.json` and `.apple-state.json`; Xcode
+  Organizer retains
+  `~/Library/Developer/Xcode/Archives/2026-09-26/MyLittleDays 2026-09-26 21.01.56.xcarchive`.
+  Preserve these plus the frozen tree/manifest, not credentials. Workspace
+  `app.json` baseline now records 44 to prevent future build-number reuse.
+- **Apple upload:** location App Store Connect → Apps → My Little Days
+  (`6809826484`) → TestFlight → iOS → **0.2.1 (44)**. The existing managed key
+  was used only in memory for readback, and in an owner-readable temporary file
+  for local `xcrun altool --upload-app`. File/directory were removed after the
+  uploader exited. **UPLOAD SUCCEEDED with no errors** at
+  `2026-09-26T11:09:12Z`, delivery UUID
+  `b18e00e9-09e8-4577-a534-cd8954a45e11`, for the exact inspected hash. EAS removed
+  its temporary signing keychain and imported profiles; the existing Apple
+  Development identity remained valid. No EAS cloud submission was used.
+- **Initial Apple processing (`2026-09-26T11:10:06Z`):** filtered build readback
+  had not yet listed 44. This is ingestion pending, not a reason to re-upload.
+  Require the exact app/build ID, `VALID`, beta states and existing group access
+  before declaring tester availability. Do not change agreements, review settings
+  or tester groups to make the check look successful.
+- **Final Apple processing (`2026-09-26T11:12:11Z`):** app `6809826484`, version
+  `0.2.1`, build **44**, Apple build ID
+  `b18e00e9-09e8-4577-a534-cd8954a45e11` returned `processingState=VALID` and
+  `internalBuildState=IN_BETA_TESTING`. Existing internal groups **Team (Expo)**
+  and **Early Birds** have this build; no group/tester changes were made.
+  `externalBuildState=READY_FOR_BETA_SUBMISSION`; **Outside birds** is not
+  assigned to 44. External Beta App Review submission remains a separate action
+  and was not performed. No duplicate upload was needed.
+- **Cleanup:** after verifying the retained IPA hash, dSYMs, logs, manifest and
+  Xcode archive, removed only this operation's isolated source/build directories
+  (approximately 4.5 GB), IPA unpack directory and separate temporary Git index.
+  The repository index, original working-tree changes and retained release
+  artifacts are unchanged. Temporary build copies are rebuildable from the
+  frozen Git tree; the signed archive and debug symbols remain available.
+- **Physical boundary:** native build/signatures and upload do not confirm UI
+  loading, previous data preservation, native alert/keyboard/Dynamic Type/
+  VoiceOver, Chinese/English appearances, paired Watch 5 mL choice/sync or Widget
+  refresh. Those remain independent device acceptance items; no Simulator,
+  uninstall, data reset, family-record export or destructive flow was used.

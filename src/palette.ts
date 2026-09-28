@@ -25,6 +25,11 @@ export const light = {
   feed: "#FBE0D3",
   diaper: "#FFF0C9",
   sleep: "#E5DDF7",
+  chartSleep: "#C7B9E5",
+  chartFeed: "#99CBEA",
+  chartCare: "#AAD7CD",
+  chartSleepAlternate: "#9E87BE",
+  chartSleepLine: "#72558F",
   growth: "#D8EEE8",
   milestone: "#F0D7B5",
 };
@@ -53,6 +58,11 @@ export const dark: typeof light = {
   feed: "#382E29",
   diaper: "#353123",
   sleep: "#302A40",
+  chartSleep: "#C7B9E5",
+  chartFeed: "#99CBEA",
+  chartCare: "#AAD7CD",
+  chartSleepAlternate: "#9E87BE",
+  chartSleepLine: "#D7C7F0",
   growth: "#263832",
   milestone: "#3A2C31",
 };
@@ -76,6 +86,7 @@ export const lightHighContrast: Palette = {
   heroText: "#142E48",
   heroMuted: "#303F4F",
   heroLine: "#62626B",
+  chartSleepLine: "#53376F",
 };
 
 export const darkHighContrast: Palette = {
@@ -97,6 +108,7 @@ export const darkHighContrast: Palette = {
   heroText: "#FFFFFF",
   heroMuted: "#D8E9F9",
   heroLine: "#98989F",
+  chartSleepLine: "#EBDCFF",
 };
 
 export function selectPalette(isDark: boolean, highContrast = false): Palette {

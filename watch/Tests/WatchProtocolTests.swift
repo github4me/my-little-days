@@ -219,4 +219,41 @@ final class WatchProtocolTests: XCTestCase {
     disk.rememberMilkAmount(90, for: breast)
     XCTAssertEqual(disk.milkAmountDraft?.recordId, feed.id)
   }
+
+  func testMilkAmountChoicesUseFiveMillilitreStepsIncludingBoundsAndDefault() {
+    let choices = WatchMilkAmountChoices.values()
+    XCTAssertEqual(choices.count, 401)
+    XCTAssertEqual(choices.first, 0)
+    XCTAssertEqual(choices.last, 2_000)
+    XCTAssertTrue(choices.contains(120))
+    XCTAssertEqual(Set(choices).count, choices.count)
+    for (previous, next) in zip(choices, choices.dropFirst()) {
+      XCTAssertEqual(next - previous, 5)
+    }
+    for amount in [0, 120, 2_000, -1, 2_001] {
+      XCTAssertEqual(WatchMilkAmountChoices.values(preserving: amount), choices)
+    }
+  }
+
+  func testMilkAmountChoicesPreserveExactLegacyAmountsWithoutChangingRecords() throws {
+    for amount in [1, 137, 1_999] {
+      let choices = WatchMilkAmountChoices.values(preserving: amount)
+      XCTAssertEqual(choices.count, 402)
+      XCTAssertEqual(choices.filter { $0 % 5 != 0 }, [amount])
+      XCTAssertEqual(choices.filter { $0 % 5 == 0 }, WatchMilkAmountChoices.standard)
+      XCTAssertEqual(choices, choices.sorted())
+      XCTAssertEqual(Set(choices).count, choices.count)
+    }
+
+    let feed = bottle(amount: 137)
+    var disk = WatchDisk(context: context(entries: [feed]))
+    XCTAssertEqual(disk.initialMilkAmount(for: feed), 137)
+    disk.rememberMilkAmount(143, for: feed)
+    let restored = try JSONDecoder().decode(WatchDisk.self, from: JSONEncoder().encode(disk))
+    let initialAmount = restored.initialMilkAmount(for: feed)
+    XCTAssertEqual(initialAmount, 143)
+    XCTAssertTrue(WatchMilkAmountChoices.values(preserving: initialAmount).contains(143))
+    XCTAssertEqual(restored.visibleEntries().first?.amount, 137)
+    XCTAssertEqual(restored.visibleEntries().first?.commandEntry.amount, 137)
+  }
 }

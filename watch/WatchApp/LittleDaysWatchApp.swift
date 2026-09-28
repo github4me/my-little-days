@@ -241,11 +241,20 @@ private struct MilkAmountPicker: View {
   @EnvironmentObject private var store: WatchStore
   @Binding var amount: Int
   let title: String
+  @State private var options: [Int]
   @ScaledMetric(relativeTo: .body) private var pickerHeight: CGFloat = 110
+
+  init(amount: Binding<Int>, title: String) {
+    _amount = amount
+    self.title = title
+    // Seed once so an exceptional legacy amount stays available while the crown scrolls.
+    _options = State(initialValue: WatchMilkAmountChoices.values(preserving: amount.wrappedValue))
+  }
+
   var body: some View {
     Section {
       Picker(title, selection: $amount) {
-        ForEach(0...2_000, id: \.self) { value in
+        ForEach(options, id: \.self) { value in
           Text("\(value) mL").monospacedDigit().tag(value)
         }
       }

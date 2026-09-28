@@ -64,6 +64,18 @@ enum WatchClock {
   }
 }
 
+enum WatchMilkAmountChoices {
+  static let standard = Array(stride(from: 0, through: 2_000, by: 5))
+
+  static func values(preserving initialAmount: Int? = nil) -> [Int] {
+    guard let initialAmount, (0...2_000).contains(initialAmount), initialAmount % 5 != 0 else {
+      return standard
+    }
+    // Keep an existing exact amount selectable without rounding saved or phone-originated data.
+    return (standard + [initialAmount]).sorted()
+  }
+}
+
 struct WatchEntry: Codable, Equatable, Identifiable {
   let id: String
   let type: String

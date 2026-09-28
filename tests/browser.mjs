@@ -272,7 +272,7 @@ for (const label of [
 assert.equal(await page.getByRole("textbox").count(), 0);
 await page.getByText("2 次喂奶 · 250 mL · 21分钟", { exact: true }).waitFor();
 assert.equal(
-  await page.getByRole("button", { name: "编辑喂奶", exact: true }).count(),
+  await page.getByRole("button", { name: /^编辑喂奶(?: · .*)?$/ }).count(),
   0,
 );
 assert.equal(
@@ -291,7 +291,7 @@ assert.equal(
   0,
 );
 const compactEdit = await page
-  .getByRole("button", { name: "编辑喂奶", exact: true })
+  .getByRole("button", { name: /^编辑喂奶(?: · .*)?$/ })
   .first()
   .boundingBox();
 assert.ok(
@@ -325,7 +325,7 @@ const recordUnitOptions = await Promise.all(
 );
 assert.ok(recordUnitOptions.every((box) => box.height >= 50));
 await page
-  .getByRole("button", { name: "编辑喂奶", exact: true })
+  .getByRole("button", { name: /^编辑喂奶(?: · .*)?$/ })
   .first()
   .click();
 const quickAmountButtons = await Promise.all(
@@ -353,7 +353,7 @@ await page
   .getByRole("button", { name: "展开当日明细", exact: true })
   .first()
   .click();
-await page.getByRole("button", { name: "编辑尿布", exact: true }).click();
+await page.getByRole("button", { name: /^编辑尿布 · / }).click();
 // Read all three boxes in one frame, even if the sheet is still animating.
 const diaperOptions = await page
   .getByRole("button", { name: /^(有尿|有便|尿 \+ 便)$/ })
@@ -375,7 +375,7 @@ await page.screenshot({
   path: path.join(screenshotDir, "little-days-diaper-options-preview.png"),
 });
 await page.getByLabel("关闭记录编辑", { exact: true }).click();
-await page.getByRole("button", { name: "删除尿布", exact: true }).click();
+await page.getByRole("button", { name: /^删除尿布 · / }).click();
 const deleteConfirmation = await page
   .getByRole("button", { name: "确认删除", exact: true })
   .boundingBox();
@@ -387,13 +387,13 @@ assert.ok(
 );
 await page.getByRole("button", { name: "取消", exact: true }).click();
 assert.equal(
-  await page.getByRole("button", { name: "删除尿布", exact: true }).count(),
+  await page.getByRole("button", { name: /^删除尿布 · / }).count(),
   1,
 );
-await page.getByRole("button", { name: "删除尿布", exact: true }).click();
+await page.getByRole("button", { name: /^删除尿布 · / }).click();
 await page.getByRole("button", { name: "确认删除", exact: true }).click();
 await page
-  .getByRole("button", { name: "删除尿布", exact: true })
+  .getByRole("button", { name: /^删除尿布 · / })
   .waitFor({ state: "detached" });
 assert.equal(
   await page.getByRole("button", { name: "撤销删除", exact: true }).count(),
@@ -671,14 +671,16 @@ await page
   .waitFor();
 await page.getByText("4.1 kg", { exact: false }).waitFor();
 for (const name of ["Edit Measure", "Delete Measure"]) {
-  const action = page.getByRole("button", { name, exact: true }).last();
+  const action = page
+    .getByRole("button", { name: new RegExp(`^${name} · `) })
+    .last();
   assert.equal(await action.locator("svg").count(), 1);
   assert.equal(await action.innerText(), "");
   const target = await action.boundingBox();
   assert.ok(target.width >= 44 && target.height >= 44);
 }
 await page
-  .getByRole("button", { name: "Delete Measure", exact: true })
+  .getByRole("button", { name: /^Delete Measure · / })
   .last()
   .click();
 const growthDeleteConfirmation = await page
@@ -692,7 +694,7 @@ assert.ok(
 await page.getByRole("button", { name: "Cancel", exact: true }).click();
 await page.getByText("4.1 kg", { exact: false }).waitFor();
 await page
-  .getByRole("button", { name: "Delete Measure", exact: true })
+  .getByRole("button", { name: /^Delete Measure · / })
   .last()
   .click();
 await page.getByRole("button", { name: "Delete record", exact: true }).click();
@@ -776,14 +778,14 @@ assert.equal(
   3,
 );
 assert.equal(
-  await page.getByRole("button", { name: "Edit Feed", exact: true }).count(),
+  await page.getByRole("button", { name: /^Edit Feed · / }).count(),
   0,
 );
 await page
   .getByRole("button", { name: "Show day details", exact: true })
   .last()
   .click();
-await page.getByRole("button", { name: "Edit Feed", exact: true }).waitFor();
+await page.getByRole("button", { name: /^Edit Feed · / }).waitFor();
 await assertNoUntranslatedChinese("Records");
 await page.getByRole("button", { name: "Diaper", exact: true }).click();
 await page.getByText("changes", { exact: true }).waitFor();
@@ -969,9 +971,9 @@ assert.equal(finishedFeed.start, runningFeed.start);
 assert.ok(Date.parse(finishedFeed.end) >= Date.parse(finishedFeed.start));
 await page.getByRole("tab", { name: "记录", exact: true }).click();
 await page.getByRole("heading", { name: /^今天 · / }).waitFor();
-await page.getByRole("button", { name: "编辑喂奶", exact: true }).waitFor();
+await page.getByRole("button", { name: /^编辑喂奶(?: · .*)?$/ }).waitFor();
 assert.equal(
-  await page.getByRole("button", { name: "编辑喂奶", exact: true }).count(),
+  await page.getByRole("button", { name: /^编辑喂奶(?: · .*)?$/ }).count(),
   1,
 );
 await page.getByRole("tab", { name: "照护", exact: true }).click();
@@ -1774,7 +1776,7 @@ assert.equal(
   "57.5",
 );
 await page
-  .getByRole("button", { name: "Feeding method: Bottle", exact: true })
+  .getByRole("button", { name: "Feeding method: Expressed milk", exact: true })
   .click();
 await assertAmountShortcuts([60, 90, 120, 150]);
 assert.equal(
@@ -1819,7 +1821,7 @@ await page
   .first()
   .click();
 await page
-  .getByRole("button", { name: "编辑喂奶", exact: true })
+  .getByRole("button", { name: /^编辑喂奶(?: · .*)?$/ })
   .first()
   .click();
 await waitForFeedEditor("关闭记录编辑");

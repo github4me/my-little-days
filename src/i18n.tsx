@@ -228,9 +228,16 @@ const english: Record<string, string> = {
   "一点一滴，都是成长": "Every little moment is growth",
   照顾此刻: "Care right now",
   今日数据: "Today's totals",
-  "mL 已记录奶量": "mL fed today",
-  "小时 已记录睡眠": "hours slept today",
-  "次 换尿布": "diaper changes",
+  "mL 奶量": "mL milk",
+  "小时 睡眠": "hours sleep",
+  "放弃未保存的修改？": "Discard unsaved changes?",
+  "这些修改尚未保存。放弃后无法恢复。":
+    "These changes have not been saved. Discarding them cannot be undone.",
+  继续编辑: "Keep editing",
+  放弃修改: "Discard changes",
+  "断线＝高度压缩；以标签时长为准。":
+    "Break mark = compressed height; read the duration label.",
+  "次 尿布": "diapers",
   正在睡觉: "Sleeping now",
   "还没有记录，轻点开始": "No record yet — tap to start",
   醒了: "Awake",
@@ -440,6 +447,10 @@ const english: Record<string, string> = {
     "● Bottle feeds  ● Breastfeeds count duration only",
   "已记录睡眠，跨日拆分；重叠时段只计一次":
     "Sleep spans are split across days; overlaps count once",
+  "长睡眠柱已缩短至其他睡眠的平均高度；断线标记和标签显示实际时长。":
+    "Long sleep bars are shortened to the average of other sleeps; break marks and labels show the actual duration.",
+  "相邻睡眠柱已错开；底部标记表示本日片段的开始时间。":
+    "Nearby sleep bars are spaced apart; bottom marks show each segment’s start time within this day.",
   一次混合尿布按一次更换统计: "A pee + poo diaper counts as one change",
   删除: "Delete",
   编辑: "Edit",

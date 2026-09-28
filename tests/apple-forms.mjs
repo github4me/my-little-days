@@ -18,6 +18,7 @@ function fixture(component, platform = "ios", fontScale = 1, overrides = {}) {
     closed = 0,
     saved;
   const changed = [];
+  const alerts = [];
   const entry = {
     id: "feed-1",
     type: "feed",
@@ -138,6 +139,10 @@ function fixture(component, platform = "ios", fontScale = 1, overrides = {}) {
               ].map((name) => [name, name]),
             ),
             Platform: { OS: platform },
+            Alert: {
+              alert: (title, detail, buttons, options) =>
+                alerts.push({ title, detail, buttons, options }),
+            },
             Linking: {},
             Keyboard: { dismiss: () => keyboardDismissals++ },
             StyleSheet: { create: (styles) => styles },
@@ -213,6 +218,7 @@ function fixture(component, platform = "ios", fontScale = 1, overrides = {}) {
     saved: () => saved,
     closed: () => closed,
     changed,
+    alerts,
     picker: () => nodes.find((node) => node.type === "DateTimePicker"),
     byLabel: (label) =>
       nodes.find((node) => node.props.accessibilityLabel === label),
@@ -304,6 +310,80 @@ test("editor back and accessibility escape cancel the active picker before closi
     dismiss(screen)();
     assert.equal(screen.closed(), 1);
   }
+});
+
+test("edited amount and notes require a single discard decision on close, back or accessibility escape", () => {
+  for (const dismiss of [
+    (screen) => screen.byLabel("关闭记录编辑").props.onPress,
+    (screen) =>
+      screen.nodes().find((node) => node.type === "Modal").props.onRequestClose,
+    (screen) =>
+      screen.nodes().find((node) => node.type === "SafeAreaView").props
+        .onAccessibilityEscape,
+  ]) {
+    const screen = fixture("EntryEditor");
+    screen.byLabel("实际喝奶量").props.onChangeText("137");
+    screen.byLabel("备注").props.onChangeText("Keep this draft");
+    screen.render();
+    dismiss(screen)();
+    dismiss(screen)();
+    assert.equal(screen.closed(), 0);
+    assert.equal(screen.alerts.length, 1);
+    assert.equal(screen.alerts[0].title, "放弃未保存的修改？");
+    const [keep, discard] = screen.alerts[0].buttons;
+    assert.equal(keep.style, "cancel");
+    assert.equal(discard.style, "destructive");
+    keep.onPress();
+    screen.render();
+    assert.equal(screen.byLabel("实际喝奶量").props.value, "137");
+    assert.equal(screen.byLabel("备注").props.value, "Keep this draft");
+    dismiss(screen)();
+    assert.equal(screen.alerts.length, 2);
+    // A late native dismissal callback from the first alert cannot cancel a newer decision.
+    screen.alerts[0].options.onDismiss();
+    screen.alerts[1].buttons[1].onPress();
+    assert.equal(screen.closed(), 1);
+    assert.equal(screen.saved(), undefined);
+  }
+});
+
+test("reverting edits closes directly; dismissed native confirmation retains the draft", () => {
+  const screen = fixture("EntryEditor");
+  screen.byLabel("实际喝奶量").props.onChangeText("137");
+  screen.render();
+  screen.byLabel("关闭记录编辑").props.onPress();
+  screen.alerts[0].options.onDismiss();
+  screen.render();
+  assert.equal(screen.closed(), 0);
+  assert.equal(screen.byLabel("实际喝奶量").props.value, "137");
+  screen.byLabel("实际喝奶量").props.onChangeText("120");
+  screen.render();
+  screen.byLabel("关闭记录编辑").props.onPress();
+  assert.equal(screen.closed(), 1);
+  assert.equal(screen.alerts.length, 1);
+});
+
+test("save failure preserves changed fields and still guards dismissal", async () => {
+  const screen = fixture("EntryEditor", "ios", 1, {
+    onSave: async () => {
+      throw new Error("Fixture save failed");
+    },
+  });
+  screen.byLabel("实际喝奶量").props.onChangeText("137");
+  screen.render();
+  screen.action("保存记录").props.onPress();
+  await new Promise((resolve) => setImmediate(resolve));
+  screen.render();
+  assert.equal(screen.closed(), 0);
+  assert.equal(screen.byLabel("实际喝奶量").props.value, "137");
+  screen.byLabel("关闭记录编辑").props.onPress();
+  assert.equal(screen.alerts.length, 1);
+});
+
+test("expressed milk is distinct from formula and bottle feeding generally", () => {
+  const screen = fixture("EntryEditor");
+  assert.ok(screen.byLabel("喂养方式：瓶喂母乳"));
+  assert.equal(screen.byLabel("喂养方式：瓶喂"), undefined);
 });
 
 test("native optional end time is a switch; web retains the existing form action", () => {

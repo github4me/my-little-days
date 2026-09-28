@@ -79,3 +79,15 @@ test("night surfaces communicate elevation and category icons do not glare", () 
     assert.ok(contrast(dark.icon, dark[kind]) >= 4.5);
   }
 });
+
+test("sleep chart boundaries and compressed-bar marks remain visible in every appearance", () => {
+  for (const palette of [light, dark, lightHighContrast, darkHighContrast]) {
+    assert.ok(contrast(palette.chartSleepLine, palette.card) >= 3);
+    assert.ok(
+      contrast(palette.controlLine, palette.card) >= 3,
+      "All summary bars have visible outlines",
+    );
+    assert.ok(contrast(palette.primary, palette.soft) >= 3);
+    assert.notEqual(palette.chartSleep, palette.chartSleepAlternate);
+  }
+});

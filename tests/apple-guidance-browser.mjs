@@ -340,7 +340,27 @@ try {
     await page.getByText(words.local, { exact: true }).waitFor();
     await noPageOverflow();
     await page.screenshot({ path: path.join(output, `editor-${name}.png`) });
+    const cancelled = page.waitForEvent("dialog").then(async (dialog) => {
+      assert.equal(dialog.type(), "confirm");
+      assert.match(
+        dialog.message(),
+        language === "en" ? /Discard unsaved changes/ : /放弃未保存的修改/,
+      );
+      await dialog.dismiss();
+    });
     await close.click();
+    await cancelled;
+    assert.equal(
+      await notes.inputValue(),
+      language === "en" ? "Local preview layout check" : "本机预览布局检查",
+    );
+    assert.equal(await close.isVisible(), true);
+    const discarded = page
+      .waitForEvent("dialog")
+      .then((dialog) => dialog.accept());
+    await close.click();
+    await discarded;
+    await close.waitFor({ state: "hidden" });
 
     await select(1);
     await page.getByRole("button", { name: words.daily, exact: true }).click();

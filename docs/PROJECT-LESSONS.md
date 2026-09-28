@@ -1,6 +1,6 @@
 # My Little Days — project lessons and working memory
 
-Last reviewed: **22 September 2026**, after local conflict-resolution, iOS build/signing checks and family backup export verification.
+Last reviewed: **26 September 2026**, after UI/Watch regression, local device installation and local TestFlight build 44 upload/processing with internal tester availability. External beta review and physical acceptance remain separate checkpoints in the runbook.
 
 This retrospective records the project's observed failures, decisions and safeguards—not a new security audit or a claim that every device scenario passed. Durable rules live in [AGENTS.md](../AGENTS.md); current environment values and deployment evidence belong in the [manual runbook](AZURE-MANUAL-SETUP-RUNBOOK.md). Historical observations below must not be treated as today's live configuration without checking.
 
@@ -54,6 +54,21 @@ keep the phone able to reach the Mac's LAN address and allow local-network acces
 if iOS asks. The user then confirmed the app running. Do not uninstall a
 data-bearing app to solve this error. A local Release/archive embeds JS and is the
 path to a Metro-independent TestFlight binary; test that separately.
+
+Inspect the **actual bundled public configuration**, not just dotenv messages or
+successful compilation. On 26 September 2026, a local Release initially reused
+Metro transforms from the earlier intentionally empty API/auth verification
+export: the generated JavaScript contained `undefined` for all four connection
+values even though the build logged `.env.local` loading. The installed Expo
+`export:embed` implementation disables the requested cache reset when `CI=1`.
+Supplying the public values alone did not fix that cached output. Rebuilding with
+`CI` unset, explicit approved public values, `EXPO_NO_DOTENV=1` and
+`EXTRA_PACKAGER_ARGS='--max-workers 2'` reset the cache; both the intermediate JS
+and signed Hermes bundle then contained the expected URL/tenant/client/scope.
+The incorrect artifacts were never installed. After switching between isolated
+and connected builds, force fresh bundling and inspect all four embedded values,
+demo `0`, OTA disabled and all three signatures before installing/uploading.
+Do not stop another project's Metro or uninstall a data-bearing app to fix this.
 
 Family backup is a **fresh authorized server read**, not serialization of the
 optimistic phone cache. A file labelled complete must include the negotiated

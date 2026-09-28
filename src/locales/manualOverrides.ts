@@ -1,5 +1,7 @@
 import type { SupportedLocale } from "../locales";
 import { familyBackupEnglishOverride } from "./familyBackupOverrides";
+import { sleepChartEnglishOverride } from "./sleepChartOverrides";
+import { uiReviewEnglishOverride } from "./uiReviewOverrides";
 
 /**
  * Context-sensitive and safety-critical terms that generic machine translation
@@ -598,7 +600,9 @@ export function manualEnglishOverride(
 ): string | undefined {
   if (locale === "en" || locale === "zh-Hans") return undefined;
   return (
+    uiReviewEnglishOverride(locale, template) ??
     familyBackupEnglishOverride(locale, template) ??
+    sleepChartEnglishOverride(locale, template) ??
     reviewedEnglishOverrides[locale]?.[template] ??
     manualEnglishOverrides[locale][template as ManualOverrideKey]
   );

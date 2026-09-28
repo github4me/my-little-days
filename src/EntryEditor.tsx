@@ -1,6 +1,7 @@
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Keyboard,
   KeyboardAvoidingView,
   Linking,
@@ -28,6 +29,7 @@ import { Entry, makeId, validateEntry } from "./domain";
 import { formatEditableNumber, parseLocalizedNumber, t, useI18n } from "./i18n";
 import { entryStorageDisclosure } from "./entryStorageDisclosure";
 import { feedAmountPresets, formulaFeedingSource } from "./feedAmountPresets";
+import { entryEditorDraftKey } from "./entryEditorDraft";
 
 const names = {
   feed: "喂养",
@@ -39,7 +41,7 @@ const names = {
 type FeedKind = NonNullable<Entry["feedKind"]>;
 const feedOptions: { kind: FeedKind; label: string }[] = [
   { kind: "formula", label: "配方奶" },
-  { kind: "expressed", label: "瓶喂" },
+  { kind: "expressed", label: "瓶喂母乳" },
   { kind: "breast-left", label: "左侧" },
   { kind: "breast-right", label: "右侧" },
   { kind: "breast-both", label: "双侧" },
@@ -195,13 +197,66 @@ export default function EntryEditor({
   const quickAmounts = feedAmountPresets(birthDate, start.date, draft.feedKind);
   const pickerRef = useRef(picker);
   pickerRef.current = picker;
+  const draftKey = entryEditorDraftKey({
+    draft,
+    start,
+    end,
+    hasEnd,
+    amount,
+    weight,
+    length,
+    head,
+  });
+  const initialDraftKey = useRef(draftKey);
+  const discardPrompt = useRef<symbol | null>(null);
+  useEffect(
+    () => () => {
+      discardPrompt.current = null;
+    },
+    [],
+  );
   const requestClose = () => {
-    if (saving.current) return;
+    if (saving.current || discardPrompt.current) return;
     // Escape/back dismisses the topmost interaction, not the entire unsaved
     // editor behind it. Keeping the ref until render also makes a repeated
     // native escape notification in the same event harmless.
-    if (pickerRef.current) setPicker(null);
-    else onClose();
+    if (pickerRef.current) {
+      setPicker(null);
+      return;
+    }
+    if (draftKey === initialDraftKey.current) {
+      onClose();
+      return;
+    }
+    const prompt = Symbol("discard-draft");
+    discardPrompt.current = prompt;
+    const keepEditing = () => {
+      if (discardPrompt.current === prompt) discardPrompt.current = null;
+    };
+    const discard = () => {
+      if (discardPrompt.current !== prompt) return;
+      discardPrompt.current = null;
+      onClose();
+    };
+    if (Platform.OS === "web") {
+      if (
+        globalThis.confirm(
+          `${t("放弃未保存的修改？")}\n\n${t("这些修改尚未保存。放弃后无法恢复。")}`,
+        )
+      )
+        discard();
+      else keepEditing();
+    } else {
+      Alert.alert(
+        t("放弃未保存的修改？"),
+        t("这些修改尚未保存。放弃后无法恢复。"),
+        [
+          { text: t("继续编辑"), style: "cancel", onPress: keepEditing },
+          { text: t("放弃修改"), style: "destructive", onPress: discard },
+        ],
+        { cancelable: true, onDismiss: keepEditing },
+      );
+    }
   };
   const openPicker = (target: "start" | "end", mode: "date" | "time") => {
     const fields = target === "start" ? start : end;

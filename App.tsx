@@ -1225,9 +1225,9 @@ function BabyApp({
           >
             <RecordActionButton
               action="edit"
-              accessibilityLabel={t("编辑{kind}", {
+              accessibilityLabel={`${t("编辑{kind}", {
                 kind: t(kinds[e.type].label),
-              })}
+              })} · ${formatDate(e.start)} ${formatTime(e.start)}`}
               accessibilityHint={t("打开记录编辑界面")}
               disabled={
                 family.sharedMode && !family.canEditRecord("entry", e.id)
@@ -1236,9 +1236,9 @@ function BabyApp({
             />
             <RecordActionButton
               action="delete"
-              accessibilityLabel={t("删除{kind}", {
+              accessibilityLabel={`${t("删除{kind}", {
                 kind: t(kinds[e.type].label),
-              })}
+              })} · ${formatDate(e.start)} ${formatTime(e.start)}`}
               accessibilityHint={t("打开删除确认")}
               disabled={
                 family.sharedMode && !family.canEditRecord("entry", e.id)
@@ -1507,6 +1507,7 @@ function BabyApp({
                     今日数据
                   </T>
                   <View
+                    testID="today-totals"
                     style={[
                       row,
                       largeType && {
@@ -1517,7 +1518,7 @@ function BabyApp({
                     ]}
                   >
                     {[
-                      [formatNumber(summary.feedMl), "mL 已记录奶量"],
+                      [formatNumber(summary.feedMl), "mL 奶量"],
                       [
                         summary.sleepMinutes
                           ? formatNumber(summary.sleepMinutes / 60, {
@@ -1525,10 +1526,10 @@ function BabyApp({
                               maximumFractionDigits: 1,
                             })
                           : formatNumber(0),
-                        "小时 已记录睡眠",
+                        "小时 睡眠",
                       ],
-                      [formatNumber(summary.diaperCount), "次 换尿布"],
-                    ].map(([v, l]) => (
+                      [formatNumber(summary.diaperCount), "次 尿布"],
+                    ].map(([v, l], index) => (
                       <View key={l} style={{ flexShrink: 1, minWidth: 0 }}>
                         <T
                           style={{
@@ -1540,7 +1541,12 @@ function BabyApp({
                         >
                           {v}
                         </T>
-                        <T style={{ color: c.heroMuted, fontSize: 10 }}>{l}</T>
+                        <T
+                          testID={`today-total-label-${index}`}
+                          style={{ color: c.heroMuted, fontSize: 11 }}
+                        >
+                          {l}
+                        </T>
                       </View>
                     ))}
                   </View>

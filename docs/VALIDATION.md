@@ -1,5 +1,48 @@
 # 验证记录
 
+## 今日汇总标签简化 · 2026-09-27（源码变更，未发布）
+
+- 根据真机截图反馈，去掉今日汇总中多余的「已记录／recorded」及「换／changes」措辞。保留三个数值和必要的单位/类别：中文「mL 奶量／小时 睡眠／次 尿布」，英文「mL milk／hours sleep／diapers」；全部 12 种语言同步简化。没有改变统计、原始记录、家庭同步、Watch/Widget 或按钮位置，也没有压缩字号或限制文字缩放。
+- `npm run verify`、Web 导出、完整浏览器回归通过。专项浏览器检查确认 320 px 下全部 12 种语言标签单行且不裁切；另覆盖中文/英文明暗外观、768 px 德文及更高对比度，共 5 个完整 UI 场景。虚构数据不变、无外部请求；检查截图位于忽略的 `work/impeccable-fixes/`。
+- 本轮未进行真机安装或原生 Dynamic Type/VoiceOver 验收，未 commit/push、新建签名构建或上传 TestFlight；已发布的 build 44 不包含这次简化。
+
+## 本地 TestFlight build 44 · 2026-09-26（Apple 已处理，内部测试可用）
+
+- 用户要求本次完成后上传 TestFlight。以基准提交 `38eeb4ee3cf83f63eb3396064ad6018faedb1e27` 加本次 UI/Watch 未提交修改，冻结 Git **tree** `11e68a7e3a9759436ef77f63a2ecc4fa1eaf947c`；443 个源码文件一致，未包含无关技能配置、工作目录、环境文件或密钥。它不是已提交/推送的 Git commit。本轮没有 GitHub 写入或新 CI 运行，也没有 API/SQL 部署。
+- 隔离源码 `npm ci`、TypeScript 与 `npm run verify` 的 716 项测试通过；完整浏览器回归、Apple/UI 专项 10 场景及睡眠图 12 场景通过。Swift Watch 24 项、Widget 模型 6 项通过。只用虚构浏览器资料，不替代原生交互验收。
+- Expo 生产配置和 Apple 现有应用确认无误：原项目、Store 分发、生产环境/频道、五项公共字段、demo `0`、OTA 关闭。Apple 最新已上传 build 43，选择新的 `0.2.1 (44)`；仅使用 EAS CLI 24.7.0 `--local --non-interactive --freeze-credentials --clear-cache`，未启动云构建、付费 Workflow 或云提交。归档输入 365 个打包源码文件与快照一致，只允许 build 号和 prebuild 两个启动脚本的预期变化。既有依赖维护告警仍在，未在冻结发布中升级依赖。
+- 本地归档、导出及 IPA 深签名检查通过。Phone/Watch/Widget 各 `0.2.1 (44)`，原 Store profiles、团队、App Group、12 种语言、production push 和 Store/TestFlight entitlement 正确；没有 Apple Pay entitlement。实际 Hermes 内含正确 API/tenant/client/scope，咖啡关闭、OTA 关闭、runtime `0.2.1`。三个产品的 dSYM UUID 与导出二进制匹配。
+- 2026-09-26 11:09:12 UTC，Apple 本地 `altool` 返回 **UPLOAD SUCCEEDED with no errors**，delivery UUID `b18e00e9-09e8-4577-a534-cd8954a45e11`，16,981,073 字节 IPA SHA-256 `3c59ebe9b96a1204166505f6d6ae6692e5af1022b96a23ba29403bbd0a824a96`。临时上传密钥文件已删除；EAS 已销毁临时签名 Keychain/导入的配置文件，现有开发身份保留。工作区 build 号基线更新为 44，避免下次误重用。
+- 11:10:06 UTC 的首次 Apple readback 尚未列出 44；没有重复上传。11:12:11 UTC 再次确认同一 Apple build ID `b18e00e9-09e8-4577-a534-cd8954a45e11` 的 `processingState=VALID`、`internalBuildState=IN_BETA_TESTING`，现有内部组 **Team (Expo)** 和 **Early Birds** 可测试。外部状态 `READY_FOR_BETA_SUBMISSION`，未分配给 **Outside birds**，本轮没有提交外部 Beta App Review 或修改测试组。
+- IPA、dSYM ZIP、检查、上传及 Apple 状态记录保存在忽略的 `artifacts/`；Xcode Organizer 保留对应 archive。真机加载/旧资料保留、原生草稿退出提示、键盘/VoiceOver/Dynamic Type、Watch 5 mL 与同步、Widget 刷新仍需独立确认；内部测试可用不等于这些交互已验收。
+
+## 本地 Release 真机安装 · 2026-09-26（开发测试版，未发布）
+
+- 用户解锁后，连接的 iPhone 11 / iOS 26.1、Developer Mode 和原有 Apple Development 签名可用。基于 `38eeb4ee3cf83f63eb3396064ad6018faedb1e27` 的当前未提交源码，非清空 prebuild 更新原生工程，`pod install --deployment` 及 Xcode 26.5 本地 Release 构建通过；Watch 的 5 mL 档位源码与生成副本一致。prebuild 自动改写的两个启动脚本已恢复，不影响此前测试脚本修改。
+- Phone、嵌入的 Watch 和 Widget 均通过签名、原有 bundle ID、团队 `A9974KXQ4G`、版本 `0.2.1 (43)`、有效开发配置文件与当前设备、12 个语言资源检查。Phone/Widget 仍有原 App Group；没有 Apple Pay entitlement。内含 4,546,235 字节 Hermes JS，OTA 关闭；这是开发签名 `.app`，不是可上传 TestFlight 的 App Store IPA。
+- 安装前拦截了错误构建：`CI=1` 下 Expo `export:embed` 跳过请求的缓存重置，复用了隔离导出时的空 API/认证转换。单独显式设置公共配置仍复用旧缓存。取消 `CI` 并显式注入既有五个公共字段、关闭 dotenv 和限定 2 个打包 worker 后重新构建，实际中间 JS 和签名 Hermes 包均包含预期 API URL、tenant/client/scope；错误产物没有安装。经验已补入 `PROJECT-LESSONS.md`，操作及证据见运行手册。
+- `devicectl` 通过原 bundle ID 原地覆盖安装；未卸载、清空资料或读取家庭记录。2026-09-26 10:46:22 UTC 启动命令成功，设备报告 `0.2.1 (43)`，约 23 秒后相同应用进程仍在。没有启动此项目的 Metro，也未停止其他项目占用的 8081 服务。
+- **尚需用户真机确认**：实际界面是否正确加载及旧资料是否保留；退出修改草稿的原生提示/VoiceOver 焦点、键盘、系统大字号、中文/英文、明暗图表；配对 Watch 的安装与 5 mL 选择、同步及 Widget 刷新。进程启动和嵌入目标签名不能代替这些验收。本轮未使用 Simulator、提交 Git、推送、上传 TestFlight 或使用 EAS 云构建。
+
+## Impeccable 审查建议修复 · 2026-09-26（源码变更，未发布）
+
+- 记录编辑器只在实际修改后询问「继续编辑／放弃修改」；iOS/Android 使用原生 alert，网页使用浏览器确认。奶量、备注、类型、起止时间、测量和里程碑字段都受保护，未完成或无效的输入也不会因退出检查而被解析或清空。未修改或完全还原的表单直接关闭；返回/读屏退出先取消顶层日期选择，保存期间不能退出，保存失败保留输入。重复退出和旧 alert 的延迟回调不会覆盖新的退出决定。没有新增草稿持久化或家庭资料副本。
+- 奶种明确显示「瓶喂母乳／Expressed milk」，不再把它泛称为「瓶喂／Bottle」。今日汇总各语言明确是「已记录」的数据；说明字号由 10 提高至 11。新增或修订的退出提示、奶种、汇总和简短图例均覆盖全部 12 个语言。
+- 汇总柱增加随增强对比度调整的轮廓；睡眠、汇总和成长 SVG 使用平台系统字体。汇总及成长标签按文字比例放大，画布同时扩展高度/宽度，必要时只让图表横向滚动，不能缩小或裁切标签。WHO 参考线保留实线/虚线区分并提高对比度。相邻喂奶数值标签错层并用引导线连接，柱的时间位置、实际奶量及所有统计值不变。
+- 六种统计范围改成换行展示，长范围不再隐藏在没有提示的横向滚动区域。压缩睡眠图上方新增「断线＝高度压缩；以标签时长为准」的简短图例，下方详细说明、真实时长和时间锚点保留。记录及成长列表的编辑/删除读屏名称加入日期、时间，记录页有结束时间时也包含时间范围。紧凑卡片、原按钮位置、历史分页、隐藏咖啡入口与 Watch 5 mL 档位保持不变。
+- `npm run verify`：716 项测试、TypeScript 检查通过；完整 `npm run test:browser` 通过。`npm run test:apple-browser` 的原有 6 场景及新增 4 场景通过，新增覆盖 320/375/390/768 px、简中/英文/德文、明暗及增强对比度；确认全部统计范围可见、SVG 系统字体/边界、相邻奶量标签不重叠、记录原值不变。`npm run test:sleep-chart` 12 场景通过。独立几何/组件测试覆盖 2/3/4 倍文字及原生 alert 的取消、放弃、重复退出、延迟回调与保存失败。浏览器仅用虚构本机数据，未尝试外部请求。
+- Web、iOS/Hermes 导出及 `git diff --check` 通过；导出使用关闭 dotenv、空 API/认证公共配置的隔离验证环境，不是发布 IPA。Impeccable 对四个已修改主界面文件的检测退出 0，无主要告警；这不是原生可访问性认证。复核浏览器图保存在 `work/impeccable-fixes/`、`work/apple-guidance-review/` 与 `work/sleep-chart-review/`，不作为真机截图。
+- **尚未完成**：原生 alert 的 VoiceOver/焦点、系统 Dynamic Type、键盘打开后的完整录入和图表字体度量仍需 iPhone/iPad 验收。配对 iPhone 11 的 lockState 检查显示仍锁定；本次没有使用 Simulator、安装/卸载应用、修改真实家庭数据、签名构建、提交 Git 或上传 TestFlight。
+
+## 每日睡眠柱状图自适应 · 2026-09-26（源码变更，未发布）
+
+- 只调整记录页展开后的每日睡眠图；喂奶、尿布、范围汇总及原始记录不变。至少有 3 个有效正时长时，超过中位数 2.5 倍的柱以其他非长柱时长的平均高度显示；用蓝色轮廓与断线明确标记，标签仍显示真实的当日片段时长。单条、两条及相近时长保持原比例。
+- 相邻柱分别显示，交替使用睡眠色系，标签错层并用引导线连接。底部标记保留本日片段的实际时间位置；跨午夜记录的整段时长仍可在明细查看。密集记录与大字号扩展图表高度，必要时仅图表横向滚动，不缩小文字或合并记录。
+- 两条显示说明已覆盖全部 12 个语言；深浅色及增强对比度的柱轮廓通过对比度检查。没有改动 API、SQL、Watch/Widget 数据或咖啡功能开关。
+- `npm run verify`、`npm run test:browser`、`npm run test:sleep-chart` 通过。专用浏览器检查覆盖 320/390/768 px × 中英文 × 深浅色，共 12 组，仅使用虚构数据且拦截外部请求；确认标签与柱无重叠/裁切、9 条记录原值未变、重叠时间去重后的每日总量仍为 14 小时 44 分。几何测试另外覆盖 24/48/96 点标签、同起点、午夜边界、无效数字与冻结输入。
+- web 与 iOS/Hermes 导出通过（关闭 dotenv、空 API/认证公共配置的隔离验证产物；不是发布候选 IPA）。浏览器图在 `work/sleep-chart-review/`，不作为 iOS 真机验收证据。
+- **尚未完成**：iPhone 原生 SVG 字体度量、VoiceOver、实际系统大字号验收。已配对的 iPhone 11 当时锁定，未安装、卸载或清空应用；现有 8081 Metro 属于另一个项目，没有停止它。没有创建本地签名 IPA、提交 TestFlight 或发布 OTA；应用仍需新原生构建才能交付这些源码变更。
+
 > 以下按日期保留各轮实际验证结果，不是当前功能或发布状态清单。2026-09-16 的头像、提醒、早教共享及五人名额范围见[共享资料说明](FAMILY-EXTRAS.md)，已完成的数据库/API 与 preview 发布见[运行手册证据](AZURE-MANUAL-SETUP-RUNBOOK.md#shared-extras-release-evidence-16-september-2026)。较早的本机准备、虚构数据试点及旧邀请上限描述只适用于当时版本。两部 iPhone 的激活/恢复、照片显示、实际通知、真实删除与恢复演练仍需独立验收，不能由这些本机测试或发布结果推定通过。
 
 ## 本次发布暂停咖啡购买 · 2026-09-22（源码变更，未发布）

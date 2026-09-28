@@ -5,7 +5,11 @@ import test from "node:test";
 import ts from "typescript";
 
 // Native props and event contracts; physical reading/focus still need iOS checks.
-function fixture(file, props, { fontScale = 1, failMail = false } = {}) {
+function fixture(
+  file,
+  props,
+  { fontScale = 1, failMail = false, highContrast = false } = {},
+) {
   const state = [],
     cache = new Map();
   let slot = 0,
@@ -17,6 +21,11 @@ function fixture(file, props, { fontScale = 1, failMail = false } = {}) {
     primary: "#34759D",
     card: "#FFFFFF",
     bg: "#F4F9FD",
+    controlLine: "#555555",
+    chartFeed: "#99CBEA",
+    chartCare: "#AAD7CD",
+    chartSleep: "#C7B9E5",
+    isHighContrast: highContrast,
   };
   const react = {
     Fragment: "Fragment",
@@ -64,6 +73,7 @@ function fixture(file, props, { fontScale = 1, failMail = false } = {}) {
               View: "View",
               Pressable: "Pressable",
               ScrollView: "ScrollView",
+              Platform: { OS: "ios" },
               useWindowDimensions: () => ({ width: 390, fontScale }),
               Linking: {
                 openURL: async () => {
@@ -102,7 +112,8 @@ function fixture(file, props, { fontScale = 1, failMail = false } = {}) {
                   en.replace(/\{(\w+)\}/g, (_, key) => args?.[key] ?? ""),
               }),
               formatDate: (value) => new Date(value).toISOString().slice(0, 10),
-              formatTime: () => "09:00",
+              formatTime: (value) =>
+                new Date(value).toISOString().slice(11, 16),
               elapsed: () => "10m",
             };
           if (name === "./growth")
@@ -125,6 +136,9 @@ function fixture(file, props, { fontScale = 1, failMail = false } = {}) {
           if (name === "./RecordActionButton")
             return load("src/RecordActionButton.tsx");
           if (name === "./recordRange") return load("src/recordRange.ts");
+          if (name === "./sleepChartLayout")
+            return load("src/sleepChartLayout.ts");
+          if (name === "./chartLayout") return load("src/chartLayout.ts");
           if (name === "./support/release")
             return load("src/support/release.ts");
           throw new Error(`Unexpected dependency ${name}`);
@@ -268,7 +282,7 @@ test("record actions have 44-point targets and announced readonly state; notes s
   for (const label of ["编辑喂奶", "删除喂奶"]) {
     const button = screen
       .nodes()
-      .find((node) => node.props.accessibilityLabel === label);
+      .find((node) => node.props.accessibilityLabel?.startsWith(`${label} · `));
     assert.ok(button);
     assert.equal(button.props.disabled, true);
     assert.equal(button.props.accessibilityState.disabled, true);
@@ -295,10 +309,87 @@ test("record actions have 44-point targets and announced readonly state; notes s
     screen
       .nodes()
       .some(
-        (node) => node.type === "ScrollView" && node.props.horizontal === false,
+        (node) =>
+          node.props.testID === "record-range-options" && node.type === "View",
       ),
     true,
   );
+});
+
+test("summary chart type and geometry grow together; all ranges remain in a wrapping group", () => {
+  const props = {
+    view: "bars",
+    entries: [
+      {
+        id: "fixture",
+        type: "feed",
+        start: new Date(2026, 8, 18, 9).toISOString(),
+        amount: 60,
+        note: "",
+      },
+    ],
+    now: new Date(2026, 8, 18, 12).getTime(),
+    onEdit() {},
+    onDelete() {},
+  };
+  const normal = fixture("src/Records.tsx", props);
+  const large = fixture("src/Records.tsx", props, {
+    fontScale: 2,
+    highContrast: true,
+  });
+  for (const screen of [normal, large]) {
+    const ranges = screen
+      .nodes()
+      .find((node) => node.props.testID === "record-range-options");
+    const chips = ranges.props.children
+      .flat()
+      .find((node) => node.type === "Chips");
+    assert.equal(chips.props.options.length, 6);
+    assert.ok(
+      screen
+        .nodes()
+        .filter((node) => node.type === "SvgText")
+        .every((node) => node.props.fontFamily === "System"),
+    );
+  }
+  const plot = (screen) =>
+    screen.nodes().find((node) => node.props.testID === "record-bars-plot");
+  assert.ok(plot(large).props.height > plot(normal).props.height);
+  assert.ok(plot(large).props.width > plot(normal).props.width);
+  assert.ok(
+    large
+      .nodes()
+      .filter((node) => node.type === "SvgText")
+      .every((node) => node.props.fontSize === 24),
+  );
+  assert.ok(
+    large
+      .nodes()
+      .filter((node) => node.props.testID === "record-bar")
+      .every((node) => node.props.stroke && node.props.strokeWidth === 2),
+  );
+});
+
+test("record action names distinguish records by date and time", () => {
+  const screen = fixture("src/Records.tsx", {
+    view: "bars",
+    entries: [9, 10].map((hour) => ({
+      id: `fixture-${hour}`,
+      type: "feed",
+      start: new Date(2026, 8, 18, hour).toISOString(),
+      amount: 60,
+      note: "",
+    })),
+    now: new Date(2026, 8, 18, 12).getTime(),
+    onEdit() {},
+    onDelete() {},
+  });
+  const names = screen
+    .nodes()
+    .filter((node) => node.props.accessibilityLabel?.startsWith("编辑喂奶 · "))
+    .map((node) => node.props.accessibilityLabel);
+  assert.equal(names.length, 2);
+  assert.equal(new Set(names).size, 2);
 });
 
 test("privacy is readable and a failed mail handoff gives recoverable feedback", async () => {
@@ -372,6 +463,37 @@ test("growth chart exposes a bounded count/latest summary instead of reading eve
       .nodes()
       .filter((node) => node.type === "SvgText")
       .every((node) => node.props.fontSize >= 11),
+  );
+});
+
+test("growth labels use system type and expand their canvas for accessibility text", () => {
+  const props = {
+    entries: [
+      {
+        id: "g",
+        type: "growth",
+        start: "2026-09-18T10:00:00Z",
+        weight: 9.2,
+        note: "",
+      },
+    ],
+    profile: { birthDate: "2026-04-01", sex: "male" },
+    metric: "weight",
+  };
+  const normal = fixture("src/GrowthChart.tsx", props);
+  const large = fixture("src/GrowthChart.tsx", props, { fontScale: 3 });
+  const plot = (screen) =>
+    screen.nodes().find((node) => node.props.testID === "growth-chart-plot");
+  assert.ok(plot(large).props.height > plot(normal).props.height);
+  assert.ok(plot(large).props.width > plot(normal).props.width);
+  assert.ok(
+    large
+      .nodes()
+      .filter((node) => node.type === "SvgText")
+      .every(
+        (node) =>
+          node.props.fontSize === 36 && node.props.fontFamily === "System",
+      ),
   );
 });
 

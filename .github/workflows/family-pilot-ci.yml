@@ -37,6 +37,7 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: npm run test:browser
       - run: npm run test:apple-browser
+      - run: npm run test:sleep-chart
       - name: Export isolated family UI preview
         env:
           EXPO_PUBLIC_FAMILY_UI_DEMO: "1"
