@@ -1,8 +1,19 @@
 import React, { useContext, useEffect, useRef, useState } from "react";
-import { Image, Platform, Pressable, Switch, View } from "react-native";
+import {
+  Image,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  View,
+  useWindowDimensions,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
 import { State, validateState } from "./domain";
 import { Theme, T, Card, Field, Button, Chips, row, heading } from "./ui";
+import CareIcon from "./CareIcon";
 import { exportBackup, importBackup } from "./backup";
 import {
   saveAutoFeedReminder,
@@ -19,8 +30,17 @@ import {
 } from "./reminders";
 import { type ReminderMode, type ReminderSettings } from "./reminderSettings";
 import { copyAvatarFile, deleteAvatarFile } from "./avatar";
-import { t, type LanguagePreference } from "./i18n";
+import {
+  LOCALE_REGISTRY,
+  localeDefinition,
+  t,
+  useI18n,
+  type LanguagePreference,
+} from "./i18n";
 import type { RecordView } from "./recordCalendar";
+import NativeDateTimeField from "./NativeDateTimeField";
+import RecordActionButton from "./RecordActionButton";
+import Modal from "./AccessibleModal";
 
 const reminderKindLabels = {
   feed: "喂养",
@@ -50,7 +70,10 @@ function SettingsSection({
         aria-expanded={expanded}
         disabled={busy}
         onPress={() => setExpanded((value) => !value)}
-        style={({ pressed }) => [row, { opacity: pressed ? 0.7 : 1 }]}
+        style={({ pressed }) => [
+          row,
+          { minHeight: 44, flexWrap: "wrap", opacity: pressed ? 0.7 : 1 },
+        ]}
       >
         <T style={{ flex: 1, minWidth: 0, fontSize: 18, fontWeight: "700" }}>
           {title}
@@ -65,6 +88,17 @@ function SettingsSection({
 }
 
 export default function Settings({
+  familyUiPreview = false,
+  accountPanel,
+  accountDeletionPanel,
+  familySharingVisible = false,
+  sharedMode = false,
+  onExportFamilyBackup,
+  sharedOwner = false,
+  sharedAvatarEditable = false,
+  sharedReminders,
+  familyPushPanel,
+  profileVersion,
   initialProfileExpanded = false,
   state,
   avatarUri,
@@ -77,12 +111,29 @@ export default function Settings({
   language,
   onLanguageChange,
   onOpenPrivacy,
+  onOpenSupport,
+  onOpenFamily,
 }: {
+  familyUiPreview?: boolean;
+  accountPanel?: React.ReactNode;
+  accountDeletionPanel?: React.ReactNode;
+  familySharingVisible?: boolean;
+  sharedMode?: boolean;
+  onExportFamilyBackup?: () => Promise<void>;
+  sharedOwner?: boolean;
+  sharedAvatarEditable?: boolean;
+  sharedReminders?: React.ReactNode;
+  familyPushPanel?: React.ReactNode;
+  profileVersion?: string;
   initialProfileExpanded?: boolean;
   state: State;
   avatarUri: string | null;
   onAvatarChange: (uri: string | null) => Promise<void>;
-  onCommit: (next: State, recovery?: boolean) => Promise<void>;
+  onCommit: (
+    next: State,
+    recovery?: boolean,
+    baseVersion?: string,
+  ) => Promise<void>;
   themePreference: boolean | null;
   recordView: RecordView;
   onRecordViewChange: (value: RecordView) => Promise<void>;
@@ -90,18 +141,30 @@ export default function Settings({
   language: LanguagePreference;
   onLanguageChange: (language: LanguagePreference) => Promise<void>;
   onOpenPrivacy: () => void;
+  onOpenSupport?: () => void;
+  onOpenFamily: () => void;
 }) {
   const c = useContext(Theme);
+  const { localize: copy } = useI18n();
+  const { fontScale } = useWindowDimensions();
+  const largeText = fontScale > 1.3;
+  const [profileDirty, setProfileDirty] = useState(false);
+  const draftProfileVersion = useRef(profileVersion);
+  const sharing = useRef(sharedMode);
+  sharing.current = sharedMode;
   const [name, setName] = useState(state.profile.name),
     [birthDate, setBirthDate] = useState(state.profile.birthDate),
     [sex, setSex] = useState<string>(state.profile.sex);
   const [busy, setBusy] = useState(false),
     lock = useRef(false),
     mounted = useRef(true);
+  const [languagePickerOpen, setLanguagePickerOpen] = useState(false);
+  const [savingProfile, setSavingProfile] = useState(false);
   const [error, setError] = useState(""),
     [message, setMessage] = useState("");
   const [pending, setPending] = useState<State | null>(null),
     [backupNotice, setBackupNotice] = useState("");
+  const [backupImportError, setBackupImportError] = useState("");
   const source = "备份文件";
   const [profileExpanded, setProfileExpanded] = useState(
     initialProfileExpanded,
@@ -122,16 +185,32 @@ export default function Settings({
     setSilent(settings.silent);
   }
   useEffect(() => {
+    if (profileDirty) return;
     setName(state.profile.name);
     setBirthDate(state.profile.birthDate);
     setSex(state.profile.sex);
-  }, [state.profile.name, state.profile.birthDate, state.profile.sex]);
+    draftProfileVersion.current = profileVersion;
+  }, [
+    state.profile.name,
+    state.profile.birthDate,
+    state.profile.sex,
+    profileVersion,
+    profileDirty,
+  ]);
+  useEffect(() => {
+    if (sharedMode) {
+      setPending(null);
+      setBackupNotice("");
+      setBackupImportError("");
+      setReminders([]);
+    }
+  }, [sharedMode]);
   useEffect(() => {
     mounted.current = true;
-    if (Platform.OS !== "web")
+    if (!sharedMode && Platform.OS !== "web")
       Promise.all([listReminders(), loadReminderSettings()])
         .then(([items, savedSettings]) => {
-          if (!mounted.current) return;
+          if (!mounted.current || sharing.current) return;
           setReminders(items);
           const activeSettings = items.find((item) => item.settings)?.settings;
           const settings = savedSettings ?? activeSettings;
@@ -148,11 +227,12 @@ export default function Settings({
     return () => {
       mounted.current = false;
     };
-  }, []);
-  async function run(task: () => Promise<void>) {
+  }, [sharedMode]);
+  async function run(task: () => Promise<void>, profileSave = false) {
     if (lock.current) return;
     lock.current = true;
     setBusy(true);
+    setSavingProfile(profileSave);
     setError("");
     setMessage("");
     try {
@@ -162,7 +242,10 @@ export default function Settings({
         setError(e instanceof Error ? e.message : "操作失败，请重试");
     } finally {
       lock.current = false;
-      if (mounted.current) setBusy(false);
+      if (mounted.current) {
+        setBusy(false);
+        setSavingProfile(false);
+      }
     }
   }
   async function refresh() {
@@ -225,7 +308,7 @@ export default function Settings({
       </View>
       {!!error && (
         <Card>
-          <T accessibilityRole="alert" style={{ color: "#B34B3B" }}>
+          <T accessibilityRole="alert" style={{ color: c.danger }}>
             {t(error)}
           </T>
         </Card>
@@ -237,26 +320,45 @@ export default function Settings({
           </T>
         </Card>
       )}
+      {accountPanel}
       <Card>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={t(
             profileExpanded ? "收起宝宝档案" : "展开宝宝档案",
           )}
-          accessibilityState={{ expanded: profileExpanded }}
+          accessibilityState={{ expanded: profileExpanded, disabled: busy }}
           aria-expanded={profileExpanded}
           disabled={busy}
           onPress={() => setProfileExpanded((expanded) => !expanded)}
-          style={({ pressed }) => [row, { opacity: pressed ? 0.7 : 1 }]}
+          style={({ pressed }) => [
+            row,
+            { minHeight: 44, flexWrap: "wrap", opacity: pressed ? 0.7 : 1 },
+          ]}
         >
-          <T style={{ fontSize: 18, fontWeight: "700" }}>宝宝档案</T>
+          <T style={{ flex: 1, minWidth: 0, fontSize: 18, fontWeight: "700" }}>
+            宝宝档案
+          </T>
           <T style={{ color: c.primary, fontSize: 13 }}>
             {profileExpanded ? "收起　⌃" : "展开　⌄"}
           </T>
         </Pressable>
         {profileExpanded ? (
           <>
-            <View pointerEvents={busy ? "none" : "auto"} style={{ gap: 14 }}>
+            {sharedMode && !sharedOwner ? (
+              <T raw style={{ color: c.muted, fontSize: 13 }}>
+                {copy(
+                  "宝宝档案由家庭管理员编辑。",
+                  "Only the family admin can edit the baby profile.",
+                )}
+              </T>
+            ) : null}
+            <View
+              pointerEvents={
+                busy || (sharedMode && !sharedOwner) ? "none" : "auto"
+              }
+              style={{ gap: 14 }}
+            >
               <View
                 style={{ flexDirection: "row", alignItems: "center", gap: 14 }}
               >
@@ -284,24 +386,35 @@ export default function Settings({
                 </View>
                 <View style={{ flex: 1 }}>
                   <T style={{ fontWeight: "600" }}>宝宝头像</T>
-                  <T style={{ color: c.muted, fontSize: 12 }}>
-                    仅保存在这台设备，不会上传
+                  <T raw style={{ color: c.muted, fontSize: 12 }}>
+                    {sharedMode
+                      ? copy(
+                          "宝宝头像与家庭共享，由管理员管理。",
+                          "The baby photo is shared with the family and managed by the admin.",
+                        )
+                      : t("仅保存在这台设备，不会上传")}
                   </T>
                 </View>
               </View>
-              {Platform.OS === "web" ? (
+              {sharedMode && !sharedOwner ? null : Platform.OS === "web" ? (
                 <T style={{ color: c.muted, fontSize: 12 }}>
                   网页预览不支持保存本机头像，请在手机安装版中设置。
                 </T>
               ) : (
-                <View style={{ flexDirection: "row", gap: 10 }}>
+                <View
+                  style={{
+                    flexDirection: largeText ? "column" : "row",
+                    gap: 10,
+                  }}
+                >
                   <Button
                     label={avatarUri ? "更换照片" : "选择照片"}
                     secondary
-                    disabled={busy}
+                    disabled={busy || (sharedMode && !sharedAvatarEditable)}
                     style={{ flex: 1 }}
                     onPress={() =>
                       run(async () => {
+                        if (sharedMode && !sharedAvatarEditable) return;
                         const result =
                           await ImagePicker.launchImageLibraryAsync({
                             mediaTypes: ["images"],
@@ -309,7 +422,23 @@ export default function Settings({
                             aspect: [1, 1],
                             quality: 0.7,
                           });
-                        if (result.canceled) return;
+                        if (
+                          result.canceled ||
+                          sharing.current !== sharedMode ||
+                          !mounted.current
+                        )
+                          return;
+                        if (sharedMode) {
+                          await onAvatarChange(result.assets[0].uri);
+                          if (mounted.current)
+                            setMessage(
+                              copy(
+                                "头像已保存，等待家庭同步。",
+                                "Photo saved, waiting for family sync.",
+                              ),
+                            );
+                          return;
+                        }
                         const nextAvatar = await copyAvatarFile(
                           result.assets[0].uri,
                         );
@@ -325,15 +454,18 @@ export default function Settings({
                     }
                   />
                   {avatarUri ? (
-                    <Button
-                      label="移除头像"
-                      secondary
-                      disabled={busy}
-                      style={{ flex: 1 }}
+                    <RecordActionButton
+                      action="delete"
+                      accessibilityLabel={t("移除头像")}
+                      accessibilityHint={copy(
+                        "移除宝宝头像",
+                        "Removes the baby photo",
+                      )}
+                      disabled={busy || (sharedMode && !sharedAvatarEditable)}
                       onPress={() =>
                         run(async () => {
                           await onAvatarChange(null);
-                          await deleteAvatarFile(avatarUri);
+                          if (!sharedMode) await deleteAvatarFile(avatarUri);
                           setMessage("宝宝头像已移除");
                         })
                       }
@@ -342,25 +474,40 @@ export default function Settings({
                 </View>
               )}
               <Field
+                editable={!busy && (!sharedMode || sharedOwner)}
                 label="宝宝名字"
                 value={name}
-                onChange={setName}
+                onChange={(value) => {
+                  setProfileDirty(true);
+                  setName(value);
+                }}
                 maxLength={100}
                 placeholder="宝宝"
               />
-              <Field
+              <NativeDateTimeField
+                editable={!busy && (!sharedMode || sharedOwner)}
                 label="出生日期 · 可暂不填写"
+                mode="date"
+                optional
+                minimumDate={new Date(1900, 0, 1)}
+                maximumDate={new Date()}
                 value={birthDate}
-                onChange={setBirthDate}
+                onChange={(value) => {
+                  setProfileDirty(true);
+                  setBirthDate(value);
+                }}
                 placeholder="YYYY-MM-DD"
-                maxLength={10}
               />
               <T style={{ color: c.muted, fontSize: 13 }}>
                 性别 · 用于匹配成长参考曲线
               </T>
               <Chips
+                disabled={busy || (sharedMode && !sharedOwner)}
                 value={sex}
-                onChange={setSex}
+                onChange={(value) => {
+                  setProfileDirty(true);
+                  setSex(value);
+                }}
                 iconized
                 options={[
                   { label: "男宝宝", value: "male", icon: "♂" },
@@ -370,113 +517,271 @@ export default function Settings({
               />
             </View>
             <Button
-              label="保存档案"
-              disabled={busy}
+              label={savingProfile ? "正在保存" : "保存档案"}
+              disabled={busy || (sharedMode && !sharedOwner)}
               onPress={() =>
                 run(async () => {
-                  const next = validateState({
-                    ...state,
+                  if (sharedMode && !sharedOwner) return;
+                  const validated = validateState({
+                    schemaVersion: 1,
+                    entries: [],
                     profile: {
                       name: name.trim(),
                       birthDate: birthDate.trim(),
                       sex,
                     },
                   });
+                  const next = { ...state, profile: validated.profile };
                   if (next.profile.birthDate) {
                     const now = new Date(),
                       today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
                     if (next.profile.birthDate > today)
                       throw new Error("出生日期不能在未来");
                   }
-                  await onCommit(next);
+                  await onCommit(next, false, draftProfileVersion.current);
+                  setProfileDirty(false);
                   setMessage("宝宝档案已保存");
-                })
+                }, true)
               }
             />
+            {sharedMode && profileDirty ? (
+              <Button
+                secondary
+                label={copy(
+                  "取消修改，查看最新档案",
+                  "Discard changes and show latest profile",
+                )}
+                onPress={() => {
+                  setProfileDirty(false);
+                  setError("");
+                }}
+              />
+            ) : null}
           </>
         ) : null}
       </Card>
-      <SettingsSection title="语言" busy={busy}>
-        <T style={{ color: c.muted, fontSize: 13 }}>
-          跟随系统语言，或在这里固定选择显示语言。
-        </T>
-        <View style={{ flexDirection: "row", gap: 8 }}>
-          {[
+      {familySharingVisible || familyUiPreview ? (
+        <Card>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={copy("家庭共享", "Family sharing")}
+            onPress={onOpenFamily}
+            style={({ pressed }) => [
+              row,
+              { minHeight: 44, opacity: pressed ? 0.7 : 1 },
+            ]}
+          >
+            <T raw style={{ flex: 1, fontSize: 18, fontWeight: "700" }}>
+              {copy("家庭共享", "Family sharing")}
+            </T>
+            <T
+              raw
+              accessibilityElementsHidden
+              style={{ color: c.primary, fontSize: 22 }}
+            >
+              ›
+            </T>
+          </Pressable>
+        </Card>
+      ) : null}
+      <Card style={{ paddingVertical: 4, gap: 0 }}>
+        <Pressable
+          testID="language-picker-row"
+          accessibilityRole="button"
+          accessibilityLabel={`${t("语言")}，${
+            language === "system"
+              ? t("跟随系统")
+              : localeDefinition(language).autonym
+          }`}
+          accessibilityHint={t("跟随系统语言，或在这里固定选择显示语言。")}
+          accessibilityState={{ expanded: languagePickerOpen, disabled: busy }}
+          aria-expanded={languagePickerOpen}
+          disabled={busy}
+          onPress={() => setLanguagePickerOpen(true)}
+          style={({ pressed }) => [
+            row,
             {
-              value: "system" as const,
-              icon: "⌘",
-              label: "自动",
-              accessibilityLabel: "跟随系统",
+              minHeight: 56,
+              paddingVertical: 8,
+              opacity: pressed || busy ? 0.7 : 1,
             },
-            {
-              value: "zh" as const,
-              icon: "中",
-              label: "中文",
-              accessibilityLabel: "简体中文",
-            },
-            {
-              value: "en" as const,
-              icon: "A",
-              label: "English",
-              accessibilityLabel: "English",
-            },
-          ].map(({ value, icon, label, accessibilityLabel }) => {
-            const selected = language === value;
-            return (
+          ]}
+        >
+          <T style={{ flex: 1, minWidth: 0, fontSize: 18, fontWeight: "700" }}>
+            语言
+          </T>
+          <T
+            raw
+            numberOfLines={largeText ? undefined : 1}
+            style={{
+              maxWidth: largeText ? "55%" : "48%",
+              color: c.muted,
+              fontSize: 15,
+              textAlign: "right",
+            }}
+          >
+            {language === "system"
+              ? t("跟随系统")
+              : localeDefinition(language).autonym}
+          </T>
+          <T
+            raw
+            accessibilityElementsHidden
+            style={{ color: c.muted, fontSize: 22 }}
+          >
+            ›
+          </T>
+        </Pressable>
+      </Card>
+      <Modal
+        visible={languagePickerOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => {
+          if (!busy) setLanguagePickerOpen(false);
+        }}
+      >
+        <View
+          style={{
+            flex: 1,
+            justifyContent: "flex-end",
+            backgroundColor: "rgba(0,0,0,0.4)",
+          }}
+        >
+          <Pressable
+            accessible={false}
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+            disabled={busy}
+            onPress={() => setLanguagePickerOpen(false)}
+            style={StyleSheet.absoluteFill}
+          />
+          <SafeAreaView
+            edges={["bottom"]}
+            style={{
+              width: "100%",
+              maxWidth: 720,
+              maxHeight: "88%",
+              alignSelf: "center",
+              backgroundColor: c.elevated,
+              borderTopLeftRadius: 22,
+              borderTopRightRadius: 22,
+              overflow: "hidden",
+            }}
+          >
+            <View
+              style={{
+                ...row,
+                minHeight: 56,
+                paddingHorizontal: 20,
+                borderBottomWidth: 1,
+                borderBottomColor: c.line,
+              }}
+            >
+              <T
+                accessibilityRole="header"
+                style={{ flex: 1, fontSize: 20, fontWeight: "700" }}
+              >
+                语言
+              </T>
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel={t(accessibilityLabel)}
-                accessibilityState={{ selected }}
+                accessibilityLabel={t("完成")}
                 disabled={busy}
-                key={value}
-                onPress={() =>
-                  void run(async () => {
-                    await onLanguageChange(value as LanguagePreference);
-                    setMessage(t("语言已保存"));
-                  })
-                }
-                style={({ pressed }) => [
-                  {
-                    flex: 1,
-                    minWidth: 0,
-                    minHeight: 66,
-                    borderRadius: 16,
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: 2,
-                    backgroundColor: selected ? c.soft : c.card,
-                    borderWidth: 1,
-                    borderColor: selected ? c.primary : c.line,
-                    opacity: pressed || busy ? 0.7 : 1,
-                  },
-                ]}
+                onPress={() => setLanguagePickerOpen(false)}
+                style={({ pressed }) => ({
+                  minHeight: 44,
+                  minWidth: 44,
+                  alignItems: "flex-end",
+                  justifyContent: "center",
+                  opacity: pressed || busy ? 0.7 : 1,
+                })}
               >
-                <T
-                  raw
-                  style={{
-                    color: selected ? c.primary : c.muted,
-                    fontSize: 22,
-                    lineHeight: 26,
-                    fontWeight: icon === "A" ? "700" : "500",
-                  }}
-                >
-                  {icon}
-                </T>
-                <T
-                  style={{
-                    color: selected ? c.primary : c.muted,
-                    fontSize: 11,
-                    lineHeight: 15,
-                    fontWeight: selected ? "700" : "500",
-                  }}
-                >
-                  {label}
-                </T>
+                <T style={{ color: c.primary, fontWeight: "600" }}>完成</T>
               </Pressable>
-            );
-          })}
+            </View>
+            <ScrollView
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={{
+                paddingHorizontal: 20,
+                paddingBottom: 8,
+              }}
+            >
+              <View
+                testID="language-options"
+                accessibilityRole="radiogroup"
+                accessibilityLabel={t("语言")}
+              >
+                {[
+                  {
+                    value: "system" as const,
+                    label: t("跟随系统"),
+                  },
+                  ...LOCALE_REGISTRY.map((item) => ({
+                    value: item.locale,
+                    label: item.autonym,
+                  })),
+                ].map(({ value, label }, index, options) => {
+                  const selected = language === value;
+                  return (
+                    <Pressable
+                      key={value}
+                      testID={`language-option-${value}`}
+                      accessibilityRole="radio"
+                      accessibilityLabel={label}
+                      accessibilityState={{ checked: selected, disabled: busy }}
+                      aria-checked={selected}
+                      disabled={busy}
+                      onPress={() => {
+                        if (selected) {
+                          setLanguagePickerOpen(false);
+                          return;
+                        }
+                        setLanguagePickerOpen(false);
+                        void run(async () => {
+                          await onLanguageChange(value);
+                          if (!sharing.current && Platform.OS !== "web")
+                            await refresh().catch(() => {
+                              // The language is already saved. Reminder rows
+                              // can be reloaded the next time this screen opens.
+                            });
+                          setMessage(t("语言已保存"));
+                        });
+                      }}
+                      style={({ pressed }) => ({
+                        minHeight: 52,
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 12,
+                        borderBottomWidth: index === options.length - 1 ? 0 : 1,
+                        borderBottomColor: c.line,
+                        opacity: pressed || busy ? 0.7 : 1,
+                      })}
+                    >
+                      <T raw style={{ flex: 1, fontSize: 17 }}>
+                        {label}
+                      </T>
+                      <T
+                        raw
+                        accessibilityElementsHidden
+                        style={{
+                          width: 24,
+                          color: c.primary,
+                          fontSize: 20,
+                          fontWeight: "700",
+                          textAlign: "center",
+                        }}
+                      >
+                        {selected ? "✓" : ""}
+                      </T>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </ScrollView>
+          </SafeAreaView>
         </View>
-      </SettingsSection>
+      </Modal>
       <SettingsSection title="主题" busy={busy}>
         <View accessibilityRole="radiogroup" accessibilityLabel={t("主题")}>
           {(
@@ -575,302 +880,493 @@ export default function Settings({
         </T>
       </SettingsSection>
       <SettingsSection title="照护提醒" busy={busy}>
-        <T style={{ color: c.muted, fontSize: 13 }}>
-          {kind === "feed"
-            ? "跟随模式会在每次保存喂奶后，按最新开始时间安排下一次提醒。"
-            : "按自己的需要设置。间隔提醒从现在算起，只提醒一次。"}
-        </T>
-        {Platform.OS === "web" ? (
-          <T style={{ color: c.muted }}>
-            浏览器预览不支持本地通知，请在手机安装版中设置和测试。
-          </T>
+        {sharedMode ? (
+          (sharedReminders ?? (
+            <T raw style={{ color: c.muted, fontSize: 13 }}>
+              {copy(
+                "请先更新家庭服务并刷新，再管理共享提醒。",
+                "Update the family service and refresh to manage shared reminders.",
+              )}
+            </T>
+          ))
         ) : (
           <>
-            <View pointerEvents={busy ? "none" : "auto"} style={{ gap: 13 }}>
-              <View style={{ flexDirection: "row", gap: 10 }}>
-                {[
-                  { value: "feed", icon: "◒" },
-                  { value: "diaper", icon: "♧" },
-                  { value: "sleep", icon: "☾" },
-                ].map(({ value, icon }) => {
-                  const selected = kind === value;
-                  return (
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel={t(
-                        reminderKindLabels[value as ReminderSettings["kind"]],
-                      )}
-                      accessibilityState={{ selected }}
-                      key={value}
-                      onPress={() => {
-                        const next = value as ReminderSettings["kind"];
-                        setKind(next);
-                        if (next !== "feed" && mode === "after-feed")
-                          setMode("once");
-                      }}
-                      style={({ pressed }) => [
-                        {
-                          flex: 1,
-                          minHeight: 70,
-                          borderRadius: 18,
-                          alignItems: "center",
-                          justifyContent: "center",
-                          backgroundColor: selected ? c.soft : c.card,
-                          borderWidth: 1,
-                          borderColor: selected ? c.primary : c.line,
-                          opacity: pressed ? 0.7 : 1,
-                        },
-                      ]}
-                    >
-                      <T
-                        style={{
-                          color: selected ? c.primary : c.muted,
-                          fontSize: 23,
-                          lineHeight: 27,
-                        }}
-                      >
-                        {icon}
-                      </T>
-                      <T
-                        style={{
-                          color: selected ? c.primary : c.muted,
-                          fontSize: 12,
-                          fontWeight: selected ? "700" : "400",
-                        }}
-                      >
-                        {reminderKindLabels[value as ReminderSettings["kind"]]}
-                      </T>
-                    </Pressable>
-                  );
-                })}
-              </View>
-              <Field
-                label="提醒标题 · 可选"
-                value={title}
-                onChange={setTitle}
-                placeholder={t(`${reminderKindLabels[kind]}提醒`)}
-                maxLength={100}
-              />
-              <View style={{ flexDirection: "row", gap: 10 }}>
-                {(kind === "feed"
-                  ? [
-                      {
-                        value: "after-feed" as const,
-                        label: "随最新喂养",
-                        shortLabel: "跟随",
-                        icon: "↻",
-                      },
-                      {
-                        value: "once" as const,
-                        label: "仅提醒一次",
-                        shortLabel: "一次",
-                        icon: "◷",
-                      },
-                      {
-                        value: "daily" as const,
-                        label: "每天固定时间",
-                        shortLabel: "每天",
-                        icon: "☀",
-                      },
-                    ]
-                  : [
-                      {
-                        value: "once" as const,
-                        label: "稍后提醒一次",
-                        shortLabel: "一次",
-                        icon: "◷",
-                      },
-                      {
-                        value: "daily" as const,
-                        label: "每天固定时间",
-                        shortLabel: "每天",
-                        icon: "☀",
-                      },
-                    ]
-                ).map(({ value, label, shortLabel, icon }) => {
-                  const selected = mode === value;
-                  return (
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel={t(label)}
-                      accessibilityState={{ selected }}
-                      key={value}
-                      onPress={() => setMode(value)}
-                      style={({ pressed }) => [
-                        {
-                          flex: 1,
-                          minHeight: 68,
-                          borderRadius: 18,
-                          alignItems: "center",
-                          justifyContent: "center",
-                          backgroundColor: selected ? c.soft : c.card,
-                          borderWidth: 1,
-                          borderColor: selected ? c.primary : c.line,
-                          opacity: pressed ? 0.7 : 1,
-                        },
-                      ]}
-                    >
-                      <T
-                        style={{
-                          color: selected ? c.primary : c.muted,
-                          fontSize: 24,
-                          lineHeight: 28,
-                        }}
-                      >
-                        {icon}
-                      </T>
-                      <T
-                        style={{
-                          color: selected ? c.primary : c.muted,
-                          fontSize: 12,
-                          fontWeight: selected ? "700" : "400",
-                        }}
-                      >
-                        {shortLabel}
-                      </T>
-                    </Pressable>
-                  );
-                })}
-              </View>
-              {mode === "daily" ? (
-                <Field
-                  label="每天当地时间 · HH:mm"
-                  value={dailyTime}
-                  onChange={setDailyTime}
-                  placeholder="09:00"
-                  maxLength={5}
-                />
-              ) : (
-                <Field
-                  label={
-                    mode === "after-feed" ? "喂养开始后多少分钟" : "多少分钟后"
-                  }
-                  value={minutes}
-                  onChange={setMinutes}
-                  keyboardType="number-pad"
-                  placeholder="120"
-                />
-              )}
-              <View style={row}>
-                <View style={{ flex: 1 }}>
-                  <T>静音提醒</T>
-                  <T style={{ color: c.muted, fontSize: 11 }}>切换后自动保存</T>
-                </View>
-                <Switch
-                  accessibilityLabel={t("静音提醒")}
-                  value={silent}
-                  onValueChange={changeSilent}
-                  disabled={busy}
-                  trackColor={{ true: c.primary }}
-                />
-              </View>
-            </View>
-            <Button
-              label="添加提醒"
-              disabled={busy}
-              onPress={() =>
-                run(async () => {
-                  if (mode !== "daily" && !minutes.trim())
-                    throw new Error("请填写提醒间隔");
-                  if (
-                    mode === "daily" &&
-                    !/^([01]\d|2[0-3]):[0-5]\d$/.test(dailyTime.trim())
-                  )
-                    throw new Error("时间格式应为 HH:mm");
-                  const settings = reminderSettings();
-                  const reminderTitle = settings.title;
-                  if (mode === "after-feed")
-                    await addAutoFeedReminder(
-                      reminderTitle,
-                      settings.minutes,
-                      silent,
-                      state.entries,
-                    );
-                  else
-                    await addReminder(
-                      reminderTitle,
-                      settings.minutes,
-                      mode === "daily" ? dailyTime.trim() : undefined,
-                      silent,
-                      kind,
-                    );
-                  await saveReminderSettings(settings);
-                  await refresh();
-                  setMessage(
-                    mode === "after-feed"
-                      ? "提醒已添加；保存下一次喂养后会自动重置"
-                      : "提醒已添加",
-                  );
-                })
-              }
-            />
-            {reminders.length === 0 ? (
-              <T style={{ color: c.muted, fontSize: 13 }}>还没有待提醒事项</T>
+            <T style={{ color: c.muted, fontSize: 13 }}>
+              {kind === "feed"
+                ? "跟随模式会在每次保存喂奶后，按最新开始时间安排下一次提醒。"
+                : "按自己的需要设置。间隔提醒从现在算起，只提醒一次。"}
+            </T>
+            {Platform.OS === "web" ? (
+              <T style={{ color: c.muted }}>
+                浏览器预览不支持本地通知，请在手机安装版中设置和测试。
+              </T>
             ) : (
-              reminders.map((reminder) => (
+              <>
                 <View
-                  key={reminder.id}
-                  style={{
-                    ...row,
-                    borderTopWidth: 1,
-                    borderTopColor: c.line,
-                    paddingTop: 12,
-                  }}
+                  pointerEvents={busy ? "none" : "auto"}
+                  style={{ gap: 13 }}
                 >
-                  <View style={{ flex: 1 }}>
-                    <T style={{ fontWeight: "600" }}>{t(reminder.title)}</T>
-                    <T style={{ color: c.muted, fontSize: 12 }}>
-                      {t(reminder.detail)}
-                    </T>
+                  <View
+                    style={{
+                      flexDirection: largeText ? "column" : "row",
+                      gap: 10,
+                    }}
+                  >
+                    {[
+                      { value: "feed", careIcon: "feed" as const },
+                      { value: "diaper", careIcon: "diaper" as const },
+                      { value: "sleep", careIcon: "sleep" as const },
+                    ].map(({ value, careIcon }) => {
+                      const selected = kind === value;
+                      return (
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={t(
+                            reminderKindLabels[
+                              value as ReminderSettings["kind"]
+                            ],
+                          )}
+                          accessibilityState={{ selected, disabled: busy }}
+                          disabled={busy}
+                          key={value}
+                          onPress={() => {
+                            const next = value as ReminderSettings["kind"];
+                            setKind(next);
+                            if (next !== "feed" && mode === "after-feed")
+                              setMode("once");
+                          }}
+                          style={({ pressed }) => [
+                            {
+                              flex: 1,
+                              minHeight: 70,
+                              paddingVertical: 8,
+                              paddingHorizontal: 8,
+                              borderRadius: 18,
+                              alignItems: "center",
+                              justifyContent: "center",
+                              backgroundColor: selected ? c.soft : c.card,
+                              borderWidth: 1,
+                              borderColor: selected ? c.primary : c.line,
+                              opacity: pressed ? 0.7 : 1,
+                            },
+                          ]}
+                        >
+                          <CareIcon
+                            kind={careIcon}
+                            size={24}
+                            color={selected ? c.primary : c.muted}
+                          />
+                          <T
+                            style={{
+                              color: selected ? c.primary : c.muted,
+                              fontSize: 12,
+                              fontWeight: selected ? "700" : "400",
+                              textAlign: "center",
+                            }}
+                          >
+                            {
+                              reminderKindLabels[
+                                value as ReminderSettings["kind"]
+                              ]
+                            }
+                          </T>
+                        </Pressable>
+                      );
+                    })}
                   </View>
-                  <Button
-                    label="取消"
-                    secondary
-                    disabled={busy}
-                    onPress={() =>
-                      run(async () => {
-                        await cancelReminder(reminder.id);
-                        await refresh();
-                        setMessage("提醒已取消");
-                      })
-                    }
+                  <Field
+                    editable={!busy}
+                    label="提醒标题 · 可选"
+                    value={title}
+                    onChange={setTitle}
+                    placeholder={t(`${reminderKindLabels[kind]}提醒`)}
+                    maxLength={100}
                   />
+                  <View
+                    style={{
+                      flexDirection: largeText ? "column" : "row",
+                      gap: 10,
+                    }}
+                  >
+                    {(kind === "feed"
+                      ? [
+                          {
+                            value: "after-feed" as const,
+                            label: "随最新喂养",
+                            shortLabel: "跟随",
+                            icon: "↻",
+                          },
+                          {
+                            value: "once" as const,
+                            label: "仅提醒一次",
+                            shortLabel: "一次",
+                            icon: "◷",
+                          },
+                          {
+                            value: "daily" as const,
+                            label: "每天固定时间",
+                            shortLabel: "每天",
+                            icon: "☀",
+                          },
+                        ]
+                      : [
+                          {
+                            value: "once" as const,
+                            label: "稍后提醒一次",
+                            shortLabel: "一次",
+                            icon: "◷",
+                          },
+                          {
+                            value: "daily" as const,
+                            label: "每天固定时间",
+                            shortLabel: "每天",
+                            icon: "☀",
+                          },
+                        ]
+                    ).map(({ value, label, shortLabel, icon }) => {
+                      const selected = mode === value;
+                      return (
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={t(label)}
+                          accessibilityState={{ selected, disabled: busy }}
+                          disabled={busy}
+                          key={value}
+                          onPress={() => setMode(value)}
+                          style={({ pressed }) => [
+                            {
+                              flex: 1,
+                              minHeight: 68,
+                              paddingVertical: 8,
+                              paddingHorizontal: 8,
+                              borderRadius: 18,
+                              alignItems: "center",
+                              justifyContent: "center",
+                              backgroundColor: selected ? c.soft : c.card,
+                              borderWidth: 1,
+                              borderColor: selected ? c.primary : c.line,
+                              opacity: pressed ? 0.7 : 1,
+                            },
+                          ]}
+                        >
+                          <T
+                            style={{
+                              color: selected ? c.primary : c.muted,
+                              fontSize: 24,
+                              lineHeight: 28,
+                            }}
+                          >
+                            {icon}
+                          </T>
+                          <T
+                            style={{
+                              color: selected ? c.primary : c.muted,
+                              fontSize: 12,
+                              fontWeight: selected ? "700" : "400",
+                              textAlign: "center",
+                            }}
+                          >
+                            {shortLabel}
+                          </T>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                  {mode === "daily" ? (
+                    <NativeDateTimeField
+                      editable={!busy}
+                      label="每天当地时间 · HH:mm"
+                      mode="time"
+                      value={dailyTime}
+                      onChange={setDailyTime}
+                      placeholder="09:00"
+                    />
+                  ) : (
+                    <Field
+                      editable={!busy}
+                      label={
+                        mode === "after-feed"
+                          ? "喂养开始后多少分钟"
+                          : "多少分钟后"
+                      }
+                      value={minutes}
+                      onChange={setMinutes}
+                      keyboardType="number-pad"
+                      placeholder="120"
+                    />
+                  )}
+                  <View style={row}>
+                    <View style={{ flex: 1 }}>
+                      <T>静音提醒</T>
+                      <T style={{ color: c.muted, fontSize: 11 }}>
+                        切换后自动保存
+                      </T>
+                    </View>
+                    <Switch
+                      accessibilityLabel={t("静音提醒")}
+                      value={silent}
+                      onValueChange={changeSilent}
+                      disabled={busy}
+                      trackColor={{ true: c.primary }}
+                    />
+                  </View>
                 </View>
-              ))
+                <Button
+                  label="添加提醒"
+                  disabled={busy}
+                  onPress={() =>
+                    run(async () => {
+                      if (mode !== "daily" && !minutes.trim())
+                        throw new Error("请填写提醒间隔");
+                      if (
+                        mode === "daily" &&
+                        !/^([01]\d|2[0-3]):[0-5]\d$/.test(dailyTime.trim())
+                      )
+                        throw new Error("时间格式应为 HH:mm");
+                      const settings = reminderSettings();
+                      const reminderTitle = settings.title;
+                      if (mode === "after-feed")
+                        await addAutoFeedReminder(
+                          reminderTitle,
+                          settings.minutes,
+                          silent,
+                          state.entries,
+                        );
+                      else
+                        await addReminder(
+                          reminderTitle,
+                          settings.minutes,
+                          mode === "daily" ? dailyTime.trim() : undefined,
+                          silent,
+                          kind,
+                        );
+                      await saveReminderSettings(settings);
+                      await refresh();
+                      setMessage(
+                        mode === "after-feed"
+                          ? "提醒已添加；保存下一次喂养后会自动重置"
+                          : "提醒已添加",
+                      );
+                    })
+                  }
+                />
+                {reminders.length === 0 ? (
+                  <T style={{ color: c.muted, fontSize: 13 }}>
+                    还没有待提醒事项
+                  </T>
+                ) : (
+                  reminders.map((reminder) => (
+                    <View
+                      key={reminder.id}
+                      style={{
+                        ...row,
+                        borderTopWidth: 1,
+                        borderTopColor: c.line,
+                        paddingTop: 12,
+                      }}
+                    >
+                      <View style={{ flex: 1 }}>
+                        <T style={{ fontWeight: "600" }}>{t(reminder.title)}</T>
+                        <T style={{ color: c.muted, fontSize: 12 }}>
+                          {t(reminder.detail)}
+                        </T>
+                      </View>
+                      <RecordActionButton
+                        action="delete"
+                        accessibilityLabel={
+                          copy("取消提醒：", "Cancel reminder: ") +
+                          t(reminder.title)
+                        }
+                        accessibilityHint={copy(
+                          "停止此设备上的这项提醒",
+                          "Stops this reminder on this device",
+                        )}
+                        disabled={busy}
+                        onPress={() =>
+                          run(async () => {
+                            await cancelReminder(reminder.id);
+                            await refresh();
+                            setMessage("提醒已取消");
+                          })
+                        }
+                      />
+                    </View>
+                  ))
+                )}
+              </>
             )}
           </>
         )}
+        {Platform.OS === "ios" ? (
+          <T raw style={{ color: c.muted, fontSize: 13 }}>
+            {copy(
+              "照护提醒在手机设置；Apple Watch 仅接收通知。请在 iPhone 的 Watch App → 通知中允许小日子镜像提醒。Apple 按设备状态选择在手机或手表提示，静音与专注模式仍适用。",
+              "Set care reminders on iPhone; Apple Watch only receives alerts. Allow Little Days to mirror alerts in the iPhone Watch app → Notifications. Apple chooses which device alerts; silent settings and Focus still apply.",
+            )}
+          </T>
+        ) : null}
       </SettingsSection>
+      {familyPushPanel ? (
+        <SettingsSection
+          title={copy("家人记录通知", "Family entry notifications")}
+          busy={busy}
+        >
+          {familyPushPanel}
+        </SettingsSection>
+      ) : null}
       <SettingsSection title="备份与恢复" busy={busy}>
-        <T style={{ color: c.muted, fontSize: 13 }}>
-          记录保存在当前设备。换手机或卸载前，请导出备份并妥善保存。备份包含宝宝档案和全部记录，不含提醒；重新安装后需重新设置提醒。
-        </T>
-        <Button
-          label="导出备份文件"
-          disabled={busy || !!pending}
-          onPress={() =>
-            run(async () => {
-              await exportBackup(state);
-              const notice = "导出操作已完成，请确认备份文件已保存";
-              setMessage(notice);
-              setBackupNotice(notice);
-            })
-          }
-        />
-        <Button
-          label="选择备份文件"
-          secondary
-          disabled={busy || !!pending}
-          onPress={() =>
-            run(async () => {
-              const next = await importBackup();
-              if (next) {
-                setBackupNotice("");
-                setPending(next);
+        {sharedMode ? (
+          <>
+            <T raw style={{ color: c.muted, fontSize: 13 }}>
+              {copy(
+                "每位当前家庭成员都可下载服务器已确认的最新资料，包括宝宝档案、全部记录、照片、共享提醒和早教资料。JSON 文件未加密，含家庭私密信息，请妥善保存。",
+                "Every active family member can download the latest confirmed server data: baby profile, all records, photo, shared reminders and play data. The JSON file is unencrypted and contains private family information; store it privately.",
+              )}
+            </T>
+            <Button
+              label={copy(
+                "下载并导出家庭备份",
+                "Download and export family backup",
+              )}
+              disabled={busy || !onExportFamilyBackup}
+              onPress={() =>
+                run(async () => {
+                  if (!sharing.current || !onExportFamilyBackup) return;
+                  await onExportFamilyBackup();
+                  const notice = copy(
+                    "分享操作已结束，请确认文件已保存。",
+                    "Sharing finished. Check that the file was saved.",
+                  );
+                  setMessage(notice);
+                  setBackupNotice(notice);
+                })
               }
-            })
-          }
-        />
+            />
+            <T raw style={{ color: c.muted, fontSize: 13 }}>
+              {copy(
+                "下载不包含本机待同步修改或未解决的冲突，也不会改动共享资料。家庭文件仅供备份或个人分析，暂不支持导入或恢复。",
+                "Downloads exclude pending local edits and unresolved conflicts, and do not change shared data. Family files are for backup or personal analysis; importing or restoring them is not supported.",
+              )}
+            </T>
+            {!onExportFamilyBackup ? (
+              <T raw style={{ color: c.muted, fontSize: 13 }}>
+                {copy(
+                  "请先联网刷新家庭权限，才能下载备份。",
+                  "Connect and refresh family access before downloading a backup.",
+                )}
+              </T>
+            ) : null}
+          </>
+        ) : (
+          <>
+            <T style={{ color: c.muted, fontSize: 13 }}>
+              记录保存在当前设备。换手机或卸载前，请导出备份并妥善保存。备份包含宝宝档案和全部记录，不含提醒；重新安装后需重新设置提醒。
+            </T>
+            <Button
+              label="导出备份文件"
+              disabled={busy || !!pending}
+              onPress={() =>
+                run(async () => {
+                  if (sharing.current) return;
+                  await exportBackup(state);
+                  const notice = "导出操作已完成，请确认备份文件已保存";
+                  setMessage(notice);
+                  setBackupNotice(notice);
+                })
+              }
+            />
+            <Button
+              label="选择备份文件"
+              secondary
+              disabled={busy || !!pending}
+              onPress={() =>
+                run(async () => {
+                  if (sharing.current) return;
+                  setBackupImportError("");
+                  setBackupNotice("");
+                  try {
+                    const next = await importBackup();
+                    if (next && !sharing.current && mounted.current) {
+                      setPending(next);
+                    }
+                  } catch (e) {
+                    if (!sharing.current && mounted.current)
+                      setBackupImportError(
+                        e instanceof Error ? e.message : "操作失败，请重试",
+                      );
+                  }
+                })
+              }
+            />
+            {backupImportError ? (
+              <T
+                accessibilityRole="alert"
+                accessibilityLiveRegion="assertive"
+                style={{ color: c.danger, fontSize: 15 }}
+              >
+                {t(backupImportError)}
+              </T>
+            ) : null}
+            {pending && (
+              <View
+                style={{
+                  backgroundColor: c.soft,
+                  padding: 16,
+                  borderRadius: 16,
+                  gap: 12,
+                }}
+              >
+                <T style={{ fontWeight: "700" }}>
+                  {t("确认恢复：{source}", { source: t(source) })}
+                </T>
+                <T>
+                  {t("{name} · {count} 条记录", {
+                    name: pending.profile.name,
+                    count:
+                      pending.entries.length +
+                      (pending.careRecords?.length ?? 0),
+                  })}
+                </T>
+                <T style={{ fontSize: 13 }}>
+                  {t(
+                    "这会替换当前「{name}」的 {count} 条记录，不会合并。替换前的数据会保留一份，可从上方入口恢复。",
+                    {
+                      name: state.profile.name,
+                      count:
+                        state.entries.length + (state.careRecords?.length ?? 0),
+                    },
+                  )}
+                </T>
+                <Button
+                  label="确认替换当前数据"
+                  disabled={busy}
+                  onPress={() =>
+                    run(async () => {
+                      if (sharing.current) return;
+                      await onCommit(pending, true);
+                      await onAvatarChange(null);
+                      await deleteAvatarFile(avatarUri);
+                      setPending(null);
+                      setBackupNotice("");
+                      setMessage(
+                        "记录已恢复；头像已移除，现有提醒保持不变，请按需检查",
+                      );
+                    })
+                  }
+                />
+                <Button
+                  label="取消恢复"
+                  secondary
+                  disabled={busy}
+                  onPress={() => {
+                    setPending(null);
+                    setBackupNotice("");
+                  }}
+                />
+              </View>
+            )}
+          </>
+        )}
         {backupNotice ? (
           <View
             style={{
@@ -883,81 +1379,102 @@ export default function Settings({
             <T style={{ color: c.muted, fontSize: 12 }}>{t(backupNotice)}</T>
           </View>
         ) : null}
-        {pending && (
-          <View
-            style={{
-              backgroundColor: c.soft,
-              padding: 16,
-              borderRadius: 16,
-              gap: 12,
-            }}
+      </SettingsSection>
+      {onOpenSupport ? (
+        <Card style={{ padding: 0 }}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t("请我喝杯咖啡")}
+            accessibilityHint={t("查看支持选项")}
+            onPress={onOpenSupport}
+            style={({ pressed }) => ({
+              minHeight: 72,
+              padding: 20,
+              opacity: pressed ? 0.7 : 1,
+            })}
           >
-            <T style={{ fontWeight: "700" }}>
-              {t("确认恢复：{source}", { source: t(source) })}
+            <View style={[row, { alignItems: "center" }]}>
+              <View
+                accessibilityElementsHidden
+                aria-hidden
+                importantForAccessibility="no-hide-descendants"
+                style={{
+                  width: 44,
+                  height: 44,
+                  borderRadius: 22,
+                  backgroundColor: c.soft,
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <T raw style={{ color: c.primary, fontSize: 22 }}>
+                  ☕︎
+                </T>
+              </View>
+              <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
+                <T style={{ fontSize: 18, fontWeight: "700" }}>请我喝杯咖啡</T>
+                <T style={{ color: c.muted, fontSize: 13, lineHeight: 19 }}>
+                  自愿、单次支持，不会订阅或解锁额外功能
+                </T>
+              </View>
+              <T raw style={{ color: c.primary, fontSize: 22 }}>
+                ›
+              </T>
+            </View>
+          </Pressable>
+        </Card>
+      ) : null}
+      <Card>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t("隐私与支持")}
+          accessibilityHint={t("了解本机记录、家庭共享、备份和软件更新")}
+          accessibilityState={{ disabled: busy }}
+          disabled={busy}
+          onPress={onOpenPrivacy}
+          style={({ pressed }) => [
+            row,
+            {
+              minHeight: 44,
+              alignItems: "center",
+              opacity: busy ? 0.65 : pressed ? 0.7 : 1,
+            },
+          ]}
+        >
+          <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
+            <T style={{ fontSize: 18, fontWeight: "700" }}>隐私与支持</T>
+            <T style={{ color: c.muted, fontSize: 13, lineHeight: 19 }}>
+              了解本机记录、家庭共享、备份和软件更新
             </T>
-            <T>
-              {t("{name} · {count} 条记录", {
-                name: pending.profile.name,
-                count:
-                  pending.entries.length + (pending.careRecords?.length ?? 0),
-              })}
-            </T>
-            <T style={{ fontSize: 13 }}>
-              {t(
-                "这会替换当前「{name}」的 {count} 条记录，不会合并。替换前的数据会保留一份，可从上方入口恢复。",
-                {
-                  name: state.profile.name,
-                  count:
-                    state.entries.length + (state.careRecords?.length ?? 0),
-                },
-              )}
-            </T>
-            <Button
-              label="确认替换当前数据"
-              disabled={busy}
-              onPress={() =>
-                run(async () => {
-                  await onCommit(pending, true);
-                  await onAvatarChange(null);
-                  await deleteAvatarFile(avatarUri);
-                  setPending(null);
-                  setBackupNotice("");
-                  setMessage(
-                    "记录已恢复；头像已移除，现有提醒保持不变，请按需检查",
-                  );
-                })
-              }
-            />
-            <Button
-              label="取消恢复"
-              secondary
-              disabled={busy}
-              onPress={() => {
-                setPending(null);
-                setBackupNotice("");
-              }}
-            />
           </View>
-        )}
-      </SettingsSection>
-      <SettingsSection title="隐私与支持" busy={busy}>
-        <T style={{ color: c.muted, fontSize: 13 }}>
-          了解本机数据、备份和软件更新
-        </T>
-        <Button label="隐私与支持" secondary onPress={onOpenPrivacy} />
-      </SettingsSection>
+          <T
+            raw
+            accessibilityElementsHidden
+            style={{ color: c.primary, fontSize: 22 }}
+          >
+            ›
+          </T>
+        </Pressable>
+      </Card>
       <SettingsSection title="致谢" busy={busy}>
         <T style={{ color: c.muted, fontSize: 13 }}>
           感谢 Trista（来自 FPH）和她群里的 Mia、Violet、Bill
           提出的建议与想法，也感谢群里每一位妈妈爸爸的支持。期待更多妈妈爸爸出现在这里，一起让小日子更好。
         </T>
       </SettingsSection>
+      {accountDeletionPanel}
       <View style={{ padding: 10, gap: 5 }}>
         <T style={{ color: c.muted, fontSize: 12, textAlign: "center" }}>
-          Little Days · 单机离线版
+          {copy(
+            "小日子 · 本机记录与家庭共享",
+            "My Little Days · Offline records and family sharing",
+          )}
         </T>
         <T style={{ color: c.muted, fontSize: 12, textAlign: "center" }}>
-          无需账号 · 无后台服务器 · 不共享 · 不上传照片
+          {copy(
+            "本机记录无需账号 · 家庭共享前查看并确认资料",
+            "No account for offline records · Review and confirm before sharing",
+          )}
         </T>
         <T style={{ color: c.muted, fontSize: 12, textAlign: "center" }}>
           日期按设备当地时区显示和统计

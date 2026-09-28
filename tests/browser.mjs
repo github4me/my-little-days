@@ -15,11 +15,18 @@ const context = await browser.newContext({
   timezoneId: "Australia/Melbourne",
 });
 const page = await context.newPage();
+const saveDialogs = [];
+page.on("dialog", async (dialog) => {
+  saveDialogs.push({ type: dialog.type(), message: dialog.message() });
+  await dialog.accept();
+});
+const screenshotDir =
+  process.env.SCREENSHOT_OUTPUT_DIR ?? "artifacts/browser-screenshots";
+await fs.mkdir(screenshotDir, { recursive: true });
 page.setDefaultTimeout(8000);
 async function chooseEnglish() {
-  const expand = page.getByRole("button", { name: "展开语言", exact: true });
-  if (await expand.isVisible()) await expand.click();
-  return page.getByRole("button", { name: "English", exact: true }).click();
+  await page.getByTestId("language-picker-row").click();
+  return page.getByRole("radio", { name: "English", exact: true }).click();
 }
 await page.addInitScript(() => {
   localStorage.setItem("little-days-v1-language", "zh");
@@ -36,8 +43,7 @@ const errors = [];
 page.on("pageerror", (e) => errors.push(e.message));
 async function assertNoUntranslatedChinese(screen) {
   const text = await page.locator("body").innerText();
-  // The Chinese language selector intentionally uses 中 as its icon in all locales.
-  const match = text.replace(/^中$/gm, "").match(/[\p{Script=Han}]/u);
+  const match = text.match(/[\p{Script=Han}]/u);
   assert.equal(
     match,
     null,
@@ -87,6 +93,7 @@ await page.getByRole("button", { name: "收起宝宝档案", exact: true }).wait
 await page.getByRole("button", { name: "保存档案", exact: true }).waitFor();
 await page.getByRole("tab", { name: "今天", exact: true }).click();
 await page.getByRole("tab", { name: "照护", exact: true }).click();
+await page.getByRole("button", { name: "早教", exact: true }).click();
 await page
   .getByText(
     "还没有早教活动，请到「设置早教」添加。未设置出生日期时不会自动选择。",
@@ -110,7 +117,7 @@ await page
   .getByText("尚未设置有效的出生日期，无法判断是否适龄。", { exact: true })
   .waitFor();
 await page.getByRole("button", { name: "仍然加入", exact: true }).click();
-await page.getByRole("button", { name: "早教活动", exact: true }).click();
+await page.getByRole("button", { name: "早教", exact: true }).click();
 await page
   .getByRole("button", { name: "查看轻声唱一小段", exact: true })
   .waitFor();
@@ -198,8 +205,54 @@ await page.evaluate(() => {
 await page.reload();
 await page.getByText("QQ的小日子", { exact: true }).waitFor();
 assert.equal(await page.getByText("● 仅此设备", { exact: true }).count(), 0);
+assert.match(
+  await page.getByTestId("today-feed-recency").innerText(),
+  /前 · 100 mL$/,
+);
+assert.doesNotMatch(
+  await page.getByTestId("today-feed-recency").innerText(),
+  /\d{2}:\d{2}/,
+);
+assert.match(await page.getByTestId("today-diaper-recency").innerText(), /前$/);
+assert.doesNotMatch(
+  await page.getByTestId("today-diaper-recency").innerText(),
+  /\d{2}:\d{2}/,
+);
+await page.setViewportSize({ width: 320, height: 740 });
+for (const kind of ["feed", "sleep", "diaper"]) {
+  const header = await page.getByTestId(`today-${kind}-header`).boundingBox();
+  assert.ok(
+    header && header.height <= 60,
+    `${kind} action should stay beside its icon`,
+  );
+}
+for (const kind of ["feed", "diaper"]) {
+  const box = await page.getByTestId(`today-${kind}-recency`).boundingBox();
+  assert.ok(box && box.height <= 25, `${kind} recency should stay on one line`);
+}
+const sleepLine = await page.getByTestId("today-last-sleep").boundingBox();
+assert.ok(
+  sleepLine && sleepLine.height <= 25,
+  "sleep duration and range should share one line",
+);
+await page.setViewportSize({ width: 390, height: 844 });
+await page.getByRole("tab", { name: "我的", exact: true }).click();
+await chooseEnglish();
+await page.getByRole("tab", { name: "Today", exact: true }).click();
+assert.match(
+  await page.getByTestId("today-feed-recency").innerText(),
+  / ago · 100 mL$/,
+);
+assert.match(
+  await page.getByTestId("today-diaper-recency").innerText(),
+  / ago$/,
+);
+await page.getByRole("tab", { name: "More", exact: true }).click();
+await page.getByTestId("language-picker-row").click();
+await page.getByRole("radio", { name: "中文（简体）", exact: true }).click();
+await page.getByRole("tab", { name: "今天", exact: true }).click();
 await page.evaluate(() => document.fonts.ready);
-await page.screenshot({ path: "docs/home-preview.png" });
+await page.screenshot({ path: path.join(screenshotDir, "home-preview.png") });
 await page.getByRole("tab", { name: "记录", exact: true }).click();
 for (const label of [
   "测量",
@@ -219,12 +272,12 @@ for (const label of [
 assert.equal(await page.getByRole("textbox").count(), 0);
 await page.getByText("2 次喂奶 · 250 mL · 21分钟", { exact: true }).waitFor();
 assert.equal(
-  await page.getByRole("button", { name: "编辑喂奶", exact: true }).count(),
+  await page.getByRole("button", { name: /^编辑喂奶(?: · .*)?$/ }).count(),
   0,
 );
 assert.equal(
   await page.getByRole("button", { name: "展开当日明细", exact: true }).count(),
-  6,
+  3,
 );
 await page
   .getByRole("button", { name: "展开当日明细", exact: true })
@@ -233,17 +286,20 @@ await page
 await page.getByText("距上次 3小时1分", { exact: true }).waitFor();
 assert.equal(
   await page
-    .getByRole("button", { name: "显示 1 天历史记录", exact: true })
+    .getByRole("button", { name: "更多：显示前 1 天", exact: true })
     .count(),
   0,
 );
 const compactEdit = await page
-  .getByRole("button", { name: "编辑喂奶", exact: true })
+  .getByRole("button", { name: /^编辑喂奶(?: · .*)?$/ })
   .first()
   .boundingBox();
 assert.ok(
-  compactEdit && compactEdit.height <= 38,
-  "record actions should be compact",
+  compactEdit &&
+    compactEdit.width >= 44 &&
+    compactEdit.height >= 44 &&
+    compactEdit.height <= 60,
+  "record actions should keep a compact layout without shrinking below the 44pt touch target",
 );
 const recordKindOptions = await Promise.all(
   ["喂奶", "尿布", "睡眠"].map((name) =>
@@ -258,7 +314,9 @@ assert.ok(
   "record type choices should be icon cards on one row",
 );
 await page.evaluate(() => document.fonts.ready);
-await page.screenshot({ path: "docs/records-preview.png" });
+await page.screenshot({
+  path: path.join(screenshotDir, "records-preview.png"),
+});
 await page.getByRole("button", { name: "时长", exact: true }).click();
 const recordUnitOptions = await Promise.all(
   ["mL", "时长"].map((name) =>
@@ -267,7 +325,7 @@ const recordUnitOptions = await Promise.all(
 );
 assert.ok(recordUnitOptions.every((box) => box.height >= 50));
 await page
-  .getByRole("button", { name: "编辑喂奶", exact: true })
+  .getByRole("button", { name: /^编辑喂奶(?: · .*)?$/ })
   .first()
   .click();
 const quickAmountButtons = await Promise.all(
@@ -281,7 +339,7 @@ assert.ok(quickAmountButtons.every(Boolean));
 const quickAmountTop = quickAmountButtons[0].y;
 assert.ok(
   quickAmountButtons.every((box) => Math.abs(box.y - quickAmountTop) < 1),
-  "quick amount choices should stay on one row",
+  `quick amount choices should stay on one row: ${JSON.stringify(quickAmountButtons)}`,
 );
 await page.getByLabel("实际喝奶量", { exact: true }).fill("110");
 await page.getByRole("button", { name: "保存记录", exact: true }).click();
@@ -295,7 +353,7 @@ await page
   .getByRole("button", { name: "展开当日明细", exact: true })
   .first()
   .click();
-await page.getByRole("button", { name: "编辑尿布", exact: true }).click();
+await page.getByRole("button", { name: /^编辑尿布 · / }).click();
 // Read all three boxes in one frame, even if the sheet is still animating.
 const diaperOptions = await page
   .getByRole("button", { name: /^(有尿|有便|尿 \+ 便)$/ })
@@ -314,13 +372,10 @@ assert.ok(
 );
 await page.evaluate(() => window.scrollTo(0, 0));
 await page.screenshot({
-  path: path.join(
-    process.env.TEMP ?? "docs",
-    "little-days-diaper-options-preview.png",
-  ),
+  path: path.join(screenshotDir, "little-days-diaper-options-preview.png"),
 });
 await page.getByLabel("关闭记录编辑", { exact: true }).click();
-await page.getByRole("button", { name: "删除尿布", exact: true }).click();
+await page.getByRole("button", { name: /^删除尿布 · / }).click();
 const deleteConfirmation = await page
   .getByRole("button", { name: "确认删除", exact: true })
   .boundingBox();
@@ -332,13 +387,13 @@ assert.ok(
 );
 await page.getByRole("button", { name: "取消", exact: true }).click();
 assert.equal(
-  await page.getByRole("button", { name: "删除尿布", exact: true }).count(),
+  await page.getByRole("button", { name: /^删除尿布 · / }).count(),
   1,
 );
-await page.getByRole("button", { name: "删除尿布", exact: true }).click();
+await page.getByRole("button", { name: /^删除尿布 · / }).click();
 await page.getByRole("button", { name: "确认删除", exact: true }).click();
 await page
-  .getByRole("button", { name: "删除尿布", exact: true })
+  .getByRole("button", { name: /^删除尿布 · / })
   .waitFor({ state: "detached" });
 assert.equal(
   await page.getByRole("button", { name: "撤销删除", exact: true }).count(),
@@ -358,18 +413,31 @@ assert.equal(
 );
 await page.getByRole("button", { name: "睡眠", exact: true }).click();
 await page.getByText("1 段睡眠 · 3小时1分", { exact: true }).waitFor();
+await page
+  .getByRole("button", { name: "展开当日明细", exact: true })
+  .first()
+  .click();
+await page
+  .locator("svg text")
+  .filter({ hasText: /^3小时1分$/ })
+  .waitFor();
 await page.getByRole("tab", { name: "成长", exact: true }).click();
 assert.equal(await page.getByText("小小里程碑", { exact: true }).count(), 0);
 assert.equal(await page.getByText("日常趋势", { exact: true }).count(), 0);
 await page.getByRole("button", { name: "＋测量", exact: true }).waitFor();
-await page.getByRole("button", { name: "全部", exact: true }).click();
+assert.equal(
+  await page
+    .getByRole("button", { name: "全部", exact: true })
+    .getAttribute("aria-selected"),
+  "true",
+);
 await page
   .getByText("三项曲线按各自单位缩放；切换到单项可查看 WHO 参考。", {
     exact: true,
   })
   .waitFor();
 await page.evaluate(() => document.fonts.ready);
-await page.screenshot({ path: "docs/growth-preview.png" });
+await page.screenshot({ path: path.join(screenshotDir, "growth-preview.png") });
 assert.equal(
   (
     await page.evaluate(() =>
@@ -380,14 +448,16 @@ assert.equal(
 );
 await page.getByRole("tab", { name: "我的", exact: true }).click();
 assert.equal(await page.getByLabel("宝宝名字", { exact: true }).count(), 0);
-for (const section of [
-  "语言",
-  "主题",
-  "照护提醒",
-  "备份与恢复",
-  "隐私与支持",
-  "致谢",
-]) {
+assert.equal(
+  await page.getByRole("button", { name: "请我喝杯咖啡", exact: true }).count(),
+  0,
+);
+const languageRow = page.getByTestId("language-picker-row");
+assert.equal(await languageRow.getAttribute("aria-expanded"), "false");
+await languageRow.click();
+assert.equal(await languageRow.getAttribute("aria-expanded"), "true");
+await page.getByRole("button", { name: "完成", exact: true }).click();
+for (const section of ["主题", "照护提醒", "备份与恢复", "致谢"]) {
   const header = page.getByRole("button", {
     name: `展开${section}`,
     exact: true,
@@ -409,8 +479,18 @@ for (const section of [
   }
   await expanded.click();
 }
+assert.equal(
+  await page
+    .getByRole("button", { name: "展开隐私与支持", exact: true })
+    .count(),
+  0,
+);
+assert.equal(
+  await page.getByRole("button", { name: "隐私与支持", exact: true }).count(),
+  1,
+);
 await page.screenshot({
-  path: path.join(process.env.TEMP ?? "docs", "little-days-more-collapsed.png"),
+  path: path.join(screenshotDir, "little-days-more-collapsed.png"),
 });
 await page.getByRole("button", { name: "展开主题", exact: true }).click();
 assert.equal(
@@ -489,25 +569,54 @@ await page
 await page.getByRole("radio", { name: "深色", exact: true }).click();
 await chooseEnglish();
 await page.getByText("Care reminders", { exact: true }).waitFor();
+assert.equal(
+  await page
+    .getByRole("button", { name: "Buy me a coffee", exact: true })
+    .count(),
+  0,
+);
 assert.equal(await page.getByText("● This device", { exact: true }).count(), 0);
-const languageOptions = await Promise.all(
-  ["Follow system", "Simplified Chinese", "English"].map((name) =>
-    page.getByRole("button", { name, exact: true }).boundingBox(),
-  ),
+await page.getByTestId("language-picker-row").click();
+const languageOptions = [
+  "Follow system",
+  "中文（简体）",
+  "中文（繁體）",
+  "English",
+  "Français",
+  "Deutsch",
+  "हिन्दी",
+  "Italiano",
+  "日本語",
+  "한국어",
+  "Español",
+  "ไทย",
+  "Tiếng Việt",
+];
+assert.deepEqual(
+  await page
+    .getByTestId("language-options")
+    .getByRole("radio")
+    .evaluateAll((nodes) =>
+      nodes.map((node) => node.getAttribute("aria-label")),
+    ),
+  languageOptions,
 );
-assert.ok(languageOptions.every(Boolean));
-assert.ok(
-  languageOptions.every((box) => Math.abs(box.y - languageOptions[0].y) < 1),
-  "language choices should stay on one row",
+await page.getByRole("button", { name: "Done", exact: true }).click();
+assert.equal(
+  await page
+    .getByRole("button", { name: "Expand Privacy & support", exact: true })
+    .count(),
+  0,
 );
-await page
-  .getByRole("button", { name: "Expand Privacy & support", exact: true })
-  .click();
 await page
   .getByRole("button", { name: "Privacy & support", exact: true })
   .click();
-await page.getByText("Your data stays with you", { exact: true }).waitFor();
+await page.getByText("Your data, your choices", { exact: true }).waitFor();
 await page.getByText("Software updates", { exact: true }).waitFor();
+assert.equal(
+  await page.getByText("Optional support", { exact: true }).count(),
+  0,
+);
 await page.getByText("contact@reticle.com.au", { exact: true }).waitFor();
 assert.equal(
   await page
@@ -536,17 +645,14 @@ await page
 assert.equal(await creditsHeader.getAttribute("aria-expanded"), "false");
 await page.getByText("Care reminders", { exact: true }).waitFor();
 await page.screenshot({
-  path: path.join(
-    process.env.TEMP ?? "docs",
-    "little-days-language-preview.png",
-  ),
+  path: path.join(screenshotDir, "little-days-language-preview.png"),
 });
 await assertNoUntranslatedChinese("Settings");
 await page.getByRole("tab", { name: "Today", exact: true }).click();
 await page.getByText("QQ's little days", { exact: true }).waitFor();
 await assertNoUntranslatedChinese("Today");
 await page.evaluate(() => document.fonts.ready);
-await page.screenshot({ path: "docs/night-preview.png" });
+await page.screenshot({ path: path.join(screenshotDir, "night-preview.png") });
 await page.getByRole("tab", { name: "Growth", exact: true }).click();
 await page.getByText("Growth charts", { exact: true }).waitFor();
 await page
@@ -564,8 +670,17 @@ await page
   .getByRole("button", { name: "Hide earlier records", exact: true })
   .waitFor();
 await page.getByText("4.1 kg", { exact: false }).waitFor();
+for (const name of ["Edit Measure", "Delete Measure"]) {
+  const action = page
+    .getByRole("button", { name: new RegExp(`^${name} · `) })
+    .last();
+  assert.equal(await action.locator("svg").count(), 1);
+  assert.equal(await action.innerText(), "");
+  const target = await action.boundingBox();
+  assert.ok(target.width >= 44 && target.height >= 44);
+}
 await page
-  .getByRole("button", { name: "Delete Measure", exact: true })
+  .getByRole("button", { name: /^Delete Measure · / })
   .last()
   .click();
 const growthDeleteConfirmation = await page
@@ -579,7 +694,7 @@ assert.ok(
 await page.getByRole("button", { name: "Cancel", exact: true }).click();
 await page.getByText("4.1 kg", { exact: false }).waitFor();
 await page
-  .getByRole("button", { name: "Delete Measure", exact: true })
+  .getByRole("button", { name: /^Delete Measure · / })
   .last()
   .click();
 await page.getByRole("button", { name: "Delete record", exact: true }).click();
@@ -602,12 +717,14 @@ assert.ok(
   metricOptions.every((box) => Math.abs(box.y - metricOptions[0].y) < 1),
   "growth metric choices should stay on one row",
 );
+for (const name of ["Length", "Head"]) {
+  const control = page.getByRole("button", { name, exact: true });
+  assert.equal(await control.locator("svg").count(), 1);
+  assert.equal((await control.innerText()).trim(), name);
+}
 await assertNoUntranslatedChinese("Growth");
 await page.screenshot({
-  path: path.join(
-    process.env.TEMP ?? "docs",
-    "little-days-growth-picker-preview.png",
-  ),
+  path: path.join(screenshotDir, "little-days-growth-picker-preview.png"),
 });
 await page.getByRole("button", { name: "+ Measure", exact: true }).click();
 await page.getByText("Measurement", { exact: true }).waitFor();
@@ -634,23 +751,41 @@ for (const [label, title] of [
 }
 await assertNoUntranslatedChinese("Records date ranges");
 await page.screenshot({
-  path: path.join(process.env.TEMP ?? "docs", "little-days-record-ranges.png"),
+  path: path.join(screenshotDir, "little-days-record-ranges.png"),
 });
+assert.equal(
+  await page
+    .getByRole("button", { name: "Show day details", exact: true })
+    .count(),
+  3,
+);
+await page
+  .getByRole("button", { name: "More: show 4 earlier days", exact: true })
+  .click();
 assert.equal(
   await page
     .getByRole("button", { name: "Show day details", exact: true })
     .count(),
   7,
 );
+await page
+  .getByRole("button", { name: "Hide earlier days", exact: true })
+  .click();
 assert.equal(
-  await page.getByRole("button", { name: "Edit Feed", exact: true }).count(),
+  await page
+    .getByRole("button", { name: "Show day details", exact: true })
+    .count(),
+  3,
+);
+assert.equal(
+  await page.getByRole("button", { name: /^Edit Feed · / }).count(),
   0,
 );
 await page
   .getByRole("button", { name: "Show day details", exact: true })
   .last()
   .click();
-await page.getByRole("button", { name: "Edit Feed", exact: true }).waitFor();
+await page.getByRole("button", { name: /^Edit Feed · / }).waitFor();
 await assertNoUntranslatedChinese("Records");
 await page.getByRole("button", { name: "Diaper", exact: true }).click();
 await page.getByText("changes", { exact: true }).waitFor();
@@ -678,7 +813,7 @@ assert.equal(
 await page.getByRole("tab", { name: "Records", exact: true }).click();
 await page.getByText("Last 7 days", { exact: true }).waitFor();
 const narrowRecordsHeading = await page
-  .getByText("Every day remembered", { exact: true })
+  .getByRole("heading", { name: "Records", exact: true })
   .boundingBox();
 assert.ok(narrowRecordsHeading);
 assert.ok(
@@ -692,10 +827,24 @@ const narrowRecordKindOptions = await Promise.all(
 );
 assert.ok(
   narrowRecordKindOptions.every(
-    (box) => Math.abs(box.y - narrowRecordKindOptions[0].y) < 1,
+    (box) =>
+      box &&
+      box.width >= 44 &&
+      box.height >= 44 &&
+      box.x >= 20 &&
+      box.x + box.width <= 320,
   ),
-  "record type choices should stay on one row on a narrow phone",
+  "record type choices should wrap within the narrow content area without shrinking touch targets",
 );
+for (let index = 1; index < narrowRecordKindOptions.length; index++) {
+  const current = narrowRecordKindOptions[index],
+    previous = narrowRecordKindOptions[index - 1];
+  assert.ok(
+    current.x >= previous.x + previous.width ||
+      current.y >= previous.y + previous.height,
+    "wrapped record choices must retain reading order without overlap",
+  );
+}
 await page.getByRole("tab", { name: "Today", exact: true }).click();
 await page.getByRole("button", { name: "+ Add", exact: true }).first().click();
 await page.getByLabel("Time date", { exact: true }).fill("2026-08-28");
@@ -724,7 +873,7 @@ assert.equal(
 );
 await page.getByLabel("Close editor", { exact: true }).click();
 await page.getByRole("button", { name: "+ Add", exact: true }).first().click();
-await page.getByRole("button", { name: "Start", exact: true }).click();
+await page.getByRole("button", { name: "Start timer", exact: true }).click();
 await page.getByRole("button", { name: "Stop", exact: true }).waitFor();
 const runningFeed = await page.evaluate(() =>
   JSON.parse(localStorage.getItem("little-days-v1")).entries.find(
@@ -773,7 +922,9 @@ await page
   .getByText(`实际奶量：${runningFeed.amount + 5} mL`, { exact: true })
   .waitFor();
 await page.waitForTimeout(350); // Let the modal's opening fade finish for visual review.
-await page.screenshot({ path: "D:/Temp/little-days-finish-feed.png" });
+await page.screenshot({
+  path: path.join(screenshotDir, "little-days-finish-feed.png"),
+});
 await page.evaluate(() => {
   const original = Storage.prototype.setItem;
   Storage.prototype.setItem = function (key, value) {
@@ -819,13 +970,15 @@ assert.ok(
 assert.equal(finishedFeed.start, runningFeed.start);
 assert.ok(Date.parse(finishedFeed.end) >= Date.parse(finishedFeed.start));
 await page.getByRole("tab", { name: "记录", exact: true }).click();
-await page.getByRole("button", { name: "编辑喂奶", exact: true }).waitFor();
+await page.getByRole("heading", { name: /^今天 · / }).waitFor();
+await page.getByRole("button", { name: /^编辑喂奶(?: · .*)?$/ }).waitFor();
 assert.equal(
-  await page.getByRole("button", { name: "编辑喂奶", exact: true }).count(),
+  await page.getByRole("button", { name: /^编辑喂奶(?: · .*)?$/ }).count(),
   1,
 );
 await page.getByRole("tab", { name: "照护", exact: true }).click();
 await page.getByRole("heading", { name: "照护", exact: true }).waitFor();
+await page.getByRole("button", { name: "早教", exact: true }).click();
 await page
   .getByRole("checkbox", { name: "今天做过：看看黑白卡", exact: true })
   .waitFor();
@@ -834,7 +987,31 @@ assert.equal(
   await page.getByRole("button", { name: /个月$/, exact: false }).count(),
   0,
 ); // no age filter on the daily list
+const playSwitcher = await page
+  .getByRole("button", { name: "早教", exact: true })
+  .boundingBox();
 await page.getByRole("button", { name: "设置早教", exact: true }).click();
+const settingsSwitcher = await page
+  .getByRole("button", { name: "早教", exact: true })
+  .boundingBox();
+const firstAgeBand = await page
+  .getByRole("button", { name: "0–1 个月", exact: true })
+  .boundingBox();
+assert.ok(playSwitcher && settingsSwitcher && firstAgeBand);
+assert.ok(
+  Math.abs(playSwitcher.y - settingsSwitcher.y) <= 1,
+  "Care section switcher should not move when the age picker appears",
+);
+assert.ok(
+  firstAgeBand.y >= settingsSwitcher.y + settingsSwitcher.height,
+  "age picker should follow the Care section switcher",
+);
+await page
+  .getByRole("heading", { name: "照护", exact: true })
+  .scrollIntoViewIfNeeded();
+await page.screenshot({
+  path: path.join(screenshotDir, "little-days-care-switcher-order.png"),
+});
 await page
   .getByRole("checkbox", { name: "选择早教活动：看看黑白卡", exact: true })
   .click();
@@ -870,7 +1047,7 @@ await page
     checked: true,
   })
   .waitFor();
-await page.getByRole("button", { name: "早教活动", exact: true }).click();
+await page.getByRole("button", { name: "早教", exact: true }).click();
 assert.equal(await page.getByRole("button", { name: /^查看/ }).count(), 7);
 assert.equal(
   await page
@@ -883,6 +1060,7 @@ await page
   .waitFor();
 await page.reload();
 await page.getByRole("tab", { name: "照护", exact: true }).click();
+await page.getByRole("button", { name: "早教", exact: true }).click();
 await page
   .getByRole("button", { name: "查看今天穿哪一件？", exact: true })
   .waitFor();
@@ -916,10 +1094,7 @@ await page.getByText("Confirm play activity", { exact: true }).waitFor();
 await assertNoUntranslatedChinese("Cross-age selection confirmation");
 await page.getByText(/Activity reference age: 18 to under 25 months/).waitFor();
 await page.screenshot({
-  path: path.join(
-    process.env.TEMP ?? "docs",
-    "little-days-selection-warning.png",
-  ),
+  path: path.join(screenshotDir, "little-days-selection-warning.png"),
 });
 await page.getByRole("button", { name: "Not now", exact: true }).click();
 await page
@@ -932,10 +1107,7 @@ assert.equal(
   true,
 );
 await page.screenshot({
-  path: path.join(
-    process.env.TEMP ?? "docs",
-    "little-days-choose-activities.png",
-  ),
+  path: path.join(screenshotDir, "little-days-choose-activities.png"),
 });
 // A corrupt selection must not be overwritten by computed defaults.
 await page.evaluate(() =>
@@ -943,6 +1115,7 @@ await page.evaluate(() =>
 );
 await page.reload();
 await page.getByRole("tab", { name: "照护", exact: true }).click();
+await page.getByRole("button", { name: "早教", exact: true }).click();
 await page
   .getByText("早教设置无法读取，原数据未覆盖。", { exact: true })
   .waitFor();
@@ -997,7 +1170,7 @@ await page
 await page
   .getByRole("checkbox", { name: "选择早教活动：看看黑白卡", checked: true })
   .waitFor();
-await page.getByRole("button", { name: "早教活动", exact: true }).click();
+await page.getByRole("button", { name: "早教", exact: true }).click();
 // Check-ins remain independent of selection and persist across reload and midnight.
 await page
   .getByRole("checkbox", { name: "今天做过：看看黑白卡", exact: true })
@@ -1019,6 +1192,7 @@ const checkinKey = await page.evaluate(() => {
 });
 await page.reload();
 await page.getByRole("tab", { name: "照护", exact: true }).click();
+await page.getByRole("button", { name: "早教", exact: true }).click();
 await page
   .getByRole("checkbox", { name: "今天做过：看看黑白卡", checked: true })
   .waitFor();
@@ -1029,11 +1203,10 @@ await page.getByRole("button", { name: "设置早教", exact: true }).click();
 await page
   .getByRole("checkbox", { name: "选择早教活动：看看黑白卡", exact: true })
   .click();
-await page.getByRole("button", { name: "早教活动", exact: true }).click();
+await page.getByRole("button", { name: "早教", exact: true }).click();
 await page
   .getByRole("checkbox", { name: "今天做过：看看黑白卡", checked: true })
   .waitFor();
-const nextDay = new Date();
 // A failed daily check-in write must still preserve the previous checked state.
 await page.evaluate(() => {
   window.checkinSetItem = Storage.prototype.setItem;
@@ -1054,8 +1227,14 @@ await page.evaluate(() => {
   Storage.prototype.setItem = window.checkinSetItem;
   delete window.checkinSetItem;
 });
-nextDay.setDate(nextDay.getDate() + 1);
-nextDay.setHours(0, 1, 0, 0);
+// The browser uses Melbourne time; the CI Node process may use UTC. Advance
+// the browser's calendar day, not the host's potentially different "tomorrow".
+const nextDay = await page.evaluate(() => {
+  const next = new Date();
+  next.setDate(next.getDate() + 1);
+  next.setHours(0, 1, 0, 0);
+  return next.getTime();
+});
 await page.clock.setFixedTime(nextDay);
 await page
   .getByRole("checkbox", { name: "今天做过：看看黑白卡", checked: false })
@@ -1070,6 +1249,7 @@ assert.deepEqual(
 await page.getByRole("tab", { name: "我的", exact: true }).click();
 await chooseEnglish();
 await page.getByRole("tab", { name: "Care", exact: true }).click();
+await page.getByRole("button", { name: "Play", exact: true }).click();
 await page
   .getByRole("button", { name: "View Awake tummy time", exact: true })
   .click();
@@ -1092,15 +1272,18 @@ for (const title of [
 }
 // Daily care is a separate history, not a daily play checkbox.
 await page.getByRole("button", { name: "Daily care", exact: true }).click();
+await page.getByText("Choose a section", { exact: true }).waitFor();
+await page.getByText("Choose what to record", { exact: true }).waitFor();
 const playControls = [
-  "Play activities",
   "Daily care",
+  "Play",
   "Play settings",
   "Temp",
   "Bath",
   "Wash",
   "Teeth",
   "Nails",
+  "Supplements",
 ];
 const iconPaths = [];
 for (const name of playControls) {
@@ -1122,18 +1305,28 @@ for (const names of [playControls.slice(0, 3), playControls.slice(3)]) {
   assert.ok(
     boxes.every(
       (b) =>
-        Math.abs(b.y - boxes[0].y) < 1 &&
+        b.width >= 44 &&
         b.height >= 44 &&
         b.x >= 0 &&
         b.x + b.width <= page.viewportSize().width,
     ),
+    `care choices must fit the screen with accessible touch targets: ${JSON.stringify(boxes)}`,
   );
+  for (let index = 1; index < boxes.length; index++) {
+    const current = boxes[index],
+      previous = boxes[index - 1];
+    assert.ok(
+      current.x >= previous.x + previous.width ||
+        current.y >= previous.y + previous.height,
+      "care choices may wrap, but must preserve reading order without overlap",
+    );
+  }
 }
 await page
   .getByRole("button", { name: "Temp", exact: true })
   .scrollIntoViewIfNeeded();
 await page.screenshot({
-  path: path.join(process.env.TEMP ?? "docs", "little-days-care-icons-en.png"),
+  path: path.join(screenshotDir, "little-days-care-icons-en.png"),
 });
 assert.equal(
   await page.getByRole("button", { name: "By setting", exact: true }).count(),
@@ -1158,6 +1351,10 @@ await page
   .getByRole("button", { name: "Save care record", exact: true })
   .click();
 await page.getByText("Care record saved", { exact: true }).waitFor();
+assert.deepEqual(saveDialogs.at(-1), {
+  type: "alert",
+  message: "Care record saved\n\nSaved on this device",
+});
 assert.deepEqual(
   await page.evaluate(() => {
     const records = JSON.parse(
@@ -1173,6 +1370,13 @@ assert.equal(
     .inputValue(),
   "36.8",
 );
+for (const name of ["Edit care record", "Delete care record"]) {
+  const action = page.getByRole("button", { name, exact: true });
+  assert.equal(await action.locator("svg").count(), 1);
+  assert.equal(await action.innerText(), "");
+  const target = await action.boundingBox();
+  assert.ok(target.width >= 44 && target.height >= 44);
+}
 await page
   .getByRole("button", { name: "Edit care record", exact: true })
   .click();
@@ -1284,6 +1488,21 @@ for (let i = 0; i < 5; i++) {
     "true",
   );
 }
+assert.equal(
+  await page
+    .getByRole("button", { name: "Delete care record", exact: true })
+    .count(),
+  3,
+);
+await page
+  .getByRole("button", { name: "Show 3 older care records", exact: true })
+  .click();
+assert.equal(
+  await page
+    .getByRole("button", { name: "Delete care record", exact: true })
+    .count(),
+  6,
+);
 // Editing an older non-armpit reading must retain its actual measurement site.
 await page
   .getByRole("button", { name: "Edit care record", exact: true })
@@ -1301,21 +1520,6 @@ assert.equal(
     .getByRole("button", { name: "Armpit", exact: true })
     .getAttribute("aria-pressed"),
   "true",
-);
-assert.equal(
-  await page
-    .getByRole("button", { name: "Delete care record", exact: true })
-    .count(),
-  5,
-);
-await page
-  .getByRole("button", { name: "Show 1 older care records", exact: true })
-  .click();
-assert.equal(
-  await page
-    .getByRole("button", { name: "Delete care record", exact: true })
-    .count(),
-  6,
 );
 await page
   .getByRole("button", { name: "Delete care record", exact: true })
@@ -1350,6 +1554,16 @@ await page
   .click();
 await page.getByText("Care record saved", { exact: true }).waitFor();
 await assertNoUntranslatedChinese("Bath care");
+await page.getByRole("button", { name: "Temp", exact: true }).click();
+assert.equal(
+  await page
+    .getByRole("button", { name: "Delete care record", exact: true })
+    .count(),
+  3,
+);
+await page
+  .getByRole("button", { name: "Show 2 older care records", exact: true })
+  .waitFor();
 for (const kind of ["Wash", "Teeth", "Nails"]) {
   await page.getByRole("button", { name: kind, exact: true }).click();
   await assertNoUntranslatedChinese(`Daily care ${kind}`);
@@ -1385,10 +1599,10 @@ await page.evaluate(() => {
 });
 await page.reload();
 await page.getByRole("tab", { name: "照护", exact: true }).click();
-await page.getByRole("button", { name: "日常照护", exact: true }).click();
+await page.getByRole("button", { name: "日常", exact: true }).click();
 assert.equal(
   await page.getByRole("button", { name: "删除照护记录", exact: true }).count(),
-  5,
+  3,
 );
 assert.equal(
   await page.evaluate(
@@ -1397,7 +1611,7 @@ assert.equal(
   true,
 );
 await page.screenshot({
-  path: path.join(process.env.TEMP ?? "docs", "little-days-daily-care.png"),
+  path: path.join(screenshotDir, "little-days-daily-care.png"),
 });
 await page.getByRole("tab", { name: "我的", exact: true }).click();
 await page.getByRole("button", { name: "展开备份与恢复", exact: true }).click();
@@ -1407,6 +1621,45 @@ const careDownload = await careDownloadPromise;
 const careBackupBytes = await fs.readFile(await careDownload.path());
 const careBackup = JSON.parse(careBackupBytes.toString());
 assert.equal(careBackup.careRecords.length, 6);
+const beforeFamilyImport = await page.evaluate(() =>
+  localStorage.getItem("little-days-v1"),
+);
+const familyImportMessage =
+  "这是家庭共享记录导出文件。为保护家庭隐私，不能将其导入个人记录或共享家庭，离线时也不支持。现有记录未改变。";
+for (const offline of [false, true]) {
+  await context.setOffline(offline);
+  const familyChooserPromise = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "选择备份文件", exact: true }).click();
+  await (
+    await familyChooserPromise
+  ).setFiles({
+    name: "little-days-family-test.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(
+      JSON.stringify({
+        format: "my-little-days-family-backup",
+        formatVersion: 1,
+        profile: careBackup.profile,
+        entries: [],
+      }),
+    ),
+  });
+  await page
+    .getByRole("alert")
+    .filter({ hasText: familyImportMessage })
+    .waitFor();
+  assert.equal(
+    await page
+      .getByRole("button", { name: "确认替换当前数据", exact: true })
+      .count(),
+    0,
+  );
+  assert.equal(
+    await page.evaluate(() => localStorage.getItem("little-days-v1")),
+    beforeFamilyImport,
+  );
+}
+// A normal personal backup remains importable offline after the rejection.
 const careChooserPromise = page.waitForEvent("filechooser");
 await page.getByRole("button", { name: "选择备份文件", exact: true }).click();
 await (
@@ -1419,11 +1672,16 @@ await (
 await page
   .getByRole("button", { name: "确认替换当前数据", exact: true })
   .click();
+assert.equal(
+  await page.getByText(familyImportMessage, { exact: true }).count(),
+  0,
+);
+await context.setOffline(false);
 await page.getByRole("tab", { name: "照护", exact: true }).click();
-await page.getByRole("button", { name: "日常照护", exact: true }).click();
+await page.getByRole("button", { name: "日常", exact: true }).click();
 assert.equal(
   await page.getByRole("button", { name: "删除照护记录", exact: true }).count(),
-  5,
+  3,
 );
 assert.deepEqual(
   await page.evaluate(
@@ -1434,13 +1692,17 @@ assert.deepEqual(
 await page.evaluate(() => localStorage.setItem("little-days-v1-dark", "true"));
 await page.reload();
 await page.getByRole("tab", { name: "照护", exact: true }).click();
-await page.getByRole("button", { name: "日常照护", exact: true }).click();
+await page.getByRole("button", { name: "日常", exact: true }).click();
 await context.setOffline(true);
 await page
   .getByRole("textbox", { name: "体温 · °C", exact: true })
   .fill("３６．７");
 await page.getByRole("button", { name: "保存照护记录", exact: true }).click();
 await page.getByText("照护记录已保存", { exact: true }).waitFor();
+assert.deepEqual(saveDialogs.at(-1), {
+  type: "alert",
+  message: "照护记录已保存\n\n已保存到本机",
+});
 assert.equal(
   await page.evaluate(
     () => JSON.parse(localStorage.getItem("little-days-v1")).careRecords.length,
@@ -1449,10 +1711,7 @@ assert.equal(
 );
 await context.setOffline(false);
 await page.screenshot({
-  path: path.join(
-    process.env.TEMP ?? "docs",
-    "little-days-daily-care-dark.png",
-  ),
+  path: path.join(screenshotDir, "little-days-daily-care-dark.png"),
 });
 // Formula shortcuts follow age on the feed date without replacing actual intake.
 await page.setViewportSize({ width: 320, height: 844 });
@@ -1531,10 +1790,7 @@ for (const label of ["Time date", "Time time"]) {
   );
 }
 await page.screenshot({
-  path: path.join(
-    process.env.TEMP ?? "docs",
-    "little-days-feed-presets-en-dark.png",
-  ),
+  path: path.join(screenshotDir, "little-days-feed-presets-en-dark.png"),
 });
 await page.getByLabel("Amount fed", { exact: true }).fill("57.5");
 await page.getByLabel("Time date", { exact: true }).fill(feedDates.firstWeek);
@@ -1544,7 +1800,7 @@ assert.equal(
   "57.5",
 );
 await page
-  .getByRole("button", { name: "Feeding method: Bottle", exact: true })
+  .getByRole("button", { name: "Feeding method: Expressed milk", exact: true })
   .click();
 await assertAmountShortcuts([60, 90, 120, 150]);
 assert.equal(
@@ -1553,7 +1809,7 @@ assert.equal(
 );
 assert.equal(await page.getByText(/Quick amounts for age at feed/).count(), 0);
 await page
-  .getByRole("button", { name: "Feeding method: Left", exact: true })
+  .getByRole("button", { name: "Feeding method: Left side", exact: true })
   .click();
 assert.equal(await page.getByLabel("Amount fed", { exact: true }).count(), 0);
 await page
@@ -1589,7 +1845,7 @@ await page
   .first()
   .click();
 await page
-  .getByRole("button", { name: "编辑喂奶", exact: true })
+  .getByRole("button", { name: /^编辑喂奶(?: · .*)?$/ })
   .first()
   .click();
 await waitForFeedEditor("关闭记录编辑");
@@ -1601,10 +1857,7 @@ assert.equal(
 await assertAmountShortcuts([30, 60, 90, 120]);
 await page.getByLabel("实际喝奶量", { exact: true }).scrollIntoViewIfNeeded();
 await page.screenshot({
-  path: path.join(
-    process.env.TEMP ?? "docs",
-    "little-days-feed-presets-zh-light.png",
-  ),
+  path: path.join(screenshotDir, "little-days-feed-presets-zh-light.png"),
 });
 await page.getByLabel("关闭记录编辑", { exact: true }).click();
 await page.evaluate(() => {
@@ -1714,7 +1967,39 @@ assert.equal(
   "true",
 );
 await page.getByRole("button", { name: "Calendar", exact: true }).click();
+async function assertCalendarToolbarFrame() {
+  const toolbar = page.getByTestId("calendar-toolbar");
+  await toolbar.scrollIntoViewIfNeeded();
+  const frame = await toolbar.boundingBox();
+  assert.ok(
+    frame && frame.x >= 0 && frame.x + frame.width <= page.viewportSize().width,
+  );
+  const style = await toolbar.evaluate((node) => {
+    const style = getComputedStyle(node);
+    return {
+      border: style.borderTopWidth,
+      radius: style.borderTopLeftRadius,
+      background: style.backgroundColor,
+      shadow: style.boxShadow,
+    };
+  });
+  assert.equal(style.border, "1px");
+  assert.equal(style.radius, "14px");
+  assert.notEqual(style.background, "rgba(0, 0, 0, 0)");
+  assert.equal(style.shadow, "none");
+  for (const button of await toolbar.getByRole("button").all()) {
+    const box = await button.boundingBox();
+    assert.ok(box && box.width >= 44 && box.height >= 44);
+    assert.ok(
+      box.x >= frame.x && box.x + box.width <= frame.x + frame.width + 1,
+    );
+    assert.ok(
+      box.y >= frame.y && box.y + box.height <= frame.y + frame.height + 1,
+    );
+  }
+}
 async function assertCompactCalendarToolbar(labels) {
+  await assertCalendarToolbarFrame();
   const boxes = await Promise.all(
     labels.map((name) =>
       page.getByRole("button", { name, exact: true }).boundingBox(),
@@ -1734,7 +2019,9 @@ async function assertCompactCalendarToolbar(labels) {
       ),
     "calendar tools stay left aligned",
   );
-  const title = await page.getByRole("heading").boundingBox();
+  const title = await page
+    .getByRole("heading", { name: /^(Records|记录)$/ })
+    .boundingBox();
   assert.ok(title && title.x + title.width <= boxes[3].x);
   assert.ok(
     Math.abs(title.y + title.height / 2 - (boxes[3].y + boxes[3].height / 2)) <=
@@ -1805,12 +2092,18 @@ for (const [label, count] of [
 }
 await compactFilter.click();
 await page.getByRole("button", { name: "Close filters", exact: true }).click();
+// The modal and inline toolbar reuse filter labels. Finish dismissing the
+// modal before resizing, or the next locator can resolve a departing button.
+await page
+  .getByRole("button", { name: "Close filters", exact: true })
+  .waitFor({ state: "detached" });
 assert.equal(
   await page.getByRole("button", { name: /^View record:/ }).count(),
   7,
 );
 await page.setViewportSize({ width: 390, height: 844 });
 await page.getByRole("button", { name: "Filter: All", exact: true }).waitFor();
+await assertCalendarToolbarFrame();
 const fullFilterBoxes = await Promise.all(
   ["All", "Feed", "Diaper", "Sleep"].map((label) =>
     page
@@ -1829,6 +2122,7 @@ assert.ok(
       box.height >= 44 &&
       Math.abs(box.y - fullDayBox.y) < 2,
   ),
+  JSON.stringify({ fullFilterBoxes, fullDayBox }),
 );
 assert.ok(fullFilterBoxes[3].x + fullFilterBoxes[3].width <= 372);
 await page.getByRole("button", { name: "Filter: Sleep", exact: true }).click();
@@ -1837,10 +2131,7 @@ assert.equal(
   2,
 );
 await page.screenshot({
-  path: path.join(
-    process.env.TEMP ?? "docs",
-    "little-days-calendar-filter-en.png",
-  ),
+  path: path.join(screenshotDir, "little-days-calendar-filter-en.png"),
 });
 await page.setViewportSize({ width: 320, height: 844 });
 await page
@@ -1851,8 +2142,12 @@ assert.equal(
   await page.getByRole("button", { name: /^View record:/ }).count(),
   7,
 );
+assert.equal(
+  await page.getByRole("button", { name: /^Open calendar record:/ }).count(),
+  3,
+);
 await page
-  .getByRole("button", { name: "Show all calendar records", exact: true })
+  .getByRole("button", { name: "Show 4 older entries", exact: true })
   .click();
 assert.equal(
   await page.getByRole("button", { name: /^Open calendar record:/ }).count(),
@@ -1905,10 +2200,7 @@ await page
   .getByRole("button", { name: "Choose calendar date", exact: true })
   .scrollIntoViewIfNeeded();
 await page.screenshot({
-  path: path.join(
-    process.env.TEMP ?? "docs",
-    "little-days-calendar-en-dark.png",
-  ),
+  path: path.join(screenshotDir, "little-days-calendar-en-dark.png"),
 });
 await page.getByRole("button", { name: "Bar chart", exact: true }).click();
 await page.getByRole("button", { name: "Sleep", exact: true }).click();
@@ -1994,7 +2286,7 @@ await page
   .getByRole("button", { name: "选择日历日期", exact: true })
   .scrollIntoViewIfNeeded();
 await page.screenshot({
-  path: path.join(process.env.TEMP ?? "docs", "little-days-calendar-zh.png"),
+  path: path.join(screenshotDir, "little-days-calendar-zh.png"),
 });
 await page.getByRole("button", { name: "筛选记录：全部", exact: true }).click();
 await page.getByRole("button", { name: "筛选：尿布", exact: true }).click();
@@ -2004,6 +2296,7 @@ assert.equal(
 );
 await page.setViewportSize({ width: 390, height: 844 });
 await page.getByRole("button", { name: "筛选：尿布", exact: true }).waitFor();
+await assertCalendarToolbarFrame();
 assert.equal(
   await page
     .getByRole("button", { name: "筛选：尿布", exact: true })
@@ -2016,13 +2309,514 @@ assert.equal(
   6,
 );
 await page.screenshot({
-  path: path.join(
-    process.env.TEMP ?? "docs",
-    "little-days-calendar-filter-zh.png",
-  ),
+  path: path.join(screenshotDir, "little-days-calendar-filter-zh.png"),
 });
+// Account setup lives directly in More. Signed-out users must not have a
+// family-management entry or need another navigation step to see setup status.
+const localHistoryBeforePilot = await page.evaluate(() =>
+  localStorage.getItem("little-days-v1"),
+);
+await page.getByRole("tab", { name: "我的", exact: true }).click();
+await page.getByRole("heading", { name: "我的账户", exact: true }).waitFor();
+assert.equal(
+  await page.getByRole("button", { name: "家庭共享", exact: true }).count(),
+  0,
+);
+assert.equal(
+  await page.getByRole("button", { name: "管理家庭共享", exact: true }).count(),
+  0,
+);
+await page.getByText("家庭服务尚未配置", { exact: true }).waitFor();
+assert.equal(
+  await page.getByRole("button", { name: "登录", exact: true }).count(),
+  0,
+);
+await page.setViewportSize({ width: 320, height: 740 });
+assert.equal(
+  await page.evaluate(
+    () => document.documentElement.scrollWidth <= window.innerWidth,
+  ),
+  true,
+);
+await chooseEnglish();
+await page.getByRole("heading", { name: "My account", exact: true }).waitFor();
+assert.equal(
+  await page
+    .getByRole("button", { name: "Family sharing", exact: true })
+    .count(),
+  0,
+);
+await page
+  .getByText("Family service is not configured", { exact: true })
+  .waitFor();
+assert.equal(
+  await page.getByRole("button", { name: "Login", exact: true }).count(),
+  0,
+);
+assert.equal(
+  await page.evaluate(
+    () => document.documentElement.scrollWidth <= window.innerWidth,
+  ),
+  true,
+);
+assert.equal(
+  await page.evaluate(() => localStorage.getItem("little-days-v1")),
+  localHistoryBeforePilot,
+);
+await page.getByRole("tab", { name: "Records", exact: true }).click();
+await page.getByRole("button", { name: "Calendar", exact: true }).click();
+await page
+  .getByRole("button", { name: "Choose calendar date", exact: true })
+  .click();
+await page.getByLabel("Calendar date", { exact: true }).fill(calendarDate);
+await page.getByRole("button", { name: "Go to date", exact: true }).click();
+assert.equal(
+  await page.getByRole("button", { name: /^View record:/ }).count(),
+  6,
+);
+// Live sleep responds locally, rejects accidental sub-minute sessions, and
+// keeps the manual backfill path unrestricted. Use an isolated synthetic state.
+const sleepClock = new Date("2026-09-17T03:14:00+10:00");
+await page.clock.setFixedTime(sleepClock);
+await page.evaluate(() => {
+  localStorage.setItem("little-days-v1-language", "zh");
+  localStorage.setItem(
+    "little-days-v1",
+    JSON.stringify({
+      schemaVersion: 1,
+      profile: { name: "Sleep test", birthDate: "", sex: "unspecified" },
+      entries: [],
+    }),
+  );
+});
+await page.reload();
+await page.getByText("今日数据", { exact: true }).waitFor();
+assert.equal(await page.getByText("0", { exact: true }).count(), 3);
+await page.getByRole("button", { name: "睡了", exact: true }).click();
+await page.getByText("正在睡觉", { exact: true }).waitFor();
+await page.getByRole("button", { name: "醒了", exact: true }).waitFor();
+await page.reload();
+await page.getByText("正在睡觉", { exact: true }).waitFor();
+await page.clock.setFixedTime(new Date(sleepClock.getTime() + 59_999));
+await page.getByRole("button", { name: "醒了", exact: true }).click();
+await page
+  .getByText(
+    "本次睡眠不足 1 分钟，已按误触取消，不计入记录。如需保留，请补录睡眠。",
+    { exact: true },
+  )
+  .waitFor();
+assert.equal(await page.getByText("正在睡觉", { exact: true }).count(), 0);
+assert.equal(
+  await page.evaluate(
+    () => JSON.parse(localStorage.getItem("little-days-v1")).entries.length,
+  ),
+  0,
+);
+assert.equal(await page.getByText("0", { exact: true }).count(), 3);
+
+// An explicitly backfilled zero-minute record is allowed, unlike live reversal.
+await page.getByRole("button", { name: "补录睡眠 ›", exact: true }).click();
+await page.getByLabel("醒来时间日期", { exact: true }).waitFor();
+await page.getByLabel("入睡时间日期", { exact: true }).fill("2026-09-17");
+await page.getByLabel("入睡时间时刻", { exact: true }).fill("03:10");
+await page.getByLabel("醒来时间日期", { exact: true }).fill("2026-09-17");
+await page.getByLabel("醒来时间时刻", { exact: true }).fill("03:10");
+await page.getByRole("button", { name: "保存记录", exact: true }).click();
+await page
+  .getByRole("button", { name: "关闭记录编辑", exact: true })
+  .waitFor({ state: "detached" });
+assert.equal(
+  await page.evaluate(
+    () => JSON.parse(localStorage.getItem("little-days-v1")).entries.length,
+  ),
+  1,
+);
+
+await page.clock.setFixedTime(sleepClock);
+await page.getByRole("button", { name: "睡了", exact: true }).click();
+await page.getByText("正在睡觉", { exact: true }).waitFor();
+await page.clock.setFixedTime(new Date(sleepClock.getTime() + 60_000));
+await page.getByRole("button", { name: "醒了", exact: true }).click();
+await page.getByRole("button", { name: "睡了", exact: true }).waitFor();
+await page.getByText("已清醒 · 0分钟", { exact: true }).waitFor();
+assert.equal(
+  await page.getByTestId("today-last-sleep").innerText(),
+  "1分钟 · 03:14–03:15",
+);
+const sleepRecords = await page.evaluate(
+  () => JSON.parse(localStorage.getItem("little-days-v1")).entries,
+);
+assert.equal(sleepRecords.length, 2);
+assert.equal(sleepRecords.filter((entry) => !entry.end).length, 0);
+assert.ok(
+  sleepRecords.some(
+    (entry) => Date.parse(entry.end) - Date.parse(entry.start) === 60_000,
+  ),
+);
+
+// A failed local save must undo the optimistic state instead of claiming sleep
+// is durably running. Do not turn this into an unhandled page exception.
+await page.evaluate(() => {
+  window.sleepTestSetItem = Storage.prototype.setItem;
+  Storage.prototype.setItem = function (key, value) {
+    if (key === "little-days-v1") throw new Error("sleep_test_storage_full");
+    return window.sleepTestSetItem.call(this, key, value);
+  };
+});
+await page.getByRole("button", { name: "睡了", exact: true }).click();
+await page.getByText(/sleep_test_storage_full/).waitFor();
+assert.equal(await page.getByText("正在睡觉", { exact: true }).count(), 0);
+await page.evaluate(() => {
+  Storage.prototype.setItem = window.sleepTestSetItem;
+  delete window.sleepTestSetItem;
+});
+await page.getByRole("tab", { name: "我的", exact: true }).click();
+await chooseEnglish();
+await page.getByRole("tab", { name: "Today", exact: true }).click();
+await page.getByText("Today's totals", { exact: true }).waitFor();
+await page.getByRole("button", { name: "Sleep", exact: true }).click();
+await page.getByText("Sleeping now", { exact: true }).waitFor();
+await page.getByRole("button", { name: "Awake", exact: true }).click();
+await page.getByText(/This sleep lasted less than 1 minute/).waitFor();
+await assertNoUntranslatedChinese("live sleep feedback and today's totals");
+await page
+  .getByText(/This sleep lasted less than 1 minute/)
+  .waitFor({ state: "hidden", timeout: 6500 });
+
+// An overnight session keeps its full duration separate from time awake and
+// today's midnight-clipped total. Previously these looked like a short sleep.
+await page.clock.setFixedTime(new Date("2026-09-17T06:12:00+10:00"));
+await page.evaluate(() => {
+  localStorage.setItem(
+    "little-days-v1",
+    JSON.stringify({
+      schemaVersion: 1,
+      profile: { name: "Sleep test", birthDate: "", sex: "unspecified" },
+      entries: [
+        {
+          id: "overnight-sleep-label",
+          type: "sleep",
+          start: "2026-09-16T22:05:00+10:00",
+          end: "2026-09-17T06:05:00+10:00",
+          note: "",
+        },
+      ],
+    }),
+  );
+});
+await page.reload();
+await page.getByText("已清醒 · 7分钟", { exact: true }).waitFor();
+assert.match(
+  await page.getByTestId("today-last-sleep").innerText(),
+  /^(?:上一觉 · )?8小时0分 · .*22:05–06:05$/,
+);
+await page.getByText("6.1", { exact: true }).waitFor();
+await page.getByRole("tab", { name: "我的", exact: true }).click();
+await chooseEnglish();
+await page.getByRole("tab", { name: "Today", exact: true }).click();
+await page.getByText("Awake · 7m", { exact: true }).waitFor();
+assert.match(
+  await page.getByTestId("today-last-sleep").innerText(),
+  /^(?:Last sleep · )?8h 0m · .*22:05–06:05$/,
+);
+await assertNoUntranslatedChinese("overnight sleep and wake duration");
+await page.getByRole("button", { name: "Sleep", exact: true }).click();
+await page.getByText("Asleep for 0m", { exact: true }).waitFor();
+assert.equal(await page.getByText(/^Awake ·/).count(), 0);
+await page.getByRole("button", { name: "Awake", exact: true }).click();
+await page.getByText("Awake · 7m", { exact: true }).waitFor();
+await page.clock.setFixedTime(new Date("2026-09-17T07:12:00+10:00"));
+await page.getByText("Awake · 1h 7m", { exact: true }).waitFor();
+
+// Suggested feeding ends never go past now, including across midnight.
+// Saving a feed started in the current minute must preserve valid seconds.
+for (const [now, startDate, startTime, expectedEnd] of [
+  ["2026-09-17T17:20:45+10:00", null, null, "17:20"],
+  ["2026-09-17T17:20:45+10:00", "2026-09-17", "17:10", "17:20"],
+  ["2026-09-17T23:55:45+10:00", "2026-09-17", "23:50", "23:55"],
+]) {
+  await page.clock.setFixedTime(new Date(now));
+  const existingIds = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem("little-days-v1")).entries.map(
+      (entry) => entry.id,
+    ),
+  );
+  await page
+    .getByRole("button", { name: "+ Add", exact: true })
+    .first()
+    .click();
+  if (startDate) {
+    await page.getByLabel("Time date", { exact: true }).fill(startDate);
+    await page.getByLabel("Time time", { exact: true }).fill(startTime);
+  }
+  await page
+    .getByRole("button", { name: "+ Add end time (optional)", exact: true })
+    .click();
+  assert.equal(
+    await page.getByLabel("End time date", { exact: true }).inputValue(),
+    "2026-09-17",
+  );
+  assert.equal(
+    await page.getByLabel("End time time", { exact: true }).inputValue(),
+    expectedEnd,
+  );
+  await page.getByRole("button", { name: "Save record", exact: true }).click();
+  await page
+    .getByLabel("Close editor", { exact: true })
+    .waitFor({ state: "detached" });
+  const savedFeed = await page.evaluate(
+    (ids) =>
+      JSON.parse(localStorage.getItem("little-days-v1")).entries.find(
+        (entry) => entry.type === "feed" && !ids.includes(entry.id),
+      ),
+    existingIds,
+  );
+  assert.ok(savedFeed.end);
+  assert.ok(Date.parse(savedFeed.end) <= Date.parse(now));
+  assert.ok(Date.parse(savedFeed.end) >= Date.parse(savedFeed.start));
+}
+// Start-only feeding is a completed record unless Start timer is chosen.
+const beforeStartOnly = await page.evaluate(() =>
+  JSON.parse(localStorage.getItem("little-days-v1")).entries.map(
+    (entry) => entry.id,
+  ),
+);
+await page.getByRole("button", { name: "+ Add", exact: true }).first().click();
+await page.getByRole("button", { name: "Start timer", exact: true }).waitFor();
+await page.getByRole("button", { name: "Save record", exact: true }).click();
+await page
+  .getByLabel("Close editor", { exact: true })
+  .waitFor({ state: "detached" });
+const startOnlyFeed = await page.evaluate(
+  (ids) =>
+    JSON.parse(localStorage.getItem("little-days-v1")).entries.find(
+      (entry) => entry.type === "feed" && !ids.includes(entry.id),
+    ),
+  beforeStartOnly,
+);
+assert.equal(startOnlyFeed.end, undefined);
+assert.equal(startOnlyFeed.feedRunning, undefined);
+
+await page.getByRole("tab", { name: "Care", exact: true }).click();
+await page.getByRole("button", { name: "Daily care", exact: true }).click();
+const forehead = page.getByRole("button", { name: "Forehead", exact: true });
+assert.equal(await forehead.locator("svg").count(), 1);
+assert.equal((await forehead.innerText()).trim(), "Forehead");
+for (const name of ["Armpit", "Ear", "Forehead", "Rectal", "Other"]) {
+  const option = page.getByRole("button", { name, exact: true });
+  assert.ok((await option.locator("svg").count()) >= 1);
+  assert.equal((await option.innerText()).trim(), name);
+}
+await forehead.click();
+await page.getByText("Selected: Forehead", { exact: true }).waitFor();
+await forehead.locator("..").screenshot({
+  path: path.join(screenshotDir, "temperature-method-icons.png"),
+});
+await page.getByRole("button", { name: "Supplements", exact: true }).click();
+const supplementHelp = page.getByRole("button", {
+  name: "Supplement guidance & references",
+  exact: true,
+});
+assert.equal(await supplementHelp.getAttribute("aria-expanded"), "false");
+assert.deepEqual(
+  await page
+    .getByRole("checkbox")
+    .evaluateAll((nodes) =>
+      nodes.map((node) => node.getAttribute("aria-label")),
+    ),
+  ["Vitamin D (VD)", "Probiotics", "Iron", "Multivitamin", "Other"],
+);
+assert.equal(await page.getByRole("checkbox", { checked: true }).count(), 0);
+assert.equal(await page.getByRole("checkbox", { checked: false }).count(), 5);
+await page
+  .getByRole("checkbox", { name: "Vitamin D (VD)", exact: true })
+  .click();
+await page.getByRole("checkbox", { name: "Probiotics", exact: true }).click();
+await page.getByRole("checkbox", { name: "Other", exact: true }).click();
+await page
+  .getByLabel("Other supplement name", { exact: true })
+  .fill("Synthetic product");
+await page.getByLabel("Care notes", { exact: true }).fill("As advised");
+await page
+  .getByRole("button", { name: "Save care record", exact: true })
+  .click();
+await page.getByText("Care record saved", { exact: true }).waitFor();
+const savedSupplement = await page.evaluate(() =>
+  JSON.parse(localStorage.getItem("little-days-v1")).careRecords.find(
+    (record) => record.kind === "supplement",
+  ),
+);
+assert.deepEqual(savedSupplement.supplements, [
+  "vitamin-d",
+  "probiotics",
+  "other",
+]);
+assert.equal(savedSupplement.otherSupplement, "Synthetic product");
+await page
+  .getByRole("button", { name: "Edit care record", exact: true })
+  .click();
+await page.getByText("Edit care record", { exact: true }).waitFor();
+for (const name of ["Vitamin D (VD)", "Probiotics", "Other"])
+  await page
+    .getByRole("checkbox", { name, exact: true, checked: true })
+    .waitFor();
+assert.equal(
+  await page.getByLabel("Other supplement name", { exact: true }).inputValue(),
+  "Synthetic product",
+);
+await page.getByRole("checkbox", { name: "Other", exact: true }).click();
+await page
+  .getByRole("button", { name: "Save care record", exact: true })
+  .click();
+await page.getByText("Care record saved", { exact: true }).waitFor();
+const updatedSupplement = await page.evaluate(() =>
+  JSON.parse(localStorage.getItem("little-days-v1")).careRecords.find(
+    (record) => record.kind === "supplement",
+  ),
+);
+assert.equal(updatedSupplement.id, savedSupplement.id);
+assert.deepEqual(updatedSupplement.supplements, ["vitamin-d", "probiotics"]);
+assert.equal(updatedSupplement.otherSupplement, undefined);
+await supplementHelp.click();
+await page
+  .getByText(/Probiotics: effects depend on the strain and condition/)
+  .waitFor();
+await assertNoUntranslatedChinese("supplement guidance");
+await page.reload();
+await page.getByRole("tab", { name: "照护", exact: true }).click();
+await page.getByRole("button", { name: "日常", exact: true }).click();
+await page.getByRole("button", { name: "补充剂", exact: true }).click();
+await page.getByText("维生素 D（VD） · 益生菌", { exact: true }).waitFor();
+assert.equal(
+  await page
+    .getByRole("button", { name: "补充剂建议、注意事项与参考", exact: true })
+    .getAttribute("aria-expanded"),
+  "false",
+);
+// Today stays visible with three other record days; older days appear in
+// seven-day increments, with the remainder still collapsed.
+await page.clock.setFixedTime(new Date("2026-09-22T08:08:00+10:00"));
+await page.evaluate(() => {
+  const today = new Date();
+  const entries = Array.from({ length: 15 }, (_, index) => {
+    const start = new Date(today);
+    start.setDate(start.getDate() - index);
+    start.setHours(7, 0, 0, 0);
+    return {
+      id: `paged-feed-${index}`,
+      type: "feed",
+      feedKind: "formula",
+      start: start.toISOString(),
+      amount: 60,
+      note: "",
+    };
+  });
+  localStorage.setItem(
+    "little-days-v1",
+    JSON.stringify({
+      schemaVersion: 1,
+      profile: { name: "Paged records", birthDate: "", sex: "unspecified" },
+      entries,
+    }),
+  );
+  localStorage.setItem("little-days-v1-record-view", "bars");
+});
+await page.reload();
+await page.getByRole("tab", { name: "记录", exact: true }).click();
+await page.getByRole("button", { name: "全部", exact: true }).click();
+assert.equal(
+  await page.getByRole("button", { name: "展开当日明细", exact: true }).count(),
+  3,
+);
+await page
+  .getByRole("button", { name: "更多：显示前 7 天", exact: true })
+  .click();
+assert.equal(
+  await page.getByRole("button", { name: "展开当日明细", exact: true }).count(),
+  10,
+);
+await page
+  .getByRole("button", { name: "更多：显示前 4 天", exact: true })
+  .click();
+assert.equal(
+  await page.getByRole("button", { name: "展开当日明细", exact: true }).count(),
+  14,
+);
+await page.getByRole("button", { name: "收起历史日期", exact: true }).click();
+assert.equal(
+  await page.getByRole("button", { name: "展开当日明细", exact: true }).count(),
+  3,
+);
+// Every selectable language must keep the compact Today care summaries legible
+// on the smallest supported phone width. Use only synthetic local records.
+await page.clock.setFixedTime(new Date("2026-09-22T08:08:00+10:00"));
+await page.evaluate(() => {
+  localStorage.setItem(
+    "little-days-v1",
+    JSON.stringify({
+      schemaVersion: 1,
+      profile: { name: "Locale test", birthDate: "", sex: "unspecified" },
+      entries: [
+        {
+          id: "locale-feed",
+          type: "feed",
+          feedKind: "formula",
+          start: "2026-09-22T07:56:00+10:00",
+          end: "2026-09-22T08:01:00+10:00",
+          amount: 60,
+          note: "",
+        },
+        {
+          id: "locale-diaper",
+          type: "diaper",
+          diaperKind: "wet",
+          start: "2026-09-22T07:19:00+10:00",
+          note: "",
+        },
+        {
+          id: "locale-sleep",
+          type: "sleep",
+          start: "2026-09-21T23:23:00+10:00",
+          end: "2026-09-22T07:01:00+10:00",
+          note: "",
+        },
+      ],
+    }),
+  );
+});
+await page.setViewportSize({ width: 320, height: 740 });
+await page.evaluate(() =>
+  localStorage.setItem("little-days-v1-record-view", "calendar"),
+);
+await page.reload();
+for (const language of languageOptions.slice(1)) {
+  await page.getByRole("tab").last().click();
+  await page.getByTestId("language-picker-row").click();
+  await page.getByRole("radio", { name: language, exact: true }).click();
+  await page.getByRole("tab").first().click();
+  const feed = await page.getByTestId("today-feed-recency").innerText();
+  const diaper = await page.getByTestId("today-diaper-recency").innerText();
+  const sleep = await page.getByTestId("today-last-sleep").innerText();
+  assert.match(feed, /60 mL$/, language);
+  assert.doesNotMatch(feed, /\d{2}:\d{2}/, language);
+  assert.doesNotMatch(diaper, /\d{2}:\d{2}/, language);
+  assert.match(sleep, /23:23–07:01$/, language);
+  for (const [kind, selector] of [
+    ["feed", "today-feed-recency"],
+    ["diaper", "today-diaper-recency"],
+    ["sleep", "today-last-sleep"],
+  ]) {
+    const box = await page.getByTestId(selector).boundingBox();
+    assert.ok(
+      box && box.height <= 30,
+      `${language}: ${kind} wrapped: ${box?.height}`,
+    );
+  }
+  await page.getByRole("tab").nth(2).click();
+  await assertCalendarToolbarFrame();
+}
 assert.deepEqual(errors, []);
 console.log(
-  "PASS: clean home, removed controls/milestones, daily chart summaries and intervals, unit switch, confirmed deletion without undo, growth, old data retained, dark mode, narrow layout.",
+  "PASS: existing local flows, calendar/history, dark/narrow layout, bilingual family/account and live sleep/today summaries, preserved local history.",
 );
 await browser.close();

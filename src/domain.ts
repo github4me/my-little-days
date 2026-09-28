@@ -1,11 +1,21 @@
 export type EntryType = "feed" | "diaper" | "sleep" | "growth" | "milestone";
+export const supplementKinds = [
+  "vitamin-d",
+  "probiotics",
+  "iron",
+  "multivitamin",
+  "other",
+] as const;
+export type SupplementKind = (typeof supplementKinds)[number];
 export type CareRecord = {
   id: string;
-  kind: "temperature" | "bath" | "wash" | "oral" | "nails";
+  kind: "temperature" | "bath" | "wash" | "oral" | "nails" | "supplement";
   time: string;
   note: string;
   temperature?: number;
   method?: "armpit" | "ear" | "forehead" | "rectal" | "other";
+  supplements?: SupplementKind[];
+  otherSupplement?: string;
 };
 export type Entry = {
   id: string;
@@ -176,7 +186,9 @@ export function validateEntry(input: unknown): Entry {
 export function validateCareRecord(input: unknown): CareRecord {
   const r = object(input);
   if (
-    !["temperature", "bath", "wash", "oral", "nails"].includes(r.kind as string)
+    !["temperature", "bath", "wash", "oral", "nails", "supplement"].includes(
+      r.kind as string,
+    )
   )
     return fail("照护类型无效");
   const out: CareRecord = {
@@ -197,13 +209,37 @@ export function validateCareRecord(input: unknown): CareRecord {
       return fail("测量方式无效");
     out.method = r.method as CareRecord["method"];
   }
+  if (out.kind === "supplement") {
+    allowed.push("supplements", "otherSupplement");
+    if (
+      !Array.isArray(r.supplements) ||
+      r.supplements.length < 1 ||
+      r.supplements.length > supplementKinds.length ||
+      new Set(r.supplements).size !== r.supplements.length ||
+      r.supplements.some((value) => !supplementKinds.includes(value))
+    )
+      return fail("请选择有效的补充剂");
+    out.supplements = [...r.supplements] as SupplementKind[];
+    if (out.supplements.includes("other"))
+      out.otherSupplement = string(
+        r.otherSupplement,
+        "其他补充剂名称",
+        100,
+      ).trim();
+    else if (r.otherSupplement !== undefined)
+      return fail("请选择其他补充剂后填写名称");
+  }
   if (Object.keys(r).some((key) => !allowed.includes(key)))
     return fail("照护记录包含不支持的字段");
   return out;
 }
 export function validateState(input: unknown): State {
-  const s = object(input),
-    p = object(s.profile);
+  const s = object(input);
+  if (s.format === "my-little-days-family-backup")
+    return fail(
+      "这是家庭共享记录导出文件。为保护家庭隐私，不能将其导入个人记录或共享家庭，离线时也不支持。现有记录未改变。",
+    );
+  const p = object(s.profile);
   if (s.schemaVersion !== 1) return fail("不支持此备份版本");
   if (
     Object.keys(s).some(

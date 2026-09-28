@@ -1,6 +1,14 @@
 import type { Entry } from "./domain";
+import type { SupportedLocale } from "./locales";
 import type { ReminderSettings } from "./reminderSettings";
 import { t } from "./i18n";
+import type { FamilyExtraRecord } from "./family/extras";
+import { loadAutoFeedReminder } from "./storage";
+import { captureScheduledReminderRecords } from "./family/familyReminderPlan";
+
+export async function captureReminderRecords(): Promise<FamilyExtraRecord[]> {
+  return captureScheduledReminderRecords([], await loadAutoFeedReminder());
+}
 
 export type Reminder = {
   id: string;
@@ -39,4 +47,9 @@ export async function addAutoFeedReminder(
   );
 }
 
-export async function rescheduleAutoFeedReminders(_entries: Entry[]) {}
+export async function rescheduleAutoFeedReminders(
+  _entries: Entry[],
+  _locale?: SupportedLocale,
+  _formattingLocale?: string,
+  _shouldContinue?: () => boolean,
+) {}

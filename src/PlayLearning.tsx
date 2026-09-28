@@ -1,8 +1,17 @@
 import React, { useContext, useEffect, useRef, useState } from "react";
-import { Linking, Modal, Pressable, ScrollView, View } from "react-native";
+import {
+  Linking,
+  Pressable,
+  ScrollView,
+  View,
+  useWindowDimensions,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import Modal from "./AccessibleModal";
 import { Button, Card, T, Theme } from "./ui";
 import { useI18n } from "./i18n";
 import DailyCare from "./DailyCare";
+import HelpDisclosure from "./HelpDisclosure";
 import PlayIcon, { type PlayIconKind } from "./PlayIcon";
 import type { CareRecord } from "./domain";
 import {
@@ -22,7 +31,6 @@ import {
   learningSources,
   playActivities,
   scenes,
-  words,
   type LearningText,
 } from "./learning";
 
@@ -30,48 +38,79 @@ function Options({
   options,
   value,
   onChange,
+  label,
 }: {
   options: { value: string; icon: PlayIconKind; label: string }[];
   value: string;
   onChange: (value: string) => void;
+  label: string;
 }) {
   const c = useContext(Theme);
+  const { width, fontScale } = useWindowDimensions();
+  const stacked = fontScale >= 1.8;
   return (
-    <View style={{ flexDirection: "row", gap: 6 }}>
-      {options.map((o) => (
-        <Pressable
-          key={o.value}
-          accessibilityRole="button"
-          accessibilityLabel={o.label}
-          accessibilityState={{ selected: value === o.value }}
-          onPress={() => onChange(o.value)}
-          style={{
-            flex: 1,
-            minWidth: 0,
-            minHeight: 62,
-            borderRadius: 16,
-            padding: 4,
-            alignItems: "center",
-            justifyContent: "center",
-            backgroundColor: value === o.value ? c.soft : c.card,
-            borderWidth: 1,
-            borderColor: value === o.value ? c.primary : c.line,
-          }}
-        >
-          <PlayIcon kind={o.icon} color={c.primary} />
-          <T
-            raw
-            style={{
-              fontSize: 11,
-              lineHeight: 16,
-              textAlign: "center",
-              fontWeight: value === o.value ? "700" : "400",
-            }}
-          >
-            {o.label}
-          </T>
-        </Pressable>
-      ))}
+    <View style={{ gap: 7 }}>
+      <T raw style={{ color: c.muted, fontSize: 12, fontWeight: "600" }}>
+        {label}
+      </T>
+      <View
+        style={{
+          flexDirection: stacked ? "column" : "row",
+          gap: 3,
+          padding: 3,
+          borderRadius: 17,
+          borderWidth: 1,
+          borderColor: c.line,
+          backgroundColor: c.input,
+        }}
+      >
+        {options.map((o) => {
+          const selected = value === o.value;
+          return (
+            <Pressable
+              key={o.value}
+              accessibilityRole="button"
+              accessibilityLabel={o.label}
+              accessibilityState={{ selected }}
+              onPress={() => onChange(o.value)}
+              style={{
+                flex: stacked ? undefined : 1,
+                flexBasis: stacked ? "100%" : undefined,
+                minWidth: 44,
+                minHeight: 56,
+                borderRadius: 14,
+                paddingHorizontal: width < 360 ? 3 : 7,
+                paddingVertical: 7,
+                flexDirection: stacked ? "row" : "column",
+                gap: stacked ? 8 : 2,
+                alignItems: "center",
+                justifyContent: "center",
+                backgroundColor: selected ? c.card : "transparent",
+                borderWidth: selected ? 1 : 0,
+                borderColor: selected ? c.primary : "transparent",
+              }}
+            >
+              <PlayIcon
+                kind={o.icon}
+                color={selected ? c.primary : c.muted}
+                size={22}
+              />
+              <T
+                raw
+                style={{
+                  color: selected ? c.primary : c.muted,
+                  fontSize: 13,
+                  lineHeight: 18,
+                  textAlign: "center",
+                  fontWeight: selected ? "700" : "500",
+                }}
+              >
+                {o.label}
+              </T>
+            </Pressable>
+          );
+        })}
+      </View>
     </View>
   );
 }
@@ -82,22 +121,38 @@ export default function PlayLearning({
   careRecords,
   onSaveCare,
   onDeleteCare,
+  sharedMode = false,
+  supplementsEnabled = !sharedMode,
+  careVersions,
+  canEditCare,
+  sharedPlay,
 }: {
   birthDate: string;
   now: number;
   careRecords: CareRecord[];
-  onSaveCare: (record: CareRecord) => Promise<void>;
-  onDeleteCare: (id: string) => Promise<void>;
+  onSaveCare: (record: CareRecord, baseVersion?: string) => Promise<void>;
+  onDeleteCare: (id: string, baseVersion?: string) => Promise<void>;
+  sharedMode?: boolean;
+  supplementsEnabled?: boolean;
+  careVersions?: Record<string, string>;
+  canEditCare?: (id: string) => boolean;
+  sharedPlay?: {
+    selection: PlaySelection;
+    checkins: string[];
+    canChangeSelection: boolean;
+    canToggleCheckin: (activityId: string) => boolean;
+    onChangeSelection: (selection: PlaySelection) => Promise<void>;
+    onToggleCheckin: (activityId: string) => Promise<void>;
+  };
 }) {
   const c = useContext(Theme);
-  const { locale } = useI18n();
-  const copy = (value: LearningText) =>
-    locale === "en-US" ? value.en : value.zh;
-  const text = (zh: string, en: string) => copy(words(zh, en));
+  const { fontScale } = useWindowDimensions();
+  const { localize: text } = useI18n();
+  const copy = (value: LearningText) => text(value.zh, value.en);
   const actualMonths = completedMonths(birthDate, new Date(now));
   const actualSupported = actualMonths !== null && actualMonths < 25;
   const [manualMonths, setManualMonths] = useState<number | null>(null);
-  const [mode, setMode] = useState("today");
+  const [mode, setMode] = useState("care");
   const [expanded, setExpanded] = useState<string | null>(null);
   const [selection, setSelection] = useState<PlaySelection>({
     included: [],
@@ -122,12 +177,27 @@ export default function PlayLearning({
   const checkinLock = useRef(false);
   const currentDay = useRef(day);
   currentDay.current = day;
-  const checkinsReady = checkins?.day === day;
-  const doneToday = checkinsReady ? checkins.ids : [];
+  const checkinsReady = sharedMode ? !!sharedPlay : checkins?.day === day;
+  const doneToday = sharedMode
+    ? (sharedPlay?.checkins ?? [])
+    : checkins?.day === day
+      ? checkins.ids
+      : [];
+  const currentSelection = sharedMode
+    ? (sharedPlay?.selection ?? { included: [], excluded: [] })
+    : selection;
+  const selectionReady = sharedMode || ready;
+  const canChangeSelection = !sharedMode || !!sharedPlay?.canChangeSelection;
+  const canToggleCheckin = (id: string) =>
+    !sharedMode || !!sharedPlay?.canToggleCheckin(id);
   useEffect(() => {
     let active = true;
     setCheckins(null);
     setCheckinError(null);
+    if (sharedMode) {
+      setCheckins({ day, ids: [] });
+      return;
+    }
     void loadPlayCheckins(day)
       .then((ids) => {
         if (active) setCheckins({ day, ids });
@@ -138,18 +208,19 @@ export default function PlayLearning({
     return () => {
       active = false;
     };
-  }, [day, checkinRetry]);
+  }, [day, checkinRetry, sharedMode]);
   async function toggleCheckin(id: string) {
-    if (!checkinsReady || checkinLock.current) return;
+    if (!checkinsReady || checkinLock.current || !canToggleCheckin(id)) return;
     checkinLock.current = true;
     setChecking(true);
     const next = doneToday.includes(id)
       ? doneToday.filter((v) => v !== id)
       : [...doneToday, id];
     try {
-      await savePlayCheckins(day, next);
+      if (sharedMode) await sharedPlay!.onToggleCheckin(id);
+      else await savePlayCheckins(day, next);
       if (currentDay.current === day) {
-        setCheckins({ day, ids: next });
+        if (!sharedMode) setCheckins({ day, ids: next });
         setCheckinError(null);
       }
     } catch {
@@ -162,6 +233,11 @@ export default function PlayLearning({
   useEffect(() => {
     let active = true;
     setReady(false);
+    if (sharedMode) {
+      setSelection({ included: [], excluded: [] });
+      setReady(true);
+      return;
+    }
     void loadPlaySelection()
       .then((value) => {
         if (active) {
@@ -176,7 +252,7 @@ export default function PlayLearning({
     return () => {
       active = false;
     };
-  }, [retry]);
+  }, [retry, sharedMode]);
   useEffect(() => {
     setManualMonths(null);
     setExpanded(null);
@@ -187,14 +263,16 @@ export default function PlayLearning({
     (actualSupported
       ? ageBands.find((b) => actualMonths >= b.min && actualMonths < b.max)!.min
       : 0);
-  const selectedIds = ready ? selectedPlayIds(actualMonths, selection) : [];
+  const selectedIds = selectionReady
+    ? selectedPlayIds(actualMonths, currentSelection)
+    : [];
   const pendingActivity = playActivities.find((a) => a.id === pendingSelection);
   const shown =
     mode === "choose"
       ? activitiesForBand(months)
       : playActivities.filter((a) => selectedIds.includes(a.id));
   function requestSelection(id: string) {
-    if (!ready || lock.current) return;
+    if (!canChangeSelection || !selectionReady || lock.current) return;
     const a = playActivities.find((v) => v.id === id)!;
     if (
       !selectedIds.includes(id) &&
@@ -206,13 +284,16 @@ export default function PlayLearning({
     void updateSelection(id, !selectedIds.includes(id));
   }
   async function updateSelection(id: string, selected: boolean) {
-    if (!ready || lock.current) return;
+    if (!canChangeSelection || !selectionReady || lock.current) return;
     lock.current = true;
     setSaving(true);
     try {
-      const next = changePlaySelection(selection, id, selected);
-      await savePlaySelection(next);
-      setSelection(next);
+      const next = changePlaySelection(currentSelection, id, selected);
+      if (sharedMode) await sharedPlay!.onChangeSelection(next);
+      else {
+        await savePlaySelection(next);
+        setSelection(next);
+      }
       setPendingSelection(null);
       setError(null);
     } catch {
@@ -231,6 +312,14 @@ export default function PlayLearning({
   }
   return (
     <View style={{ gap: 16 }}>
+      {sharedMode && !sharedPlay ? (
+        <T raw style={{ color: c.muted, fontSize: 12 }}>
+          {text(
+            "日常照护记录与家庭共享。当前服务尚不支持共享早教设置和打卡，可先阅读活动指南。",
+            "Daily care records are shared. This server does not yet support shared play settings or check-ins; activity guides remain available to read.",
+          )}
+        </T>
+      ) : null}
       <Modal
         visible={!!pendingActivity}
         transparent
@@ -239,7 +328,7 @@ export default function PlayLearning({
           if (!saving) setPendingSelection(null);
         }}
       >
-        <View
+        <SafeAreaView
           style={{
             flex: 1,
             backgroundColor: "rgba(0,0,0,0.5)",
@@ -251,12 +340,16 @@ export default function PlayLearning({
             style={{
               flexGrow: 0,
               maxHeight: "80%",
-              backgroundColor: c.card,
+              backgroundColor: c.elevated,
               borderRadius: 20,
             }}
             contentContainerStyle={{ padding: 20, gap: 14 }}
           >
-            <T raw style={{ fontSize: 18, fontWeight: "700" }}>
+            <T
+              raw
+              accessibilityRole="header"
+              style={{ fontSize: 20, fontWeight: "700" }}
+            >
               {text("确认添加早教活动", "Confirm play activity")}
             </T>
             <T raw>{pendingActivity ? copy(pendingActivity.title) : ""}</T>
@@ -267,15 +360,17 @@ export default function PlayLearning({
                     "No valid birth date is set, so age suitability cannot be checked.",
                   )
                 : text(
-                    `宝宝实际满 ${actualMonths} 个月，这项活动不在当前参考月龄内。`,
-                    `Your baby is ${actualMonths} completed months old. This activity is outside the current reference age.`,
+                    "宝宝实际满 {months} 个月，这项活动不在当前参考月龄内。",
+                    "Your baby is {months} completed months old. This activity is outside the current reference age.",
+                    { months: actualMonths },
                   )}
             </T>
             <T raw>
               {pendingActivity
                 ? text(
-                    `活动参考月龄：满 ${pendingActivity.min} 月至未满 ${pendingActivity.max} 月。请根据宝宝实际能力选择；是否仍要加入？`,
-                    `Activity reference age: ${pendingActivity.min} to under ${pendingActivity.max} months. Consider your child's abilities. Add it anyway?`,
+                    "活动参考月龄：满 {min} 月至未满 {max} 月。请根据宝宝实际能力选择；是否仍要加入？",
+                    "Activity reference age: {min} to under {max} months. Consider your child's abilities. Add it anyway?",
+                    { min: pendingActivity.min, max: pendingActivity.max },
                   )
                 : ""}
             </T>
@@ -293,6 +388,7 @@ export default function PlayLearning({
             <Button
               label={text("仍然加入", "Add anyway")}
               disabled={saving}
+              busy={saving}
               onPress={() => {
                 if (pendingActivity)
                   void updateSelection(pendingActivity.id, true);
@@ -305,46 +401,33 @@ export default function PlayLearning({
               onPress={() => setPendingSelection(null)}
             />
           </ScrollView>
-        </View>
+        </SafeAreaView>
       </Modal>
-      <View
-        style={{
-          borderLeftWidth: 3,
-          borderLeftColor: c.primary,
-          paddingLeft: 12,
-          gap: 4,
+      <Options
+        value={mode}
+        label={text("切换照护内容", "Choose a section")}
+        onChange={(value) => {
+          setMode(value);
+          setExpanded(null);
         }}
-      >
-        <T raw style={{ fontWeight: "600", fontSize: 16 }}>
-          {mode === "care"
-            ? text(
-                "日常照护，按需要记录",
-                "Everyday care, recorded when needed",
-              )
-            : mode === "choose"
-              ? text("设置适合你们的早教活动", "Choose the play that suits you")
-              : text(
-                  "把日常，变成一起玩的时光",
-                  "A little play in everyday moments",
-                )}
-        </T>
-        <T raw style={{ color: c.muted, fontSize: 13, lineHeight: 20 }}>
-          {mode === "care"
-            ? text(
-                "记录实际做过的照护，不是每日任务。测温、洗澡等记录会保留历史，填写后点保存才生效。",
-                "Record care you actually provided, not daily tasks. Temperature and care history are kept; drafts are only stored when you tap Save.",
-              )
-            : mode === "choose"
-              ? text(
-                  "按月龄浏览并选择，勾选后自动保存，所选项目会显示在「早教活动」。可跨月龄选择，参考范围不符时会提示。",
-                  "Browse by age and choose activities. Selections save automatically and appear in Play activities. You can choose other ages; a prompt flags activities outside your baby's reference age.",
-                )
-              : text(
-                  "给家长参考的亲子早教活动，不是宝宝的屏幕课程。先读步骤，再放下手机陪伴。做过可自愿打卡，不必全部完成。",
-                  "Parent-led play activities, not screen lessons for babies. Read first, then put the phone away. Check in if you like; there is no need to do everything.",
-                )}
-        </T>
-      </View>
+        options={[
+          {
+            value: "care",
+            icon: "care",
+            label: text("日常", "Daily care"),
+          },
+          {
+            value: "today",
+            icon: "activities",
+            label: text("早教", "Play"),
+          },
+          {
+            value: "choose",
+            icon: "choose",
+            label: text("设置早教", "Play settings"),
+          },
+        ]}
+      />
       {mode === "choose" ? (
         <View style={{ gap: 8 }}>
           <T raw style={{ fontSize: 13, color: c.muted }}>
@@ -352,8 +435,9 @@ export default function PlayLearning({
               ? text("正在浏览手选月龄", "Browsing a selected age group")
               : actualSupported
                 ? text(
-                    `按宝宝满 ${actualMonths} 个月推荐`,
-                    `Ideas for your baby's age: ${actualMonths} months`,
+                    "按宝宝满 {months} 个月推荐",
+                    "Ideas for your baby's age: {months} months",
+                    { months: actualMonths },
                   )
                 : actualMonths !== null && actualMonths >= 25
                   ? text(
@@ -374,10 +458,9 @@ export default function PlayLearning({
               <Pressable
                 key={band.min}
                 accessibilityRole="button"
-                accessibilityLabel={text(
-                  `${band.label} 个月`,
-                  `${band.label} months`,
-                )}
+                accessibilityLabel={text("{label} 个月", "{label} months", {
+                  label: band.label,
+                })}
                 accessibilityState={{
                   selected:
                     months !== null && months >= band.min && months < band.max,
@@ -388,17 +471,27 @@ export default function PlayLearning({
                 }}
                 style={{
                   minHeight: 44,
+                  minWidth: 44,
                   paddingHorizontal: 12,
+                  paddingVertical: 8,
                   justifyContent: "center",
                   borderRadius: 13,
+                  borderWidth:
+                    months !== null && months >= band.min && months < band.max
+                      ? 2
+                      : 1,
+                  borderColor:
+                    months !== null && months >= band.min && months < band.max
+                      ? c.primary
+                      : c.line,
                   backgroundColor:
                     months !== null && months >= band.min && months < band.max
                       ? c.soft
                       : c.card,
                 }}
               >
-                <T raw style={{ fontSize: 12, color: c.primary }}>
-                  {text(`${band.label} 月`, `${band.label} mo`)}
+                <T raw style={{ fontSize: 15, color: c.primary }}>
+                  {text("{label} 月", "{label} mo", { label: band.label })}
                 </T>
               </Pressable>
             ))}
@@ -416,7 +509,7 @@ export default function PlayLearning({
                 setManualMonths(null);
                 setExpanded(null);
               }}
-              style={{ minHeight: 40, justifyContent: "center" }}
+              style={{ minHeight: 44, justifyContent: "center" }}
             >
               <T raw style={{ fontSize: 12, color: c.primary }}>
                 {text("回到宝宝实际月龄", "Use baby's actual age")}
@@ -425,37 +518,17 @@ export default function PlayLearning({
           ) : null}
         </View>
       ) : null}
-      <Options
-        value={mode}
-        onChange={(value) => {
-          setMode(value);
-          setExpanded(null);
-        }}
-        options={[
-          {
-            value: "today",
-            icon: "activities",
-            label: text("早教活动", "Play activities"),
-          },
-          {
-            value: "care",
-            icon: "care",
-            label: text("日常照护", "Daily care"),
-          },
-          {
-            value: "choose",
-            icon: "choose",
-            label: text("设置早教", "Play settings"),
-          },
-        ]}
-      />
       {mode === "care" ? (
         <DailyCare
+          supplementsEnabled={supplementsEnabled}
           records={careRecords}
           birthDate={birthDate}
           now={now}
           onSave={onSaveCare}
           onDelete={onDeleteCare}
+          sharedMode={sharedMode}
+          versions={careVersions}
+          canEdit={canEditCare}
         />
       ) : (
         <>
@@ -490,8 +563,9 @@ export default function PlayLearning({
           ) : null}
           <T raw style={{ color: c.muted, fontSize: 12 }}>
             {text(
-              `已选 ${selectedIds.length} 项。默认随实际月龄选择；手动增减会保留。`,
-              `${selectedIds.length} selected. Defaults follow actual age; manual choices are kept.`,
+              "已选 {count} 项。默认随实际月龄选择；手动增减会保留。",
+              "{count} selected. Defaults follow actual age; manual choices are kept.",
+              { count: selectedIds.length },
             )}
           </T>
           {mode === "today" ? (
@@ -499,10 +573,16 @@ export default function PlayLearning({
               {day} ·{" "}
               {checkinsReady
                 ? text(
-                    `今天做过 ${doneToday.length} 项，自在选择就好`,
-                    `${doneToday.length} checked in today. Choose freely.`,
+                    "今天做过 {count} 项，自在选择就好",
+                    "{count} checked in today. Choose freely.",
+                    { count: doneToday.length },
                   )
-                : text("正在读取今日打卡…", "Loading today's check-ins…")}
+                : sharedMode
+                  ? text(
+                      "当前服务暂不支持共享打卡",
+                      "Shared check-ins are not available on this server",
+                    )
+                  : text("正在读取今日打卡…", "Loading today's check-ins…")}
             </T>
           ) : null}
           {checkinError ? (
@@ -543,8 +623,14 @@ export default function PlayLearning({
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel={text(
-                    `${open ? "收起" : "查看"}${a.title.zh}`,
-                    `${open ? "Hide" : "View"} ${a.title.en}`,
+                    "{action}{title}",
+                    "{action} {title}",
+                    {
+                      action: open
+                        ? text("收起", "Hide")
+                        : text("查看", "View"),
+                      title: copy(a.title),
+                    },
                   )}
                   accessibilityState={{ expanded: open }}
                   onPress={() => setExpanded(open ? null : a.id)}
@@ -578,8 +664,10 @@ export default function PlayLearning({
                     style={{ color: c.muted, fontSize: 12, lineHeight: 18 }}
                   >
                     {copy(currentScene.label)} ·{" "}
-                    {text(`约 ${a.minutes} 分钟`, `About ${a.minutes} min`)} ·{" "}
-                    {copy(a.focus)}
+                    {text("约 {minutes} 分钟", "About {minutes} min", {
+                      minutes: a.minutes,
+                    })}{" "}
+                    · {copy(a.focus)}
                   </T>
                 </Pressable>
                 {actualMonths === null ||
@@ -587,14 +675,15 @@ export default function PlayLearning({
                 actualMonths >= a.max ? (
                   <T raw style={{ fontSize: 12, color: c.muted }}>
                     {text(
-                      `参考月龄：满 ${a.min} 月至未满 ${a.max} 月，不是当前月龄推荐。`,
-                      `Reference ages: ${a.min} to under ${a.max} months; not a current-age recommendation.`,
+                      "参考月龄：满 {min} 月至未满 {max} 月，不是当前月龄推荐。",
+                      "Reference ages: {min} to under {max} months; not a current-age recommendation.",
+                      { min: a.min, max: a.max },
                     )}
                   </T>
                 ) : null}
                 {open ? (
                   <View style={{ gap: 10, paddingTop: 4 }}>
-                    <T raw style={{ fontSize: 13 }}>
+                    <T raw style={{ fontSize: 17 }}>
                       {text("准备：", "You need: ")}
                       {copy(a.materials)}
                     </T>
@@ -608,7 +697,7 @@ export default function PlayLearning({
                         </T>
                         <T
                           raw
-                          style={{ fontSize: 14, lineHeight: 22, flex: 1 }}
+                          style={{ fontSize: 17, lineHeight: 24, flex: 1 }}
                         >
                           {copy(step)}
                         </T>
@@ -621,7 +710,7 @@ export default function PlayLearning({
                         borderRadius: 12,
                       }}
                     >
-                      <T raw style={{ fontSize: 12, lineHeight: 19 }}>
+                      <T raw style={{ fontSize: 15, lineHeight: 22 }}>
                         {text("安全提醒：", "Keep it safe: ")}
                         {copy(a.safety)}
                       </T>
@@ -629,11 +718,12 @@ export default function PlayLearning({
                     <Pressable
                       accessibilityRole="link"
                       accessibilityLabel={text(
-                        `参考来源：${source.label}`,
-                        `Reference: ${source.label}`,
+                        "参考来源：{source}",
+                        "Reference: {source}",
+                        { source: source.label },
                       )}
                       onPress={() => void openSource(source.url)}
-                      style={{ minHeight: 40, justifyContent: "center" }}
+                      style={{ minHeight: 44, justifyContent: "center" }}
                     >
                       <T raw style={{ fontSize: 12, color: c.primary }}>
                         {text("参考原则 · ", "Reference · ")}
@@ -644,8 +734,9 @@ export default function PlayLearning({
                 ) : null}
                 <View
                   style={{
-                    flexDirection: "row",
-                    alignItems: "center",
+                    flexDirection: fontScale >= 1.3 ? "column" : "row",
+                    alignItems: fontScale >= 1.3 ? "stretch" : "center",
+                    flexWrap: "wrap",
                     justifyContent: "space-between",
                     gap: 8,
                   }}
@@ -655,20 +746,28 @@ export default function PlayLearning({
                       accessibilityRole="checkbox"
                       aria-checked={doneToday.includes(a.id)}
                       accessibilityLabel={text(
-                        `今天做过：${a.title.zh}`,
-                        `Done today: ${a.title.en}`,
+                        "今天做过：{title}",
+                        "Done today: {title}",
+                        { title: copy(a.title) },
                       )}
                       accessibilityState={{
                         checked: doneToday.includes(a.id),
-                        disabled: !checkinsReady || checking,
+                        busy: checking,
+                        disabled:
+                          !checkinsReady || checking || !canToggleCheckin(a.id),
                       }}
-                      disabled={!checkinsReady || checking}
+                      disabled={
+                        !checkinsReady || checking || !canToggleCheckin(a.id)
+                      }
                       onPress={() => void toggleCheckin(a.id)}
                       style={{
                         minHeight: 44,
                         justifyContent: "center",
                         flexShrink: 1,
-                        opacity: checkinsReady && !checking ? 1 : 0.5,
+                        opacity:
+                          checkinsReady && !checking && canToggleCheckin(a.id)
+                            ? 1
+                            : 0.5,
                       }}
                     >
                       <T
@@ -680,12 +779,9 @@ export default function PlayLearning({
                         }}
                       >
                         {doneToday.includes(a.id) ? "☑ " : "□ "}
-                        {text(
-                          doneToday.includes(a.id) ? "今天已打卡" : "今天做过",
-                          doneToday.includes(a.id)
-                            ? "Checked in today"
-                            : "Done today",
-                        )}
+                        {doneToday.includes(a.id)
+                          ? text("今天已打卡", "Checked in today")
+                          : text("今天做过", "Done today")}
                       </T>
                     </Pressable>
                   ) : null}
@@ -693,28 +789,34 @@ export default function PlayLearning({
                     accessibilityRole="checkbox"
                     aria-checked={saved}
                     accessibilityLabel={text(
-                      `选择早教活动：${a.title.zh}`,
-                      `Select play activity: ${a.title.en}`,
+                      "选择早教活动：{title}",
+                      "Select play activity: {title}",
+                      { title: copy(a.title) },
                     )}
                     accessibilityState={{
                       checked: saved,
-                      disabled: !ready || saving,
+                      busy: saving,
+                      disabled:
+                        !selectionReady || saving || !canChangeSelection,
                     }}
-                    disabled={!ready || saving}
+                    disabled={!selectionReady || saving || !canChangeSelection}
                     onPress={() => requestSelection(a.id)}
                     style={{
                       minHeight: 44,
+                      flexShrink: 1,
                       justifyContent: "center",
                       paddingHorizontal: 4,
-                      opacity: ready && !saving ? 1 : 0.5,
+                      opacity:
+                        selectionReady && !saving && canChangeSelection
+                          ? 1
+                          : 0.5,
                     }}
                   >
                     <T raw style={{ color: c.primary, fontSize: 13 }}>
                       {saved ? "☑ " : "□ "}
-                      {text(
-                        saved ? "已选早教活动" : "加入早教活动",
-                        saved ? "Selected" : "Add to activities",
-                      )}
+                      {saved
+                        ? text("已选早教活动", "Selected")
+                        : text("加入早教活动", "Add to activities")}
                     </T>
                   </Pressable>
                 </View>
@@ -731,7 +833,31 @@ export default function PlayLearning({
                   )}
             </T>
           ) : null}
-          <View style={{ gap: 8, paddingTop: 6 }}>
+          <HelpDisclosure
+            title={text("早教说明与参考", "Play help & references")}
+          >
+            <T raw style={{ fontWeight: "600", fontSize: 16 }}>
+              {mode === "choose"
+                ? text(
+                    "设置适合你们的早教活动",
+                    "Choose the play that suits you",
+                  )
+                : text(
+                    "把日常，变成一起玩的时光",
+                    "A little play in everyday moments",
+                  )}
+            </T>
+            <T raw style={{ color: c.muted, fontSize: 13, lineHeight: 20 }}>
+              {mode === "choose"
+                ? text(
+                    "按月龄浏览并选择，勾选后自动保存，所选项目会显示在「早教」。可跨月龄选择，参考范围不符时会提示。",
+                    "Browse by age and choose activities. Selections save automatically and appear in Play. You can choose other ages; a prompt flags activities outside your baby's reference age.",
+                  )
+                : text(
+                    "给家长参考的亲子早教活动，不是宝宝的屏幕课程。先读步骤，再放下手机陪伴。做过可自愿打卡，不必全部完成。",
+                    "Parent-led play activities, not screen lessons for babies. Read first, then put the phone away. Check in if you like; there is no need to do everything.",
+                  )}
+            </T>
             <T raw style={{ fontSize: 12, lineHeight: 20, color: c.muted }}>
               {text(
                 "月龄只是浏览参考，不是敏感期或达标清单。按宝宝兴趣和能力选择；早产或有特殊需要时，适龄活动请咨询儿科医生。若担心发展或已会的技能退步，请及时咨询专业人员。",
@@ -740,10 +866,27 @@ export default function PlayLearning({
             </T>
             <T raw style={{ fontSize: 11, lineHeight: 18, color: c.muted }}>
               {text(
-                "活动由参考资料整理改写，时长和分组为浏览建议，未作临床验证。打卡仅表示今天做过，不代表完成建议活动量。早教设置和每日打卡仅保存在本机，不包含在记录备份中。",
-                "Activities are editorial adaptations; times and age groups are browsing suggestions, not clinically validated guidance. A check-in means you tried it today, not that a recommended activity amount was met. Play settings and dated check-ins stay locally and are not included in record backups.",
-              )}
+                "活动由参考资料整理改写，时长和分组为浏览建议，未作临床验证。打卡仅表示今天做过，不代表完成建议活动量。",
+                "Activities are editorial adaptations; times and age groups are browsing suggestions, not clinically validated guidance. A check-in means you tried it today, not that a recommended activity amount was met.",
+              )}{" "}
+              {sharedMode
+                ? text(
+                    "家庭早教设置和打卡以服务确认的同步结果为准。",
+                    "Family play settings and check-ins depend on confirmed synchronization.",
+                  )
+                : text(
+                    "早教设置和每日打卡仅保存在本机，不包含在记录备份中。",
+                    "Play settings and dated check-ins stay locally and are not included in record backups.",
+                  )}
             </T>
+            {sharedMode && sharedPlay ? (
+              <T raw style={{ color: c.muted, fontSize: 12 }}>
+                {text(
+                  "早教设置和打卡与家庭共享。管理员选择活动；成员可打卡并取消自己添加的打卡，管理员可管理全部打卡。",
+                  "Play settings and check-ins are shared with your family. The admin chooses activities. Members can add or undo their own check-ins; the admin can manage all check-ins.",
+                )}
+              </T>
+            ) : null}
             <Pressable
               accessibilityRole="link"
               onPress={() => void openSource(learningSources.who.url)}
@@ -756,7 +899,7 @@ export default function PlayLearning({
                 )}
               </T>
             </Pressable>
-          </View>
+          </HelpDisclosure>
         </>
       )}
     </View>

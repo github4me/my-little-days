@@ -1,26 +1,35 @@
-import React, { useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
+  Keyboard,
   KeyboardAvoidingView,
   Linking,
-  Modal,
   Platform,
   Pressable,
   ScrollView,
   StyleProp,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
   ViewStyle,
+  useWindowDimensions,
 } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
-import DateTimePicker from "@react-native-community/datetimepicker";
+import DateTimePicker, {
+  type DateTimePickerEvent,
+} from "@react-native-community/datetimepicker";
 import Svg, { Path } from "react-native-svg";
-import { light, dark as night } from "./ui";
+import Modal from "./AccessibleModal";
+import { selectPalette } from "./palette";
+import { useAccessibilityPreferences } from "./accessibilityPreferences";
 import { Entry, makeId, validateEntry } from "./domain";
-import { t } from "./i18n";
+import { formatEditableNumber, parseLocalizedNumber, t, useI18n } from "./i18n";
+import { entryStorageDisclosure } from "./entryStorageDisclosure";
 import { feedAmountPresets, formulaFeedingSource } from "./feedAmountPresets";
+import { entryEditorDraftKey } from "./entryEditorDraft";
 
 const names = {
   feed: "喂养",
@@ -32,7 +41,7 @@ const names = {
 type FeedKind = NonNullable<Entry["feedKind"]>;
 const feedOptions: { kind: FeedKind; label: string }[] = [
   { kind: "formula", label: "配方奶" },
-  { kind: "expressed", label: "瓶喂" },
+  { kind: "expressed", label: "瓶喂母乳" },
   { kind: "breast-left", label: "左侧" },
   { kind: "breast-right", label: "右侧" },
   { kind: "breast-both", label: "双侧" },
@@ -130,51 +139,180 @@ export default function EntryEditor({
   onSave,
   onClose,
   dark,
+  sharedMode = false,
+  hasAccount = false,
 }: {
   entry: Entry;
   birthDate: string;
   onSave: (entry: Entry) => Promise<void>;
   onClose: () => void;
   dark: boolean;
+  sharedMode?: boolean;
+  hasAccount?: boolean;
 }) {
+  const { formattingLocale } = useI18n();
   const [draft, setDraft] = useState(entry);
   const initialEnd = useRef(entry.end ?? new Date().toISOString());
   const [start, setStart] = useState(localFields(entry.start));
   const [end, setEnd] = useState(localFields(initialEnd.current));
   const [hasEnd, setHasEnd] = useState(!!entry.end);
   const feedEndInitialized = useRef(!!entry.end);
-  const [amount, setAmount] = useState(String(entry.amount ?? 120));
+  const [amount, setAmount] = useState(() =>
+    formatEditableNumber(entry.amount ?? 120, formattingLocale),
+  );
   const [sourceError, setSourceError] = useState(false);
   const [weight, setWeight] = useState(
-    entry.weight === undefined ? "" : String(entry.weight),
+    entry.weight === undefined
+      ? ""
+      : formatEditableNumber(entry.weight, formattingLocale),
   );
   const [length, setLength] = useState(
-    entry.length === undefined ? "" : String(entry.length),
+    entry.length === undefined
+      ? ""
+      : formatEditableNumber(entry.length, formattingLocale),
   );
   const [head, setHead] = useState(
-    entry.head === undefined ? "" : String(entry.head),
+    entry.head === undefined
+      ? ""
+      : formatEditableNumber(entry.head, formattingLocale),
   );
   const [picker, setPicker] = useState<{
     target: "start" | "end";
     mode: "date" | "time";
+    value: Date;
   } | null>(null);
   const [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   const saving = useRef(false);
-  const palette = dark ? night : light;
-  const bg = palette.bg,
-    card = palette.card,
+  const { highContrast } = useAccessibilityPreferences();
+  const { fontScale } = useWindowDimensions();
+  const largeText = fontScale > 1.3;
+  const palette = selectPalette(dark, highContrast);
+  const bg = dark ? palette.card : palette.bg,
+    card = dark ? palette.elevated : palette.card,
     ink = palette.text,
     muted = palette.muted;
-  const accent = dark ? "#447FA6" : "#34759D";
+  const accent = palette.primary;
   const bottle = draft.feedKind === "formula" || draft.feedKind === "expressed";
   const quickAmounts = feedAmountPresets(birthDate, start.date, draft.feedKind);
+  const pickerRef = useRef(picker);
+  pickerRef.current = picker;
+  const draftKey = entryEditorDraftKey({
+    draft,
+    start,
+    end,
+    hasEnd,
+    amount,
+    weight,
+    length,
+    head,
+  });
+  const initialDraftKey = useRef(draftKey);
+  const discardPrompt = useRef<symbol | null>(null);
+  useEffect(
+    () => () => {
+      discardPrompt.current = null;
+    },
+    [],
+  );
+  const requestClose = () => {
+    if (saving.current || discardPrompt.current) return;
+    // Escape/back dismisses the topmost interaction, not the entire unsaved
+    // editor behind it. Keeping the ref until render also makes a repeated
+    // native escape notification in the same event harmless.
+    if (pickerRef.current) {
+      setPicker(null);
+      return;
+    }
+    if (draftKey === initialDraftKey.current) {
+      onClose();
+      return;
+    }
+    const prompt = Symbol("discard-draft");
+    discardPrompt.current = prompt;
+    const keepEditing = () => {
+      if (discardPrompt.current === prompt) discardPrompt.current = null;
+    };
+    const discard = () => {
+      if (discardPrompt.current !== prompt) return;
+      discardPrompt.current = null;
+      onClose();
+    };
+    if (Platform.OS === "web") {
+      if (
+        globalThis.confirm(
+          `${t("放弃未保存的修改？")}\n\n${t("这些修改尚未保存。放弃后无法恢复。")}`,
+        )
+      )
+        discard();
+      else keepEditing();
+    } else {
+      Alert.alert(
+        t("放弃未保存的修改？"),
+        t("这些修改尚未保存。放弃后无法恢复。"),
+        [
+          { text: t("继续编辑"), style: "cancel", onPress: keepEditing },
+          { text: t("放弃修改"), style: "destructive", onPress: discard },
+        ],
+        { cancelable: true, onDismiss: keepEditing },
+      );
+    }
+  };
+  const openPicker = (target: "start" | "end", mode: "date" | "time") => {
+    const fields = target === "start" ? start : end;
+    Keyboard.dismiss();
+    setPicker({
+      target,
+      mode,
+      value: new Date(localISO(fields.date, fields.time)),
+    });
+  };
+  // Android's dialog effect observes onChange identity. Keep the handler stable
+  // across typing/renders and never apply the value supplied with a dismissal.
+  const onPickerChange = useCallback(
+    (event: DateTimePickerEvent, value?: Date) => {
+      const active = pickerRef.current;
+      if (!active) return;
+      if (event.type !== "set" || !value) {
+        if (Platform.OS !== "ios") setPicker(null);
+        return;
+      }
+      if (Platform.OS === "ios") setPicker({ ...active, value });
+      else {
+        (active.target === "start" ? setStart : setEnd)(
+          localFields(value.toISOString()),
+        );
+        setPicker(null);
+      }
+    },
+    [],
+  );
+  const toggleEnd = () => {
+    if (!hasEnd && !feedEndInitialized.current) {
+      try {
+        const startTime = localISO(start.date, start.time);
+        setEnd(
+          localFields(
+            new Date(
+              Math.min(Date.parse(startTime) + 20 * 60 * 1000, Date.now()),
+            ).toISOString(),
+          ),
+        );
+        feedEndInitialized.current = true;
+        setError("");
+      } catch (err) {
+        setError((err as Error).message);
+        return;
+      }
+    }
+    setHasEnd(!hasEnd);
+  };
   const inputStyle = [
     s.input,
     {
-      backgroundColor: card,
+      backgroundColor: dark ? palette.input : card,
       color: ink,
-      borderColor: palette.line,
+      borderColor: palette.controlLine,
     },
   ];
   const label = (text: string) => (
@@ -191,7 +329,7 @@ export default function EntryEditor({
       disabled={busy}
       onPress={press}
       accessibilityRole="button"
-      accessibilityState={{ selected }}
+      accessibilityState={{ selected, disabled: busy }}
       style={[
         s.chip,
         style,
@@ -203,7 +341,7 @@ export default function EntryEditor({
     >
       <Text
         style={{
-          color: selected ? "#FFFFFF" : ink,
+          color: selected ? palette.onPrimary : ink,
           fontSize: 15,
           fontWeight: "600",
         }}
@@ -222,7 +360,7 @@ export default function EntryEditor({
       key={text}
       accessibilityRole="button"
       accessibilityLabel={t(text)}
-      accessibilityState={{ selected }}
+      accessibilityState={{ selected, disabled: busy }}
       disabled={busy}
       onPress={press}
       style={({ pressed }) => [
@@ -236,7 +374,7 @@ export default function EntryEditor({
     >
       <Text
         style={{
-          color: selected ? "#FFFFFF" : accent,
+          color: selected ? palette.onPrimary : accent,
           fontSize: 21,
           lineHeight: 24,
           fontWeight: "600",
@@ -245,12 +383,12 @@ export default function EntryEditor({
         {icon}
       </Text>
       <Text
-        numberOfLines={1}
         style={{
-          color: selected ? "#FFFFFF" : muted,
+          color: selected ? palette.onPrimary : muted,
           fontSize: 11,
           lineHeight: 15,
           fontWeight: selected ? "700" : "600",
+          textAlign: "center",
         }}
       >
         {t(text)}
@@ -264,10 +402,14 @@ export default function EntryEditor({
         key={kind}
         accessibilityRole="button"
         accessibilityLabel={t("喂养方式：{kind}", { kind: t(text) })}
-        accessibilityState={{ selected }}
+        accessibilityState={{ selected, disabled: busy }}
         disabled={busy}
         onPress={() => setDraft({ ...draft, feedKind: kind })}
-        style={({ pressed }) => [s.feedMode, { opacity: pressed ? 0.72 : 1 }]}
+        style={({ pressed }) => [
+          s.feedMode,
+          largeText && s.largeChoice,
+          { opacity: pressed ? 0.72 : 1 },
+        ]}
       >
         <View
           style={[
@@ -278,10 +420,12 @@ export default function EntryEditor({
             },
           ]}
         >
-          <FeedModeIcon kind={kind} color={selected ? "#FFFFFF" : accent} />
+          <FeedModeIcon
+            kind={kind}
+            color={selected ? palette.onPrimary : accent}
+          />
         </View>
         <Text
-          numberOfLines={1}
           style={[
             s.feedModeLabel,
             {
@@ -301,10 +445,12 @@ export default function EntryEditor({
     return (
       <View style={s.section}>
         {label(title)}
-        <View style={s.row}>
+        <View style={[s.row, largeText && s.stack]}>
           {Platform.OS === "web" ? (
             <>
               <TextInput
+                keyboardAppearance={dark ? "dark" : "light"}
+                selectionColor={accent}
                 accessibilityLabel={t("{title}日期", { title: t(title) })}
                 editable={!busy}
                 value={fields.date}
@@ -314,6 +460,8 @@ export default function EntryEditor({
                 style={[inputStyle, { flex: 1.4 }]}
               />
               <TextInput
+                keyboardAppearance={dark ? "dark" : "light"}
+                selectionColor={accent}
                 accessibilityLabel={t("{title}时刻", { title: t(title) })}
                 editable={!busy}
                 value={fields.time}
@@ -326,15 +474,29 @@ export default function EntryEditor({
           ) : (
             <>
               <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t("{title}日期", { title: t(title) })}
+                accessibilityValue={{ text: fields.date }}
+                accessibilityState={{
+                  disabled: busy,
+                  expanded: picker?.target === target && picker.mode === "date",
+                }}
                 disabled={busy}
-                onPress={() => setPicker({ target, mode: "date" })}
+                onPress={() => openPicker(target, "date")}
                 style={[inputStyle, { flex: 1.4 }]}
               >
                 <Text style={{ color: ink, fontSize: 17 }}>{fields.date}</Text>
               </Pressable>
               <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t("{title}时刻", { title: t(title) })}
+                accessibilityValue={{ text: fields.time }}
+                accessibilityState={{
+                  disabled: busy,
+                  expanded: picker?.target === target && picker.mode === "time",
+                }}
                 disabled={busy}
-                onPress={() => setPicker({ target, mode: "time" })}
+                onPress={() => openPicker(target, "time")}
                 style={[inputStyle, { flex: 1 }]}
               >
                 <Text style={{ color: ink, fontSize: 17 }}>{fields.time}</Text>
@@ -345,7 +507,7 @@ export default function EntryEditor({
       </View>
     );
   };
-  async function save() {
+  async function save(startFeedTimer = false) {
     if (saving.current) return;
     saving.current = true;
     setBusy(true);
@@ -375,19 +537,23 @@ export default function EntryEditor({
         throw new Error(t("请填写已经发生的时间"));
       if (entry.type === "feed") {
         delete result.feedRunning;
-        if (!hasEnd) result.feedRunning = true;
+        if (!hasEnd && (startFeedTimer || entry.feedRunning))
+          result.feedRunning = true;
         if (bottle) {
           if (!amount.trim()) throw new Error(t("请填写实际喝奶量"));
-          result.amount = Number(amount);
+          result.amount = parseLocalizedNumber(amount, formattingLocale);
         } else delete result.amount;
       }
       if (entry.type === "growth") {
         delete result.weight;
         delete result.length;
         delete result.head;
-        if (weight.trim()) result.weight = Number(weight);
-        if (length.trim()) result.length = Number(length);
-        if (head.trim()) result.head = Number(head);
+        if (weight.trim())
+          result.weight = parseLocalizedNumber(weight, formattingLocale);
+        if (length.trim())
+          result.length = parseLocalizedNumber(length, formattingLocale);
+        if (head.trim())
+          result.head = parseLocalizedNumber(head, formattingLocale);
       }
       await onSave(validateEntry(result));
     } catch (e) {
@@ -398,15 +564,11 @@ export default function EntryEditor({
     }
   }
   return (
-    <Modal
-      visible
-      animationType="slide"
-      onRequestClose={() => {
-        if (!saving.current) onClose();
-      }}
-    >
+    <Modal visible animationType="slide" onRequestClose={requestClose}>
       <SafeAreaProvider>
         <SafeAreaView
+          accessibilityViewIsModal
+          onAccessibilityEscape={requestClose}
           edges={["top", "left", "right", "bottom"]}
           style={{ flex: 1, backgroundColor: bg }}
         >
@@ -414,38 +576,52 @@ export default function EntryEditor({
             style={{ flex: 1 }}
             behavior={Platform.OS === "ios" ? "padding" : undefined}
           >
-            <View style={s.header}>
-              <View>
+            <View
+              accessibilityElementsHidden={!!picker && Platform.OS === "ios"}
+              style={s.header}
+            >
+              <View style={{ flex: 1, minWidth: 0 }}>
                 <Text style={[s.kicker, { color: accent }]}>
                   {t("每一刻，都值得记住")}
                 </Text>
-                <Text style={[s.title, { color: ink }]}>
+                <Text
+                  accessibilityRole="header"
+                  style={[s.title, { color: ink }]}
+                >
                   {t(names[entry.type])}
                 </Text>
               </View>
               <Pressable
+                accessibilityRole="button"
                 accessibilityLabel={t("关闭记录编辑")}
+                accessibilityState={{ disabled: busy }}
                 disabled={busy}
-                onPress={() => {
-                  if (!saving.current) onClose();
-                }}
+                onPress={requestClose}
                 style={[s.close, { backgroundColor: card }]}
               >
                 <Text style={{ fontSize: 24, color: ink }}>×</Text>
               </Pressable>
             </View>
             <ScrollView
+              accessibilityElementsHidden={!!picker && Platform.OS === "ios"}
               keyboardShouldPersistTaps="handled"
+              keyboardDismissMode={
+                Platform.OS === "ios" ? "interactive" : "on-drag"
+              }
               contentContainerStyle={s.content}
             >
               {entry.type === "feed" && (
                 <View style={s.section}>
                   {label("喂养方式")}
-                  <View style={s.feedModes}>{feedOptions.map(feedMode)}</View>
+                  <View style={[s.feedModes, largeText && s.wrappingChoices]}>
+                    {feedOptions.map(feedMode)}
+                  </View>
                   {bottle && (
                     <View style={s.feedAmount}>
                       {label("实际喝奶量 · mL")}
                       <TextInput
+                        keyboardAppearance={dark ? "dark" : "light"}
+                        selectionColor={accent}
                         accessibilityLabel={t("实际喝奶量")}
                         editable={!busy}
                         value={amount}
@@ -453,13 +629,23 @@ export default function EntryEditor({
                         keyboardType="decimal-pad"
                         style={[inputStyle, s.largeInput]}
                       />
-                      <View style={[s.amountChips, { marginTop: 10 }]}>
+                      <View
+                        style={[
+                          s.amountChips,
+                          largeText && s.wrappingChoices,
+                          { marginTop: 10 },
+                        ]}
+                      >
                         {quickAmounts.amounts.map((n) =>
                           chip(
                             `${n} mL`,
-                            amount === String(n),
-                            () => setAmount(String(n)),
-                            s.amountChip,
+                            amount ===
+                              formatEditableNumber(n, formattingLocale),
+                            () =>
+                              setAmount(
+                                formatEditableNumber(n, formattingLocale),
+                              ),
+                            [s.amountChip, largeText && s.largeChoice],
                           ),
                         )}
                       </View>
@@ -507,7 +693,7 @@ export default function EntryEditor({
               {entry.type === "diaper" && (
                 <View style={s.section}>
                   {label("尿布情况")}
-                  <View style={s.optionRow}>
+                  <View style={[s.optionRow, largeText && s.stack]}>
                     {(
                       [
                         ["wet", "有尿", "⌁"],
@@ -525,7 +711,7 @@ export default function EntryEditor({
               {entry.type === "sleep" && (
                 <View style={s.section}>
                   {label("睡眠状态")}
-                  <View style={s.optionRow}>
+                  <View style={[s.optionRow, largeText && s.stack]}>
                     {iconChoice("正在睡", "☾", !hasEnd, () => setHasEnd(false))}
                     {iconChoice("已睡醒 / 补录", "✓", hasEnd, () =>
                       setHasEnd(true),
@@ -542,32 +728,42 @@ export default function EntryEditor({
               )}
               {entry.type === "feed" && (
                 <View style={s.section}>
-                  <View style={s.wrap}>
-                    {chip(
-                      hasEnd ? "✓ 记录结束时间" : "+ 记录结束时间（可选）",
-                      hasEnd,
-                      () => {
-                        if (!hasEnd && !feedEndInitialized.current) {
-                          try {
-                            const startTime = localISO(start.date, start.time);
-                            setEnd(
-                              localFields(
-                                new Date(
-                                  Date.parse(startTime) + 20 * 60 * 1000,
-                                ).toISOString(),
-                              ),
-                            );
-                            feedEndInitialized.current = true;
-                            setError("");
-                          } catch (err) {
-                            setError((err as Error).message);
-                            return;
-                          }
-                        }
-                        setHasEnd(!hasEnd);
-                      },
-                    )}
-                  </View>
+                  {Platform.OS !== "web" ? (
+                    <View
+                      style={[
+                        s.row,
+                        {
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          minHeight: 44,
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          s.label,
+                          { color: ink, flex: 1, marginBottom: 0 },
+                        ]}
+                      >
+                        {t("记录结束时间")}
+                      </Text>
+                      <Switch
+                        accessibilityLabel={t("记录结束时间")}
+                        value={hasEnd}
+                        disabled={busy}
+                        onValueChange={toggleEnd}
+                        trackColor={{ true: accent }}
+                      />
+                    </View>
+                  ) : (
+                    <View style={s.wrap}>
+                      {chip(
+                        hasEnd ? "✓ 记录结束时间" : "+ 记录结束时间（可选）",
+                        hasEnd,
+                        toggleEnd,
+                      )}
+                    </View>
+                  )}
                 </View>
               )}
               {hasEnd &&
@@ -592,6 +788,8 @@ export default function EntryEditor({
                     <View key={text} style={{ marginBottom: 15 }}>
                       {label(text)}
                       <TextInput
+                        keyboardAppearance={dark ? "dark" : "light"}
+                        selectionColor={accent}
                         accessibilityLabel={t(text)}
                         editable={!busy}
                         value={value}
@@ -609,6 +807,8 @@ export default function EntryEditor({
                 <View style={s.section}>
                   {label("里程碑标题")}
                   <TextInput
+                    keyboardAppearance={dark ? "dark" : "light"}
+                    selectionColor={accent}
                     accessibilityLabel={t("里程碑标题")}
                     editable={!busy}
                     value={draft.title ?? ""}
@@ -623,6 +823,8 @@ export default function EntryEditor({
               <View style={s.section}>
                 {label("备注 · 可选")}
                 <TextInput
+                  keyboardAppearance={dark ? "dark" : "light"}
+                  selectionColor={accent}
                   accessibilityLabel={t("备注")}
                   editable={!busy}
                   value={draft.note}
@@ -638,69 +840,144 @@ export default function EntryEditor({
                 />
               </View>
               {!!error && (
-                <Text accessibilityRole="alert" style={s.error}>
+                <Text
+                  accessibilityRole="alert"
+                  style={[s.error, { color: palette.danger }]}
+                >
                   {t(error)}
                 </Text>
               )}
               <Pressable
                 accessibilityRole="button"
+                accessibilityLabel={t(
+                  busy
+                    ? "正在保存"
+                    : !hasEnd && (entry.type === "sleep" || entry.feedRunning)
+                      ? "保存 · 继续计时"
+                      : "保存记录",
+                )}
+                accessibilityState={{ busy, disabled: busy }}
                 disabled={busy}
-                onPress={save}
+                onPress={() => void save()}
                 style={[
                   s.save,
-                  { backgroundColor: accent, opacity: busy ? 0.6 : 1 },
+                  {
+                    backgroundColor:
+                      entry.type === "feed" && !hasEnd && !entry.feedRunning
+                        ? palette.soft
+                        : accent,
+                    opacity: busy ? 0.6 : 1,
+                  },
                 ]}
               >
                 {busy ? (
-                  <ActivityIndicator color="#FFFFFF" />
+                  <ActivityIndicator
+                    color={
+                      entry.type === "feed" && !hasEnd && !entry.feedRunning
+                        ? accent
+                        : palette.onPrimary
+                    }
+                  />
                 ) : (
-                  <Text style={s.saveText}>
+                  <Text
+                    style={[
+                      s.saveText,
+                      {
+                        color:
+                          entry.type === "feed" && !hasEnd && !entry.feedRunning
+                            ? accent
+                            : palette.onPrimary,
+                      },
+                    ]}
+                  >
                     {t(
-                      entry.type === "feed" && !hasEnd
-                        ? "开始"
-                        : entry.type === "sleep" && !hasEnd
-                          ? "保存 · 继续计时"
-                          : "保存记录",
+                      !hasEnd && (entry.type === "sleep" || entry.feedRunning)
+                        ? "保存 · 继续计时"
+                        : "保存记录",
                     )}
                   </Text>
                 )}
               </Pressable>
+              {entry.type === "feed" && !hasEnd && !entry.feedRunning ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={t("开始计时")}
+                  accessibilityState={{ busy, disabled: busy }}
+                  disabled={busy}
+                  onPress={() => void save(true)}
+                  style={[
+                    s.save,
+                    {
+                      backgroundColor: accent,
+                      opacity: busy ? 0.6 : 1,
+                      marginTop: 10,
+                    },
+                  ]}
+                >
+                  <Text style={[s.saveText, { color: palette.onPrimary }]}>
+                    {t("开始计时")}
+                  </Text>
+                </Pressable>
+              ) : null}
               <Text style={[s.footer, { color: muted }]}>
-                {t("仅保存在这台设备 · 无需联网")}
+                {t(entryStorageDisclosure({ sharedMode, hasAccount }))}
               </Text>
             </ScrollView>
             {picker && Platform.OS !== "web" && (
-              <View style={{ backgroundColor: card }}>
+              <View
+                accessibilityViewIsModal={Platform.OS === "ios"}
+                onAccessibilityEscape={() => setPicker(null)}
+                style={{ backgroundColor: palette.elevated }}
+              >
                 {Platform.OS === "ios" && (
-                  <Pressable
-                    onPress={() => setPicker(null)}
-                    style={{ padding: 14, alignSelf: "flex-end" }}
+                  <View
+                    style={[
+                      s.row,
+                      {
+                        justifyContent: "space-between",
+                        paddingHorizontal: 10,
+                      },
+                    ]}
                   >
-                    <Text style={{ color: accent, fontWeight: "700" }}>
-                      {t("完成")}
-                    </Text>
-                  </Pressable>
+                    <Pressable
+                      accessibilityRole="button"
+                      onPress={() => setPicker(null)}
+                      style={{ padding: 14, minHeight: 44, minWidth: 44 }}
+                    >
+                      <Text style={{ color: accent, fontSize: 17 }}>
+                        {t("取消")}
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      accessibilityRole="button"
+                      onPress={() => {
+                        (picker.target === "start" ? setStart : setEnd)(
+                          localFields(picker.value.toISOString()),
+                        );
+                        setPicker(null);
+                      }}
+                      style={{ padding: 14, minHeight: 44, minWidth: 44 }}
+                    >
+                      <Text
+                        style={{
+                          color: accent,
+                          fontWeight: "700",
+                          fontSize: 17,
+                        }}
+                      >
+                        {t("完成")}
+                      </Text>
+                    </Pressable>
+                  </View>
                 )}
                 <DateTimePicker
-                  value={
-                    new Date(
-                      localISO(
-                        (picker.target === "start" ? start : end).date,
-                        (picker.target === "start" ? start : end).time,
-                      ),
-                    )
-                  }
+                  value={picker.value}
                   mode={picker.mode}
                   display={Platform.OS === "ios" ? "spinner" : "default"}
                   themeVariant={dark ? "dark" : "light"}
-                  onChange={(_, value) => {
-                    if (Platform.OS !== "ios") setPicker(null);
-                    if (value) {
-                      const update =
-                        picker.target === "start" ? setStart : setEnd;
-                      update(localFields(value.toISOString()));
-                    }
-                  }}
+                  locale={formattingLocale}
+                  is24Hour
+                  onChange={onPickerChange}
                 />
               </View>
             )}
@@ -718,6 +995,7 @@ const s = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+    gap: 12,
   },
   kicker: {
     fontSize: 11,
@@ -725,7 +1003,7 @@ const s = StyleSheet.create({
     letterSpacing: 1,
     marginBottom: 4,
   },
-  title: { fontSize: 26, lineHeight: 31, fontWeight: "800" },
+  title: { fontSize: 26, fontWeight: "800" },
   close: {
     height: 44,
     width: 44,
@@ -744,6 +1022,9 @@ const s = StyleSheet.create({
   section: { marginBottom: 24 },
   label: { fontSize: 15, fontWeight: "600", marginBottom: 10 },
   row: { flexDirection: "row", gap: 12 },
+  stack: { flexDirection: "column" },
+  wrappingChoices: { flexWrap: "wrap" },
+  largeChoice: { flexGrow: 1, flexBasis: "44%", flexShrink: 0 },
   wrap: { flexDirection: "row", flexWrap: "wrap", gap: 9 },
   optionRow: { flexDirection: "row", gap: 8 },
   feedModes: { flexDirection: "row", gap: 5, alignItems: "flex-start" },
@@ -767,6 +1048,7 @@ const s = StyleSheet.create({
     paddingHorizontal: 4,
   },
   chip: {
+    minHeight: 44,
     paddingHorizontal: 16,
     paddingVertical: 13,
     borderRadius: 15,
@@ -797,6 +1079,8 @@ const s = StyleSheet.create({
   error: { color: "#C64440", marginBottom: 18, fontSize: 14, lineHeight: 21 },
   save: {
     minHeight: 56,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
     borderRadius: 18,
     alignItems: "center",
     justifyContent: "center",

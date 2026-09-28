@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.0" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="4.0.0"><PrivateAssets>all</PrivateAssets></PackageReference>
+    <ProjectReference Include="../LittleDays.DatabaseMigrator/LittleDays.DatabaseMigrator.csproj" />
+    <ProjectReference Include="../LittleDays.FamilyApi/LittleDays.FamilyApi.csproj" />
+    <!-- Historical EF migrations exist only in the adoption test assembly, never in the API. -->
+    <Compile Include="../LittleDays.FamilyApi/Migrations/**/*.cs" Link="LegacyEf/%(RecursiveDir)%(Filename)%(Extension)" />
+    <Using Include="Xunit" />
+  </ItemGroup>
+</Project>

@@ -1,3 +1,5 @@
+import type { SupportedLocale } from "./locales";
+
 export type ReminderKind = "feed" | "diaper" | "sleep";
 export type ReminderMode = "once" | "daily" | "after-feed";
 export type ReminderSettings = {
@@ -8,6 +10,62 @@ export type ReminderSettings = {
   dailyTime: string;
   silent: boolean;
 };
+export type ReminderSchedule =
+  | { type: "date"; time: number }
+  | { type: "daily"; hour: number; minute: number };
+
+// Bump whenever app-generated notification copy changes so existing schedules
+// are replaced without changing the user's title or timing rule.
+export const reminderContentVersion = 1;
+export const autoFeedReminderRuleId = "auto-feed";
+
+type ReminderIdentityData = Record<string, unknown> | undefined;
+
+export function reminderRuleId(
+  identifier: string,
+  data: ReminderIdentityData,
+): string {
+  if (data?.reminderMode === "after-feed") return autoFeedReminderRuleId;
+  const stored = data?.reminderRuleId;
+  return typeof stored === "string" &&
+    stored !== autoFeedReminderRuleId &&
+    stored.length > 0 &&
+    stored.length <= 100 &&
+    /^[A-Za-z0-9._:-]+$/.test(stored)
+    ? stored
+    : identifier;
+}
+
+export function reminderRevision(data: ReminderIdentityData): number {
+  const stored = data?.reminderRevision;
+  return typeof stored === "number" &&
+    Number.isSafeInteger(stored) &&
+    stored >= 0
+    ? stored
+    : 0;
+}
+
+export function reminderNotificationFingerprint(
+  settings: ReminderSettings,
+  trigger: ReminderSchedule,
+  locale: SupportedLocale,
+  formattingLocale: string,
+) {
+  return JSON.stringify({
+    contentVersion: reminderContentVersion,
+    locale,
+    formattingLocale,
+    settings: {
+      kind: settings.kind,
+      mode: settings.mode,
+      title: settings.title,
+      minutes: settings.minutes,
+      dailyTime: settings.dailyTime,
+      silent: settings.silent,
+    },
+    trigger,
+  });
+}
 
 function normalizeKind(value: unknown): ReminderKind | null {
   if (value === "feed" || value === "喂养") return "feed";

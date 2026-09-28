@@ -1,0 +1,14 @@
+{
+  "Name": "My Little Days infrastructure preview",
+  "IsCustom": true,
+  "Description": "Read infrastructure metadata and preview/validate ARM templates without deploying resources or accessing SQL data.",
+  "Actions": [
+    "*/read",
+    "Microsoft.Resources/deployments/whatIf/action",
+    "Microsoft.Resources/deployments/validate/action"
+  ],
+  "NotActions": [],
+  "DataActions": [],
+  "NotDataActions": [],
+  "AssignableScopes": ["/subscriptions/4768a858-f23f-4a39-bb64-eabc9c142627"]
+}

@@ -1,0 +1,448 @@
+import SwiftUI
+
+@main
+struct LittleDaysWatchApp: App {
+  @StateObject private var store = WatchStore()
+  @Environment(\.scenePhase) private var scenePhase
+  var body: some Scene {
+    WindowGroup {
+      WatchHome().environmentObject(store)
+        .environment(\.locale, store.locale)
+        .onChange(of: scenePhase) { phase in if phase == .active { store.reconnect() } }
+    }
+  }
+}
+
+private enum WatchRoute: Hashable { case milk, nappy, finishMilk, status, notifications }
+
+private enum WatchCareSymbol: Equatable { case feed, nappy }
+
+private struct WatchCareIcon: View {
+  let kind: WatchCareSymbol
+
+  var body: some View {
+    GeometryReader { proxy in
+      let width = proxy.size.width
+      let height = proxy.size.height
+      Path { path in
+        func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+          CGPoint(x: x * width, y: y * height)
+        }
+        if kind == .feed {
+          path.move(to: point(0.42, 0.08))
+          path.addLine(to: point(0.58, 0.08))
+          path.addLine(to: point(0.62, 0.24))
+          path.addLine(to: point(0.70, 0.30))
+          path.addLine(to: point(0.70, 0.42))
+          path.addLine(to: point(0.76, 0.52))
+          path.addLine(to: point(0.76, 0.84))
+          path.addQuadCurve(to: point(0.66, 0.94), control: point(0.76, 0.94))
+          path.addLine(to: point(0.34, 0.94))
+          path.addQuadCurve(to: point(0.24, 0.84), control: point(0.24, 0.94))
+          path.addLine(to: point(0.24, 0.52))
+          path.addLine(to: point(0.30, 0.42))
+          path.addLine(to: point(0.30, 0.30))
+          path.addLine(to: point(0.38, 0.24))
+          path.closeSubpath()
+          path.move(to: point(0.30, 0.42))
+          path.addLine(to: point(0.70, 0.42))
+          path.move(to: point(0.55, 0.62))
+          path.addLine(to: point(0.70, 0.62))
+          path.move(to: point(0.55, 0.76))
+          path.addLine(to: point(0.70, 0.76))
+        } else {
+          path.move(to: point(0.16, 0.22))
+          path.addQuadCurve(to: point(0.50, 0.30), control: point(0.33, 0.28))
+          path.addQuadCurve(to: point(0.84, 0.22), control: point(0.67, 0.28))
+          path.addLine(to: point(0.80, 0.58))
+          path.addQuadCurve(to: point(0.50, 0.88), control: point(0.72, 0.84))
+          path.addQuadCurve(to: point(0.20, 0.58), control: point(0.28, 0.84))
+          path.closeSubpath()
+          path.move(to: point(0.19, 0.40))
+          path.addQuadCurve(to: point(0.50, 0.48), control: point(0.34, 0.46))
+          path.addQuadCurve(to: point(0.81, 0.40), control: point(0.66, 0.46))
+        }
+      }
+      .stroke(style: StrokeStyle(lineWidth: 1.7, lineCap: .round, lineJoin: .round))
+    }
+    .accessibilityHidden(true)
+  }
+}
+
+private struct WatchCareLabel: View {
+  let title: String
+  let kind: WatchCareSymbol
+
+  var body: some View {
+    Label {
+      Text(title)
+    } icon: {
+      WatchCareIcon(kind: kind).frame(width: 15, height: 15)
+    }
+  }
+}
+
+private struct WatchHome: View {
+  @EnvironmentObject private var store: WatchStore
+  var body: some View {
+    NavigationStack {
+      TimelineView(.periodic(from: .now, by: 30)) { timeline in
+        List {
+          if let context = store.disk.context, context.isValid(at: timeline.date), let profile = context.profile {
+            Section {
+              Text(profile.name).font(.headline).accessibilityAddTraits(.isHeader)
+              if let summary = store.disk.summary(at: timeline.date) {
+                VStack(alignment: .leading, spacing: 8) {
+                  Text(store.text("summary.today")).font(.headline)
+                  WatchCareLabel(title: store.text("summary.milk", Int64(summary.totals.feedMl)), kind: .feed)
+                  WatchCareLabel(title: store.text("summary.nappies", Int64(summary.totals.diaperCount)), kind: .nappy)
+                  Label(store.text("summary.sleep", Int64(summary.totals.sleepMinutes)), systemImage: "moon.fill")
+                  if summary.includesLocalChanges {
+                    Text(store.text("summary.includes_watch_pending"))
+                      .foregroundStyle(.secondary)
+                  }
+                  if summary.needsPhoneUpdate {
+                    Text(store.text("summary.iphone_pending"))
+                      .foregroundStyle(.secondary)
+                  }
+                  if let date = summary.phoneUpdatedAt.flatMap(WatchClock.date) {
+                    PhoneUpdateLabel(date: date)
+                  }
+                }.font(.caption).fixedSize(horizontal: false, vertical: true)
+              }
+            }
+            Section {
+              if let feed = store.activeFeed {
+                NavigationLink(value: WatchRoute.finishMilk) {
+                  VStack(alignment: .leading) {
+                    WatchCareLabel(title: store.text("action.finish_milk"), kind: .feed)
+                    elapsed(feed, now: timeline.date)
+                  }
+                }.disabled(feed.canControl == false)
+              } else {
+                NavigationLink(value: WatchRoute.milk) { WatchCareLabel(title: store.text("action.milk"), kind: .feed) }
+              }
+              NavigationLink(value: WatchRoute.nappy) { WatchCareLabel(title: store.text("action.nappy"), kind: .nappy) }
+              Button {
+                store.toggleSleep()
+              } label: {
+                VStack(alignment: .leading) {
+                  Label(store.activeSleep == nil ? store.text("action.asleep") : store.text("action.awake"), systemImage: "moon.fill")
+                  if let sleep = store.activeSleep { elapsed(sleep, now: timeline.date) }
+                }
+              }.disabled(store.activeSleep?.canControl == false)
+              if store.activeFeed?.canControl == false || store.activeSleep?.canControl == false {
+                Text(store.text("timer.manage_on_iphone"))
+                  .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+              }
+              if !store.recordingEnabled {
+                Text(store.text("sync.recording_paused"))
+                  .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+              }
+            }.disabled(!store.ready || !store.recordingEnabled)
+          } else {
+            Section {
+              Label(store.text("setup.open_iphone.title"), systemImage: "iphone")
+              Text(store.text("setup.open_iphone.body"))
+                .font(.caption).foregroundStyle(.secondary)
+              Button(store.text("action.try_again")) { store.reconnect() }
+            }
+          }
+          if let notice = store.notice {
+            Section {
+              Text(notice).font(.caption).fixedSize(horizontal: false, vertical: true)
+              Button(store.text("action.dismiss")) { store.notice = nil }
+            }
+          }
+          Section {
+            NavigationLink(value: WatchRoute.status) {
+              Label(store.pendingCount > 0 ? store.text("sync.pending.short", Int64(store.pendingCount)) : store.text("sync.status"), systemImage: "arrow.triangle.2.circlepath")
+            }
+            NavigationLink(value: WatchRoute.notifications) {
+              Label(store.text("notifications.title"), systemImage: "bell")
+            }
+          }
+        }
+      }
+      .navigationTitle(store.text("app.name"))
+      .navigationDestination(for: WatchRoute.self) { route in
+        switch route {
+        case .milk: MilkEntryView()
+        case .nappy: NappyEntryView()
+        case .finishMilk: FinishMilkView()
+        case .status: SyncStatusView()
+        case .notifications: NotificationsView()
+        }
+      }
+    }
+  }
+  private func elapsed(_ entry: WatchEntry, now: Date) -> some View {
+    Text(store.text("elapsed.minutes", Int64(max(0, Int(now.timeIntervalSince(entry.startedAt) / 60)))))
+      .font(.caption).foregroundStyle(.secondary)
+  }
+}
+
+private struct PhoneUpdateLabel: View {
+  @EnvironmentObject private var store: WatchStore
+  let date: Date
+  var body: some View {
+    // A fixed wall-clock time, not SwiftUI's live relative counter. Phone
+    // heartbeats may refresh the snapshot but cannot reset a seconds timer.
+    Text(store.text("summary.phone_updated", date.formatted(
+      .dateTime.locale(store.locale).month(.twoDigits).day(.twoDigits).hour().minute())))
+      .font(.caption).foregroundStyle(.secondary)
+      .fixedSize(horizontal: false, vertical: true)
+  }
+}
+
+private struct MilkEntryView: View {
+  @EnvironmentObject private var store: WatchStore
+  @Environment(\.dismiss) private var dismiss
+  @State private var kind = "formula"
+  @State private var amount = 120
+  @State private var saving = false
+  private var bottle: Bool { ["formula", "expressed"].contains(kind) }
+  var body: some View {
+    List {
+      Picker(store.text("milk.type"), selection: $kind) {
+        Text(store.text("milk.formula")).tag("formula")
+        Text(store.text("milk.expressed")).tag("expressed")
+        Text(store.text("milk.breast_left")).tag("breast-left")
+        Text(store.text("milk.breast_right")).tag("breast-right")
+        Text(store.text("milk.breast_both")).tag("breast-both")
+      }
+      if bottle {
+        MilkAmountPicker(amount: $amount, title: store.text("milk.amount"))
+        Button(store.text("milk.save")) {
+          save(running: false)
+        }.buttonStyle(.borderedProminent)
+        Button(store.text("milk.start_timer")) {
+          save(running: true)
+        }
+      } else {
+        Button(store.text("milk.start_timer")) {
+          save(running: true)
+        }.buttonStyle(.borderedProminent)
+      }
+      if let notice = store.notice { Text(notice).font(.caption) }
+    }
+    .disabled(!store.ready || saving)
+    .navigationTitle(store.text("action.milk"))
+  }
+  private func save(running: Bool) {
+    guard !saving else { return }
+    saving = true
+    if store.recordFeed(kind: kind, amount: bottle ? Double(amount) : nil, running: running) { dismiss() }
+    else { saving = false }
+  }
+}
+
+private struct MilkAmountPicker: View {
+  @EnvironmentObject private var store: WatchStore
+  @Binding var amount: Int
+  let title: String
+  @State private var options: [Int]
+  @ScaledMetric(relativeTo: .body) private var pickerHeight: CGFloat = 110
+
+  init(amount: Binding<Int>, title: String) {
+    _amount = amount
+    self.title = title
+    // Seed once so an exceptional legacy amount stays available while the crown scrolls.
+    _options = State(initialValue: WatchMilkAmountChoices.values(preserving: amount.wrappedValue))
+  }
+
+  var body: some View {
+    Section {
+      Picker(title, selection: $amount) {
+        ForEach(options, id: \.self) { value in
+          Text("\(value) mL").monospacedDigit().tag(value)
+        }
+      }
+      .pickerStyle(.wheel)
+      .labelsHidden()
+      .frame(height: pickerHeight)
+      .accessibilityLabel(title)
+      .accessibilityValue("\(amount) mL")
+      .accessibilityHint(store.text("crown.hint"))
+    } header: {
+      Text(title)
+    } footer: {
+      Text(store.text("crown.footer"))
+    }
+  }
+}
+
+private struct FinishMilkView: View {
+  @EnvironmentObject private var store: WatchStore
+  var body: some View {
+    Group {
+      if let feed = store.activeFeed {
+        FinishMilkForm(feed: feed, initialAmount: store.disk.initialMilkAmount(for: feed))
+          .id("\(store.disk.context?.bridgeId ?? ""):\(store.disk.context?.workspaceKey ?? ""):\(store.disk.context?.generation ?? 0):\(feed.id)")
+      } else {
+        Text(store.text("milk.none_running"))
+      }
+    }.navigationTitle(store.text("action.finish_milk"))
+  }
+}
+
+private struct FinishMilkForm: View {
+  @EnvironmentObject private var store: WatchStore
+  @Environment(\.dismiss) private var dismiss
+  let feed: WatchEntry
+  @State private var stoppedAt = Date()
+  @State private var amount: Int
+  @State private var saving = false
+
+  init(feed: WatchEntry, initialAmount: Int) {
+    self.feed = feed
+    _amount = State(initialValue: initialAmount)
+  }
+
+  var body: some View {
+    List {
+      if feed.isBottle {
+        MilkAmountPicker(amount: $amount, title: store.text("milk.consumed"))
+      }
+      Button(store.text("milk.confirm_finish")) {
+        guard !saving else { return }
+        saving = true
+        if store.finishFeed(feed, stoppedAt: stoppedAt, amount: feed.isBottle ? Double(amount) : nil) { dismiss() }
+        else { saving = false }
+      }.buttonStyle(.borderedProminent).disabled(!store.ready || feed.canControl == false || saving)
+      Text(store.text("milk.end_time_note"))
+        .font(.caption).foregroundStyle(.secondary)
+      if let notice = store.notice { Text(notice).font(.caption) }
+    }
+  }
+}
+
+private struct NappyEntryView: View {
+  @EnvironmentObject private var store: WatchStore
+  @Environment(\.dismiss) private var dismiss
+  @State private var saving = false
+  var body: some View {
+    List {
+      nappy("wet", "nappy.wet", "drop")
+      nappy("dirty", "nappy.dirty", "circle.fill")
+      nappy("mixed", "nappy.mixed", "drop.circle")
+      if let notice = store.notice { Text(notice).font(.caption) }
+    }.navigationTitle(store.text("action.nappy")).disabled(!store.ready || saving)
+  }
+  private func nappy(_ kind: String, _ key: String, _ symbol: String) -> some View {
+    Button {
+      guard !saving else { return }
+      saving = true
+      if store.recordNappy(kind) { dismiss() } else { saving = false }
+    } label: { Label(store.text(key), systemImage: symbol).frame(minHeight: 44) }
+  }
+}
+
+private struct SyncStatusView: View {
+  @EnvironmentObject private var store: WatchStore
+  var body: some View {
+    List {
+      if let context = store.disk.context, let publishedAt = context.publishedAt,
+         let updated = WatchClock.date(publishedAt) {
+        Section { PhoneUpdateLabel(date: updated) }
+      }
+      Section {
+        Text(store.plural("sync.records_waiting", count: store.pendingCount))
+        if store.pendingCount > 0 {
+          Text(store.text("sync.pending.detail"))
+            .font(.caption).foregroundStyle(.secondary)
+        }
+        if store.rejectedCount > 0 {
+          Text(store.text("sync.attention"))
+        }
+        Button(store.text("sync.retry")) { store.reconnect() }
+      }
+      if !store.rejectedItems.isEmpty {
+        Section(store.text("sync.not_applied")) {
+          ForEach(store.rejectedItems) { item in
+            if item.receipt?.conflict != nil {
+              WatchConflictView(item: item)
+            } else {
+              VStack(alignment: .leading) {
+                if let date = WatchClock.date(item.command.createdAt) { Text(date, style: .time).font(.caption) }
+                Text(store.rejectionMessage(item.receipt?.error)).font(.caption)
+              }.fixedSize(horizontal: false, vertical: true)
+            }
+          }
+        }
+      }
+    }.navigationTitle(store.text("sync.status"))
+  }
+}
+
+private struct WatchConflictView: View {
+  @EnvironmentObject private var store: WatchStore
+  let item: WatchOutboxItem
+
+  var body: some View {
+    if let conflict = item.receipt?.conflict {
+      let pending = store.conflictResolutionPending(item)
+      VStack(alignment: .leading, spacing: 8) {
+        Text(store.text("sync.conflict.title"))
+          .font(.headline).accessibilityAddTraits(.isHeader)
+        Text(store.text("sync.conflict.changed_by", conflict.currentEditedBy))
+          .font(.caption).foregroundStyle(.secondary)
+        version(store.text("sync.conflict.current"), entry: conflict.currentEntry)
+        version(store.text("sync.conflict.mine"), entry: conflict.proposedEntry)
+        if pending {
+          HStack {
+            ProgressView()
+            Text(store.text("sync.conflict.pending")).font(.caption)
+          }
+        }
+        Button(store.text("sync.conflict.keep")) {
+          store.resolveConflict(item, replace: false)
+        }
+        .buttonStyle(.bordered)
+        .frame(minHeight: 44)
+        .disabled(pending)
+        if conflict.canReplace {
+          Button(role: .destructive) {
+            store.resolveConflict(item, replace: true)
+          } label: {
+            Text(store.text("sync.conflict.replace"))
+              .multilineTextAlignment(.center)
+          }
+          .buttonStyle(.borderedProminent)
+          .frame(minHeight: 44)
+          .disabled(pending)
+        }
+      }
+      .fixedSize(horizontal: false, vertical: true)
+    }
+  }
+
+  private func version(_ title: String, entry: WatchEntry) -> some View {
+    VStack(alignment: .leading, spacing: 2) {
+      Text(title).font(.caption).fontWeight(.semibold)
+      Text(store.conflictSummary(entry))
+        .font(.caption2).foregroundStyle(.secondary)
+    }
+    .accessibilityElement(children: .combine)
+  }
+}
+
+private struct NotificationsView: View {
+  @EnvironmentObject private var store: WatchStore
+  var body: some View {
+    List {
+      Section(store.text("notifications.care.title")) {
+        Text(store.text("notifications.care.body"))
+          .font(.caption).fixedSize(horizontal: false, vertical: true)
+      }
+      Section(store.text("notifications.family.title")) {
+        Text(store.text("notifications.family.body"))
+          .font(.caption).fixedSize(horizontal: false, vertical: true)
+      }
+      Section(store.text("notifications.delivery.title")) {
+        Text(store.text("notifications.delivery.body"))
+          .font(.caption).fixedSize(horizontal: false, vertical: true)
+      }
+    }.navigationTitle(store.text("notifications.title"))
+  }
+}

@@ -1,4 +1,16 @@
 import { words } from "./learning";
+import type { SupplementKind } from "./domain";
+
+export const supplementOptions: {
+  id: SupplementKind;
+  label: ReturnType<typeof words>;
+}[] = [
+  { id: "vitamin-d", label: words("维生素 D（VD）", "Vitamin D (VD)") },
+  { id: "probiotics", label: words("益生菌", "Probiotics") },
+  { id: "iron", label: words("铁", "Iron") },
+  { id: "multivitamin", label: words("复合维生素", "Multivitamin") },
+  { id: "other", label: words("其他", "Other") },
+];
 
 export const careOptions = [
   {
@@ -6,8 +18,12 @@ export const careOptions = [
     icon: "temperature",
     label: words("体温", "Temp"),
     hint: words(
-      "有需要时测量，不要求每日测温。记录原始读数，不按测量部位自行加减。",
-      "Measure when needed, not as a daily target. Record the reading without adding or subtracting for the measurement site.",
+      "有需要时测量，不要求每日测温。",
+      "Measure when needed, not as a daily target.",
+    ),
+    safety: words(
+      "记录原始读数，不按测量部位自行加减。",
+      "Record the reading without adding or subtracting for the measurement site.",
     ),
     url: "https://www.healthdirect.gov.au/types-of-thermometer",
   },
@@ -46,10 +62,28 @@ export const careOptions = [
     icon: "nails",
     label: words("指甲", "Nails"),
     hint: words(
-      "按需要记录指甲护理，不是每日任务。由成人使用婴儿适用工具，宝宝挣动时暂停。",
-      "Record nail care as needed, not as a daily task. An adult should use baby-suitable tools and pause if baby wriggles.",
+      "按需要记录指甲护理，不是每日任务。",
+      "Record nail care as needed, not as a daily task.",
+    ),
+    safety: words(
+      "由成人使用婴儿适用工具，宝宝挣动时暂停。",
+      "An adult should use baby-suitable tools and pause if baby wriggles.",
     ),
     url: "https://www.nhs.uk/baby/caring-for-a-newborn/washing-and-bathing-your-baby/",
+  },
+  {
+    id: "supplement",
+    icon: "supplement",
+    label: words("补充剂", "Supplements"),
+    hint: words(
+      "只记录实际给予的补充剂，可多选。品牌和实际用量可写在备注中。",
+      "Select only supplements actually given. You can select more than one; record the product and amount in notes.",
+    ),
+    safety: words(
+      "请遵循宝宝医生的建议使用；这些选项不是推荐清单，注意不要重复补充相同成分。",
+      "Use only as advised by your baby's clinician. These options are not recommendations; avoid overlapping ingredients.",
+    ),
+    url: "https://www.pregnancybirthbaby.org.au/children/feeding-and-nutrition/children-and-vitamins",
   },
 ] as const;
 export const temperatureMethods = [

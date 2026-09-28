@@ -1,0 +1,7 @@
+{
+  "name": "little-days-family-pilot",
+  "issuer": "https://token.actions.githubusercontent.com",
+  "subject": "repo:REPLACE_OWNER/REPLACE_REPOSITORY:environment:family-pilot",
+  "description": "Manual deployment after family-pilot environment approval",
+  "audiences": ["api://AzureADTokenExchange"]
+}

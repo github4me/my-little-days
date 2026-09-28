@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "commandId": "00000000-0000-4000-8000-000000000004",
+  "recordId": "00000000-0000-4000-8000-000000000005",
+  "workspaceKey": "opaque-workspace-example",
+  "bridgeId": "00000000-0000-4000-8000-000000000003",
+  "generation": 3,
+  "snapshotSequence": 8,
+  "createdAt": "2026-09-18T12:00:00.000Z",
+  "kind": "create",
+  "entry": {
+    "id": "00000000-0000-4000-8000-000000000005",
+    "type": "feed",
+    "start": "2026-09-18T12:00:00.000Z",
+    "feedRunning": true,
+    "amount": 0,
+    "feedKind": "formula",
+    "note": ""
+  }
+}

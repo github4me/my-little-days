@@ -1,5 +1,43 @@
 # Repository Guidelines
 
+## Collaboration preferences
+
+When information or a material decision is needed from the user, use the available `grilling` ("grill me") skill for concise, dependency-aware questions. First resolve discoverable facts from the repository and tools; do not ask about choices already agreed in the conversation.
+
+Use the GitHub plugin for future commits and pushes to GitHub. Do not default to command-line pushes or open local Git credential/login windows. Local Git inspection and fetching remain available for verification and keeping the checkout aligned. If the plugin is unavailable, explain the blocker before choosing another publishing method.
+
+## Project memory and operational lessons
+
+Read [docs/PROJECT-LESSONS.md](docs/PROJECT-LESSONS.md) before changing authentication, family lifecycle/sync, releases or infrastructure. Use [docs/AZURE-MANUAL-SETUP-RUNBOOK.md](docs/AZURE-MANUAL-SETUP-RUNBOOK.md) for current configuration and deployment evidence; recheck dated observations against live state.
+
+- Update the runbook in the same task whenever new manual Azure/GitHub/Expo/Apple steps are needed. Specify location, tenant/environment, exact fields, expected result and verification; never record secrets or private family payloads.
+- Treat preview as connected to production data unless verified otherwise. Do not uninstall data-bearing apps, reset production data or test destructive family/account flows on real users.
+- Separate token recognition, authoritative account/family access, local persistence and server acknowledgement. Render permitted same-account cache promptly; preserve durable operation IDs, version checks and late-response isolation. Do not optimistically grant access or confirm create/join/delete outcomes.
+- Creating uploads the reviewed owner's seed; joining downloads/replaces after consent without merging the invitee's personal history. Leave/removal retains contributions and is not account deletion. Offline revocation cannot be detected instantly. Consult the current contract before altering lifecycle semantics.
+- Keep DbUp scripts immutable and schema changes additive/compatible with the previous running API. Require catalog verification and explicit zero pending scripts for no-op acceptance; never truncate active-family idempotency receipts as cache cleanup.
+- Validate real response shapes and installed tool versions. Fix incorrect checks without removing target, cost, identity, privacy or integrity safeguards. Preserve unrelated resources/settings and clean up only temporary state owned by this operation.
+- Freeze release SHA/configuration and verify actual environment protections. After deployment/settings changes, allow bounded startup propagation with one health check in flight; do not equate ARM success or generic health with signed-in SQL-backed readiness.
+- Verify the resolved EAS environment, URL/IDs/scope/demo flag, runtime and distribution before each build. Read current OTA settings; do not assume an OTA can deliver native/security changes or an ad hoc IPA can go to TestFlight. Track build, upload, processing and device acceptance separately.
+- Build iOS locally to control Expo cost: use Expo CLI/Xcode for development and a local Xcode archive or `eas build --local` for signed releases. Upload to TestFlight directly through Apple tooling. Do not start an EAS cloud build, paid EAS Workflow or paid preview build unless the user explicitly approves that exception after seeing the expected cost. Read-only Expo checks and downloading the existing managed credentials for a local build remain allowed.
+- As of 17 September 2026, live SQL is paid Basic and the ordinary infrastructure path is still free-only; its cloud gates are paused. Do not re-enable or apply the old target before the documented Basic-profile integration and fresh preview. Recheck current state rather than treating this dated checkpoint as permanent.
+- Report tested, deployed, device-verified and outstanding results separately. Preserve restore/revocation reconciliation and native acceptance gaps until demonstrated, not merely documented or committed.
+
+## Apple-first design standard
+
+The user requires **all app design**, not only Night mode, to follow the current [Apple Human Interface Guidelines](https://developer.apple.com/design/human-interface-guidelines). Apply this to existing screens when changing them and to all new UI/UX: navigation, forms, recording flows, settings, account/family management, dialogs, feedback, accessibility and both appearances. Apple's platform guidance takes precedence over generic design-skill aesthetics or custom styling preferences.
+
+- Prefer native iOS controls and familiar interaction patterns where supported. Custom controls must preserve expected behavior, accessibility and consistency; a native-looking color scheme alone is not enough. Retain platform-appropriate Android/web behavior rather than copying iOS-only gestures blindly.
+- Use clear screen titles, stable top-level navigation, predictable Back/Cancel/Done behavior and appropriate sheets/alerts. Never obscure data-loss, privacy or permission consequences while simplifying a flow.
+- Put the user's task before general explanations. Move lengthy introductory/reference copy below the main content into clearly named, initially collapsed help. Keep urgent safety warnings, input-accuracy notes, errors, access limitations and consent consequences visible where they matter; do not hide them to shorten a screen.
+- Use system typography and support Dynamic Type without clipping or hiding actions. Target comfortable touch areas of at least 44 × 44 points in this project; provide accessible names, roles, states and a sensible VoiceOver focus order. Do not rely on color alone.
+- Respect safe areas, keyboard avoidance, device size/orientation, localized text and iPad layouts. Verify complete forms with the keyboard open, not just static screenshots.
+- Prefer semantic/adaptive colors and appropriate surface hierarchy. Support System/Light/Night consistently through content, sheets, pickers, keyboards and status bars; preserve real photo colors. Check Increase Contrast, Reduce Transparency and Reduce Motion as applicable. See [the scoped Night implementation](docs/NIGHT-APPEARANCE.md), which is not a whole-app compliance certificate.
+- Give prompt, truthful feedback: distinguish locally saved, pending synchronization, confirmed success and failure. Do not make network-dependent authorization or destructive operations look successful before confirmation.
+- Recheck the relevant official HIG pages before a design change. Use native materials and controls supported by the project's OS/framework versions; do not imitate a newer OS effect at the expense of legibility or compatibility.
+- Review changed flows in both appearances, Chinese/English, small/large screens and accessibility text sizes. Browser/unit tests supplement physical iOS checks; report unverified native behavior explicitly. Record concrete gaps rather than claiming the entire app follows HIG merely because this policy exists.
+
+Relevant references: [accessibility](https://developer.apple.com/design/human-interface-guidelines/accessibility), [typography](https://developer.apple.com/design/human-interface-guidelines/typography), [layout](https://developer.apple.com/design/human-interface-guidelines/layout), [Dark Mode](https://developer.apple.com/design/human-interface-guidelines/dark-mode) and [color](https://developer.apple.com/design/human-interface-guidelines/color).
+
 ## Project Structure & Module Organization
 
 This is an offline baby-growth tracker built with Expo, React Native, and TypeScript. `App.tsx` owns top-level navigation and screen composition. Application modules live in `src/`: domain models and statistics in `domain.ts`, persistence in `storage.ts` (with browser counterparts such as `storage.web.ts`), and feature UI in components such as `EntryEditor.tsx` and `Settings.tsx`. Keep static images and bundled WHO reference data in `assets/`; keep supporting documentation in `docs/`. Unit tests sit beside their subjects as `src/*.test.ts`; end-to-end browser coverage is in `tests/browser.mjs`.
@@ -23,4 +61,4 @@ Add focused `*.test.ts` coverage for changes to validation, imports/exports, tim
 
 ## Commit & Pull Request Guidelines
 
-This repository has no existing commit history to infer a convention from. Use concise, imperative subject lines such as `Fix sleep duration across midnight`. Keep commits scoped. Pull requests should describe the user-visible change, list verification performed, link the relevant issue when one exists, and include screenshots for UI changes. Call out any untested iOS-native behavior explicitly.
+Use concise, imperative subject lines such as `Fix sleep duration across midnight`. Keep commits scoped. Pull requests should describe the user-visible change, list verification performed, link the relevant issue when one exists, and include screenshots for UI changes. Call out any untested iOS-native behavior explicitly.

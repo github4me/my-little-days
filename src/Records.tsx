@@ -1,11 +1,24 @@
 import React, { useContext, useState } from "react";
-import { View, Pressable, ScrollView } from "react-native";
+import {
+  View,
+  Platform,
+  Pressable,
+  ScrollView,
+  useWindowDimensions,
+} from "react-native";
 import Svg, { Rect, Line, Text as Label } from "react-native-svg";
 import { Entry, summarize } from "./domain";
 import { Theme, T, Card, Chips, row } from "./ui";
-import { elapsed, formatDate, formatTime, t } from "./i18n";
+import { elapsed, formatDate, formatNumber, formatTime, t } from "./i18n";
 import RecordsCalendar from "./RecordsCalendar";
+import RecordActionButton from "./RecordActionButton";
 import type { RecordView } from "./recordCalendar";
+import { layoutSleepChart, SLEEP_CHART_INSET } from "./sleepChartLayout";
+import {
+  chartAxisLayout,
+  chartFontFamily,
+  layoutBarValueLabels,
+} from "./chartLayout";
 import {
   recordRangeStart,
   recordChartBuckets,
@@ -26,8 +39,13 @@ const dayKey = (d: Date) =>
 const midnight = (d: Date) =>
   new Date(d.getFullYear(), d.getMonth(), d.getDate());
 const clock = (iso: string) => formatTime(iso);
-const colors = ["#99CBEA", "#AAD7CD", "#C7B9E5"];
-type Bar = { x: number; value: number; color: string; label?: string };
+type Bar = {
+  x: number;
+  value: number;
+  color: string;
+  label?: string;
+  startLabel?: string;
+};
 function Bars({
   bars,
   labels,
@@ -43,81 +61,383 @@ function Bars({
 }) {
   const c = useContext(Theme),
     max = Math.max(1, ...bars.map((b) => b.value));
-  const x = (v: number) => 12 + (v / maxX) * 272;
+  const { width: screenWidth, fontScale } = useWindowDimensions();
+  const [availableWidth, setAvailableWidth] = useState(
+    Math.max(220, screenWidth - 64),
+  );
+  const valueLabel = (bar: Bar) =>
+    bar.label ??
+    (unit === "小时"
+      ? elapsed(Math.round(bar.value * 3600000))
+      : formatNumber(bar.value, { maximumFractionDigits: 0 }));
+  const yLabels = [0, 0.5, 1].map((fraction) =>
+    formatNumber(max * fraction, {
+      minimumFractionDigits: unit === "小时" ? 1 : 0,
+      maximumFractionDigits: unit === "小时" ? 1 : 0,
+    }),
+  );
+  const baseLayout = chartAxisLayout({
+    width: availableWidth,
+    fontScale,
+    compact: true,
+    leftLabelChars: values
+      ? 0
+      : Math.max(...yLabels.map((label) => label.length)),
+    xLabelChars: Math.max(2, ...labels.map((label) => label.text.length)),
+    xLabelCount: labels.length,
+  });
+  const annotations = layoutBarValueLabels(
+    values && bars.length <= 12
+      ? bars.map((bar) => ({
+          x: baseLayout.left + (bar.x / maxX) * baseLayout.plotWidth,
+          y:
+            baseLayout.baseline - 7 - (bar.value / max) * baseLayout.plotHeight,
+          text: valueLabel(bar),
+        }))
+      : [],
+    baseLayout.width,
+    baseLayout.fontSize,
+  );
+  const layout = {
+    ...baseLayout,
+    baseline: baseLayout.baseline + annotations.topInset,
+    axisLabelY: baseLayout.axisLabelY + annotations.topInset,
+    height: baseLayout.height + annotations.topInset,
+  };
+  const x = (v: number) => layout.left + (v / maxX) * layout.plotWidth;
   const width = Math.min(
     values ? 18 : 30,
-    (260 / Math.max(1, bars.length)) * 0.6,
+    (layout.plotWidth / Math.max(1, bars.length)) * 0.6,
   );
   return (
-    <Svg
-      width="100%"
-      height={values ? 132 : 172}
-      viewBox={`0 0 330 ${values ? 132 : 172}`}
-      accessibilityLabel={t("统计图，单位{unit}，数值见每日汇总和明细", {
-        unit: t(unit),
-      })}
+    <View
+      testID="record-bars"
+      onLayout={(event) => {
+        const measured = event.nativeEvent.layout.width;
+        if (measured > 0 && Math.abs(measured - availableWidth) > 1)
+          setAvailableWidth(measured);
+      }}
     >
-      {[0, 0.5, 1].map((f) => (
-        <React.Fragment key={f}>
-          <Line
-            x1={12}
-            x2={294}
-            y1={110 - f * 82}
-            y2={110 - f * 82}
-            stroke={c.line}
-          />
-          {!values ? (
-            <Label
-              x={326}
-              y={114 - f * 82}
-              fill={c.muted}
-              fontSize={10}
-              textAnchor="end"
-            >
-              {(max * f).toFixed(unit === "小时" ? 1 : 0)}
-            </Label>
-          ) : null}
-        </React.Fragment>
-      ))}
-      {bars.map((b, i) => (
-        <React.Fragment key={i}>
-          <Rect
-            x={x(b.x) - width / 2}
-            y={110 - (b.value / max) * 82}
-            width={width}
-            height={Math.max(0, (b.value / max) * 82)}
-            fill={b.color}
-            rx={3}
-          />
-          {values && bars.length <= 12 ? (
-            <Label
-              x={x(b.x)}
-              y={103 - (b.value / max) * 82}
-              fontSize={9}
-              textAnchor="middle"
-              fill={c.muted}
-            >
-              {b.label ?? b.value.toFixed(0)}
-            </Label>
-          ) : null}
-        </React.Fragment>
-      ))}
-      {labels.map((l, i) => (
-        <Label
-          key={i}
-          x={x(l.x)}
-          y={129}
-          fill={c.muted}
-          fontSize={10}
-          textAnchor="middle"
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={layout.width > availableWidth + 1}
+      >
+        <Svg
+          testID="record-bars-plot"
+          width={layout.width}
+          height={layout.height}
+          viewBox={`0 0 ${layout.width} ${layout.height}`}
+          accessible
+          accessibilityRole="image"
+          accessibilityLabel={t("统计图，单位{unit}，数值见每日汇总和明细", {
+            unit: t(unit),
+          })}
         >
-          {l.text}
-        </Label>
-      ))}
-    </Svg>
+          {[0, 0.5, 1].map((f) => (
+            <React.Fragment key={f}>
+              <Line
+                x1={layout.left}
+                x2={layout.width - layout.right}
+                y1={layout.baseline - f * layout.plotHeight}
+                y2={layout.baseline - f * layout.plotHeight}
+                stroke={c.line}
+              />
+              {!values ? (
+                <Label
+                  x={layout.left - 8}
+                  y={
+                    layout.baseline -
+                    f * layout.plotHeight +
+                    layout.fontSize * 0.35
+                  }
+                  fill={c.muted}
+                  fontSize={layout.fontSize}
+                  fontFamily={chartFontFamily(Platform.OS)}
+                  textAnchor="end"
+                >
+                  {yLabels[Math.round(f * 2)]}
+                </Label>
+              ) : null}
+            </React.Fragment>
+          ))}
+          {bars.map((b, i) => (
+            <React.Fragment key={i}>
+              <Rect
+                x={x(b.x) - width / 2}
+                testID="record-bar"
+                y={layout.baseline - (b.value / max) * layout.plotHeight}
+                width={width}
+                height={Math.max(0, (b.value / max) * layout.plotHeight)}
+                fill={b.color}
+                stroke={c.controlLine}
+                strokeWidth={c.isHighContrast ? 2 : 1}
+                rx={3}
+              />
+            </React.Fragment>
+          ))}
+          {annotations.labels.map((label) => (
+            <Line
+              key={label.index}
+              x1={x(bars[label.index].x)}
+              y1={
+                layout.baseline -
+                (bars[label.index].value / max) * layout.plotHeight -
+                2
+              }
+              x2={label.x}
+              y2={label.y + 3}
+              stroke={c.controlLine}
+            />
+          ))}
+          {annotations.labels.map((label) => (
+            <React.Fragment key={label.index}>
+              <Rect
+                x={label.x - label.width / 2}
+                y={label.y - layout.fontSize}
+                width={label.width}
+                height={layout.fontSize * 1.4}
+                fill={c.card}
+                rx={2}
+              />
+              <Label
+                testID="record-bar-value-label"
+                x={label.x}
+                y={label.y}
+                fontSize={layout.fontSize}
+                fontFamily={chartFontFamily(Platform.OS)}
+                textAnchor="middle"
+                fill={c.muted}
+              >
+                {label.text}
+              </Label>
+            </React.Fragment>
+          ))}
+          {labels.map((l, i) => (
+            <Label
+              key={i}
+              x={x(l.x)}
+              y={layout.axisLabelY}
+              fill={c.muted}
+              fontSize={layout.fontSize}
+              fontFamily={chartFontFamily(Platform.OS)}
+              textAnchor="middle"
+            >
+              {l.text}
+            </Label>
+          ))}
+        </Svg>
+      </ScrollView>
+    </View>
+  );
+}
+
+// Daily sleep charts use a separate visual layout; totals and stored durations
+// remain linear and unchanged. Leaders retain the real start-time anchors when
+// close records need extra space, and break marks disclose shortened long bars.
+function SleepBars({ bars }: { bars: Bar[] }) {
+  const c = useContext(Theme);
+  const { width: screenWidth, fontScale } = useWindowDimensions();
+  const [width, setWidth] = useState(Math.max(220, screenWidth - 64));
+  const fontSize = 12 * fontScale;
+  const layout = layoutSleepChart(
+    bars.map((bar) => ({
+      x: bar.x,
+      value: bar.value,
+      label: elapsed(Math.round(bar.value * 3600000)),
+    })),
+    { width, fontSize },
+  );
+  const barColors = [c.chartSleep, c.chartSleepAlternate];
+  const explanation = [
+    layout.compressed
+      ? t("长睡眠柱已缩短至其他睡眠的平均高度；断线标记和标签显示实际时长。")
+      : "",
+    layout.clustered
+      ? t("相邻睡眠柱已错开；底部标记表示本日片段的开始时间。")
+      : "",
+  ].filter(Boolean);
+  return (
+    <View
+      testID="daily-sleep-chart"
+      onLayout={(event) => {
+        const measured = event.nativeEvent.layout.width;
+        if (measured > 0 && Math.abs(measured - width) > 1) setWidth(measured);
+      }}
+      style={{ gap: 4 }}
+    >
+      {layout.compressed ? (
+        <T
+          testID="sleep-chart-compression-legend"
+          style={{ fontSize: 12, color: c.muted }}
+        >
+          断线＝高度压缩；以标签时长为准。
+        </T>
+      ) : null}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={layout.width > width + 1}
+      >
+        <Svg
+          testID="sleep-chart-plot"
+          width={layout.width}
+          height={layout.height}
+          viewBox={`0 0 ${layout.width} ${layout.height}`}
+          accessible
+          accessibilityRole="image"
+          accessibilityLabel={[
+            t("统计图，单位{unit}，数值见每日汇总和明细", { unit: t("小时") }),
+            ...layout.bars.map(
+              (bar) => `${bars[bar.index].startLabel ?? ""}: ${bar.label}`,
+            ),
+            ...explanation,
+          ].join("; ")}
+        >
+          {[0, 0.5, 1].map((fraction) => (
+            <Line
+              key={fraction}
+              x1={SLEEP_CHART_INSET}
+              x2={layout.width - SLEEP_CHART_INSET}
+              y1={
+                layout.baseline - fraction * (layout.baseline - layout.plotTop)
+              }
+              y2={
+                layout.baseline - fraction * (layout.baseline - layout.plotTop)
+              }
+              stroke={c.line}
+            />
+          ))}
+          {layout.bars.map((bar) => (
+            <React.Fragment key={bar.index}>
+              <Line
+                testID="sleep-chart-leader"
+                x1={bar.x}
+                y1={layout.baseline - bar.height - 2}
+                x2={bar.labelX}
+                y2={bar.labelY + 4}
+                stroke={c.controlLine}
+                strokeWidth={1}
+              />
+              {Math.abs(bar.x - bar.anchorX) > 0.5 ? (
+                <Line
+                  x1={bar.x}
+                  y1={layout.baseline}
+                  x2={bar.anchorX}
+                  y2={layout.baseline + 6}
+                  stroke={c.controlLine}
+                />
+              ) : null}
+              <Line
+                testID="sleep-chart-anchor"
+                x1={bar.anchorX}
+                x2={bar.anchorX}
+                y1={layout.baseline + 3}
+                y2={layout.baseline + 8}
+                stroke={c.controlLine}
+              />
+              <Rect
+                testID={
+                  bar.compressed
+                    ? "sleep-chart-compressed-bar"
+                    : "sleep-chart-bar"
+                }
+                x={bar.x - bar.width / 2}
+                y={layout.baseline - bar.height}
+                width={bar.width}
+                height={bar.height}
+                rx={3}
+                fill={
+                  bar.compressed
+                    ? c.soft
+                    : barColors[bar.variant % barColors.length]
+                }
+                stroke={bar.compressed ? c.primary : c.chartSleepLine}
+                strokeWidth={bar.compressed ? 2 : 1}
+              />
+              {bar.compressed ? (
+                <>
+                  <Line
+                    x1={bar.x - bar.width / 2 - 1}
+                    x2={bar.x + bar.width / 2 + 1}
+                    y1={layout.baseline - bar.height / 2 + 3}
+                    y2={layout.baseline - bar.height / 2 - 3}
+                    stroke={c.card}
+                    strokeWidth={5}
+                  />
+                  <Line
+                    x1={bar.x - bar.width / 2 - 1}
+                    x2={bar.x + bar.width / 2 + 1}
+                    y1={layout.baseline - bar.height / 2 + 3}
+                    y2={layout.baseline - bar.height / 2 - 3}
+                    stroke={c.primary}
+                    strokeWidth={1.5}
+                  />
+                </>
+              ) : null}
+            </React.Fragment>
+          ))}
+          {layout.bars.map((bar) => (
+            <React.Fragment key={bar.index}>
+              <Rect
+                x={bar.labelX - bar.labelWidth / 2}
+                y={bar.labelY - fontSize}
+                width={bar.labelWidth}
+                height={fontSize + Math.max(4, fontSize * 0.3)}
+                rx={2}
+                fill={c.card}
+              />
+              <Label
+                testID="sleep-chart-label"
+                x={bar.labelX}
+                y={bar.labelY}
+                fill={c.muted}
+                fontSize={fontSize}
+                fontFamily={chartFontFamily(Platform.OS)}
+                textAnchor="middle"
+              >
+                {bar.label}
+              </Label>
+            </React.Fragment>
+          ))}
+          {[0, 6, 12, 18, 24].map((hour) => (
+            <Label
+              key={hour}
+              x={
+                SLEEP_CHART_INSET +
+                (hour / 24) * (layout.width - SLEEP_CHART_INSET * 2)
+              }
+              y={layout.baseline + fontSize + 14}
+              fill={c.muted}
+              fontSize={fontSize}
+              fontFamily={chartFontFamily(Platform.OS)}
+              textAnchor={hour === 0 ? "start" : hour === 24 ? "end" : "middle"}
+            >
+              {String(hour).padStart(2, "0")}
+            </Label>
+          ))}
+        </Svg>
+      </ScrollView>
+      {layout.compressed ? (
+        <T
+          testID="sleep-chart-compression-note"
+          style={{ fontSize: 12, color: c.muted }}
+        >
+          长睡眠柱已缩短至其他睡眠的平均高度；断线标记和标签显示实际时长。
+        </T>
+      ) : null}
+      {layout.clustered ? (
+        <T
+          testID="sleep-chart-crowding-note"
+          style={{ fontSize: 12, color: c.muted }}
+        >
+          相邻睡眠柱已错开；底部标记表示本日片段的开始时间。
+        </T>
+      ) : null}
+    </View>
   );
 }
 type RecordsProps = {
+  authorLabel?: (id: string) => string;
+  canEdit?: (id: string) => boolean;
   entries: Entry[];
   now: number;
   onEdit: (e: Entry) => void;
@@ -260,17 +580,16 @@ function BarRecords({
   now,
   onEdit,
   onDelete,
-}: {
-  entries: Entry[];
-  now: number;
-  onEdit: (e: Entry) => void;
-  onDelete: (e: Entry) => void;
-}) {
+  authorLabel,
+  canEdit,
+}: RecordsProps) {
+  const { fontScale } = useWindowDimensions();
+  const largeText = fontScale >= 1.3;
   const c = useContext(Theme),
     [kind, setKind] = useState<Kind>("feed"),
     [unit, setUnit] = useState("mL"),
     [range, setRange] = useState<RecordRange>("7d"),
-    [historyExpanded, setHistoryExpanded] = useState(false),
+    [olderDayPages, setOlderDayPages] = useState(0),
     [expandedDays, setExpandedDays] = useState<Set<string>>(() => new Set()),
     [expandedDayEntries, setExpandedDayEntries] = useState<Set<string>>(
       () => new Set(),
@@ -293,15 +612,15 @@ function BarRecords({
   const color = (e: Entry) =>
     kind === "feed"
       ? e.feedKind?.startsWith("breast")
-        ? colors[1]
-        : colors[0]
+        ? c.chartCare
+        : c.chartFeed
       : kind === "sleep"
-        ? colors[2]
+        ? c.chartSleep
         : e.diaperKind === "wet"
-          ? colors[0]
+          ? c.chartFeed
           : e.diaperKind === "dirty"
-            ? colors[2]
-            : colors[1];
+            ? c.chartSleep
+            : c.chartCare;
   const groups = new Map<string, { date: Date; events: Entry[] }>();
   for (const e of selected) {
     const first = midnight(new Date(e.start)),
@@ -335,9 +654,12 @@ function BarRecords({
   const rangeDays = days.filter(
     (day) => day.date >= rangeStart && day.date <= new Date(now),
   );
-  const recentDays = rangeDays.slice(0, 7);
-  const olderDayCount = rangeDays.length - recentDays.length;
-  const visibleDays = historyExpanded ? rangeDays : recentDays;
+  const initialDayCount = rangeDays.some((day) => dayKey(day.date) === today)
+    ? 4
+    : 3;
+  const visibleDayCount = initialDayCount + olderDayPages * 7;
+  const visibleDays = rangeDays.slice(0, visibleDayCount);
+  const nextDayCount = Math.min(7, rangeDays.length - visibleDays.length);
   const perDay = (date: Date, events: Entry[]) => {
     const end = new Date(date);
     end.setDate(end.getDate() + 1);
@@ -386,31 +708,36 @@ function BarRecords({
         value={kind}
         iconized
         options={[
-          { label: "喂奶", value: "feed", icon: "◒" },
-          { label: "尿布", value: "diaper", icon: "♧" },
-          { label: "睡眠", value: "sleep", icon: "☾" },
+          { label: "喂奶", value: "feed", careIcon: "feed" },
+          { label: "尿布", value: "diaper", careIcon: "diaper" },
+          { label: "睡眠", value: "sleep", careIcon: "sleep" },
         ]}
         onChange={(v) => {
           setKind(v as Kind);
-          setHistoryExpanded(false);
+          setOlderDayPages(0);
           setExpandedDays(new Set());
           setExpandedDayEntries(new Set());
         }}
       />
       <Card>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+        <View testID="record-range-options">
           <Chips
             value={range}
             options={ranges}
             onChange={(next) => {
               setRange(next as RecordRange);
-              setHistoryExpanded(false);
+              setOlderDayPages(0);
               setExpandedDays(new Set());
               setExpandedDayEntries(new Set());
             }}
           />
-        </ScrollView>
-        <View style={row}>
+        </View>
+        <View
+          style={[
+            row,
+            largeText && { flexDirection: "column", alignItems: "stretch" },
+          ]}
+        >
           <T style={{ flex: 1, fontSize: 18, fontWeight: "700" }}>
             {ranges.find((option) => option.value === range)!.title}
           </T>
@@ -420,7 +747,7 @@ function BarRecords({
               iconized
               compact
               options={[
-                { label: "mL", value: "mL", icon: "◒" },
+                { label: "mL", value: "mL", careIcon: "feed" },
                 { label: "时长", value: "hours", icon: "◷" },
               ]}
               onChange={setUnit}
@@ -435,7 +762,7 @@ function BarRecords({
           bars={chartDays.map((d, i) => ({
             x: i + 0.5,
             value: d.total,
-            color: kind === "sleep" ? colors[2] : colors[0],
+            color: kind === "sleep" ? c.chartSleep : c.chartFeed,
           }))}
           labels={chartDays.flatMap((d, i) =>
             chartLabelIndices.has(i)
@@ -492,9 +819,43 @@ function BarRecords({
             n + (e.end ? (Date.parse(e.end) - Date.parse(e.start)) / 60000 : 0),
           0,
         );
+        const dailyBars = events.map((e) => {
+          const start = Math.max(date.getTime(), Date.parse(e.start));
+          const d = new Date(start);
+          return {
+            x: d.getHours() + d.getMinutes() / 60,
+            value:
+              kind === "sleep"
+                ? Math.max(
+                    0,
+                    Math.min(
+                      dayEnd.getTime(),
+                      Date.parse(e.end ?? new Date(now).toISOString()),
+                    ) - start,
+                  ) / 3600000
+                : value(e),
+            color: color(e),
+            startLabel: Number.isFinite(start) ? formatTime(start) : undefined,
+            label:
+              kind === "feed" && unit === "mL"
+                ? e.amount === undefined
+                  ? t("亲喂")
+                  : formatNumber(e.amount)
+                : undefined,
+          };
+        });
         return (
           <View key={key} style={{ gap: 8 }}>
-            <T style={{ fontSize: 17, fontWeight: "600" }}>
+            <T
+              raw
+              accessibilityRole="header"
+              style={{ fontSize: 17, fontWeight: "600" }}
+            >
+              {key === today ? (
+                <T raw style={{ color: c.primary, fontWeight: "700" }}>
+                  {t("今天")} ·{" "}
+                </T>
+              ) : null}
               {formatDate(date, {
                 month: "long",
                 day: "numeric",
@@ -504,14 +865,24 @@ function BarRecords({
                 {date.getFullYear()}
               </T>
             </T>
-            <Card style={{ padding: 16, gap: 8 }}>
+            <Card
+              style={{
+                padding: 16,
+                gap: 8,
+                borderWidth: key === today ? 2 : 1,
+                borderColor: key === today ? c.primary : c.line,
+              }}
+            >
               <Pressable
                 disabled={key === today}
                 accessibilityRole="button"
                 accessibilityLabel={t(
                   detailsExpanded ? "收起当日明细" : "展开当日明细",
                 )}
-                accessibilityState={{ expanded: detailsExpanded }}
+                accessibilityState={{
+                  expanded: detailsExpanded,
+                  disabled: key === today,
+                }}
                 onPress={() =>
                   setExpandedDays((current) => {
                     const next = new Set(current);
@@ -521,7 +892,7 @@ function BarRecords({
                   })
                 }
                 style={{
-                  minHeight: 36,
+                  minHeight: 44,
                   flexDirection: "row",
                   alignItems: "center",
                   gap: 8,
@@ -553,41 +924,19 @@ function BarRecords({
               </Pressable>
               {detailsExpanded ? (
                 <>
-                  <Bars
-                    values
-                    unit={displayUnit}
-                    bars={events.map((e) => {
-                      const start = Math.max(
-                          date.getTime(),
-                          Date.parse(e.start),
-                        ),
-                        d = new Date(start);
-                      return {
-                        x: d.getHours() + d.getMinutes() / 60,
-                        value:
-                          kind === "sleep"
-                            ? Math.max(
-                                0,
-                                Math.min(
-                                  dayEnd.getTime(),
-                                  Date.parse(
-                                    e.end ?? new Date(now).toISOString(),
-                                  ),
-                                ) - start,
-                              ) / 3600000
-                            : value(e),
-                        color: color(e),
-                        label:
-                          kind === "feed" && unit === "mL"
-                            ? String(e.amount ?? t("亲喂"))
-                            : undefined,
-                      };
-                    })}
-                    labels={[0, 6, 12, 18, 24].map((x) => ({
-                      x,
-                      text: String(x).padStart(2, "0"),
-                    }))}
-                  />
+                  {kind === "sleep" ? (
+                    <SleepBars bars={dailyBars} />
+                  ) : (
+                    <Bars
+                      values
+                      unit={displayUnit}
+                      bars={dailyBars}
+                      labels={[0, 6, 12, 18, 24].map((x) => ({
+                        x,
+                        text: String(x).padStart(2, "0"),
+                      }))}
+                    />
+                  )}
                   {visibleEvents.map((e) => {
                     const index = selected.findIndex((v) => v.id === e.id),
                       prev = selected[index + 1];
@@ -601,9 +950,17 @@ function BarRecords({
                           gap: 2,
                         }}
                       >
-                        <View style={row}>
+                        <View
+                          style={[
+                            row,
+                            largeText && {
+                              flexDirection: "column",
+                              alignItems: "stretch",
+                            },
+                          ]}
+                        >
                           <View style={{ flex: 1, minWidth: 0, gap: 1 }}>
-                            <View style={row}>
+                            <View style={[row, { flexWrap: "wrap", gap: 8 }]}>
                               <T
                                 style={{
                                   fontSize: 13,
@@ -619,7 +976,7 @@ function BarRecords({
                               <T style={{ fontSize: 13, lineHeight: 19 }}>
                                 {kind === "feed"
                                   ? e.amount !== undefined
-                                    ? `${e.amount} mL`
+                                    ? `${formatNumber(e.amount)} mL`
                                     : t("亲喂")
                                   : kind === "diaper"
                                     ? t(
@@ -683,12 +1040,17 @@ function BarRecords({
                                 })}
                               </T>
                             ) : null}
+                            {authorLabel ? (
+                              <T raw style={{ fontSize: 11, color: c.muted }}>
+                                {authorLabel(e.id)}
+                              </T>
+                            ) : null}
                             {e.note ? (
                               <T
-                                numberOfLines={1}
+                                raw
                                 style={{
-                                  fontSize: 11,
-                                  lineHeight: 16,
+                                  fontSize: 15,
+                                  lineHeight: 21,
                                   color: c.muted,
                                 }}
                               >
@@ -700,12 +1062,13 @@ function BarRecords({
                             style={{
                               flexDirection: "row",
                               alignItems: "center",
-                              gap: 3,
+                              gap: 8,
+                              flexWrap: "wrap",
                             }}
                           >
-                            <Pressable
-                              accessibilityRole="button"
-                              accessibilityLabel={t("编辑{kind}", {
+                            <RecordActionButton
+                              action="edit"
+                              accessibilityLabel={`${t("编辑{kind}", {
                                 kind: t(
                                   kind === "feed"
                                     ? "喂奶"
@@ -713,21 +1076,14 @@ function BarRecords({
                                       ? "睡眠"
                                       : "尿布",
                                 ),
-                              })}
+                              })} · ${formatDate(e.start)} ${formatTime(e.start)}${e.end ? `–${formatTime(e.end)}` : ""}`}
+                              accessibilityHint={t("打开记录编辑界面")}
                               onPress={() => onEdit(e)}
-                              style={{
-                                minHeight: 36,
-                                justifyContent: "center",
-                                paddingHorizontal: 3,
-                              }}
-                            >
-                              <T style={{ fontSize: 11, color: c.primary }}>
-                                编辑
-                              </T>
-                            </Pressable>
-                            <Pressable
-                              accessibilityRole="button"
-                              accessibilityLabel={t("删除{kind}", {
+                              disabled={canEdit && !canEdit(e.id)}
+                            />
+                            <RecordActionButton
+                              action="delete"
+                              accessibilityLabel={`${t("删除{kind}", {
                                 kind: t(
                                   kind === "feed"
                                     ? "喂奶"
@@ -735,18 +1091,11 @@ function BarRecords({
                                       ? "睡眠"
                                       : "尿布",
                                 ),
-                              })}
+                              })} · ${formatDate(e.start)} ${formatTime(e.start)}${e.end ? `–${formatTime(e.end)}` : ""}`}
+                              accessibilityHint={t("打开删除确认")}
                               onPress={() => onDelete(e)}
-                              style={{
-                                minHeight: 36,
-                                justifyContent: "center",
-                                paddingHorizontal: 3,
-                              }}
-                            >
-                              <T style={{ fontSize: 11, color: c.muted }}>
-                                删除
-                              </T>
-                            </Pressable>
+                              disabled={canEdit && !canEdit(e.id)}
+                            />
                           </View>
                         </View>
                       </View>
@@ -773,8 +1122,10 @@ function BarRecords({
                       }
                       style={({ pressed }) => ({
                         alignSelf: "flex-start",
-                        minHeight: 36,
+                        minHeight: 44,
+                        minWidth: 44,
                         paddingHorizontal: 8,
+                        paddingVertical: 8,
                         justifyContent: "center",
                         opacity: pressed ? 0.72 : 1,
                       })}
@@ -800,19 +1151,18 @@ function BarRecords({
           </View>
         );
       })}
-      {olderDayCount > 0 ? (
+      {nextDayCount > 0 ? (
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={
-            historyExpanded
-              ? t("收起历史日期")
-              : t("显示 {count} 天历史记录", { count: olderDayCount })
-          }
-          accessibilityState={{ expanded: historyExpanded }}
-          onPress={() => setHistoryExpanded((expanded) => !expanded)}
+          accessibilityLabel={t("更多：显示前 {count} 天", {
+            count: nextDayCount,
+          })}
+          onPress={() => setOlderDayPages((count) => count + 1)}
           style={({ pressed }) => ({
-            minHeight: 40,
+            minHeight: 44,
+            minWidth: 44,
             paddingHorizontal: 12,
+            paddingVertical: 8,
             alignSelf: "flex-start",
             borderRadius: 13,
             justifyContent: "center",
@@ -821,9 +1171,27 @@ function BarRecords({
           })}
         >
           <T style={{ color: c.primary, fontSize: 13, fontWeight: "700" }}>
-            {historyExpanded
-              ? t("收起历史日期")
-              : t("显示 {count} 天历史记录", { count: olderDayCount })}
+            {t("更多：显示前 {count} 天", { count: nextDayCount })}
+          </T>
+        </Pressable>
+      ) : null}
+      {olderDayPages > 0 ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t("收起历史日期")}
+          onPress={() => setOlderDayPages(0)}
+          style={({ pressed }) => ({
+            minHeight: 44,
+            minWidth: 44,
+            paddingHorizontal: 12,
+            paddingVertical: 8,
+            alignSelf: "flex-start",
+            justifyContent: "center",
+            opacity: pressed ? 0.72 : 1,
+          })}
+        >
+          <T style={{ color: c.primary, fontSize: 13, fontWeight: "700" }}>
+            收起历史日期
           </T>
         </Pressable>
       ) : null}

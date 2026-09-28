@@ -1,0 +1,2225 @@
+import React, { useContext, useEffect, useRef, useState } from "react";
+import {
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  TextInput,
+  View,
+} from "react-native";
+import NativeDateTimeField from "../NativeDateTimeField";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { useI18n } from "../i18n";
+import { Button, Card, T, Theme } from "../ui";
+import Modal from "../AccessibleModal";
+import RecordActionButton from "../RecordActionButton";
+import type { SharedFeed } from "./contracts";
+import type { FeedDraft } from "./pilotState";
+import {
+  familyErrorMessage,
+  familyMessage,
+  fullFamilyMessage,
+  familyNoticeMessage,
+  type FamilyMessageKey,
+} from "./messages";
+import type { useFamilyPilot } from "./useFamilyPilot";
+import type { OwnerSeedSummary } from "./ownerSeed";
+import { OwnerSeedCountsView } from "./OwnerSetupCard";
+import { familyInvitationCapacity } from "./invitationCapacity";
+import { FamilySyncDetails } from "./FamilySyncStatus";
+import { familySyncIssues } from "./syncIssues";
+
+type Translate = (
+  key: FamilyMessageKey,
+  values?: Record<string, string | number>,
+) => string;
+type Confirmation = {
+  title: string;
+  body: string;
+  label: string;
+  action: () => Promise<void>;
+  acknowledgement?: string;
+  allowDuringTransition?: boolean;
+  requiresAuthentication: boolean;
+};
+
+function Disclosure({
+  title,
+  children,
+  initiallyOpen = false,
+  status,
+  nested = false,
+  alwaysVisibleContent,
+}: {
+  title: string;
+  children: React.ReactNode;
+  initiallyOpen?: boolean;
+  status?: string;
+  nested?: boolean;
+  alwaysVisibleContent?: React.ReactNode;
+}) {
+  const c = useContext(Theme);
+  const { locale } = useI18n();
+  const [open, setOpen] = useState(initiallyOpen);
+  const Container = nested ? View : Card;
+  return (
+    <Container
+      style={
+        nested
+          ? { ...styles.nestedDisclosure, borderColor: c.line }
+          : styles.card
+      }
+    >
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={familyMessage(
+          locale,
+          open ? "hideSection" : "showSection",
+          { section: title },
+        )}
+        accessibilityState={{ expanded: open }}
+        aria-expanded={open}
+        onPress={() => setOpen((value) => !value)}
+        style={({ pressed }) => [
+          styles.disclosure,
+          { opacity: pressed ? 0.65 : 1 },
+        ]}
+      >
+        <View style={{ flex: 1, gap: 4 }}>
+          <T
+            raw
+            style={[styles.sectionTitle, nested && styles.nestedSectionTitle]}
+          >
+            {title}
+          </T>
+          {status ? (
+            <T
+              raw
+              accessibilityLiveRegion="polite"
+              style={styles.muted(c.muted)}
+            >
+              {status}
+            </T>
+          ) : null}
+        </View>
+        <T
+          raw
+          accessibilityElementsHidden
+          style={{
+            color: c.primary,
+            fontSize: nested ? 13 : 20,
+            flexShrink: 0,
+          }}
+        >
+          {nested
+            ? familyMessage(
+                locale,
+                open ? "collapseSectionAction" : "expandSectionAction",
+              )
+            : open
+              ? "−"
+              : "+"}
+        </T>
+      </Pressable>
+      {alwaysVisibleContent}
+      {open ? <View style={styles.stack}>{children}</View> : null}
+    </Container>
+  );
+}
+
+function Input({
+  label,
+  ...props
+}: React.ComponentProps<typeof TextInput> & { label: string }) {
+  const c = useContext(Theme);
+  return (
+    <View style={styles.field}>
+      <T raw style={{ fontSize: 13, color: c.muted }}>
+        {label}
+      </T>
+      <TextInput
+        {...props}
+        accessibilityLabel={label}
+        placeholderTextColor={c.muted}
+        keyboardAppearance={c.isDark ? "dark" : "light"}
+        allowFontScaling
+        maxFontSizeMultiplier={0}
+        accessibilityState={{ disabled: props.editable === false }}
+        selectionColor={c.primary}
+        style={[
+          styles.input,
+          // Let UITextField use its native baseline/descender metrics. Explicit
+          // paragraph line height is still useful for multiline notes and web.
+          Platform.OS !== "ios" || props.multiline
+            ? styles.inputLineHeight
+            : null,
+          {
+            color: c.text,
+            backgroundColor: c.input,
+            borderColor: c.controlLine,
+          },
+          props.style,
+        ]}
+      />
+    </View>
+  );
+}
+
+function Consent({
+  checked,
+  onChange,
+  label,
+  disabled,
+}: {
+  checked: boolean;
+  onChange: (value: boolean) => void;
+  label: string;
+  disabled: boolean;
+}) {
+  const c = useContext(Theme);
+  return (
+    <Pressable
+      accessibilityRole="checkbox"
+      accessibilityLabel={label}
+      accessibilityState={{ checked, disabled }}
+      disabled={disabled}
+      onPress={() => onChange(!checked)}
+      style={({ pressed }) => [
+        styles.consent,
+        { opacity: disabled ? 0.5 : pressed ? 0.65 : 1 },
+      ]}
+    >
+      <View
+        style={[
+          styles.checkbox,
+          {
+            backgroundColor: checked ? c.soft : c.bg,
+            borderColor: checked ? c.primary : c.muted,
+          },
+        ]}
+      >
+        <T
+          raw
+          accessibilityElementsHidden
+          style={{ color: c.primary, fontWeight: "700" }}
+        >
+          {checked ? "✓" : ""}
+        </T>
+      </View>
+      <T raw style={{ flex: 1, fontSize: 13, lineHeight: 20, color: c.muted }}>
+        {label}
+      </T>
+    </Pressable>
+  );
+}
+
+const pad = (value: number) => String(value).padStart(2, "0");
+function localFields(iso: string) {
+  const value = new Date(iso);
+  return {
+    date: `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}`,
+    time: `${pad(value.getHours())}:${pad(value.getMinutes())}`,
+  };
+}
+
+function localISO(date: string, time: string): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time))
+    return null;
+  const [year, month, day] = date.split("-").map(Number);
+  const [hour, minute] = time.split(":").map(Number);
+  const value = new Date(year, month - 1, day, hour, minute);
+  if (
+    value.getFullYear() !== year ||
+    value.getMonth() !== month - 1 ||
+    value.getDate() !== day ||
+    value.getHours() !== hour ||
+    value.getMinutes() !== minute
+  )
+    return null;
+  return value.toISOString();
+}
+
+function displayDate(value: string, locale: string) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "";
+  return new Intl.DateTimeFormat(locale, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(date);
+}
+
+function DateFields({
+  value,
+  dateLabel,
+  timeLabel,
+  onChange,
+  onValidityChange,
+  disabled,
+}: {
+  value: string;
+  dateLabel: string;
+  timeLabel: string;
+  onChange: (iso: string) => void;
+  onValidityChange: (valid: boolean) => void;
+  disabled: boolean;
+}) {
+  const [fields, setFields] = useState(() => localFields(value));
+  useEffect(() => {
+    setFields(localFields(value));
+    onValidityChange(true);
+  }, [value]);
+  function update(next: typeof fields) {
+    setFields(next);
+    const iso = localISO(next.date, next.time);
+    onValidityChange(iso !== null);
+    if (iso) onChange(iso);
+  }
+  return (
+    <View style={styles.stack}>
+      <View style={styles.dateRow}>
+        {Platform.OS === "web" ? (
+          <>
+            <View style={{ flex: 1.25 }}>
+              <Input
+                label={dateLabel}
+                value={fields.date}
+                onChangeText={(date) => update({ ...fields, date })}
+                placeholder="YYYY-MM-DD"
+                maxLength={10}
+                editable={!disabled}
+              />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Input
+                label={timeLabel}
+                value={fields.time}
+                onChangeText={(time) => update({ ...fields, time })}
+                placeholder="HH:mm"
+                maxLength={5}
+                editable={!disabled}
+              />
+            </View>
+          </>
+        ) : (
+          <>
+            <View style={{ flex: 1.25 }}>
+              <NativeDateTimeField
+                label={dateLabel}
+                value={fields.date}
+                mode="date"
+                editable={!disabled}
+                maximumDate={new Date()}
+                onChange={(date) => update({ ...fields, date })}
+              />
+            </View>
+            <View style={{ flex: 1 }}>
+              <NativeDateTimeField
+                label={timeLabel}
+                value={fields.time}
+                mode="time"
+                editable={!disabled}
+                onChange={(time) => update({ ...fields, time })}
+              />
+            </View>
+          </>
+        )}
+      </View>
+    </View>
+  );
+}
+
+function DraftEditor({
+  draft,
+  busy,
+  canSave,
+  m,
+  onChange,
+  onSave,
+  onDiscard,
+}: {
+  draft: FeedDraft;
+  busy: boolean;
+  canSave: boolean;
+  m: Translate;
+  onChange: (draft: FeedDraft) => void;
+  onSave: () => void;
+  onDiscard: () => void;
+}) {
+  const c = useContext(Theme);
+  const [startValid, setStartValid] = useState(true);
+  const [endValid, setEndValid] = useState(true);
+  const [validation, setValidation] = useState<FamilyMessageKey | null>(null);
+  function save() {
+    if (
+      !startValid ||
+      !endValid ||
+      !Number.isFinite(Date.parse(draft.start)) ||
+      !Number.isFinite(Date.parse(draft.end))
+    )
+      return setValidation("errorDate");
+    if (Date.parse(draft.end) < Date.parse(draft.start))
+      return setValidation("errorEnd");
+    if (
+      Date.parse(draft.start) > Date.now() + 60000 ||
+      Date.parse(draft.end) > Date.now() + 60000
+    )
+      return setValidation("errorFuture");
+    if (!/^\d+$/.test(draft.amount.trim()) || Number(draft.amount) > 2000)
+      return setValidation("errorAmount");
+    setValidation(null);
+    onSave();
+  }
+  return (
+    <Card style={{ ...styles.card, borderColor: c.primary }}>
+      <T raw accessibilityRole="header" style={styles.sectionTitle}>
+        {m(draft.baseVersion ? "editingFeed" : "privateDraft")}
+      </T>
+      <T raw style={styles.muted(c.muted)}>
+        {m("draftDescription")}
+      </T>
+      <DateFields
+        value={draft.start}
+        dateLabel={m("startDate")}
+        timeLabel={m("startTime")}
+        disabled={busy}
+        onValidityChange={setStartValid}
+        onChange={(start) => onChange({ ...draft, start })}
+      />
+      <DateFields
+        value={draft.end}
+        dateLabel={m("endDate")}
+        timeLabel={m("endTime")}
+        disabled={busy}
+        onValidityChange={setEndValid}
+        onChange={(end) => onChange({ ...draft, end })}
+      />
+      <T raw style={styles.muted(c.muted)}>
+        {m("localTimeHint")}
+      </T>
+      <Input
+        label={m("amount")}
+        value={draft.amount}
+        onChangeText={(amount) => onChange({ ...draft, amount })}
+        keyboardType="number-pad"
+        inputMode="numeric"
+        maxLength={4}
+        editable={!busy}
+      />
+      <T raw style={styles.muted(c.muted)}>
+        {m("amountHint")}
+      </T>
+      <Input
+        label={m("note")}
+        value={draft.note}
+        onChangeText={(note) => onChange({ ...draft, note })}
+        placeholder={m("notePlaceholder")}
+        maxLength={500}
+        multiline
+        editable={!busy}
+        style={{ minHeight: 72, textAlignVertical: "top" }}
+      />
+      {validation ? (
+        <T raw accessibilityRole="alert">
+          {m(validation)}
+        </T>
+      ) : null}
+      <View style={styles.actions}>
+        <Button
+          label={m(busy ? "saving" : "saveFeed")}
+          onPress={save}
+          disabled={busy || !canSave}
+          style={styles.flexButton}
+        />
+        <Button
+          label={m("discardDraft")}
+          secondary
+          onPress={onDiscard}
+          disabled={busy}
+          style={styles.flexButton}
+        />
+      </View>
+    </Card>
+  );
+}
+
+export default function FamilyScreenView({
+  onBack,
+  pilot,
+  demo = false,
+  section = "all",
+  feedbackHandledByGlobalBanner = false,
+  ownerSetup,
+  initialDataSummary,
+}: {
+  onBack?: () => void;
+  pilot: ReturnType<typeof useFamilyPilot>;
+  demo?: boolean;
+  section?: "all" | "account" | "family" | "deletion";
+  feedbackHandledByGlobalBanner?: boolean;
+  ownerSetup?: React.ReactNode;
+  initialDataSummary?: OwnerSeedSummary;
+}) {
+  const c = useContext(Theme);
+  const { locale, formattingLocale, localize: text } = useI18n();
+  const m: Translate = (key, values) =>
+    demo
+      ? familyMessage(locale, key, values)
+      : fullFamilyMessage(locale, key, values);
+  const [babyName, setBabyName] = useState("");
+  const [createConsent, setCreateConsent] = useState(false);
+  const [profileName, setProfileName] = useState("");
+  const [profileBirthDate, setProfileBirthDate] = useState("");
+  const [recipient, setRecipient] = useState("");
+  const [createdInvite, setCreatedInvite] = useState<string | null>(null);
+  const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
+  const [acknowledged, setAcknowledged] = useState(false);
+  const [localError, setLocalError] = useState<FamilyMessageKey | null>(null);
+  const [dismissedFeedback, setDismissedFeedback] = useState<string | null>(
+    null,
+  );
+  const [confirmationError, setConfirmationError] = useState<string | null>(
+    null,
+  );
+  const [acting, setActing] = useState(false);
+  const [activeAction, setActiveAction] = useState<FamilyMessageKey | null>(
+    null,
+  );
+  const lock = useRef(false);
+  const mounted = useRef(true);
+  const busy = acting || pilot.busy;
+  const authenticated = pilot.authStatus === "authenticated";
+  const tokenConfirmed = pilot.authStatus === "token_confirmed";
+  const savedSessionPending =
+    !pilot.user &&
+    pilot.sessionAvailable &&
+    pilot.authStatus !== "signed_out" &&
+    pilot.authStatus !== "reauth_required";
+  const accountAccessPending = tokenConfirmed || savedSessionPending;
+  const unresolvedWorkspace =
+    !pilot.user && pilot.sharedMode && pilot.authStatus !== "signed_out";
+  const accessCheckUnavailable =
+    accountAccessPending && !pilot.syncing && !!pilot.error;
+  const needsSignIn = pilot.authStatus === "reauth_required";
+  const showAccount =
+    section !== "family" ||
+    !authenticated ||
+    pilot.transitionPending ||
+    (pilot.sharedMode && !pilot.ready);
+  const connectionUnavailable =
+    pilot.authStatus === "unverified" &&
+    [
+      "network_unavailable",
+      "network_error",
+      "offline",
+      "service_unavailable",
+    ].includes(pilot.error ?? "");
+  const connectingCachedAccount =
+    !!pilot.user && pilot.authStatus === "checking";
+  const accountStatusKey: FamilyMessageKey = connectingCachedAccount
+    ? "accountConnecting"
+    : connectionUnavailable
+      ? "accountConnectionUnavailable"
+      : ({
+          signed_out: "accountSignedOut",
+          checking: "accountChecking",
+          token_confirmed: "accountTokenRecognized",
+          authenticated: "accountSignedIn",
+          reauth_required: "accountExpired",
+          unverified: "accountUnverified",
+        }[pilot.authStatus] as FamilyMessageKey);
+  const snapshot = pilot.snapshot;
+  const inviteCapacity = snapshot
+    ? familyInvitationCapacity(snapshot.members, snapshot.invitations)
+    : null;
+  const replacesPendingInvitation = snapshot?.invitations.some(
+    (invite) =>
+      invite.status === "pending" &&
+      Date.parse(invite.expiresAt) > Date.now() &&
+      invite.email.toLowerCase() === recipient.trim().toLowerCase(),
+  );
+  const invitationAtCapacity =
+    inviteCapacity?.remaining === 0 && !replacesPendingInvitation;
+  const owner = snapshot?.family.role === "owner";
+  const activeMembers =
+    snapshot?.members.filter((member) => member.status === "active") ?? [];
+  const formerMembers = owner
+    ? (snapshot?.members.filter((member) => member.status !== "active") ?? [])
+    : [];
+  // Older responses, capped invitation lists and original admins may have no
+  // matching invitation. Keep their history without guessing from an email.
+  const unlinkedFormerMembers = formerMembers.filter(
+    (member) =>
+      !snapshot?.invitations.some(
+        (invitation) =>
+          invitation.status === "accepted" &&
+          invitation.acceptedMembershipId === member.membershipId,
+      ),
+  );
+  const successors = activeMembers.filter(
+    (member) => member.id !== pilot.user?.id,
+  );
+  const transfer = snapshot?.ownershipTransfer;
+  const deletion = pilot.deletionStatus ?? pilot.accountDeletion;
+  const workspaceBusy =
+    busy || !authenticated || pilot.transitionPending || !!deletion;
+  // Shared mode also covers unresolved lifecycle work. Keep a no-family inbox
+  // visible (but disabled) while its action awaits confirmation; a hidden family
+  // snapshot must never make an existing member look eligible to join.
+  const incomingInvitations =
+    authenticated &&
+    pilot.user &&
+    !snapshot &&
+    !pilot.hasFamilyMembership &&
+    !deletion &&
+    (!pilot.sharedMode || pilot.transitionPending)
+      ? pilot.inbox.filter(
+          (invitation) => Date.parse(invitation.expiresAt) > Date.now(),
+        )
+      : [];
+  const showAccountInvitations = showAccount && incomingInvitations.length > 0;
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  useEffect(() => {
+    setCreatedInvite(null);
+    setRecipient("");
+  }, [pilot.user?.id, snapshot?.family.id]);
+  useEffect(() => {
+    setProfileName(snapshot?.family.babyName ?? "");
+    setProfileBirthDate(snapshot?.family.babyBirthDate ?? "");
+  }, [
+    snapshot?.family.id,
+    snapshot?.family.babyName,
+    snapshot?.family.babyBirthDate,
+  ]);
+
+  async function run(
+    action: () => Promise<void>,
+    close = false,
+    actionKey: FamilyMessageKey | null = null,
+  ) {
+    if (lock.current) return;
+    lock.current = true;
+    setActing(true);
+    setActiveAction(actionKey);
+    setLocalError(null);
+    if (close) setConfirmationError(null);
+    try {
+      await action();
+      if (mounted.current && close) setConfirmation(null);
+    } catch (cause) {
+      // The controller publishes safe error codes; never show exception payloads.
+      if (mounted.current && close)
+        setConfirmationError(
+          cause instanceof Error && /^[a-z_]+$/.test(cause.message)
+            ? cause.message
+            : "request_failed",
+        );
+    } finally {
+      lock.current = false;
+      if (mounted.current) {
+        setActing(false);
+        setActiveAction(null);
+      }
+    }
+  }
+
+  function confirm(
+    title: FamilyMessageKey,
+    body: string,
+    label: FamilyMessageKey,
+    action: () => Promise<void>,
+    acknowledgement?: FamilyMessageKey,
+  ) {
+    const requiresAuthentication =
+      label !== "signOut" && label !== "discardDraft";
+    if (requiresAuthentication && !authenticated) return;
+    setConfirmationError(null);
+    setAcknowledged(false);
+    setConfirmation({
+      title: m(title),
+      body,
+      label: m(label),
+      action,
+      acknowledgement: acknowledgement ? m(acknowledgement) : undefined,
+      allowDuringTransition: label === "signOut",
+      requiresAuthentication,
+    });
+  }
+
+  function renderIncomingInvitations() {
+    return incomingInvitations.map((invitation) => (
+      <View
+        key={invitation.id}
+        style={[styles.listItem, { borderColor: c.line }]}
+      >
+        <T raw style={{ fontWeight: "600" }}>
+          {m("invitedBy", { name: invitation.ownerDisplayName })}
+        </T>
+        <T raw style={styles.muted(c.muted)}>
+          {m("expiresAt", {
+            time: displayDate(invitation.expiresAt, formattingLocale),
+          })}
+        </T>
+        <View style={styles.actions}>
+          <Button
+            label={m("acceptInvite")}
+            disabled={workspaceBusy}
+            style={styles.flexButton}
+            onPress={() =>
+              confirm(
+                "acceptInviteTitle",
+                `${m("invitedBy", { name: invitation.ownerDisplayName })}\n\n${m("joinWarning")}\n\n${m("joinDeclineWarning")}`,
+                "acceptInvite",
+                () => pilot.acceptInvitation(invitation.id),
+                "joinConsent",
+              )
+            }
+          />
+          <Button
+            label={m("declineInvite")}
+            secondary
+            disabled={workspaceBusy}
+            style={styles.flexButton}
+            onPress={() =>
+              confirm(
+                "declineInviteTitle",
+                `${m("invitedBy", { name: invitation.ownerDisplayName })}\n\n${m("declineInviteDescription")}`,
+                "declineInvite",
+                () => pilot.declineInvitation(invitation.id),
+              )
+            }
+          />
+        </View>
+      </View>
+    ));
+  }
+
+  const memberName = (id: string) =>
+    snapshot?.members.find((member) => member.id === id)?.displayName ||
+    m("memberFallback");
+  const obsoleteAuthError =
+    pilot.error === "sign_in_cancelled" ||
+    (authenticated &&
+      (pilot.error === "sign_in_required" || pilot.error === "unauthorized"));
+  // The surrounding app owns the global banner and its dismissal state. Only
+  // deduplicate feedback it represents, never local validation or modal errors.
+  const globalIssues =
+    feedbackHandledByGlobalBanner && !demo ? familySyncIssues(pilot) : [];
+  const globallyHandled = (kind: "error" | "notice", code: string | null) =>
+    globalIssues.some((issue) => issue.kind === kind && issue.code === code);
+  const error = localError
+    ? m(localError)
+    : pilot.error &&
+        !obsoleteAuthError &&
+        !globallyHandled("error", pilot.error)
+      ? familyErrorMessage(locale, pilot.error)
+      : null;
+  const notice =
+    pilot.notice &&
+    (demo || pilot.notice !== "saved_locally") &&
+    !globallyHandled("notice", pilot.notice)
+      ? !demo && pilot.notice === "change_not_shared"
+        ? m("noticeNotShared", {
+            section:
+              pilot.conflicts.length && !pilot.recordConflicts?.length
+                ? m("preservedSection", { count: pilot.conflicts.length })
+                : m("sharingIssuesTitle"),
+          })
+        : familyNoticeMessage(locale, pilot.notice, demo)
+      : null;
+  const feedback = error ?? notice;
+  const feedbackKey = feedback
+    ? JSON.stringify([
+        pilot.user?.id,
+        snapshot?.family.id,
+        pilot.authStatus,
+        localError
+          ? ["local", localError]
+          : error
+            ? ["error", pilot.error]
+            : ["notice", pilot.notice],
+      ])
+    : null;
+  useEffect(() => {
+    setDismissedFeedback(null);
+  }, [feedbackKey]);
+  const confirmationAuthBlocked =
+    !!confirmation?.requiresAuthentication && !authenticated;
+  const modalError = confirmationAuthBlocked
+    ? m(needsSignIn ? "accountExpiredAction" : "accountVerifyAction")
+    : confirmationError
+      ? familyErrorMessage(locale, confirmationError)
+      : null;
+  const staleDraft =
+    !!pilot.draft &&
+    !!snapshot &&
+    (pilot.draft.historyId !== snapshot.historyId ||
+      pilot.draft.membershipId !== snapshot.family.membershipId);
+  const draftEditor =
+    pilot.draft && snapshot && !staleDraft && !workspaceBusy ? (
+      <View style={styles.stack}>
+        <DraftEditor
+          key={pilot.draft.recordId}
+          draft={pilot.draft}
+          busy={busy}
+          canSave={!!snapshot && !staleDraft}
+          m={m}
+          onChange={(draft) => {
+            void pilot.setDraft(draft).catch(() => {});
+          }}
+          onSave={() => void run(pilot.saveDraft)}
+          onDiscard={() =>
+            confirm(
+              "discardDraftTitle",
+              m("discardDraftDescription"),
+              "discardDraft",
+              pilot.discardDraft,
+            )
+          }
+        />
+      </View>
+    ) : null;
+
+  function feedItem(
+    feed: SharedFeed & {
+      pending?: boolean;
+      pendingDelete?: boolean;
+      awaitingRefresh?: boolean;
+    },
+  ) {
+    const waiting = feed.pending || feed.pendingDelete || feed.awaitingRefresh;
+    const canEdit = owner || feed.recordedBy === pilot.user?.id;
+    return (
+      <View key={feed.id} style={[styles.listItem, { borderColor: c.line }]}>
+        <View style={styles.spread}>
+          <T raw style={{ fontSize: 18, fontWeight: "700" }}>
+            {feed.amount} mL
+          </T>
+          {waiting ? (
+            <T raw style={{ color: c.primary, fontSize: 13 }}>
+              {m(
+                feed.awaitingRefresh
+                  ? "savedRefreshing"
+                  : feed.pendingDelete
+                    ? "pendingDelete"
+                    : "pendingFeed",
+              )}
+            </T>
+          ) : null}
+        </View>
+        <T raw>
+          {displayDate(feed.start, formattingLocale)} —{" "}
+          {displayDate(feed.end, formattingLocale)}
+        </T>
+        {feed.note ? (
+          <T raw style={styles.muted(c.muted)}>
+            {feed.note}
+          </T>
+        ) : null}
+        <T raw style={styles.muted(c.muted)}>
+          {m("recordedBy", { name: memberName(feed.recordedBy) })}
+        </T>
+        {feed.lastEditedBy !== feed.recordedBy ? (
+          <T raw style={styles.muted(c.muted)}>
+            {m("editedBy", { name: memberName(feed.lastEditedBy) })}
+          </T>
+        ) : null}
+        {canEdit ? (
+          <View style={[styles.actions, { justifyContent: "flex-end" }]}>
+            <RecordActionButton
+              action="edit"
+              accessibilityLabel={m("editFeed")}
+              accessibilityHint={text(
+                "打开记录编辑界面",
+                "Opens the record editor",
+              )}
+              disabled={workspaceBusy || !!waiting || !!pilot.draft}
+              onPress={() => void run(() => pilot.beginFeed(feed))}
+            />
+            <RecordActionButton
+              action="delete"
+              accessibilityLabel={m("deleteFeed")}
+              accessibilityHint={text(
+                "打开删除确认",
+                "Opens a confirmation before deleting",
+              )}
+              disabled={workspaceBusy || !!waiting || !!pilot.draft}
+              onPress={() =>
+                confirm(
+                  "deleteFeedTitle",
+                  m("deleteFeedDescription"),
+                  "deleteFeed",
+                  () => pilot.deleteFeed(feed.id),
+                )
+              }
+            />
+          </View>
+        ) : null}
+      </View>
+    );
+  }
+
+  function renderDeletionAction() {
+    // A standalone More item, separate from expandable account details.
+    // Token recognition is not authoritative account or family access.
+    if (
+      !pilot.configured ||
+      pilot.webUnsupported ||
+      !pilot.user ||
+      deletion ||
+      accountAccessPending
+    )
+      return null;
+    const familyAccessPending =
+      (pilot.hasFamilyMembership || pilot.sharedMode) &&
+      (!snapshot || !pilot.ready);
+    return (
+      <Card style={styles.card}>
+        <View style={styles.spread}>
+          <T
+            raw
+            accessibilityRole="header"
+            style={{ flex: 1, fontSize: 18, fontWeight: "700" }}
+          >
+            {m("deletion")}
+          </T>
+          <RecordActionButton
+            action="delete"
+            accessibilityLabel={m("deletion")}
+            accessibilityHint={text(
+              "打开删除账户确认",
+              "Opens the account deletion confirmation",
+            )}
+            disabled={workspaceBusy || owner || familyAccessPending}
+            onPress={() =>
+              confirm(
+                "deleteAccountTitle",
+                m("deleteAccountDescription"),
+                "deleteAccount",
+                pilot.deleteAccount,
+                "deleteAccountConsent",
+              )
+            }
+          />
+        </View>
+        {owner ? (
+          <T raw style={styles.muted(c.muted)}>
+            {m("deleteAccountBlocked")}
+          </T>
+        ) : familyAccessPending ? (
+          <T raw style={styles.muted(c.muted)}>
+            {text(
+              "请在“我的账户”刷新家庭权限后继续。",
+              "Refresh family access in My account before continuing.",
+            )}
+          </T>
+        ) : null}
+      </Card>
+    );
+  }
+
+  function renderConfirmation() {
+    return (
+      <Modal
+        visible={confirmation !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          if (!busy) setConfirmation(null);
+        }}
+      >
+        <SafeAreaView style={styles.modalBackdrop}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === "ios" ? "padding" : undefined}
+            style={{
+              width: "100%",
+              maxWidth: 420,
+              maxHeight: "100%",
+              flexShrink: 1,
+              alignSelf: "center",
+            }}
+          >
+            <View
+              accessibilityViewIsModal
+              style={[styles.modal, { backgroundColor: c.elevated }]}
+            >
+              <ScrollView
+                contentContainerStyle={styles.stack}
+                keyboardShouldPersistTaps="handled"
+              >
+                <T raw accessibilityRole="header" style={styles.title}>
+                  {confirmation?.title}
+                </T>
+                {demo ? (
+                  <T raw style={{ color: c.primary, fontWeight: "600" }}>
+                    {m("demoConfirmation")}
+                  </T>
+                ) : null}
+                <T raw>{confirmation?.body}</T>
+                {confirmation?.acknowledgement ? (
+                  <Consent
+                    checked={acknowledged}
+                    onChange={setAcknowledged}
+                    disabled={busy}
+                    label={confirmation.acknowledgement}
+                  />
+                ) : null}
+                {modalError ? (
+                  <T raw accessibilityRole="alert">
+                    {modalError}
+                  </T>
+                ) : null}
+                <Button
+                  label={
+                    busy ? m("working") : (confirmation?.label ?? m("confirm"))
+                  }
+                  disabled={
+                    busy ||
+                    confirmationAuthBlocked ||
+                    (!!confirmation?.acknowledgement && !acknowledged) ||
+                    (pilot.transitionPending &&
+                      !confirmation?.allowDuringTransition)
+                  }
+                  onPress={() => {
+                    if (
+                      confirmation &&
+                      !confirmationAuthBlocked &&
+                      !busy &&
+                      (!confirmation.acknowledgement || acknowledged) &&
+                      (!pilot.transitionPending ||
+                        confirmation.allowDuringTransition)
+                    )
+                      void run(confirmation.action, true);
+                  }}
+                />
+                <Button
+                  label={m("cancel")}
+                  secondary
+                  disabled={busy}
+                  onPress={() => setConfirmation(null)}
+                />
+              </ScrollView>
+            </View>
+          </KeyboardAvoidingView>
+        </SafeAreaView>
+      </Modal>
+    );
+  }
+
+  if (section === "deletion") {
+    return (
+      <>
+        {renderDeletionAction()}
+        {renderConfirmation()}
+      </>
+    );
+  }
+
+  return (
+    <View style={styles.screen}>
+      {section !== "account" ? (
+        <>
+          <View style={styles.spread}>
+            <T raw accessibilityRole="header" style={styles.title}>
+              {m("title")}
+            </T>
+            {onBack ? (
+              <Button
+                label={m("back")}
+                secondary
+                onPress={onBack}
+                style={{ minHeight: 44, paddingHorizontal: 14 }}
+              />
+            ) : null}
+          </View>
+          {demo || (!accountAccessPending && !snapshot && !pilot.sharedMode) ? (
+            <View style={[styles.notice, { backgroundColor: c.soft }]}>
+              <T raw style={{ fontSize: 13, lineHeight: 20 }}>
+                {m(demo ? "demoNotice" : "pilotNotice")}
+              </T>
+            </View>
+          ) : null}
+        </>
+      ) : null}
+
+      {feedback &&
+      (demo ||
+        (localError ? dismissedFeedback : pilot.dismissedFeedback) !==
+          feedbackKey) ? (
+        <View
+          style={[
+            styles.notice,
+            error
+              ? { borderColor: c.primary, borderWidth: 1 }
+              : { backgroundColor: c.soft },
+          ]}
+        >
+          <View style={[styles.spread, { alignItems: "flex-start" }]}>
+            <T
+              raw
+              accessibilityRole={error ? "alert" : undefined}
+              accessibilityLiveRegion={error ? undefined : "polite"}
+              style={{ flex: 1 }}
+            >
+              {feedback}
+            </T>
+            {!demo ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={text("关闭提示", "Dismiss message")}
+                onPress={() =>
+                  localError
+                    ? setDismissedFeedback(feedbackKey)
+                    : pilot.dismissFeedback(feedbackKey)
+                }
+                style={{
+                  minWidth: 44,
+                  minHeight: 44,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  margin: -8,
+                }}
+              >
+                <T
+                  raw
+                  accessibilityElementsHidden
+                  style={{ color: c.muted, fontSize: 22 }}
+                >
+                  ×
+                </T>
+              </Pressable>
+            ) : null}
+          </View>
+        </View>
+      ) : null}
+
+      {deletion ? (
+        <Card style={styles.card}>
+          <T raw accessibilityRole="header" style={styles.sectionTitle}>
+            {m(
+              pilot.transitionPending
+                ? "transitionPending"
+                : deletion.status === "completed"
+                  ? "deletionComplete"
+                  : deletion.status === "awaiting_identity_deletion"
+                    ? "deletionIdentity"
+                    : "deletionPending",
+            )}
+          </T>
+          {pilot.transitionPending || deletion.status !== "completed" ? (
+            <T raw style={styles.muted(c.muted)}>
+              {m(
+                pilot.transitionPending
+                  ? "transitionDescription"
+                  : deletion.status === "awaiting_identity_deletion"
+                    ? "deletionIdentityDescription"
+                    : "deletionPendingDescription",
+              )}
+            </T>
+          ) : null}
+          <T raw style={styles.muted(c.muted)}>
+            {m("deletionRequestedAt", {
+              time: displayDate(deletion.requestedAt, formattingLocale),
+            })}
+          </T>
+          <Button
+            label={m(
+              activeAction === "checkDeletionStatus"
+                ? "working"
+                : "checkDeletionStatus",
+            )}
+            secondary
+            disabled={busy}
+            onPress={() =>
+              void run(
+                async () => {
+                  await pilot.checkDeletionStatus();
+                },
+                false,
+                "checkDeletionStatus",
+              )
+            }
+          />
+          {deletion.status === "completed" && !pilot.transitionPending ? (
+            <Button
+              label={m("deletionDone")}
+              disabled={busy}
+              onPress={() =>
+                void run(async () => {
+                  if (pilot.user || pilot.sessionAvailable)
+                    await pilot.signOut();
+                  await pilot.dismissDeletionStatus();
+                })
+              }
+            />
+          ) : null}
+          {pilot.transitionPending && pilot.user ? (
+            <Button
+              label={m(pilot.syncing ? "refreshing" : "refresh")}
+              disabled={busy || pilot.syncing}
+              onPress={() => void run(pilot.refresh)}
+            />
+          ) : null}
+          {pilot.user || pilot.sessionAvailable ? (
+            <Button
+              label={m("signOut")}
+              secondary
+              disabled={busy || pilot.activationPending}
+              onPress={() =>
+                confirm(
+                  "signOutTitle",
+                  m(
+                    pilot.transitionPending
+                      ? "signOutDuringTransition"
+                      : "signOutDescription",
+                  ),
+                  "signOut",
+                  pilot.signOut,
+                )
+              }
+            />
+          ) : null}
+        </Card>
+      ) : !pilot.configured || pilot.webUnsupported ? (
+        <Card style={styles.card}>
+          <T raw accessibilityRole="header" style={styles.sectionTitle}>
+            {m(
+              section === "account"
+                ? "account"
+                : !pilot.configured
+                  ? "unconfigured"
+                  : "nativeOnly",
+            )}
+          </T>
+          {section === "account" ? (
+            <T raw style={styles.muted(c.muted)}>
+              {m(!pilot.configured ? "unconfigured" : "nativeOnly")}
+            </T>
+          ) : null}
+          <T raw style={styles.muted(c.muted)}>
+            {m(
+              !pilot.configured
+                ? "unconfiguredDescription"
+                : "nativeOnlyDescription",
+            )}
+          </T>
+        </Card>
+      ) : accountAccessPending ? (
+        <Card style={styles.card}>
+          <T raw accessibilityRole="header" style={styles.sectionTitle}>
+            {m("account")}
+          </T>
+          <T raw style={{ fontWeight: "600" }}>
+            {m(tokenConfirmed ? "accountTokenRecognized" : accountStatusKey)}
+          </T>
+          <T raw style={styles.muted(c.muted)}>
+            {m(
+              accessCheckUnavailable
+                ? "familyServiceUnavailable"
+                : "familyServiceConnecting",
+            )}
+          </T>
+          <T raw style={styles.muted(c.muted)}>
+            {m(
+              tokenConfirmed
+                ? "accountAccessPendingDetails"
+                : "accountSavedSignInDetails",
+            )}
+          </T>
+          {pilot.user ? (
+            <>
+              <T raw style={{ fontWeight: "600" }}>
+                {pilot.user.displayName}
+              </T>
+              <T raw selectable style={styles.muted(c.muted)}>
+                {pilot.user.email}
+              </T>
+              <T raw style={styles.muted(c.muted)}>
+                {m("accountRecognizedCachedDetails")}
+              </T>
+            </>
+          ) : null}
+          <Button
+            label={m(pilot.syncing ? "refreshing" : "refresh")}
+            secondary
+            disabled={busy || pilot.syncing}
+            // Refresh publishes its own errors. Do not lock sign-out while the
+            // account/family access check waits for the service.
+            onPress={() => void pilot.refresh().catch(() => {})}
+          />
+          <Button
+            label={m("signOut")}
+            secondary
+            disabled={busy || pilot.activationPending}
+            onPress={() =>
+              confirm(
+                "signOutTitle",
+                m(
+                  pilot.transitionPending
+                    ? "signOutDuringTransition"
+                    : pilot.hasPrivateWork
+                      ? "signOutWithWork"
+                      : "signOutDescription",
+                ),
+                "signOut",
+                pilot.signOut,
+              )
+            }
+          />
+        </Card>
+      ) : !pilot.user ? (
+        <Card style={styles.card}>
+          <T raw accessibilityRole="header" style={styles.sectionTitle}>
+            {m("account")}
+          </T>
+          <T raw style={styles.muted(c.muted)}>
+            {m(accountStatusKey)}
+          </T>
+          <T raw style={styles.muted(c.muted)}>
+            {m(
+              unresolvedWorkspace
+                ? needsSignIn
+                  ? "accountExpiredAction"
+                  : pilot.sessionAvailable
+                    ? "accountSavedSignInDetails"
+                    : "accountVerifyAction"
+                : "signInDescription",
+            )}
+          </T>
+          {unresolvedWorkspace && !needsSignIn ? (
+            <Button
+              label={m(pilot.syncing ? "refreshing" : "refresh")}
+              disabled={busy || pilot.syncing}
+              // A slow access check must not trap the user on this recovery
+              // screen. Refresh publishes its own errors, while sign-in and
+              // the confirmed local escape remain available.
+              onPress={() => void pilot.refresh().catch(() => {})}
+            />
+          ) : null}
+          <Button
+            label={m(
+              busy
+                ? "working"
+                : pilot.error === "sign_out_failed"
+                  ? "retrySignOut"
+                  : needsSignIn
+                    ? "signInAgain"
+                    : "signIn",
+            )}
+            disabled={busy}
+            secondary={unresolvedWorkspace && !needsSignIn}
+            onPress={() =>
+              void run(
+                pilot.error === "sign_out_failed"
+                  ? pilot.signOut
+                  : pilot.signIn,
+              )
+            }
+          />
+          {unresolvedWorkspace && pilot.error !== "sign_out_failed" ? (
+            <Button
+              label={m("signOut")}
+              secondary
+              disabled={busy || pilot.activationPending}
+              onPress={() =>
+                confirm(
+                  "signOutTitle",
+                  m(
+                    pilot.transitionPending
+                      ? "signOutDuringTransition"
+                      : pilot.hasPrivateWork
+                        ? "signOutWithWork"
+                        : "signOutDescription",
+                  ),
+                  "signOut",
+                  pilot.signOut,
+                )
+              }
+            />
+          ) : null}
+        </Card>
+      ) : (
+        <>
+          {showAccount ? (
+            <Disclosure
+              title={m("account")}
+              status={m(accountStatusKey)}
+              initiallyOpen={!authenticated}
+              alwaysVisibleContent={
+                showAccountInvitations ? (
+                  <View style={styles.stack}>
+                    <T
+                      raw
+                      accessibilityRole="header"
+                      style={{ fontWeight: "600" }}
+                    >
+                      {m("receivedInvitations", {
+                        count: incomingInvitations.length,
+                      })}
+                    </T>
+                    {pilot.transitionPending ? (
+                      <T
+                        raw
+                        accessibilityLiveRegion="polite"
+                        style={styles.muted(c.muted)}
+                      >
+                        {m("transitionPending")}
+                      </T>
+                    ) : null}
+                    {renderIncomingInvitations()}
+                  </View>
+                ) : null
+              }
+            >
+              <T raw style={{ fontWeight: "600" }}>
+                {pilot.user.displayName}
+              </T>
+              <T raw selectable style={styles.muted(c.muted)}>
+                {pilot.user.email}
+              </T>
+              {!authenticated ? (
+                <T raw style={styles.muted(c.muted)}>
+                  {m(
+                    connectingCachedAccount
+                      ? "accountConnectingDetails"
+                      : connectionUnavailable
+                        ? "accountConnectionDetails"
+                        : "accountCachedDetails",
+                  )}
+                </T>
+              ) : null}
+              {needsSignIn ? (
+                <>
+                  <T raw>{m("accountExpiredAction")}</T>
+                  <Button
+                    label={m(
+                      activeAction === "signInAgain"
+                        ? "working"
+                        : "signInAgain",
+                    )}
+                    disabled={busy}
+                    onPress={() => void run(pilot.signIn, false, "signInAgain")}
+                  />
+                </>
+              ) : !snapshot || !authenticated ? (
+                <Button
+                  label={m(pilot.syncing ? "refreshing" : "refresh")}
+                  secondary
+                  disabled={
+                    busy || pilot.syncing || pilot.authStatus === "checking"
+                  }
+                  onPress={() => void run(pilot.refresh)}
+                />
+              ) : null}
+              <Button
+                label={m("signOut")}
+                secondary
+                disabled={busy || pilot.activationPending}
+                onPress={() =>
+                  confirm(
+                    "signOutTitle",
+                    m(
+                      pilot.transitionPending
+                        ? "signOutDuringTransition"
+                        : pilot.hasPrivateWork
+                          ? "signOutWithWork"
+                          : "signOutDescription",
+                    ),
+                    "signOut",
+                    pilot.signOut,
+                  )
+                }
+              />
+            </Disclosure>
+          ) : null}
+
+          {pilot.transitionPending ? (
+            <Card style={styles.card}>
+              <T raw accessibilityRole="header" style={styles.sectionTitle}>
+                {m("transitionPending")}
+              </T>
+              <T raw style={styles.muted(c.muted)}>
+                {m("transitionDescription")}
+              </T>
+              <Button
+                label={m(pilot.syncing ? "refreshing" : "refresh")}
+                disabled={busy || pilot.syncing}
+                onPress={() => void run(pilot.refresh)}
+              />
+            </Card>
+          ) : section === "account" || !authenticated ? null : !demo &&
+            pilot.sharedMode &&
+            !pilot.ready ? (
+            <Card>
+              <T raw>
+                {text(
+                  "家庭记录暂不可见。请联网刷新权限与完整记录后继续。",
+                  "Family records are hidden until access and the complete history have been refreshed.",
+                )}
+              </T>
+              <Button
+                label={m("refresh")}
+                disabled={busy || pilot.syncing}
+                onPress={() => void run(pilot.refresh)}
+              />
+            </Card>
+          ) : !snapshot ? (
+            <>
+              {section === "family" ? (
+                <Button
+                  label={m(pilot.syncing ? "refreshing" : "refresh")}
+                  secondary
+                  disabled={busy || pilot.syncing}
+                  onPress={() => void run(pilot.refresh)}
+                />
+              ) : null}
+              {!showAccountInvitations ? (
+                <Disclosure
+                  title={m("joinSection")}
+                  initiallyOpen={!ownerSetup || !!incomingInvitations.length}
+                >
+                  <T raw style={styles.muted(c.muted)}>
+                    {m("joinDescription")}
+                  </T>
+                  {!incomingInvitations.length ? (
+                    <T raw style={styles.muted(c.muted)}>
+                      {m("noIncomingInvitations")}
+                    </T>
+                  ) : (
+                    renderIncomingInvitations()
+                  )}
+                </Disclosure>
+              ) : null}
+              {ownerSetup ??
+                (demo ? (
+                  <Disclosure title={m("createSection")}>
+                    <T raw style={styles.muted(c.muted)}>
+                      {m("oneFamily")}
+                    </T>
+                    <Input
+                      label={m("babyName")}
+                      value={babyName}
+                      onChangeText={setBabyName}
+                      placeholder={m("babyNamePlaceholder")}
+                      maxLength={60}
+                      editable={!busy}
+                    />
+                    <Consent
+                      checked={createConsent}
+                      onChange={setCreateConsent}
+                      disabled={busy}
+                      label={m("createConsent")}
+                    />
+                    <Button
+                      label={m("createFamily")}
+                      disabled={busy || !babyName.trim() || !createConsent}
+                      onPress={() =>
+                        void run(() => pilot.createFamily(babyName.trim()))
+                      }
+                    />
+                  </Disclosure>
+                ) : null)}
+            </>
+          ) : (
+            <>
+              <View style={styles.spread}>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <T raw style={{ fontSize: 18, fontWeight: "700" }}>
+                    {snapshot.family.babyName}
+                  </T>
+                  <T raw style={styles.muted(c.muted)}>
+                    {m(owner ? "owner" : "caregiver")}
+                  </T>
+                </View>
+                <Button
+                  label={m(pilot.syncing ? "refreshing" : "refresh")}
+                  secondary
+                  disabled={busy || pilot.syncing}
+                  onPress={() => void run(pilot.refresh)}
+                  style={{ minHeight: 44, paddingHorizontal: 14 }}
+                />
+              </View>
+
+              {initialDataSummary ? (
+                <Card style={styles.card}>
+                  <T raw accessibilityRole="header" style={styles.sectionTitle}>
+                    {m("ownerSeededCounts")}
+                  </T>
+                  <OwnerSeedCountsView summary={initialDataSummary} />
+                  <T raw style={styles.muted(c.muted)}>
+                    {m("ownerSeededHint")}
+                  </T>
+                </Card>
+              ) : null}
+
+              <Disclosure title={m("ownerSetup")}>
+                <T raw style={styles.muted(c.muted)}>
+                  {m(owner ? "createBlockedOwner" : "createBlockedMember")}
+                </T>
+              </Disclosure>
+
+              {transfer?.toUserId === pilot.user.id ? (
+                <Card style={{ ...styles.card, borderColor: c.primary }}>
+                  <T raw accessibilityRole="header" style={styles.sectionTitle}>
+                    {m("ownershipIncoming")}
+                  </T>
+                  <T raw style={styles.muted(c.muted)}>
+                    {m("ownershipIncomingDescription")}
+                  </T>
+                  <Button
+                    label={m("acceptOwnership")}
+                    disabled={workspaceBusy}
+                    onPress={() =>
+                      confirm(
+                        "acceptOwnershipTitle",
+                        m("ownershipIncomingDescription"),
+                        "acceptOwnership",
+                        pilot.acceptOwnership,
+                      )
+                    }
+                  />
+                </Card>
+              ) : null}
+
+              {pilot.pending.length ? (
+                <View style={[styles.notice, { backgroundColor: c.soft }]}>
+                  <T
+                    raw
+                    accessibilityLiveRegion="polite"
+                    style={{ fontWeight: "600" }}
+                  >
+                    {m("pendingCount", { count: pilot.pending.length })}
+                  </T>
+                  <T raw style={styles.muted(c.muted)}>
+                    {m("pendingDescription")}
+                  </T>
+                </View>
+              ) : null}
+
+              {demo ? (
+                <>
+                  {draftEditor}
+                  <Card style={styles.card}>
+                    <T
+                      raw
+                      accessibilityRole="header"
+                      style={styles.sectionTitle}
+                    >
+                      {m("feedSection")}
+                    </T>
+                    <T raw style={styles.muted(c.muted)}>
+                      {m("feedDescription")}
+                    </T>
+                    {!pilot.draft ? (
+                      <Button
+                        label={m("addFeed")}
+                        disabled={busy}
+                        onPress={() => void run(() => pilot.beginFeed())}
+                      />
+                    ) : null}
+                    {!pilot.feeds.length ? (
+                      <T raw style={styles.muted(c.muted)}>
+                        {m("noFeeds")}
+                      </T>
+                    ) : (
+                      pilot.feeds.map(feedItem)
+                    )}
+                  </Card>
+                </>
+              ) : null}
+            </>
+          )}
+
+          {section !== "account" && !demo ? (
+            <FamilySyncDetails pilot={pilot} />
+          ) : null}
+
+          {section !== "account" &&
+          snapshot &&
+          !workspaceBusy &&
+          pilot.conflicts.length ? (
+            <Disclosure
+              title={m("preservedSection", { count: pilot.conflicts.length })}
+              initiallyOpen
+            >
+              <T raw style={styles.muted(c.muted)}>
+                {m("preservedDescription")}
+              </T>
+              {pilot.conflicts.map((conflict) => (
+                <View
+                  key={conflict.operation.operationId}
+                  style={[styles.listItem, { borderColor: c.line }]}
+                >
+                  <T raw>
+                    {familyErrorMessage(
+                      locale,
+                      conflict.error ?? "record_changed",
+                    )}
+                  </T>
+                  {conflict.operation.feed ? (
+                    <>
+                      <T raw style={{ fontWeight: "600" }}>
+                        {conflict.operation.feed.amount} mL
+                      </T>
+                      <T raw style={styles.muted(c.muted)}>
+                        {displayDate(
+                          conflict.operation.feed.start,
+                          formattingLocale,
+                        )}{" "}
+                        —{" "}
+                        {displayDate(
+                          conflict.operation.feed.end,
+                          formattingLocale,
+                        )}
+                      </T>
+                      {conflict.operation.feed.note ? (
+                        <T raw>{conflict.operation.feed.note}</T>
+                      ) : null}
+                    </>
+                  ) : (
+                    <T raw style={styles.muted(c.muted)}>
+                      {m("preservedDelete")}
+                    </T>
+                  )}
+                  <View style={styles.actions}>
+                    <Button
+                      label={m("discardPreserved")}
+                      secondary
+                      disabled={busy}
+                      onPress={() =>
+                        confirm(
+                          "discardPreservedTitle",
+                          m("discardPreservedDescription"),
+                          "discardPreserved",
+                          () =>
+                            pilot.discardConflict(
+                              conflict.operation.operationId,
+                            ),
+                        )
+                      }
+                      style={styles.flexButton}
+                    />
+                  </View>
+                </View>
+              ))}
+            </Disclosure>
+          ) : null}
+
+          {section !== "account" &&
+          snapshot &&
+          !pilot.transitionPending &&
+          !pilot.accountDeletion ? (
+            <>
+              <Disclosure
+                title={m("membersCount", { count: activeMembers.length })}
+              >
+                <T raw style={styles.muted(c.muted)}>
+                  {m("sharingDescription")}
+                </T>
+                {activeMembers.map((member) => (
+                  <View
+                    key={member.membershipId}
+                    style={[styles.listItem, { borderColor: c.line }]}
+                  >
+                    <View style={styles.spread}>
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <T raw style={{ fontWeight: "600" }}>
+                          {member.displayName}
+                          {member.id === pilot.user?.id ? ` (${m("you")})` : ""}
+                        </T>
+                        <T raw style={styles.muted(c.muted)}>
+                          {m(member.role)} · {m("activeMember")}
+                        </T>
+                      </View>
+                      {owner && member.role !== "owner" ? (
+                        <Button
+                          label={m("remove")}
+                          secondary
+                          disabled={busy}
+                          onPress={() =>
+                            confirm(
+                              "removeTitle",
+                              m("removeDescription", {
+                                name: member.displayName,
+                              }),
+                              "remove",
+                              () => pilot.removeMember(member.id),
+                            )
+                          }
+                          style={{ minHeight: 44, paddingHorizontal: 14 }}
+                        />
+                      ) : null}
+                    </View>
+                    {member.email ? (
+                      <T raw style={styles.muted(c.muted)}>
+                        {member.email}
+                      </T>
+                    ) : null}
+                  </View>
+                ))}
+                {!owner ? (
+                  <Button
+                    label={m("leave")}
+                    secondary
+                    disabled={busy}
+                    onPress={() =>
+                      confirm(
+                        "leaveTitle",
+                        m("leaveDescription"),
+                        "leave",
+                        pilot.leaveFamily,
+                      )
+                    }
+                  />
+                ) : null}
+              </Disclosure>
+
+              {demo ? (
+                <Disclosure title={m("profile")}>
+                  <T raw style={styles.muted(c.muted)}>
+                    {m("profileDescription")}
+                  </T>
+                  {owner ? (
+                    <>
+                      <Input
+                        label={m("babyName")}
+                        value={profileName}
+                        onChangeText={setProfileName}
+                        maxLength={60}
+                        editable={!workspaceBusy}
+                      />
+                      <Input
+                        label={m("babyBirthDate")}
+                        value={profileBirthDate}
+                        onChangeText={setProfileBirthDate}
+                        placeholder="YYYY-MM-DD"
+                        maxLength={10}
+                        editable={!workspaceBusy}
+                      />
+                      <Button
+                        label={m("saveProfile")}
+                        disabled={workspaceBusy || !profileName.trim()}
+                        onPress={() => {
+                          const date = profileBirthDate.trim();
+                          const iso = date ? localISO(date, "00:00") : null;
+                          if (date && (!iso || Date.parse(iso) > Date.now())) {
+                            setLocalError("profileDateError");
+                            return;
+                          }
+                          void run(() =>
+                            pilot.updateProfile(
+                              profileName.trim(),
+                              date || null,
+                            ),
+                          );
+                        }}
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <T raw>{snapshot.family.babyName}</T>
+                      <T raw style={styles.muted(c.muted)}>
+                        {snapshot.family.babyBirthDate || m("noBirthDate")}
+                      </T>
+                    </>
+                  )}
+                </Disclosure>
+              ) : null}
+
+              {owner ? (
+                <Disclosure title={m("inviteSection")}>
+                  {inviteCapacity ? (
+                    <T raw accessibilityLiveRegion="polite">
+                      {m("invitationSlots", inviteCapacity)}
+                    </T>
+                  ) : null}
+                  <T raw style={styles.muted(c.muted)}>
+                    {m("invitationCapacityHint")}
+                  </T>
+                  <T raw style={styles.muted(c.muted)}>
+                    {m("recipientHint")}
+                  </T>
+                  <Input
+                    label={m("recipientEmail")}
+                    value={recipient}
+                    onChangeText={setRecipient}
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    editable={!workspaceBusy}
+                    maxLength={254}
+                  />
+                  <Button
+                    label={m(
+                      activeAction === "createInvitation"
+                        ? "working"
+                        : "createInvitation",
+                    )}
+                    disabled={
+                      workspaceBusy || !recipient.trim() || invitationAtCapacity
+                    }
+                    onPress={() => {
+                      if (
+                        workspaceBusy ||
+                        !recipient.trim() ||
+                        invitationAtCapacity
+                      )
+                        return;
+                      void run(
+                        async () => {
+                          setCreatedInvite(null);
+                          const email = recipient.trim();
+                          await pilot.createInvitation(email);
+                          if (mounted.current) {
+                            setCreatedInvite(email);
+                            setRecipient("");
+                          }
+                        },
+                        false,
+                        "createInvitation",
+                      );
+                    }}
+                  />
+                  {createdInvite ? (
+                    <View style={[styles.notice, { backgroundColor: c.soft }]}>
+                      <T
+                        raw
+                        accessibilityLiveRegion="polite"
+                        style={{ fontWeight: "600" }}
+                      >
+                        {m("invitationReady")}
+                      </T>
+                      <T raw>{createdInvite}</T>
+                    </View>
+                  ) : null}
+                  <Disclosure title={m("invitations")} nested>
+                    {!snapshot.invitations.length &&
+                    !unlinkedFormerMembers.length ? (
+                      <T raw style={styles.muted(c.muted)}>
+                        {m("noInvitations")}
+                      </T>
+                    ) : (
+                      snapshot.invitations.map((invitation) => {
+                        const pending =
+                          invitation.status === "pending" &&
+                          Date.parse(invitation.expiresAt) > Date.now();
+                        const status =
+                          invitation.status === "pending" && !pending
+                            ? "expired"
+                            : invitation.status;
+                        // Link to this invitation's grant, never to the email:
+                        // the same person can leave and rejoin with a new grant.
+                        const acceptedMember =
+                          status === "accepted" &&
+                          invitation.acceptedMembershipId
+                            ? snapshot.members.find(
+                                (member) =>
+                                  member.membershipId ===
+                                  invitation.acceptedMembershipId,
+                              )
+                            : undefined;
+                        const statusLabel: Record<
+                          typeof status,
+                          FamilyMessageKey
+                        > = {
+                          pending: "pendingInvitation",
+                          accepted:
+                            acceptedMember?.status === "removed"
+                              ? "acceptedRemovedInvitation"
+                              : acceptedMember?.status === "left"
+                                ? "acceptedLeftInvitation"
+                                : "acceptedInvitation",
+                          declined: "declinedInvitation",
+                          revoked: "revokedInvitation",
+                          expired: "expiredInvitation",
+                        };
+                        return (
+                          <View
+                            key={invitation.id}
+                            style={[styles.listItem, { borderColor: c.line }]}
+                          >
+                            <T raw>{invitation.email}</T>
+                            <T raw style={styles.muted(c.muted)}>
+                              {m(
+                                status === "declined" &&
+                                  invitation.declineReason === "created_family"
+                                  ? "declinedCreatedFamily"
+                                  : status === "declined" &&
+                                      invitation.declineReason ===
+                                        "joined_family"
+                                    ? "declinedJoinedFamily"
+                                    : statusLabel[status],
+                              )}
+                            </T>
+                            {acceptedMember?.endedAt &&
+                            acceptedMember.status !== "active" ? (
+                              <T raw style={styles.muted(c.muted)}>
+                                {m("endedAt", {
+                                  time: displayDate(
+                                    acceptedMember.endedAt,
+                                    formattingLocale,
+                                  ),
+                                })}
+                              </T>
+                            ) : status === "pending" || status === "expired" ? (
+                              <T raw style={styles.muted(c.muted)}>
+                                {m("expiresAt", {
+                                  time: displayDate(
+                                    invitation.expiresAt,
+                                    formattingLocale,
+                                  ),
+                                })}
+                              </T>
+                            ) : null}
+                            {pending ? (
+                              <Button
+                                label={m("revoke")}
+                                secondary
+                                disabled={busy}
+                                onPress={() =>
+                                  confirm(
+                                    "revokeTitle",
+                                    m("revokeDescription", {
+                                      email: invitation.email,
+                                    }),
+                                    "revoke",
+                                    async () => {
+                                      await pilot.revokeInvitation(
+                                        invitation.id,
+                                      );
+                                      setCreatedInvite(null);
+                                    },
+                                  )
+                                }
+                              />
+                            ) : null}
+                          </View>
+                        );
+                      })
+                    )}
+                    {unlinkedFormerMembers.length ? (
+                      <>
+                        <T raw style={{ fontWeight: "600" }}>
+                          {m("unlinkedMembershipHistory")}
+                        </T>
+                        <T raw style={styles.muted(c.muted)}>
+                          {m("memberHistoryDescription")}
+                        </T>
+                        {unlinkedFormerMembers.map((member) => (
+                          <View
+                            key={member.membershipId}
+                            style={[styles.listItem, { borderColor: c.line }]}
+                          >
+                            <T raw style={{ fontWeight: "600" }}>
+                              {member.displayName}
+                            </T>
+                            <T raw style={styles.muted(c.muted)}>
+                              {m(member.role)} ·{" "}
+                              {m(
+                                member.status === "left"
+                                  ? "leftMember"
+                                  : "removedMember",
+                              )}
+                            </T>
+                            {member.email ? (
+                              <T raw style={styles.muted(c.muted)}>
+                                {member.email}
+                              </T>
+                            ) : null}
+                            {member.endedAt ? (
+                              <T raw style={styles.muted(c.muted)}>
+                                {m("endedAt", {
+                                  time: displayDate(
+                                    member.endedAt,
+                                    formattingLocale,
+                                  ),
+                                })}
+                              </T>
+                            ) : null}
+                          </View>
+                        ))}
+                      </>
+                    ) : null}
+                  </Disclosure>
+                </Disclosure>
+              ) : null}
+              {owner ? (
+                <Disclosure title={m("ownership")}>
+                  <T raw style={styles.muted(c.muted)}>
+                    {m("ownershipDescription")}
+                  </T>
+                  {transfer ? (
+                    <View style={styles.stack}>
+                      <T raw>
+                        {m("ownershipPending", {
+                          name: memberName(transfer.toUserId),
+                        })}
+                      </T>
+                      <Button
+                        label={m("cancelOwnership")}
+                        secondary
+                        disabled={workspaceBusy}
+                        onPress={() =>
+                          confirm(
+                            "cancelOwnershipTitle",
+                            m("cancelOwnershipDescription"),
+                            "cancelOwnership",
+                            pilot.cancelOwnership,
+                          )
+                        }
+                      />
+                    </View>
+                  ) : successors.length ? (
+                    successors.map((member) => (
+                      <View
+                        key={member.membershipId}
+                        style={[styles.listItem, { borderColor: c.line }]}
+                      >
+                        <T raw>{member.displayName}</T>
+                        <Button
+                          label={m("nominateOwner")}
+                          secondary
+                          disabled={workspaceBusy}
+                          onPress={() =>
+                            confirm(
+                              "nominateOwnerTitle",
+                              m("nominateOwnerDescription", {
+                                name: member.displayName,
+                              }),
+                              "nominateOwner",
+                              () => pilot.nominateOwner(member.id),
+                            )
+                          }
+                        />
+                      </View>
+                    ))
+                  ) : (
+                    <T raw style={styles.muted(c.muted)}>
+                      {m("noSuccessor")}
+                    </T>
+                  )}
+                  <View style={[styles.listItem, { borderColor: c.line }]}>
+                    <T raw style={styles.muted(c.muted)}>
+                      {m(
+                        successors.length
+                          ? "closeFamilyBlocked"
+                          : "closeFamilyDescription",
+                      )}
+                    </T>
+                    <Button
+                      label={m("closeFamily")}
+                      secondary
+                      disabled={workspaceBusy || successors.length > 0}
+                      onPress={() =>
+                        confirm(
+                          "closeFamilyTitle",
+                          m("closeFamilyDescription"),
+                          "closeFamily",
+                          pilot.closeFamily,
+                          "closeFamilyConsent",
+                        )
+                      }
+                    />
+                  </View>
+                </Disclosure>
+              ) : null}
+              <Disclosure title={m("details")}>
+                <T raw style={styles.muted(c.muted)}>
+                  {m("firstCommit")}
+                </T>
+              </Disclosure>
+            </>
+          ) : null}
+        </>
+      )}
+
+      {busy ? (
+        <ActivityIndicator
+          color={c.primary}
+          accessibilityLabel={m("working")}
+        />
+      ) : null}
+
+      {section === "all" ? renderDeletionAction() : null}
+      {renderConfirmation()}
+    </View>
+  );
+}
+
+const styles = {
+  ...StyleSheet.create({
+    screen: { width: "100%", maxWidth: 680, alignSelf: "center", gap: 14 },
+    title: { fontSize: 22, lineHeight: 29, fontWeight: "700", flexShrink: 1 },
+    sectionTitle: { fontSize: 17, lineHeight: 24, fontWeight: "700", flex: 1 },
+    nestedSectionTitle: { fontSize: 15, lineHeight: 22, fontWeight: "600" },
+    card: { padding: 16, borderRadius: 20, gap: 12 },
+    nestedDisclosure: {
+      borderTopWidth: 1,
+      marginTop: 4,
+      paddingTop: 8,
+      gap: 12,
+    },
+    stack: { gap: 12 },
+    spread: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      gap: 12,
+    },
+    disclosure: {
+      minHeight: 44,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 12,
+    },
+    notice: { borderRadius: 16, padding: 14, gap: 8 },
+    field: { gap: 4 },
+    input: {
+      borderWidth: 1,
+      borderRadius: 14,
+      minHeight: 48,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      fontSize: 17,
+    },
+    inputLineHeight: { lineHeight: 22 },
+    consent: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: 10,
+      minHeight: 44,
+      paddingVertical: 4,
+    },
+    checkbox: {
+      width: 24,
+      height: 24,
+      borderWidth: 1,
+      borderRadius: 6,
+      alignItems: "center",
+      justifyContent: "center",
+      marginTop: 2,
+    },
+    dateRow: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+    actions: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+    flexButton: { flexGrow: 1, flexBasis: 120, paddingHorizontal: 12 },
+    listItem: { borderTopWidth: 1, paddingTop: 12, gap: 6 },
+    modalBackdrop: {
+      flex: 1,
+      backgroundColor: "rgba(0,0,0,0.45)",
+      justifyContent: "center",
+      padding: 20,
+    },
+    modal: { borderRadius: 24, padding: 20, maxHeight: "100%" },
+  }),
+  muted: (color: string) => ({ color, fontSize: 15, lineHeight: 22 }),
+};

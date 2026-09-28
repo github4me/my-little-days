@@ -1,10 +1,6 @@
 name: Deploy family API and database
 
-# Register the manual workflow on the default branch so GitHub shows its native
-# "Run workflow -> Use workflow from -> Branch" selector. Dispatching against
-# feature/family-invitations executes THAT branch's full workflow at this path.
-# Keep these input definitions aligned with the release branch.
-# No application code, cloud credentials or automatic deployment is added here.
+# No push, merge, release, schedule, or workflow_run deployment trigger.
 on:
   workflow_dispatch:
     inputs:
@@ -18,17 +14,143 @@ on:
         type: boolean
         default: false
 
-permissions: {}
+permissions:
+  contents: read
+
+concurrency:
+  # Serialize the entire release with infrastructure apply (including SQL firewall changes).
+  group: family-infrastructure
+  cancel-in-progress: false
 
 jobs:
-  select-release-branch:
-    name: Select the branch containing the family release
+  validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 2
     steps:
-      - name: Prevent deployment from this registration-only revision
+      - name: Require reviewed current trusted-branch revision and SQL bootstrap
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          RELEASE_SHA: ${{ github.sha }}
+          DATABASE_BOOTSTRAPPED: ${{ inputs.database_bootstrapped }}
+          TRUSTED_BRANCH: ${{ vars.FAMILY_INFRA_BRANCH || github.event.repository.default_branch }}
+        with:
+          script: |
+            const sha = process.env.RELEASE_SHA;
+            if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error('The workflow commit SHA is invalid.');
+            core.info(`Automatically selected release commit: ${sha}`);
+            if (process.env.DATABASE_BOOTSTRAPPED !== 'true') throw new Error('Complete the one-time SQL bootstrap and review migrations first.');
+            if (context.ref !== `refs/heads/${process.env.TRUSTED_BRANCH}`) throw new Error('Run the workflow from the trusted release branch.');
+            const current = await github.rest.git.getRef({ ...context.repo, ref: `heads/${process.env.TRUSTED_BRANCH}` });
+            if (current.data.object.sha !== sha || context.sha !== sha) throw new Error('This run is stale. Start a new run from the trusted release branch.');
+
+  verify:
+    needs: validate
+    uses: ./.github/workflows/family-pilot-ci.yml
+    with:
+      revision: ${{ github.sha }}
+
+  migrate:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: family-database
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      AZURE_DB_MIGRATION_CLIENT_ID: ${{ vars.AZURE_DB_MIGRATION_CLIENT_ID }}
+      FAMILY_DB_RESOURCE_GROUP: ${{ vars.FAMILY_DB_RESOURCE_GROUP }}
+      FAMILY_DB_SERVER_NAME: ${{ vars.FAMILY_DB_SERVER_NAME }}
+      FAMILY_DB_NAME: ${{ vars.FAMILY_DB_NAME }}
+      FAMILY_DB_MIGRATIONS_ENABLED: ${{ vars.FAMILY_DB_MIGRATIONS_ENABLED }}
+      TRUSTED_BRANCH: ${{ vars.FAMILY_INFRA_BRANCH || github.event.repository.default_branch }}
+      RELEASE_SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: "10.0.x"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: family-database-${{ github.run_id }}
+          path: artifacts/database
+      - name: Recheck approved revision and show only federation binding claims
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            if (process.env.FAMILY_DB_MIGRATIONS_ENABLED !== 'true') throw new Error('Configure and protect family-database before enabling migrations.');
+            const current = await github.rest.git.getRef({ ...context.repo, ref: `heads/${process.env.TRUSTED_BRANCH}` });
+            if (current.data.object.sha !== process.env.RELEASE_SHA) throw new Error('Approval is stale; review the new release.');
+            const token = await core.getIDToken('api://AzureADTokenExchange');
+            const claims = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8'));
+            core.info(JSON.stringify({ issuer: claims.iss, subject: claims.sub, audience: claims.aud }));
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3
+        id: azure-login
+        with:
+          client-id: ${{ vars.AZURE_DB_MIGRATION_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Apply DbUp with temporary exact runner-IP access
+        shell: pwsh
+        env:
+          ADOPT_EF: ${{ inputs.adopt_ef }}
+        run: ./infra/github-database.ps1 -Mode Migrate -AdoptEf:($env:ADOPT_EF -ceq 'true')
+      - name: Recover this run's firewall cleanup
+        if: ${{ always() && steps.azure-login.outcome == 'success' }}
+        shell: pwsh
+        run: ./infra/github-database.ps1 -Mode Cleanup
+
+  deploy:
+    # Failed SQL or cleanup blocks API deployment. No automatic schema rollback.
+    needs: migrate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: family-pilot
+      url: ${{ vars.FAMILY_API_PUBLIC_URL }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      # Keep this existing environment/flag and its OIDC subject stable across upgrades.
+      - name: Require configured protected family environment
         shell: bash
+        env:
+          ENABLED: ${{ vars.FAMILY_PILOT_DEPLOY_ENABLED }}
+          WEBAPP: ${{ vars.AZURE_WEBAPP_NAME }}
+          PUBLIC_URL: ${{ vars.FAMILY_API_PUBLIC_URL }}
+          CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
         run: |
-          echo '::error::This revision only registers the manual workflow. Open Run workflow and select feature/family-invitations in the Branch selector. Its commit is selected automatically.'
-          echo 'The selected release branch runs its own workflow, including trusted-branch checks, database approval and API approval. No Azure or database changes were made by this run.'
-          exit 1
+          set -euo pipefail
+          [ "$ENABLED" = true ] || { echo 'Configure and protect the family-pilot environment before enabling deployment.' >&2; exit 1; }
+          for value in "$WEBAPP" "$PUBLIC_URL" "$CLIENT_ID" "$TENANT_ID" "$SUBSCRIPTION_ID"; do
+            [ -n "$value" ] || { echo 'A required family API environment variable is missing.' >&2; exit 1; }
+          done
+          [[ "$PUBLIC_URL" == https://* ]] || { echo 'The family API URL must use HTTPS.' >&2; exit 1; }
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: family-api-${{ github.run_id }}
+          path: family-api
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - uses: azure/webapps-deploy@02a81bead70021f5284939794bcec79c271ab383 # v3
+        with:
+          app-name: ${{ vars.AZURE_WEBAPP_NAME }}
+          package: family-api
+      - name: Check public liveness only
+        shell: bash
+        env:
+          PUBLIC_URL: ${{ vars.FAMILY_API_PUBLIC_URL }}
+        run: |
+          # Shared B1 cold starts can take several minutes after zip deployment finishes.
+          curl --fail --silent --show-error --retry 60 --retry-delay 5 --retry-max-time 300 --retry-all-errors \
+            --connect-timeout 10 --max-time 20 "${PUBLIC_URL%/}/health/live"

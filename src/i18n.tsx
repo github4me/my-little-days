@@ -1,16 +1,67 @@
 import React, { createContext, useContext, useMemo } from "react";
 import { getLocales } from "expo-localization";
+import {
+  isChineseLocale,
+  localeDefinition,
+  normalizeLanguagePreference,
+  resolveLocalization,
+  type LanguagePreference,
+  type PreferredLocale,
+  type SupportedLocale,
+} from "./locales";
+import {
+  formatDisplayNumber,
+  formatEditableNumber as formatEditableNumberForLocale,
+  parseLocalizedNumber as parseLocalizedNumberForLocale,
+} from "./localeNumbers";
+import {
+  getGeneratedCatalog,
+  getGeneratedEnglishCatalog,
+  loadGeneratedCatalog,
+} from "./locales/generated";
+import { manualEnglishOverride } from "./locales/manualOverrides";
 
-export type LanguagePreference = "system" | "zh" | "en";
-export type AppLocale = "zh-CN" | "en-US";
+export {
+  LOCALE_REGISTRY,
+  SUPPORTED_LOCALES,
+  isChineseLocale,
+  localeDefinition,
+  matchSupportedLocale,
+  normalizeLanguagePreference,
+  resolveLocalization,
+  type LanguagePreference,
+  type LocaleDefinition,
+  type PreferredLocale,
+  type ResolvedLocalization,
+  type SupportedLocale,
+} from "./locales";
+
+/** Kept as a compatibility alias while callers migrate to SupportedLocale. */
+export type AppLocale = SupportedLocale;
 
 type TranslationValues = Record<string, string | number>;
 
 // Chinese source text remains the fallback. Keeping translations together makes
 // adding another language a data change rather than a screen-by-screen rewrite.
 const english: Record<string, string> = {
+  "已保存，等待家庭同步": "Saved; waiting for family sync",
+  家庭邀请试点: "Family invitation pilot",
+  打开家庭邀请试点: "Open family invitation pilot",
+  "界面预览（无需登录）": "Preview screens — no login",
+  "预览邀请和成员管理界面。仅使用样例，不登录、不联网、不保存。":
+    "Preview invitations and member management with samples only: no sign-in, network requests or saving.",
+  "独立测试空间，仅使用虚构数据。现有宝宝记录不会上传或共享。":
+    "A separate test space for fictional data only. Your existing baby records are never uploaded or shared.",
+  "本机记录无需账号 · 家庭试点为独立测试空间 · 不上传照片":
+    "Local records need no account · Family pilot is separate · No photo uploads",
+  "本机记录无需账号，不会自动上传。可选的家庭邀请试点使用独立登录和服务器，仅用于主动保存的虚构测试资料。":
+    "Local records need no account and are never uploaded automatically. The optional family invitation pilot has separate sign-in and server storage for fictional test data you explicitly save.",
+  "试点通过 Microsoft Entra External ID 登录。创建测试家庭、发送邀请、接受邀请和保存测试记录时，相关资料会发送到配置的试点服务。原有宝宝档案、历史、计时器、照片、早教打卡和备份不会上传。":
+    "The pilot uses Microsoft Entra External ID for sign-in. Creating a test family, inviting or joining, and saving test feeds sends the relevant data to the configured pilot service. Your existing baby profile, history, timers, photos, learning check-ins and backups are not uploaded.",
+  "试点仅限获准的测试账户，请勿填写真实宝宝资料。退出会清除这台设备的试点缓存和草稿；服务端数据仍保留。账户删除、保留期限和正式隐私披露完成前，不对外发布家庭共享。":
+    "The pilot is limited to admitted test accounts. Do not enter real baby data. Signing out clears this device's pilot cache and drafts; server data remains. Family sharing will not be publicly released until account deletion, retention rules and privacy disclosures are ready.",
   "MY LITTLE DAYS · 小日子": "MY LITTLE DAYS",
-  今天的小日子: "{name}'s little days",
+  今天的小日子: "Today",
   "每一天，都记得": "Every day remembered",
   慢慢长大的你: "Growing with you",
   我的: "More",
@@ -22,6 +73,10 @@ const english: Record<string, string> = {
   "筛选：{kind}": "Filter: {kind}",
   "筛选记录：{kind}": "Filter records: {kind}",
   致谢: "Credits",
+  请我喝杯咖啡: "Buy me a coffee",
+  "自愿、单次支持，不会订阅或解锁额外功能":
+    "Optional, one-time support. No subscription or feature unlocks.",
+  查看支持选项: "View support options",
   "感谢 Trista（来自 FPH）和她群里的 Mia、Violet、Bill 提出的建议与想法，也感谢群里每一位妈妈爸爸的支持。期待更多妈妈爸爸出现在这里，一起让小日子更好。":
     "Thank you to Trista from FPH and Mia, Violet, and Bill in her group for their suggestions and ideas, and to all the mums and dads in the group for their support. We hope to see more mums and dads here, helping make My Little Days even better.",
   柱状图: "Bar chart",
@@ -30,6 +85,62 @@ const english: Record<string, string> = {
     "Saved immediately and used when you open Records. You can also switch views temporarily in Records.",
   "无法保存视图设置，请重试。":
     "Could not save the view preference. Please try again.",
+  这台设备暂不支持导出文件:
+    "This device does not currently support file export.",
+  "备份文件不能超过 25 MB": "Backup files cannot exceed 25 MB.",
+  头像仅支持在手机安装版中保存:
+    "Baby photos can only be saved in the installed mobile app.",
+  "无法读取所选照片，请重试":
+    "The selected photo could not be read. Please try again.",
+  "请选择 12 MB 以内的照片": "Choose a photo smaller than 12 MB.",
+  "头像保存失败，请重试": "The baby photo could not be saved. Try again.",
+  提醒设置无效: "The reminder settings are invalid.",
+  跟随喂养设置无效: "The follow-feed reminder settings are invalid.",
+  头像地址无效: "The baby photo address is invalid.",
+  "打开成长记录…": "Opening your records…",
+  保存成长记录备份: "Save a Little Days backup",
+  保存家庭记录备份: "Save a family backup",
+  数据格式无效: "The data format is invalid.",
+  出生日期无效: "The birth date is invalid.",
+  "出生日期格式应为 YYYY-MM-DD":
+    "The birth date must use the YYYY-MM-DD format.",
+  记录时间需要带时区: "The record time must include a time zone.",
+  记录时间无效: "The record time is invalid.",
+  记录类型无效: "The record type is invalid.",
+  记录编号无效: "The record identifier is invalid.",
+  备注无效: "The notes are invalid or too long.",
+  结束时间不能早于开始时间:
+    "The end time cannot be earlier than the start time.",
+  喂养方式无效: "The feeding method is invalid.",
+  奶量超出有效范围: "The milk amount is outside the valid range.",
+  亲喂不能填写估算奶量: "A milk amount cannot be estimated for breastfeeding.",
+  尿布类型无效: "The diaper type is invalid.",
+  至少填写一项测量: "Enter at least one measurement.",
+  体重超出有效范围: "Weight is outside the valid range.",
+  身长超出有效范围: "Length is outside the valid range.",
+  头围超出有效范围: "Head circumference is outside the valid range.",
+  里程碑标题无效: "The milestone title is invalid or too long.",
+  记录包含不支持的字段: "The record contains unsupported fields.",
+  照护类型无效: "The care type is invalid.",
+  体温超出有效范围: "Temperature is outside the valid range.",
+  测量方式无效: "The measurement method is invalid.",
+  请选择有效的补充剂: "Select one or more valid supplements.",
+  其他补充剂名称无效: "The other supplement name is invalid or too long.",
+  请选择其他补充剂后填写名称:
+    "Select Other before entering another supplement name.",
+  照护记录包含不支持的字段: "The care record contains unsupported fields.",
+  不支持此备份版本: "This backup version is not supported.",
+  "这是家庭共享记录导出文件。为保护家庭隐私，不能将其导入个人记录或共享家庭，离线时也不支持。现有记录未改变。":
+    "This file contains exported family records. To protect family privacy, it cannot be imported into personal records or a shared family, even offline. Your existing records are unchanged.",
+  备份包含不支持的字段: "The backup contains unsupported fields.",
+  性别设置无效: "The sex setting is invalid.",
+  记录列表无效或过大: "The record list is invalid or too large.",
+  备份包含重复记录编号: "The backup contains duplicate record identifiers.",
+  只能有一个进行中的睡眠: "Only one sleep session can be ongoing at a time.",
+  照护记录列表无效或过大: "The care record list is invalid or too large.",
+  照护记录编号重复: "The care record identifiers are duplicated.",
+  宝宝名字无效: "The baby's name is invalid or too long.",
+  统计日期范围无效: "The statistics date range is invalid.",
   应用版本: "App version",
   "版本 {version} · 更新 {build}": "Version {version} · Update {build}",
   日: "Day",
@@ -66,11 +177,14 @@ const english: Record<string, string> = {
   "结束：{date} · {time}": "Ended: {date} · {time}",
   编辑记录: "Edit record",
   删除记录: "Delete record",
+  打开记录编辑界面: "Opens the record editor",
+  打开删除确认: "Opens a confirmation before deleting",
   成长: "Growth",
   照护: "Care",
   喂奶: "Feed",
   喂养: "Feed",
   开始: "Start",
+  开始计时: "Start timer",
   停止: "Stop",
   确认结束喂养: "Finish feed",
   "结束时间：{time} · 时长：{duration}":
@@ -100,23 +214,41 @@ const english: Record<string, string> = {
   配方奶: "Formula",
   瓶喂: "Bottle",
   瓶喂母乳: "Expressed milk",
-  左侧: "Left",
-  右侧: "Right",
+  左侧: "Left side",
+  右侧: "Right side",
   双侧: "Both",
   亲喂: "Breastfeed",
+  "亲喂 · 左侧": "Breastfeed · left side",
+  "亲喂 · 右侧": "Breastfeed · right side",
+  "亲喂 · 双侧": "Breastfeed · Both",
   尿: "Pee",
   便: "Poo",
   "尿＋便": "Pee + poo",
   "尿 + 便": "Pee + poo",
   "一点一滴，都是成长": "Every little moment is growth",
   照顾此刻: "Care right now",
-  "mL 已记录奶量": "mL fed today",
-  "小时 已记录睡眠": "hours slept today",
-  "次 换尿布": "diaper changes",
+  今日数据: "Today's totals",
+  "mL 奶量": "mL milk",
+  "小时 睡眠": "hours sleep",
+  "放弃未保存的修改？": "Discard unsaved changes?",
+  "这些修改尚未保存。放弃后无法恢复。":
+    "These changes have not been saved. Discarding them cannot be undone.",
+  继续编辑: "Keep editing",
+  放弃修改: "Discard changes",
+  "断线＝高度压缩；以标签时长为准。":
+    "Break mark = compressed height; read the duration label.",
+  "次 尿布": "diapers",
   正在睡觉: "Sleeping now",
   "还没有记录，轻点开始": "No record yet — tap to start",
   醒了: "Awake",
   睡了: "Sleep",
+  睡眠计时状态无效: "This sleep timer is no longer running.",
+  "已同步到家庭中正在进行的睡眠，未创建重复计时。":
+    "An ongoing family sleep was synced. No duplicate timer was created.",
+  "已同步到家庭中正在进行的喂养，未创建重复计时。":
+    "An ongoing family feed was synced. No duplicate timer was created.",
+  "本次睡眠不足 1 分钟，已按误触取消，不计入记录。如需保留，请补录睡眠。":
+    "This sleep lasted less than 1 minute and was cancelled as an accidental tap. It will not count as a record. Use Add past sleep to keep it.",
   "＋记录": "+ Add",
   "补录睡眠 ›": "Add past sleep ›",
   "＋测量": "+ Measure",
@@ -150,6 +282,7 @@ const english: Record<string, string> = {
   入睡时间: "Sleep start",
   记录时间: "Time",
   "✓ 记录结束时间": "✓ End time recorded",
+  记录结束时间: "Record end time",
   "+ 记录结束时间（可选）": "+ Add end time (optional)",
   醒来时间: "Wake time",
   结束时间: "End time",
@@ -168,6 +301,10 @@ const english: Record<string, string> = {
   "保存 · 继续计时": "Save · keep timing",
   保存记录: "Save record",
   "仅保存在这台设备 · 无需联网": "Saved on this device · no internet needed",
+  "本机记录 · 登录不会自动上传":
+    "Local records · signing in does not upload them",
+  "家庭共享记录 · 保存后等待同步确认":
+    "Family-shared records · saved changes await sync confirmation",
   "属于宝宝，也属于你的小小日常。":
     "For your baby, and for your everyday moments together.",
   宝宝档案: "Baby profile",
@@ -211,25 +348,28 @@ const english: Record<string, string> = {
   中文: "Chinese",
   简体中文: "Simplified Chinese",
   隐私与支持: "Privacy & support",
-  "了解本机数据、备份和软件更新":
-    "Learn about on-device data, backups, and updates",
+  "了解本机记录、家庭共享、备份和软件更新":
+    "Learn about offline records, family sharing, backups, and updates",
   返回我的: "Back to More",
   了解数据如何留在本机: "See how your data stays on this device",
-  "你的数据，由你掌控": "Your data stays with you",
+  "你的数据，由你掌控": "Your data, your choices",
   "小日子是一款离线记录工具：我们不提供账号、服务器或云同步。":
     "Little Days is an offline journal: we do not provide accounts, servers, or cloud sync.",
   本机记录: "On-device records",
-  "宝宝档案、照护记录、主题、语言和提醒设定都保存在这台设备上。":
-    "Baby profiles, care records, theme, language, and reminder settings stay on this device.",
+  "未启用家庭共享时，宝宝档案、记录、头像、早教和提醒资料保存在这台设备上，不会自动上传。主题、语言和视图偏好始终由本机保存。":
+    "Without family sharing, baby profiles, records, avatars, play data and reminders stay on this device and are not uploaded automatically. Theme, language and view preferences always remain on-device.",
   宝宝照片: "Baby photos",
-  "只有在你主动选择照片时才会请求相册权限。头像会复制到本机，可随时在宝宝档案中移除。":
-    "Photo access is requested only when you choose a photo. The avatar is copied on-device and can be removed from the baby profile at any time.",
+  "只有在你主动选择照片时才会访问所选照片。个人模式的头像保存在本机；创建家庭时会上传确认的当前头像，供家庭成员查看，之后由管理员修改或移除。不会上传整个相册。":
+    "The app accesses a photo only when you choose it. Personal avatars stay on-device. Creating a family uploads the confirmed current avatar for family members to view; the admin can then change or remove it. The app does not upload your entire photo library.",
   本地提醒: "Local reminders",
-  "照护提醒由手机本地安排，不会将提醒内容上传到服务器。":
-    "Care reminders are scheduled locally on your phone. Their content is not uploaded to a server.",
+  "个人模式的提醒仅保存在本机。家庭模式会共享提醒规则与设置，但通知由每台手机自行安排。下载规则不会自动开启通知，需在该手机选择启用并取得系统权限；关闭本机通知不会删除家庭规则。":
+    "Personal reminders stay on-device. Family mode shares reminder rules and settings, but each phone schedules its own notifications. Downloading rules does not enable notifications: opt in on that phone and grant system permission. Disabling notifications on one phone does not delete family rules.",
   备份与删除: "Backups and deletion",
-  "备份文件只会在你主动导出和分享时离开应用。删除应用会移除设备上的本机数据，请先导出备份。":
-    "Backup files leave the app only when you choose to export and share them. Deleting the app removes its on-device data, so export first.",
+  "个人备份支持导入；家庭资料仅可下载，暂不支持从文件恢复。导出文件未加密；选择云端保存位置时，由你选择的服务处理文件。退出、移除成员、删除家庭或账户不会撤回已保存或分享的副本，请自行管理这些文件。卸载应用不会删除服务端记录或账户；删除账户请使用「我的账户」中的相应流程。":
+    "Personal backups can be imported; family data is download-only, with no file restore. Exports are unencrypted; a cloud destination uses your chosen service. Signing out, member removal, or family/account deletion cannot recall saved or shared copies; manage those files yourself. Uninstalling does not delete server records or your account; use My account to request account deletion.",
+  可选支持: "Optional support",
+  "iOS 上可以选择单次支持。付款由 Apple 处理；小日子不会收到你的银行卡或 Apple 账户详情，也不会把支持与你的宝宝、家庭或应用登录关联。未完成交易仅通过 StoreKit 恢复；收据和购买记录不会上传到小日子服务器。":
+    "On iOS, you can choose a one-time support purchase. Apple handles payment; My Little Days does not receive your card or Apple Account details or link support to your baby, family or app sign-in. Unfinished transactions are recovered only through StoreKit; receipts and purchase history are not uploaded to My Little Days servers.",
   软件更新: "Software updates",
   "应用会安全检查更新。更新服务可能收到设备系统版本和随机安装标记，但不包含宝宝记录或照片。":
     "The app securely checks for updates. The update service may receive the operating-system version and a random installation token, never baby records or photos.",
@@ -307,6 +447,10 @@ const english: Record<string, string> = {
     "● Bottle feeds  ● Breastfeeds count duration only",
   "已记录睡眠，跨日拆分；重叠时段只计一次":
     "Sleep spans are split across days; overlaps count once",
+  "长睡眠柱已缩短至其他睡眠的平均高度；断线标记和标签显示实际时长。":
+    "Long sleep bars are shortened to the average of other sleeps; break marks and labels show the actual duration.",
+  "相邻睡眠柱已错开；底部标记表示本日片段的开始时间。":
+    "Nearby sleep bars are spaced apart; bottom marks show each segment’s start time within this day.",
   一次混合尿布按一次更换统计: "A pee + poo diaper counts as one change",
   删除: "Delete",
   编辑: "Edit",
@@ -316,6 +460,7 @@ const english: Record<string, string> = {
   "显示 {count} 条历史记录": "Show {count} earlier records",
   收起历史记录: "Hide earlier records",
   "显示 {count} 天历史记录": "Show {count} earlier days",
+  "更多：显示前 {count} 天": "More: show {count} earlier days",
   收起历史日期: "Hide earlier days",
   展开当日明细: "Show day details",
   收起当日明细: "Hide day details",
@@ -390,7 +535,6 @@ const english: Record<string, string> = {
     "Chart in {unit}; values appear in the daily summary and details.",
   没有恢复副本: "No recovery copy available",
   语言已保存: "Language saved",
-  出生日期无效: "Invalid birth date",
   "请填写 1–10080 分钟": "Enter a value from 1 to 10,080 minutes.",
   安静提醒: "Quiet reminder",
   请在手机设置中允许通知后再试:
@@ -410,41 +554,127 @@ const english: Record<string, string> = {
   "{name}的小日子": "{name}'s little days",
   "正在睡 · {duration}": "Sleeping · {duration}",
   "已睡 {duration}": "Asleep for {duration}",
+  "{time} 醒来 · 已清醒 {duration}": "Woke at {time} · Awake for {duration}",
+  "已清醒 · {duration}": "Awake · {duration}",
+  "上一觉 · {duration}": "Last sleep · {duration}",
+  "上一觉：{start}–{end} · 共睡 {duration}":
+    "Last sleep: {start}–{end} · Slept for {duration}",
+  "{duration}前": "{duration} ago",
   "上次 {time} · {duration}前": "Last {time} · {duration} ago",
   "身长 {value} cm": "Length {value} cm",
   "头围 {value} cm": "Head {value} cm",
 };
 
-let activeLocale: AppLocale = "zh-CN";
+let activeLocale: AppLocale = "zh-Hans";
+let activeFormattingLocale = "zh-CN";
 
-export function resolveLocale(preference: LanguagePreference): AppLocale {
-  if (preference === "zh") return "zh-CN";
-  if (preference === "en") return "en-US";
-  return getLocales()[0]?.languageCode?.toLowerCase().startsWith("zh")
-    ? "zh-CN"
-    : "en-US";
-}
-
-export function setActiveLocale(locale: AppLocale) {
-  activeLocale = locale;
-}
-
-export function currentLocale() {
-  return activeLocale;
-}
-
-export function t(source: string, values?: TranslationValues): string {
-  const template =
-    activeLocale === "en-US" ? (english[source] ?? source) : source;
+function interpolate(template: string, values?: TranslationValues) {
   if (!values) return template;
   return template.replace(/\{(\w+)\}/g, (_, name) =>
     String(values[name] ?? ""),
   );
 }
 
+function canonicalCatalogLocale(locale: AppLocale | string): SupportedLocale {
+  if (locale === "zh" || locale === "zh-CN") return "zh-Hans";
+  if (locale === "en-US") return "en";
+  const normalized = normalizeLanguagePreference(locale);
+  return !normalized || normalized === "system" ? "en" : normalized;
+}
+
+export function resolveLocale(
+  preference: LanguagePreference,
+  preferredLocales: readonly PreferredLocale[] = getLocales(),
+): AppLocale {
+  return resolveAppLocalization(preference, preferredLocales).catalogLocale;
+}
+
+export function resolveFormattingLocale(
+  preference: LanguagePreference,
+  preferredLocales: readonly PreferredLocale[] = getLocales(),
+) {
+  return resolveAppLocalization(preference, preferredLocales).formattingLocale;
+}
+
+export function resolveAppLocalization(
+  preference: LanguagePreference,
+  preferredLocales: readonly PreferredLocale[] = getLocales(),
+) {
+  return resolveLocalization(preference, preferredLocales);
+}
+
+export function setActiveLocale(
+  locale: AppLocale,
+  formattingLocale = localeDefinition(locale).formattingLocale,
+) {
+  activeLocale = locale;
+  activeFormattingLocale = formattingLocale;
+}
+
+export function currentLocale() {
+  return activeLocale;
+}
+
+export function currentFormattingLocale() {
+  return activeFormattingLocale;
+}
+
+export async function hydrateLocaleCatalog(locale: AppLocale | string) {
+  await loadGeneratedCatalog(canonicalCatalogLocale(locale));
+}
+
+export function translate(
+  source: string,
+  locale: AppLocale,
+  values?: TranslationValues,
+): string {
+  locale = canonicalCatalogLocale(locale);
+  const englishTemplate = english[source] ?? source;
+  const template =
+    locale === "zh-Hans"
+      ? source
+      : locale === "en"
+        ? englishTemplate
+        : (manualEnglishOverride(locale, englishTemplate) ??
+          getGeneratedCatalog(locale)?.[source] ??
+          englishTemplate);
+  return interpolate(template, values);
+}
+
+export function translateEnglish(
+  template: string,
+  locale: AppLocale,
+  values?: TranslationValues,
+): string {
+  locale = canonicalCatalogLocale(locale);
+  const translated =
+    locale === "en"
+      ? template
+      : (manualEnglishOverride(locale, template) ??
+        getGeneratedEnglishCatalog(locale)?.[template] ??
+        template);
+  return interpolate(translated, values);
+}
+
+export function localize(
+  chinese: string,
+  englishTemplate: string,
+  values?: TranslationValues,
+  locale = activeLocale,
+) {
+  locale = canonicalCatalogLocale(locale);
+  return locale === "zh-Hans"
+    ? interpolate(chinese, values)
+    : translateEnglish(englishTemplate, locale, values);
+}
+
+export function t(source: string, values?: TranslationValues): string {
+  return translate(source, activeLocale, values);
+}
+
 export function formatTime(
   value: string | number | Date,
-  locale = activeLocale,
+  locale = activeFormattingLocale,
 ) {
   return new Intl.DateTimeFormat(locale, {
     hour: "2-digit",
@@ -460,20 +690,45 @@ export function formatDate(
     month: "long",
     day: "numeric",
   },
-  locale = activeLocale,
+  locale = activeFormattingLocale,
 ) {
   return new Intl.DateTimeFormat(locale, options).format(new Date(value));
 }
 
+export function formatEditableNumber(
+  value: number,
+  locale = activeFormattingLocale,
+) {
+  return formatEditableNumberForLocale(value, locale);
+}
+
+export function formatNumber(
+  value: number,
+  options: Intl.NumberFormatOptions = {},
+  locale = activeFormattingLocale,
+) {
+  return formatDisplayNumber(value, locale, options);
+}
+
+export function parseLocalizedNumber(
+  value: string,
+  locale = activeFormattingLocale,
+) {
+  return parseLocalizedNumberForLocale(value, locale);
+}
+
 export function elapsed(ms: number, locale = activeLocale) {
+  locale = canonicalCatalogLocale(locale);
   const minutes = Math.floor(Math.max(0, Number.isFinite(ms) ? ms : 0) / 60000);
-  if (locale === "en-US") {
-    const hours = Math.floor(minutes / 60);
-    return hours ? `${hours}h ${minutes % 60}m` : `${minutes}m`;
-  }
-  return minutes >= 60
-    ? `${Math.floor(minutes / 60)}小时${minutes % 60}分`
-    : `${minutes}分钟`;
+  const hours = Math.floor(minutes / 60);
+  return hours
+    ? localize(
+        "{hours}小时{minutes}分",
+        "{hours}h {minutes}m",
+        { hours, minutes: minutes % 60 },
+        locale,
+      )
+    : localize("{minutes}分钟", "{minutes}m", { minutes }, locale);
 }
 
 export function age(
@@ -481,7 +736,9 @@ export function age(
   now = new Date(),
   locale = activeLocale,
 ) {
-  if (!birthDate) return locale === "en-US" ? "Set birth date" : "设置出生日期";
+  locale = canonicalCatalogLocale(locale);
+  if (!birthDate)
+    return localize("设置出生日期", "Set birth date", undefined, locale);
   const [year, month, day] = birthDate.split("-").map(Number);
   const days = Math.floor(
     (Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()) -
@@ -489,26 +746,51 @@ export function age(
       86400000,
   );
   if (days < 0)
-    return locale === "en-US"
-      ? "Birth date is in the future"
-      : "出生日期在未来";
-  return locale === "en-US"
-    ? `${days} days · ${Math.floor(days / 7)}w ${days % 7}d`
-    : `${days}天 · ${Math.floor(days / 7)}周${days % 7}天`;
+    return localize(
+      "出生日期在未来",
+      "Birth date is in the future",
+      undefined,
+      locale,
+    );
+  return localize(
+    "{days}天 · {weeks}周{remainingDays}天",
+    "{days} days · {weeks}w {remainingDays}d",
+    {
+      days,
+      weeks: Math.floor(days / 7),
+      remainingDays: days % 7,
+    },
+    locale,
+  );
 }
 
-type I18nValue = { locale: AppLocale; t: typeof t };
-const I18nContext = createContext<I18nValue>({ locale: activeLocale, t });
+type I18nValue = {
+  locale: AppLocale;
+  formattingLocale: string;
+  t: typeof t;
+  localize: typeof localize;
+};
+const I18nContext = createContext<I18nValue>({
+  locale: activeLocale,
+  formattingLocale: activeFormattingLocale,
+  t,
+  localize,
+});
 
 export function I18nProvider({
   locale,
+  formattingLocale = localeDefinition(locale).formattingLocale,
   children,
 }: {
   locale: AppLocale;
+  formattingLocale?: string;
   children: React.ReactNode;
 }) {
-  setActiveLocale(locale);
-  const value = useMemo(() => ({ locale, t }), [locale]);
+  setActiveLocale(locale, formattingLocale);
+  const value = useMemo(
+    () => ({ locale, formattingLocale, t, localize }),
+    [formattingLocale, locale],
+  );
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
 }
 

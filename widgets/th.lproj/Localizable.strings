@@ -1,0 +1,11 @@
+"widget.gallery.name" = "การดูแลวันนี้";
+"widget.gallery.description" = "นม การเปลี่ยนผ้าอ้อม และการนอนที่บันทึกวันนี้ แตะเพื่อเปิดวันนี้";
+"widget.today" = "วันนี้";
+"widget.milk" = "นม";
+"widget.nappies" = "ผ้าอ้อม";
+"widget.sleep" = "นอน";
+"widget.recorded_sleep" = "การนอนที่บันทึก";
+"widget.unit.ml" = "mL";
+"widget.unit.hour_short" = "ชม.";
+"widget.updated" = "อัปเดต ";
+"widget.empty" = "เปิด Little Days\nเพื่ออัปเดตวันนี้";

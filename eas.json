@@ -2,11 +2,21 @@
   "build": {
     "preview": {
       "distribution": "internal",
-      "channel": "preview"
+      "channel": "preview",
+      "environment": "preview"
+    },
+    "ui-preview": {
+      "extends": "preview",
+      "channel": "ui-preview",
+      "environment": "preview",
+      "env": {
+        "EXPO_PUBLIC_FAMILY_UI_DEMO": "1"
+      }
     },
     "production": {
       "autoIncrement": true,
-      "channel": "production"
+      "channel": "production",
+      "environment": "production"
     }
   },
   "submit": {

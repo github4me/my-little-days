@@ -1,0 +1,114 @@
+name: Family sharing CI
+
+on:
+  pull_request:
+  push:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      revision:
+        description: Exact commit supplied by the manual deployment workflow
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  mobile:
+    name: TypeScript and browser
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.revision || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - name: Verify Watch offline summaries and protocol
+        run: swift test --package-path watch
+      - run: npm run verify
+      - run: npm run export:web
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:browser
+      - run: npm run test:apple-browser
+      - run: npm run test:sleep-chart
+      - name: Export isolated family UI preview
+        env:
+          EXPO_PUBLIC_FAMILY_UI_DEMO: "1"
+        run: npx expo export --platform web --clear --output-dir dist-ui-demo
+      - run: npm run test:family-demo-browser
+
+  api:
+    name: API and SQL integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.revision || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: "10.0.x"
+      - name: Start a disposable SQL Server
+        shell: bash
+        run: |
+          set -euo pipefail
+          sql_password="Pilot!$(openssl rand -hex 24)"
+          echo "::add-mask::$sql_password"
+          docker run --detach --name family-pilot-ci-sql \
+            --publish 127.0.0.1:1433:1433 \
+            --env ACCEPT_EULA=Y --env MSSQL_PID=Developer \
+            --env MSSQL_SA_PASSWORD="$sql_password" \
+            mcr.microsoft.com/mssql/server:2022-latest
+          ready=false
+          for attempt in $(seq 1 60); do
+            if docker exec --env SQLCMDPASSWORD="$sql_password" family-pilot-ci-sql \
+              /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -C -b -Q 'SELECT 1' > /dev/null 2>&1; then
+              ready=true
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ready" != true ]; then
+            echo 'Disposable SQL Server did not become ready.' >&2
+            exit 1
+          fi
+          sql_connection="Server=localhost,1433;Database=master;User Id=sa;Password=$sql_password;Encrypt=True;TrustServerCertificate=True;"
+          echo "::add-mask::$sql_connection"
+          printf 'FAMILY_TEST_SQL_CONNECTION=%s\n' "$sql_connection" >> "$GITHUB_ENV"
+      - name: Run unit and real SQL tests
+        run: dotnet test server/LittleDays.slnx --configuration Release
+      - name: Check migration firewall lifecycle without Azure access
+        shell: pwsh
+        run: ./infra/tests/github-database.Tests.ps1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+      - run: npm ci --ignore-scripts
+      - run: node --test infra/tests/database-workflow.test.cjs infra/tests/action-pins.test.cjs
+      - name: Publish reviewed database artifact
+        run: dotnet publish server/LittleDays.DatabaseMigrator/LittleDays.DatabaseMigrator.csproj --configuration Release --output artifacts/database
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: family-database-${{ github.run_id }}
+          path: artifacts/database
+          if-no-files-found: error
+          retention-days: 14
+      - name: Publish reviewed API artifact
+        run: dotnet publish server/LittleDays.FamilyApi/LittleDays.FamilyApi.csproj --configuration Release --output artifacts/family-api
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: family-api-${{ github.run_id }}
+          path: artifacts/family-api
+          if-no-files-found: error
+          retention-days: 14
+      - name: Remove disposable SQL Server
+        if: always()
+        run: docker rm --force family-pilot-ci-sql
