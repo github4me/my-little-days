@@ -144,7 +144,12 @@ export function Chips({
   compact = false,
   disabled = false,
 }: {
-  options: { label: string; value: string; icon?: string }[];
+  options: {
+    label: string;
+    value: string;
+    icon?: string;
+    careIcon?: "feed" | "sleep" | "diaper";
+  }[];
   value: string;
   onChange: (v: string) => void;
   iconized?: boolean;
@@ -195,9 +200,9 @@ export function Chips({
             opacity: disabled ? 0.65 : 1,
           }}
         >
-          {iconized && o.icon === "♧" ? (
+          {iconized && o.careIcon ? (
             <CareIcon
-              kind="diaper"
+              kind={o.careIcon}
               size={compact ? 20 : 24}
               color={value === o.value ? c.primary : c.muted}
             />

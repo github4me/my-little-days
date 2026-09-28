@@ -715,6 +715,11 @@ assert.ok(
   metricOptions.every((box) => Math.abs(box.y - metricOptions[0].y) < 1),
   "growth metric choices should stay on one row",
 );
+for (const name of ["Length", "Head"]) {
+  const control = page.getByRole("button", { name, exact: true });
+  assert.equal(await control.locator("svg").count(), 1);
+  assert.equal((await control.innerText()).trim(), name);
+}
 await assertNoUntranslatedChinese("Growth");
 await page.screenshot({
   path: path.join(screenshotDir, "little-days-growth-picker-preview.png"),
@@ -1241,6 +1246,8 @@ for (const title of [
 }
 // Daily care is a separate history, not a daily play checkbox.
 await page.getByRole("button", { name: "Daily care", exact: true }).click();
+await page.getByText("Choose a section", { exact: true }).waitFor();
+await page.getByText("Choose what to record", { exact: true }).waitFor();
 const playControls = [
   "Daily care",
   "Play",

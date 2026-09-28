@@ -81,6 +81,15 @@ test("generated companion files match the phone version and use an opaque RGB Wa
   ]) {
     assert.ok(fs.statSync(path.join(destination, filename)).size > 0);
   }
+  const watchApp = fs.readFileSync(
+    path.join(destination, "LittleDaysWatchApp.swift"),
+    "utf8",
+  );
+  assert.match(watchApp, /private struct WatchCareIcon/);
+  assert.match(watchApp, /WatchCareLabel\(title:.*kind: \.feed\)/);
+  assert.match(watchApp, /WatchCareLabel\(title:.*kind: \.nappy\)/);
+  assert.doesNotMatch(watchApp, /systemImage: "drop\.fill"/);
+  assert.doesNotMatch(watchApp, /systemImage: "square\.fill"/);
   for (const locale of plugin.LOCALES) {
     assert.ok(
       fs.statSync(path.join(destination, `${locale}.lproj/Localizable.strings`))

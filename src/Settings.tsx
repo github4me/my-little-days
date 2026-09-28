@@ -13,6 +13,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
 import { State, validateState } from "./domain";
 import { Theme, T, Card, Field, Button, Chips, row, heading } from "./ui";
+import CareIcon from "./CareIcon";
 import { exportBackup, importBackup } from "./backup";
 import {
   saveAutoFeedReminder,
@@ -912,10 +913,10 @@ export default function Settings({
                     }}
                   >
                     {[
-                      { value: "feed", icon: "◒" },
-                      { value: "diaper", icon: "♧" },
-                      { value: "sleep", icon: "☾" },
-                    ].map(({ value, icon }) => {
+                      { value: "feed", careIcon: "feed" as const },
+                      { value: "diaper", careIcon: "diaper" as const },
+                      { value: "sleep", careIcon: "sleep" as const },
+                    ].map(({ value, careIcon }) => {
                       const selected = kind === value;
                       return (
                         <Pressable
@@ -950,15 +951,11 @@ export default function Settings({
                             },
                           ]}
                         >
-                          <T
-                            style={{
-                              color: selected ? c.primary : c.muted,
-                              fontSize: 23,
-                              lineHeight: 27,
-                            }}
-                          >
-                            {icon}
-                          </T>
+                          <CareIcon
+                            kind={careIcon}
+                            size={24}
+                            color={selected ? c.primary : c.muted}
+                          />
                           <T
                             style={{
                               color: selected ? c.primary : c.muted,

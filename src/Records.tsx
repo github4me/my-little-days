@@ -399,9 +399,9 @@ function BarRecords({
         value={kind}
         iconized
         options={[
-          { label: "喂奶", value: "feed", icon: "◒" },
-          { label: "尿布", value: "diaper", icon: "♧" },
-          { label: "睡眠", value: "sleep", icon: "☾" },
+          { label: "喂奶", value: "feed", careIcon: "feed" },
+          { label: "尿布", value: "diaper", careIcon: "diaper" },
+          { label: "睡眠", value: "sleep", careIcon: "sleep" },
         ]}
         onChange={(v) => {
           setKind(v as Kind);
@@ -441,7 +441,7 @@ function BarRecords({
               iconized
               compact
               options={[
-                { label: "mL", value: "mL", icon: "◒" },
+                { label: "mL", value: "mL", careIcon: "feed" },
                 { label: "时长", value: "hours", icon: "◷" },
               ]}
               onChange={setUnit}

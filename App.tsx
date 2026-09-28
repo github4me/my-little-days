@@ -55,6 +55,7 @@ import {
 import { exportFamilyBackup, importBackup } from "./src/backup";
 import EntryEditor, { newEntry } from "./src/EntryEditor";
 import GrowthChart, { Metric } from "./src/GrowthChart";
+import GrowthMetricIcon from "./src/GrowthMetricIcon";
 import Records, { RecordsViewToggle } from "./src/Records";
 import AppVersion from "./src/AppVersion";
 import type { RecordView } from "./src/recordCalendar";
@@ -1799,11 +1800,31 @@ function BabyApp({
                     }}
                   >
                     {[
-                      { value: "all" as const, icon: "≋", label: "全部" },
-                      { value: "weight" as const, icon: "⚖", label: "体重" },
-                      { value: "length" as const, icon: "↕", label: "身长" },
-                      { value: "head" as const, icon: "◯", label: "头围" },
-                    ].map(({ value, icon, label }) => {
+                      {
+                        value: "all" as const,
+                        icon: "≋",
+                        growthIcon: undefined,
+                        label: "全部",
+                      },
+                      {
+                        value: "weight" as const,
+                        icon: "⚖",
+                        growthIcon: undefined,
+                        label: "体重",
+                      },
+                      {
+                        value: "length" as const,
+                        icon: undefined,
+                        growthIcon: "length" as const,
+                        label: "身长",
+                      },
+                      {
+                        value: "head" as const,
+                        icon: undefined,
+                        growthIcon: "head" as const,
+                        label: "头围",
+                      },
+                    ].map(({ value, icon, growthIcon, label }) => {
                       const selected = metric === value;
                       const accent =
                         value === "length"
@@ -1841,17 +1862,25 @@ function BabyApp({
                             },
                           ]}
                         >
-                          <T
-                            raw
-                            style={{
-                              color: selected ? accent : c.muted,
-                              fontSize: 19,
-                              lineHeight: 23,
-                              fontWeight: icon === "⚖" ? "500" : "700",
-                            }}
-                          >
-                            {icon}
-                          </T>
+                          {growthIcon ? (
+                            <GrowthMetricIcon
+                              kind={growthIcon}
+                              color={selected ? accent : c.muted}
+                              size={23}
+                            />
+                          ) : (
+                            <T
+                              raw
+                              style={{
+                                color: selected ? accent : c.muted,
+                                fontSize: 19,
+                                lineHeight: 23,
+                                fontWeight: icon === "⚖" ? "500" : "700",
+                              }}
+                            >
+                              {icon}
+                            </T>
+                          )}
                           <T
                             style={{
                               color: selected ? accent : c.muted,

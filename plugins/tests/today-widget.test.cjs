@@ -72,6 +72,15 @@ test("widget source, metadata and localized gallery copy are generated determini
   assert.equal(info.LittleDaysWidgetAppGroup, options.appGroup);
   assert.equal(info.CFBundleVersion, "$(CURRENT_PROJECT_VERSION)");
   assert.deepEqual(info.CFBundleLocalizations, widget.LOCALES);
+  const widgetSource = fs.readFileSync(
+    path.join(destination, "TodayWidget.swift"),
+    "utf8",
+  );
+  assert.match(widgetSource, /private struct CareMetricIcon/);
+  assert.match(widgetSource, /symbol: \.feed/);
+  assert.match(widgetSource, /symbol: \.nappy/);
+  assert.doesNotMatch(widgetSource, /symbol: "drop\.fill"/);
+  assert.doesNotMatch(widgetSource, /symbol: "square\.stack"/);
   assert.deepEqual(
     plist.parse(
       fs.readFileSync(

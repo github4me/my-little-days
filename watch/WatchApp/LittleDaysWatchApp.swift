@@ -15,6 +15,73 @@ struct LittleDaysWatchApp: App {
 
 private enum WatchRoute: Hashable { case milk, nappy, finishMilk, status, notifications }
 
+private enum WatchCareSymbol: Equatable { case feed, nappy }
+
+private struct WatchCareIcon: View {
+  let kind: WatchCareSymbol
+
+  var body: some View {
+    GeometryReader { proxy in
+      let width = proxy.size.width
+      let height = proxy.size.height
+      Path { path in
+        func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+          CGPoint(x: x * width, y: y * height)
+        }
+        if kind == .feed {
+          path.move(to: point(0.42, 0.08))
+          path.addLine(to: point(0.58, 0.08))
+          path.addLine(to: point(0.62, 0.24))
+          path.addLine(to: point(0.70, 0.30))
+          path.addLine(to: point(0.70, 0.42))
+          path.addLine(to: point(0.76, 0.52))
+          path.addLine(to: point(0.76, 0.84))
+          path.addQuadCurve(to: point(0.66, 0.94), control: point(0.76, 0.94))
+          path.addLine(to: point(0.34, 0.94))
+          path.addQuadCurve(to: point(0.24, 0.84), control: point(0.24, 0.94))
+          path.addLine(to: point(0.24, 0.52))
+          path.addLine(to: point(0.30, 0.42))
+          path.addLine(to: point(0.30, 0.30))
+          path.addLine(to: point(0.38, 0.24))
+          path.closeSubpath()
+          path.move(to: point(0.30, 0.42))
+          path.addLine(to: point(0.70, 0.42))
+          path.move(to: point(0.55, 0.62))
+          path.addLine(to: point(0.70, 0.62))
+          path.move(to: point(0.55, 0.76))
+          path.addLine(to: point(0.70, 0.76))
+        } else {
+          path.move(to: point(0.16, 0.22))
+          path.addQuadCurve(to: point(0.50, 0.30), control: point(0.33, 0.28))
+          path.addQuadCurve(to: point(0.84, 0.22), control: point(0.67, 0.28))
+          path.addLine(to: point(0.80, 0.58))
+          path.addQuadCurve(to: point(0.50, 0.88), control: point(0.72, 0.84))
+          path.addQuadCurve(to: point(0.20, 0.58), control: point(0.28, 0.84))
+          path.closeSubpath()
+          path.move(to: point(0.19, 0.40))
+          path.addQuadCurve(to: point(0.50, 0.48), control: point(0.34, 0.46))
+          path.addQuadCurve(to: point(0.81, 0.40), control: point(0.66, 0.46))
+        }
+      }
+      .stroke(style: StrokeStyle(lineWidth: 1.7, lineCap: .round, lineJoin: .round))
+    }
+    .accessibilityHidden(true)
+  }
+}
+
+private struct WatchCareLabel: View {
+  let title: String
+  let kind: WatchCareSymbol
+
+  var body: some View {
+    Label {
+      Text(title)
+    } icon: {
+      WatchCareIcon(kind: kind).frame(width: 15, height: 15)
+    }
+  }
+}
+
 private struct WatchHome: View {
   @EnvironmentObject private var store: WatchStore
   var body: some View {
@@ -27,8 +94,8 @@ private struct WatchHome: View {
               if let summary = store.disk.summary(at: timeline.date) {
                 VStack(alignment: .leading, spacing: 8) {
                   Text(store.text("summary.today")).font(.headline)
-                  Label(store.text("summary.milk", Int64(summary.totals.feedMl)), systemImage: "drop.fill")
-                  Label(store.text("summary.nappies", Int64(summary.totals.diaperCount)), systemImage: "square.fill")
+                  WatchCareLabel(title: store.text("summary.milk", Int64(summary.totals.feedMl)), kind: .feed)
+                  WatchCareLabel(title: store.text("summary.nappies", Int64(summary.totals.diaperCount)), kind: .nappy)
                   Label(store.text("summary.sleep", Int64(summary.totals.sleepMinutes)), systemImage: "moon.fill")
                   if summary.includesLocalChanges {
                     Text(store.text("summary.includes_watch_pending"))
@@ -48,14 +115,14 @@ private struct WatchHome: View {
               if let feed = store.activeFeed {
                 NavigationLink(value: WatchRoute.finishMilk) {
                   VStack(alignment: .leading) {
-                    Label(store.text("action.finish_milk"), systemImage: "drop.fill")
+                    WatchCareLabel(title: store.text("action.finish_milk"), kind: .feed)
                     elapsed(feed, now: timeline.date)
                   }
                 }.disabled(feed.canControl == false)
               } else {
-                NavigationLink(value: WatchRoute.milk) { Label(store.text("action.milk"), systemImage: "drop.fill") }
+                NavigationLink(value: WatchRoute.milk) { WatchCareLabel(title: store.text("action.milk"), kind: .feed) }
               }
-              NavigationLink(value: WatchRoute.nappy) { Label(store.text("action.nappy"), systemImage: "square.fill") }
+              NavigationLink(value: WatchRoute.nappy) { WatchCareLabel(title: store.text("action.nappy"), kind: .nappy) }
               Button {
                 store.toggleSleep()
               } label: {

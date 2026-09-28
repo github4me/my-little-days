@@ -337,11 +337,14 @@ export default function DailyCare({
   }
   return (
     <View style={{ gap: 14 }}>
+      <T raw style={{ color: c.muted, fontSize: 12, fontWeight: "600" }}>
+        {text("选择要记录的项目", "Choose what to record")}
+      </T>
       <View
         style={{
           flexDirection: "row",
           flexWrap: "wrap",
-          gap: 5,
+          gap: 8,
         }}
       >
         {careOptions.map((o) => (
@@ -364,19 +367,44 @@ export default function DailyCare({
               flexBasis: largeText ? "44%" : "30%",
               flexGrow: 1,
               minWidth: 0,
-              minHeight: 62,
-              paddingVertical: 8,
-              paddingHorizontal: 3,
+              minHeight: 78,
+              paddingVertical: 10,
+              paddingHorizontal: 5,
+              gap: 5,
               alignItems: "center",
               justifyContent: "center",
-              borderRadius: 14,
-              borderWidth: 1,
-              borderColor: kind === o.id ? c.primary : c.line,
-              backgroundColor: kind === o.id ? c.soft : c.card,
+              borderRadius: 18,
+              borderWidth: kind === o.id ? 2 : 0,
+              borderColor: kind === o.id ? c.primary : "transparent",
+              backgroundColor: kind === o.id ? c.soft : c.input,
             }}
           >
-            <PlayIcon kind={o.icon} color={c.primary} />
-            <T raw style={{ fontSize: 11, textAlign: "center" }}>
+            <View
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: 11,
+                alignItems: "center",
+                justifyContent: "center",
+                backgroundColor: c.card,
+              }}
+            >
+              <PlayIcon
+                kind={o.icon}
+                color={kind === o.id ? c.primary : c.muted}
+                size={23}
+              />
+            </View>
+            <T
+              raw
+              style={{
+                color: kind === o.id ? c.primary : c.muted,
+                fontSize: 11,
+                lineHeight: 16,
+                fontWeight: kind === o.id ? "700" : "500",
+                textAlign: "center",
+              }}
+            >
               {copy(o.label)}
             </T>
           </Pressable>

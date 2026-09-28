@@ -154,9 +154,9 @@ test("buttons allow wrapping and grow vertically, exposing disabled and busy sta
 });
 
 const options = [
-  { label: "Bottle feeding", value: "feed", icon: "◒" },
-  { label: "Diaper changes", value: "diaper", icon: "♧" },
-  { label: "Sleep records", value: "sleep", icon: "☾" },
+  { label: "Bottle feeding", value: "feed", careIcon: "feed" },
+  { label: "Diaper changes", value: "diaper", careIcon: "diaper" },
+  { label: "Sleep records", value: "sleep", careIcon: "sleep" },
 ];
 
 test("installed React Native Web preserves busy/disabled buttons and readonly fields", () => {
@@ -250,6 +250,23 @@ test("selection is exposed to assistive technology and not communicated by color
     assert.equal(chip.props.disabled, true);
     assert.equal(chip.props.accessibilityState.disabled, true);
     assert.equal(chip.props.onPress, undefined);
+  }
+});
+
+test("care choices use semantic icons instead of ambiguous text glyphs", () => {
+  const ui = fixture();
+  const group = ui.Chips({
+    options,
+    value: "feed",
+    iconized: true,
+    onChange() {},
+  });
+  for (const [chip, option] of ui
+    .children(group)
+    .map((chip, index) => [chip, options[index]])) {
+    const icon = ui.children(chip)[0];
+    assert.equal(icon.type, "CareIcon");
+    assert.equal(icon.props.kind, option.careIcon);
   }
 });
 

@@ -38,52 +38,79 @@ function Options({
   options,
   value,
   onChange,
+  label,
 }: {
   options: { value: string; icon: PlayIconKind; label: string }[];
   value: string;
   onChange: (value: string) => void;
+  label: string;
 }) {
   const c = useContext(Theme);
   const { width, fontScale } = useWindowDimensions();
-  const basis =
-    fontScale >= 2 ? "100%" : fontScale >= 1.3 || width < 360 ? "46%" : 0;
+  const stacked = fontScale >= 1.8;
   return (
-    <View style={{ flexDirection: "row", gap: 6, flexWrap: "wrap" }}>
-      {options.map((o) => (
-        <Pressable
-          key={o.value}
-          accessibilityRole="button"
-          accessibilityLabel={o.label}
-          accessibilityState={{ selected: value === o.value }}
-          onPress={() => onChange(o.value)}
-          style={{
-            flexGrow: 1,
-            flexBasis: basis,
-            minWidth: 44,
-            minHeight: 62,
-            borderRadius: 16,
-            padding: 8,
-            alignItems: "center",
-            justifyContent: "center",
-            backgroundColor: value === o.value ? c.soft : c.card,
-            borderWidth: value === o.value ? 2 : 1,
-            borderColor: value === o.value ? c.primary : c.line,
-          }}
-        >
-          <PlayIcon kind={o.icon} color={c.primary} />
-          <T
-            raw
-            style={{
-              fontSize: 13,
-              lineHeight: 18,
-              textAlign: "center",
-              fontWeight: value === o.value ? "700" : "400",
-            }}
-          >
-            {o.label}
-          </T>
-        </Pressable>
-      ))}
+    <View style={{ gap: 7 }}>
+      <T raw style={{ color: c.muted, fontSize: 12, fontWeight: "600" }}>
+        {label}
+      </T>
+      <View
+        style={{
+          flexDirection: stacked ? "column" : "row",
+          gap: 3,
+          padding: 3,
+          borderRadius: 17,
+          borderWidth: 1,
+          borderColor: c.line,
+          backgroundColor: c.input,
+        }}
+      >
+        {options.map((o) => {
+          const selected = value === o.value;
+          return (
+            <Pressable
+              key={o.value}
+              accessibilityRole="button"
+              accessibilityLabel={o.label}
+              accessibilityState={{ selected }}
+              onPress={() => onChange(o.value)}
+              style={{
+                flex: stacked ? undefined : 1,
+                flexBasis: stacked ? "100%" : undefined,
+                minWidth: 44,
+                minHeight: 56,
+                borderRadius: 14,
+                paddingHorizontal: width < 360 ? 3 : 7,
+                paddingVertical: 7,
+                flexDirection: stacked ? "row" : "column",
+                gap: stacked ? 8 : 2,
+                alignItems: "center",
+                justifyContent: "center",
+                backgroundColor: selected ? c.card : "transparent",
+                borderWidth: selected ? 1 : 0,
+                borderColor: selected ? c.primary : "transparent",
+              }}
+            >
+              <PlayIcon
+                kind={o.icon}
+                color={selected ? c.primary : c.muted}
+                size={22}
+              />
+              <T
+                raw
+                style={{
+                  color: selected ? c.primary : c.muted,
+                  fontSize: 13,
+                  lineHeight: 18,
+                  textAlign: "center",
+                  fontWeight: selected ? "700" : "500",
+                }}
+              >
+                {o.label}
+              </T>
+            </Pressable>
+          );
+        })}
+      </View>
     </View>
   );
 }
@@ -468,6 +495,7 @@ export default function PlayLearning({
       ) : null}
       <Options
         value={mode}
+        label={text("切换照护内容", "Choose a section")}
         onChange={(value) => {
           setMode(value);
           setExpanded(null);

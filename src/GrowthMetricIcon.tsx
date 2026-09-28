@@ -1,30 +1,37 @@
 import React from "react";
-import Svg, { Path } from "react-native-svg";
+import Svg, { Circle, Path } from "react-native-svg";
 
-// Fixed vector bounds avoid font-baseline clipping on iOS.
-export default function CareIcon({
+export default function GrowthMetricIcon({
   kind,
-  size = 26,
   color,
+  size = 24,
 }: {
-  kind: "feed" | "sleep" | "diaper";
-  size?: number;
+  kind: "length" | "head";
   color: string;
+  size?: number;
 }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 32 32" accessible={false}>
-      {kind === "feed" ? (
+      {kind === "length" ? (
         <>
           <Path
-            d="M13 8V6h1V4.5a2 2 0 0 1 4 0V6h1v2M11 8h10v3H11Z"
+            d="M4 6h24M4 6l3-3M4 6l3 3M28 6l-3-3M28 6l-3 3"
             fill="none"
             stroke={color}
             strokeWidth={1.8}
             strokeLinecap="round"
             strokeLinejoin="round"
           />
+          <Circle
+            cx={7.5}
+            cy={19}
+            r={3.2}
+            fill="none"
+            stroke={color}
+            strokeWidth={1.8}
+          />
           <Path
-            d="M11 11h10l1 3v11a3 3 0 0 1-3 3h-6a3 3 0 0 1-3-3V14l1-3ZM10 16h12M18 20h3M18 23h3"
+            d="M11 17.5c3-2.5 8-2 10.5.5l5 3M11 20.5c4 3 9 3 12 .5l4 3M18 22.5l2 4M23 21.5l3.5 4"
             fill="none"
             stroke={color}
             strokeWidth={1.8}
@@ -32,23 +39,23 @@ export default function CareIcon({
             strokeLinejoin="round"
           />
         </>
-      ) : kind === "sleep" ? (
-        <Path d="M13 4A12 12 0 1 0 28 19A11 11 0 0 1 13 4Z" fill={color} />
       ) : (
         <>
           <Path
-            d="M4 7Q16 10 28 7L27 18Q25 27 16 28Q7 27 5 18Z"
-            fill="none"
-            stroke={color}
-            strokeWidth={1.8}
-            strokeLinejoin="round"
-          />
-          <Path
-            d="M4.5 12Q16 15 27.5 12M5 17Q12 17 12 26M27 17Q20 17 20 26M5 10L9 11M23 11L27 10"
+            d="M10 28v-4c-4-2-6-6-6-11A10 10 0 0 1 24 11l4 6h-4v4c0 3-3 5-7 5v2"
             fill="none"
             stroke={color}
             strokeWidth={1.8}
             strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          <Path
+            d="M5 11.5Q15 7.5 24 10.5M5 14.5Q15 10.5 25.5 13.5M10 10l.8 3M15 8.8l.8 3M20 9l.8 3"
+            fill="none"
+            stroke={color}
+            strokeWidth={1.8}
+            strokeLinecap="round"
+            strokeLinejoin="round"
           />
         </>
       )}
