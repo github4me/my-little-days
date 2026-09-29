@@ -3624,3 +3624,48 @@ locally built, different Apple build 44; retain both release histories.
   Chinese/English and light/dark, large text and VoiceOver. None of those
   on-device results are implied by archive or TestFlight availability. The
   repository iOS build baseline is now **46** to prevent reuse.
+
+## Care-order correction — local TestFlight build 47, 29 September 2026 Melbourne
+
+- **Source and destination:** isolated `git archive` of remote `master` SHA
+  `8f539074e1d09dbfab77b8a342dc324cff5bac43` (tree
+  `4a8f4d9b5e7a79cdf046849ea08d4435edc667a3`), which includes the Care
+  selector-before-month recommendation fix `360f053`. The feature branch had the
+  same tree. App Store Connect app `6809826484`, bundle
+  `com.littledays.babylog`, existing Apple team `A9974KXQ4G`, Expo project
+  `a5210f78-8729-46d4-82a4-7d1d40d30ac6`. No Azure, SQL, Entra, IAP,
+  public App Store or family-data change.
+- **Verification and build:** `npm ci`, `npm run verify`, Watch Swift **24** and
+  Widget **7** tests passed in the frozen source. Local Xcode **26.5** / EAS CLI
+  **24.7.0** `--local --freeze-credentials --clear-cache` production Store build,
+  explicit approved public values and demo `0`, no EAS cloud build/submission.
+  The staged build number auto-incremented **46 → 47**; version/runtime remain
+  **0.2.1**, OTA disabled. Existing certificate and Phone/Watch/Widget Store
+  provisioning profiles were reused. Archive:
+  `~/Library/Developer/Xcode/Archives/2026-09-29/MyLittleDays 2026-09-29 09.47.34.xcarchive`.
+- **Artifact:** Phone, Watch and Widget are each **0.2.1 (47)**, with expected
+  bundle IDs and valid deep/strict code signatures. Phone has production push;
+  Phone/Widget have `group.com.littledays.babylog.widgets`; all three have
+  `get-task-allow=false`; no Apple Pay entitlement. Twelve locale bundles and
+  the Hermes bundle's production URL/tenant/client/scope were checked. Phone,
+  Watch and Widget dSYM UUIDs match their binaries. Retain ignored
+  `artifacts/MyLittleDays-0.2.1-47.ipa` (**17,005,418 bytes**, SHA-256
+  `08e7a579b34c57d48844bd9967556bbda93c5eff53878eb3ade86e075e70493c`),
+  `.dSYM.zip`, `.build.log` and `.upload.log`.
+- **Apple delivery:** local `xcrun altool --upload-app` using the existing
+  EAS-managed submission key returned **UPLOAD SUCCEEDED with no errors** at
+  `2026-09-28T23:58:19Z`, delivery/build ID
+  `509bc164-845f-4ef0-85da-28aee72f5ce2`; its owner-readable temporary key
+  file was removed. Apple readback confirms processing **VALID**, internal
+  **IN_BETA_TESTING** in the unchanged `Team (Expo)` and `Early Birds` groups.
+  Build 47 was added only to the existing `Outside birds` external group, as
+  build 46 had been. External Beta App Review was submitted and Apple readback
+  confirms **APPROVED** / **IN_BETA_TESTING**, with build 47 present in all three
+  existing groups. No duplicate upload, new testers/groups, new signing assets
+  or public App Store release.
+- **Device acceptance still open:** TestFlight installation on the connected
+  iPhone, preservation of existing data, Care layout in Chinese/English and
+  light/dark/small screens, paired Watch and Widget behavior, and accessibility
+  were not demonstrated by archive/upload. Do not uninstall the data-bearing
+  app to test. The source build-number baseline is advanced to **47** to avoid
+  reuse on the next local release.
