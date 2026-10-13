@@ -233,7 +233,7 @@ public sealed class SleepAiTests
             "next-day-start" => Serialize(valid with { Periods = [period with { SleepStart = Now.Date.AddDays(1), SleepEnd = Now.Date.AddDays(1).AddHours(2) }] }),
             "end-after-limit" => Serialize(valid with { Periods = [period with { SleepEnd = DateTimeOffset.Parse("2026-10-13T12:00:00.001+11:00") }] }),
             "overlap" => Serialize(valid with { Periods = [period, period] }),
-            "unsorted" => Serialize(valid with { Periods = [period with { SleepStart = period.SleepStart.AddHours(3), SleepEnd = period.SleepEnd.AddHours(3), SootheStart = period.SootheStart.AddHours(3), SootheEnd = period.SootheEnd.AddHours(3) }, period] }),
+            "unsorted" => Serialize(valid with { Periods = [period with { SleepStart = period.SleepStart.AddHours(3), SleepEnd = period.SleepEnd.AddHours(3), SootheStart = period.SootheStart!.Value.AddHours(3), SootheEnd = period.SootheEnd!.Value.AddHours(3) }, period] }),
             "empty-ready" => """{"status":"ready","periods":[]}""",
             "nonempty-insufficient" => Ready.Replace("ready", "insufficient_data"),
             "unknown-status" => Ready.Replace("ready", "maybe"),

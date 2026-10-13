@@ -34,3 +34,50 @@ Authorization: Bearer {{token}}
 Content-Type: application/json
 
 {"schemaVersion": 1, "inputRevision": "invalid"}
+
+### Whole-day schema 2: explicit new consent; first request has no prior estimate.
+# Synthetic only. Update now and record dates together in an isolated local host.
+POST {{baseUrl}}/v2/sleep-predictions
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "schemaVersion": 2,
+  "inputRevision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "consentVersion": "sleep-ai-v2",
+  "familyId": null,
+  "membershipId": null,
+  "historyId": null,
+  "ageDays": 100,
+  "timeZone": "Australia/Melbourne",
+  "now": "2026-10-13T16:00:00+11:00",
+  "previousEstimate": null,
+  "records": [
+    {"kind": "sleep", "start": "2026-10-12T21:00:00+11:00", "end": "2026-10-13T07:00:00+11:00", "ongoing": false, "feedKind": null, "amountMl": null},
+    {"kind": "sleep", "start": "2026-10-13T15:30:00+11:00", "end": null, "ongoing": true, "feedKind": null, "amountMl": null},
+    {"kind": "feed", "start": "2026-10-13T15:00:00+11:00", "end": null, "ongoing": false, "feedKind": "formula", "amountMl": 120}
+  ]
+}
+
+### Re-estimate after records change: previousEstimate is context, not fact.
+# The prior predicted nap differs from the newly recorded actual sleep below.
+POST {{baseUrl}}/v2/sleep-predictions
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "schemaVersion": 2,
+  "inputRevision": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "consentVersion": "sleep-ai-v2",
+  "familyId": null,
+  "membershipId": null,
+  "historyId": null,
+  "ageDays": 100,
+  "timeZone": "Australia/Melbourne",
+  "now": "2026-10-13T16:00:00+11:00",
+  "previousEstimate": {
+    "generatedAt": "2026-10-13T12:00:00+11:00",
+    "periods": [{"sleepStart": "2026-10-13T14:00:00+11:00", "sleepEnd": "2026-10-13T15:00:00+11:00", "sootheStart": "2026-10-13T13:40:00+11:00", "sootheEnd": "2026-10-13T13:55:00+11:00"}]
+  },
+  "records": [{"kind": "sleep", "start": "2026-10-13T13:30:00+11:00", "end": "2026-10-13T14:30:00+11:00", "ongoing": false, "feedKind": null, "amountMl": null}]
+}
