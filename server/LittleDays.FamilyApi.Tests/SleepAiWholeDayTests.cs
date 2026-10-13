@@ -523,11 +523,11 @@ public sealed class SleepAiWholeDayTests
         Assert.Equal("membership_revoked", denied.Code); Assert.Equal(1, provider.Calls); Assert.Equal(2, access.Calls);
         provider = new Provider("invalid"); access = new(); var options = Enabled(); options.MaxRequestsPerAccountPerHour = 2;
         var service = Service(access, provider, options: options);
-        var result = await service.PredictAsync(User, Request(), default);
-        Assert.Equal("unavailable", result.Status); Assert.Empty(result.Periods); Assert.Equal(4, access.Calls);
+        var invalid = await Assert.ThrowsAsync<ApiException>(() => service.PredictAsync(User, Request(), default));
+        Assert.Equal(503, invalid.Status); Assert.Equal("ai_invalid_response", invalid.Code); Assert.Equal(4, access.Calls);
         Assert.Equal([false, true], provider.Retries);
         var quota = await Assert.ThrowsAsync<ApiException>(() => service.PredictAsync(User, Request(), default));
-        Assert.Equal(429, quota.Status); Assert.Equal(2, provider.Calls);
+        Assert.Equal(429, quota.Status); Assert.Equal("ai_hourly_limit", quota.Code); Assert.Equal(2, provider.Calls);
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.PredictAsync(User, Request(), new(true)));
         Assert.Equal(2, provider.Calls);
     }

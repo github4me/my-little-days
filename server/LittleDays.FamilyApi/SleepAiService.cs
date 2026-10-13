@@ -25,7 +25,7 @@ public sealed class SleepAiOptions
     public string Model { get; set; } = SelectedModel;
     public string ApiKey { get; set; } = "";
     public bool SupportsTemperature { get; set; }
-    public int MaxRequestsPerAccountPerHour { get; set; } = 6;
+    public int MaxRequestsPerAccountPerHour { get; set; } = 30;
     public int MaxRequestsPerInstancePerDay { get; set; } = 200;
 
     public bool IsAvailable => Enabled && ChildDataProcessingApproved && ZeroDataRetentionApproved &&
@@ -141,6 +141,8 @@ public sealed class DisabledSleepAiProvider : ISleepAiProvider
 
 // A bounded per-process guard, not a distributed billing cap. Restarting/scaling
 // resets or multiplies these counters; the external hard-spend gate is separate.
+public enum SleepAiBudgetRejection { None, HourlyLimit, DailyLimit, Capacity }
+
 public sealed class SleepAiBudget(TimeProvider clock, IOptions<SleepAiOptions> options)
 {
     private readonly object gate = new();
@@ -152,15 +154,19 @@ public sealed class SleepAiBudget(TimeProvider clock, IOptions<SleepAiOptions> o
 
     public bool TryEnter() => concurrency.Wait(0);
     public void Exit() => concurrency.Release();
-    public bool TrySpend(Guid account)
+    public bool TrySpend(Guid account) => TrySpend(account, out _);
+    public bool TrySpend(Guid account, out SleepAiBudgetRejection rejection)
     {
         lock (gate)
         {
             var seconds = clock.GetUtcNow().ToUnixTimeSeconds();
             if (hour != seconds / 3600) { accounts.Clear(); hour = seconds / 3600; }
             if (day != seconds / 86400) { total = 0; day = seconds / 86400; }
-            if (total >= options.Value.MaxRequestsPerInstancePerDay || accounts.GetValueOrDefault(account) >= options.Value.MaxRequestsPerAccountPerHour ||
-                accounts.Count >= 10000 && !accounts.ContainsKey(account)) return false;
+            rejection = total >= options.Value.MaxRequestsPerInstancePerDay ? SleepAiBudgetRejection.DailyLimit
+                : accounts.GetValueOrDefault(account) >= options.Value.MaxRequestsPerAccountPerHour ? SleepAiBudgetRejection.HourlyLimit
+                : accounts.Count >= 10000 && !accounts.ContainsKey(account) ? SleepAiBudgetRejection.Capacity
+                : SleepAiBudgetRejection.None;
+            if (rejection != SleepAiBudgetRejection.None) return false;
             accounts[account] = accounts.GetValueOrDefault(account) + 1;
             total++;
             return true;
@@ -186,7 +192,7 @@ public sealed class SleepAiService(IOptions<SleepAiOptions> options, ISleepAiAcc
         EnsureResponseDay(request, bounds, clock.GetUtcNow());
         if (!Capabilities.Enabled) return Response(request, bounds, "unavailable", []);
         await access.AuthorizeAsync(user, request, ct);
-        if (!budget.TryEnter()) throw new ApiException(429, "rate_limited");
+        if (!budget.TryEnter()) throw new ApiException(429, "ai_busy");
         try
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -195,13 +201,40 @@ public sealed class SleepAiService(IOptions<SleepAiOptions> options, ISleepAiAcc
             {
                 // Recheck on the retry as permissions may have changed in flight.
                 if (attempt > 0) await access.AuthorizeAsync(user, request, timeout.Token);
+                timeout.Token.ThrowIfCancellationRequested();
                 EnsureResponseDay(request, bounds, clock.GetUtcNow());
-                if (!budget.TrySpend(user.ObjectId)) throw new ApiException(429, "rate_limited");
+                if (!budget.TrySpend(user.ObjectId, out var rejection)) throw new ApiException(429, rejection switch
+                {
+                    SleepAiBudgetRejection.HourlyLimit => "ai_hourly_limit",
+                    SleepAiBudgetRejection.DailyLimit => "ai_daily_limit",
+                    _ => "ai_busy"
+                });
                 string? result;
                 try { result = await provider.GenerateAsync(request, bounds, attempt > 0, timeout.Token); }
-                catch (OperationCanceledException) when (!ct.IsCancellationRequested) { return Response(request, bounds, "unavailable", []); }
-                catch (ClientResultException) { return Response(request, bounds, "unavailable", []); }
-                catch (HttpRequestException) { return Response(request, bounds, "unavailable", []); }
+                catch (OperationCanceledException) { throw; }
+                catch (TimeoutException)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    throw new ApiException(504, "ai_timeout");
+                }
+                catch (ClientResultException error)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    throw new ApiException(503, error.Status == 429 ? "ai_provider_busy" : "ai_provider_unavailable");
+                }
+                catch (HttpRequestException error)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    throw new ApiException(503, error.StatusCode == System.Net.HttpStatusCode.TooManyRequests ? "ai_provider_busy" : "ai_provider_unavailable");
+                }
+                catch (Exception)
+                {
+                    // Only fixed categories cross the API boundary; provider messages,
+                    // response bodies and request data must never be exposed or logged.
+                    ct.ThrowIfCancellationRequested();
+                    throw new ApiException(503, "ai_provider_unavailable");
+                }
+                timeout.Token.ThrowIfCancellationRequested();
                 // Never return a result after account deletion, grant replacement,
                 // history change or restore maintenance. No SQL lock spans the AI call.
                 await access.AuthorizeAsync(user, request, ct);
@@ -210,8 +243,10 @@ public sealed class SleepAiService(IOptions<SleepAiOptions> options, ISleepAiAcc
                 if (SleepAiValidation.TryReadOutput(result, request, bounds, out var parsed))
                     return Response(request, bounds, parsed!.Status, parsed.Periods);
             }
-            return Response(request, bounds, "unavailable", []);
+            throw new ApiException(503, "ai_invalid_response");
         }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        { throw new ApiException(504, "ai_timeout"); }
         finally { budget.Exit(); }
     }
 

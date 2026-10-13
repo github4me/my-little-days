@@ -257,11 +257,11 @@ public sealed class SleepAiTests
     }
 
     [Fact]
-    public async Task InvalidModelOutputRetriesOnceThenUnavailableWithoutLocalFallback()
+    public async Task InvalidModelOutputRetriesOnceThenSafeFailureWithoutLocalFallback()
     {
         var provider = new Provider("{bad json}"); var access = new Access();
-        var result = await Service(Enabled(), access, provider).PredictAsync(User, Request(), default);
-        Assert.Equal("unavailable", result.Status); Assert.Empty(result.Periods);
+        var error = await Assert.ThrowsAsync<ApiException>(() => Service(Enabled(), access, provider).PredictAsync(User, Request(), default));
+        Assert.Equal(503, error.Status); Assert.Equal("ai_invalid_response", error.Code);
         Assert.Equal(2, provider.Calls); Assert.Equal([false, true], provider.Retries); Assert.Equal(4, access.Calls);
     }
 
@@ -339,18 +339,59 @@ public sealed class SleepAiTests
         Assert.Equal(1, provider.Calls); Assert.Equal([false], provider.Retries);
     }
 
-    [Fact]
-    public async Task CancellationAndNetworkFailureNeverCreateFallbackPredictions()
+    [Theory]
+    [InlineData("operation-timeout", 504, "ai_timeout")]
+    [InlineData("timeout", 504, "ai_timeout")]
+    [InlineData("sdk-busy", 503, "ai_provider_busy")]
+    [InlineData("sdk-rejected", 503, "ai_provider_unavailable")]
+    [InlineData("sdk-unavailable", 503, "ai_provider_unavailable")]
+    [InlineData("http-busy", 503, "ai_provider_busy")]
+    [InlineData("http-unavailable", 503, "ai_provider_unavailable")]
+    [InlineData("network", 503, "ai_provider_unavailable")]
+    [InlineData("unknown", 503, "ai_provider_unavailable")]
+    public async Task ProviderFailuresReturnOnlySafeCategoriesWithoutRetryOrPrivateDetails(string failure, int status, string code)
     {
-        var canceled = new CancellationToken(true); var provider = new Provider(Ready);
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Service(Enabled(), new Access(), provider).PredictAsync(User, Request(), canceled));
-        Assert.Equal(0, provider.Calls);
-        provider = new Provider(Ready) { Error = new HttpRequestException("synthetic private message") };
-        var result = await Service(Enabled(), new Access(), provider).PredictAsync(User, Request(), default);
-        Assert.Equal("unavailable", result.Status); Assert.Empty(result.Periods); Assert.Equal(1, provider.Calls);
-        provider = new Provider(Ready) { Error = new OperationCanceledException() };
-        result = await Service(Enabled(), new Access(), provider).PredictAsync(User, Request(), default);
-        Assert.Equal("unavailable", result.Status); Assert.Empty(result.Periods); Assert.Equal(1, provider.Calls);
+        var provider = new Provider(Ready) { Error = await ProviderFailure(failure) }; var access = new Access();
+        var service = Service(Enabled(), access, provider);
+        for (var call = 1; call <= 3; call++)
+        {
+            var error = await Assert.ThrowsAsync<ApiException>(() => service.PredictAsync(User, Request(), default));
+            Assert.Equal(status, error.Status); Assert.Equal(code, error.Code); Assert.Equal(code, error.Message);
+            Assert.Null(error.InnerException); Assert.Equal(call, provider.Calls); Assert.Equal(call, access.Calls);
+        }
+        Assert.Equal([false, false, false], provider.Retries);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CallerCancellationBeforeOrDuringProviderRemainsCancellationAndReleasesSlot(bool duringProvider)
+    {
+        var options = Options.Create(Enabled()); var clock = new Clock(); var budget = new SleepAiBudget(clock, options);
+        var provider = new DeferredProvider(); var access = new Access();
+        var service = new SleepAiService(options, access, provider, budget, clock);
+        using var cancellation = new CancellationTokenSource();
+        if (!duringProvider) cancellation.Cancel();
+        var pending = service.PredictAsync(User, Request(), cancellation.Token);
+        Assert.Equal(duringProvider ? 1 : 0, provider.Calls);
+        if (duringProvider) { Assert.False(pending.IsCompleted); cancellation.Cancel(); }
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending);
+        Assert.Equal(duringProvider ? 1 : 0, access.Calls);
+        Assert.True(budget.TryEnter()); Assert.True(budget.TryEnter()); Assert.False(budget.TryEnter());
+        budget.Exit(); budget.Exit();
+    }
+
+    [Theory]
+    [InlineData("timeout")]
+    [InlineData("sdk-busy")]
+    [InlineData("network")]
+    [InlineData("unknown")]
+    public async Task CallerCancellationTakesPrecedenceOverConcurrentProviderFailure(string failure)
+    {
+        using var cancellation = new CancellationTokenSource();
+        var provider = new Provider(Ready) { Error = await ProviderFailure(failure), BeforeError = cancellation.Cancel };
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Service(Enabled(), new Access(), provider).PredictAsync(User, Request(), cancellation.Token));
+        Assert.True(cancellation.IsCancellationRequested); Assert.Equal(1, provider.Calls); Assert.Equal([false], provider.Retries);
     }
 
     [Fact]
@@ -358,11 +399,72 @@ public sealed class SleepAiTests
     {
         var options = Enabled(); options.MaxRequestsPerAccountPerHour = 2;
         var provider = new Provider("invalid"); var service = Service(options, new Access(), provider);
-        Assert.Equal("unavailable", (await service.PredictAsync(User, Request(), default)).Status);
+        var invalid = await Assert.ThrowsAsync<ApiException>(() => service.PredictAsync(User, Request(), default));
+        Assert.Equal("ai_invalid_response", invalid.Code);
         var error = await Assert.ThrowsAsync<ApiException>(() => service.PredictAsync(User, Request(), default));
-        Assert.Equal(429, error.Status); Assert.Equal(2, provider.Calls);
-        Assert.Equal("unavailable", (await service.PredictAsync(new PilotIdentity { ObjectId = Guid.NewGuid() }, Request(), default)).Status);
+        Assert.Equal(429, error.Status); Assert.Equal("ai_hourly_limit", error.Code); Assert.Equal(2, provider.Calls);
+        invalid = await Assert.ThrowsAsync<ApiException>(() => service.PredictAsync(new PilotIdentity { ObjectId = Guid.NewGuid() }, Request(), default));
+        Assert.Equal("ai_invalid_response", invalid.Code);
         Assert.Equal(4, provider.Calls);
+    }
+
+    [Fact]
+    public void DefaultBudgetAllowsThirtiethAttemptRejectsThirtyFirstAndResetsAtHourBoundary()
+    {
+        var options = new SleepAiOptions(); Assert.Equal(30, options.MaxRequestsPerAccountPerHour);
+        var clock = new MutableClock(Now); var budget = new SleepAiBudget(clock, Options.Create(options));
+        for (var attempt = 1; attempt <= 30; attempt++)
+        {
+            Assert.True(budget.TrySpend(User.ObjectId, out var reason));
+            Assert.Equal(SleepAiBudgetRejection.None, reason);
+        }
+        Assert.False(budget.TrySpend(User.ObjectId, out var rejected));
+        Assert.Equal(SleepAiBudgetRejection.HourlyLimit, rejected);
+        Assert.True(budget.TrySpend(Guid.NewGuid(), out var other)); Assert.Equal(SleepAiBudgetRejection.None, other);
+        clock.Current = Now.AddHours(1).AddTicks(-1);
+        Assert.False(budget.TrySpend(User.ObjectId, out rejected)); Assert.Equal(SleepAiBudgetRejection.HourlyLimit, rejected);
+        clock.Current = Now.AddHours(1);
+        Assert.True(budget.TrySpend(User.ObjectId, out rejected)); Assert.Equal(SleepAiBudgetRejection.None, rejected);
+    }
+
+    [Fact]
+    public void DefaultDailyBudgetStillAllowsTwoHundredAttemptsAndOnlyResetsAtUtcDayBoundary()
+    {
+        var options = new SleepAiOptions(); Assert.Equal(200, options.MaxRequestsPerInstancePerDay);
+        var clock = new MutableClock(Now); var budget = new SleepAiBudget(clock, Options.Create(options));
+        var account = Guid.NewGuid();
+        for (var attempt = 0; attempt < 200; attempt++)
+        {
+            if (attempt % 30 == 0) account = Guid.NewGuid();
+            Assert.True(budget.TrySpend(account, out var reason)); Assert.Equal(SleepAiBudgetRejection.None, reason);
+        }
+        Assert.False(budget.TrySpend(Guid.NewGuid(), out var rejected)); Assert.Equal(SleepAiBudgetRejection.DailyLimit, rejected);
+        clock.Current = Now.AddHours(1);
+        Assert.False(budget.TrySpend(Guid.NewGuid(), out rejected)); Assert.Equal(SleepAiBudgetRejection.DailyLimit, rejected);
+        var midnight = new DateTimeOffset(Now.UtcDateTime.Date.AddDays(1), TimeSpan.Zero);
+        clock.Current = midnight.AddTicks(-1);
+        Assert.False(budget.TrySpend(Guid.NewGuid(), out rejected)); Assert.Equal(SleepAiBudgetRejection.DailyLimit, rejected);
+        clock.Current = midnight;
+        Assert.True(budget.TrySpend(account, out rejected)); Assert.Equal(SleepAiBudgetRejection.None, rejected);
+    }
+
+    [Fact]
+    public async Task ThirdConcurrentRequestReturnsBusyWithoutSpendingAndFreedSlotsRemainUsable()
+    {
+        var options = Options.Create(Enabled()); var clock = new Clock(); var budget = new SleepAiBudget(clock, options);
+        var provider = new DeferredProvider(); var service = new SleepAiService(options, new Access(), provider, budget, clock);
+        var first = service.PredictAsync(User, Request(), default);
+        var second = service.PredictAsync(User, Request(), default);
+        Assert.Equal(2, provider.Calls); Assert.False(first.IsCompleted); Assert.False(second.IsCompleted);
+        var busy = await Assert.ThrowsAsync<ApiException>(() => service.PredictAsync(User, Request(), default));
+        Assert.Equal(429, busy.Status); Assert.Equal("ai_busy", busy.Code); Assert.Equal(2, provider.Calls);
+        provider.Pending.SetResult(Ready);
+        Assert.All(await Task.WhenAll(first, second), result => Assert.Equal("ready", result.Status));
+        Assert.Equal("ready", (await service.PredictAsync(User, Request(), default)).Status);
+        Assert.Equal(3, provider.Calls);
+        // The refused third request must not consume one of the thirty attempts.
+        for (var attempt = 3; attempt < 30; attempt++) Assert.True(budget.TrySpend(User.ObjectId));
+        Assert.False(budget.TrySpend(User.ObjectId, out var rejected)); Assert.Equal(SleepAiBudgetRejection.HourlyLimit, rejected);
     }
 
     [Fact]
@@ -485,6 +587,7 @@ public sealed class SleepAiTests
         using var client = isolated.CreateClient();
         var configured = isolated.Services.GetRequiredService<IOptions<SleepAiOptions>>().Value;
         Assert.Equal("gpt-6-luna", configured.Model); Assert.False(configured.Enabled);
+        Assert.Equal(30, configured.MaxRequestsPerAccountPerHour); Assert.Equal(200, configured.MaxRequestsPerInstancePerDay);
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/v2/sleep-predictions/capabilities")).StatusCode);
         client.DefaultRequestHeaders.Authorization = new("Bearer", host.Token(new() { ObjectId = Guid.NewGuid(), Email = scenario.Owner.Email }));
         Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/v2/sleep-predictions/capabilities")).StatusCode);
@@ -523,7 +626,77 @@ public sealed class SleepAiTests
         Assert.Equal(JsonSerializer.Deserialize<SleepPredictionModelOutput>(Ready, SleepAiJson.Options)!.Periods, result.Periods);
     }
 
+    [Theory]
+    [InlineData("operation-timeout", 504, "ai_timeout", 1)]
+    [InlineData("sdk-busy", 503, "ai_provider_busy", 1)]
+    [InlineData("sdk-rejected", 503, "ai_provider_unavailable", 1)]
+    [InlineData("network", 503, "ai_provider_unavailable", 1)]
+    [InlineData("unknown", 503, "ai_provider_unavailable", 1)]
+    [InlineData("invalid-output", 503, "ai_invalid_response", 2)]
+    [InlineData("hourly-limit", 429, "ai_hourly_limit", 0)]
+    [InlineData("daily-limit", 429, "ai_daily_limit", 0)]
+    [InlineData("busy", 429, "ai_busy", 0)]
+    public async Task HttpAiFailuresUseExistingCodeOnlyEnvelopeWithoutLeakingProviderDetails(string failure, int status, string code, int providerCalls)
+    {
+        var scenario = new Scenario(new SqlFixture()); var options = Options.Create(Enabled());
+        var provider = new Provider(failure == "invalid-output" ? "synthetic private invalid output" : Ready)
+        { Error = failure is "invalid-output" or "hourly-limit" or "daily-limit" or "busy" ? null : await ProviderFailure(failure) };
+        var budget = new SleepAiBudget(new Clock(), options);
+        if (failure == "hourly-limit")
+            for (var i = 0; i < 30; i++) Assert.True(budget.TrySpend(scenario.Owner.ObjectId));
+        if (failure == "daily-limit")
+            for (var i = 0; i < 200; i++) Assert.True(budget.TrySpend(Guid.NewGuid()));
+        if (failure == "busy") { Assert.True(budget.TryEnter()); Assert.True(budget.TryEnter()); }
+        await using var host = new TestHost(scenario.Config);
+        await using var isolated = host.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
+        {
+            services.AddSingleton<IOptions<SleepAiOptions>>(options);
+            services.AddSingleton<TimeProvider>(new Clock());
+            services.AddSingleton(budget);
+            services.AddScoped<ISleepAiAccess>(_ => new Access());
+            services.AddScoped<ISleepAiProvider>(_ => provider);
+        }));
+        using var client = isolated.CreateClient(); client.DefaultRequestHeaders.Authorization = new("Bearer", host.Token(scenario.Owner));
+        using var response = await client.PostAsJsonAsync("/v2/sleep-predictions", Request());
+        Assert.Equal(status, (int)response.StatusCode); Assert.Equal("no-store", response.Headers.CacheControl!.ToString());
+        var text = await response.Content.ReadAsStringAsync();
+        using var body = JsonDocument.Parse(text);
+        Assert.Equal("code", Assert.Single(body.RootElement.EnumerateObject()).Name);
+        Assert.Equal(code, body.RootElement.GetProperty("code").GetString());
+        Assert.DoesNotContain("synthetic private", text); Assert.DoesNotContain("periods", text);
+        Assert.Equal(providerCalls, provider.Calls);
+        if (failure == "busy") { budget.Exit(); budget.Exit(); }
+    }
+
     private static string Serialize(object value) => JsonSerializer.Serialize(value, SleepAiJson.Options);
+    private static async Task<Exception> ProviderFailure(string failure)
+    {
+        const string privateMessage = "synthetic private provider body and credential";
+        if (failure.StartsWith("sdk-", StringComparison.Ordinal))
+        {
+            var status = failure switch { "sdk-busy" => HttpStatusCode.TooManyRequests, "sdk-rejected" => HttpStatusCode.BadRequest, _ => HttpStatusCode.ServiceUnavailable };
+            using var handler = new ErrorWireHandler(status);
+            using var http = new HttpClient(handler);
+            using var chat = new ResponsesClient(new ApiKeyCredential("synthetic-not-real"), new ResponsesClientOptions
+            {
+                Transport = new HttpClientPipelineTransport(http), RetryPolicy = new ClientRetryPolicy(0),
+                ClientLoggingOptions = new() { EnableLogging = false, EnableMessageLogging = false, EnableMessageContentLogging = false }
+            }).AsIChatClient("gpt-6-luna");
+            var error = await Assert.ThrowsAnyAsync<ClientResultException>(() => chat.GetResponseAsync([new(ChatRole.User, "synthetic input")]));
+            Assert.Equal((int)status, error.Status); Assert.Equal(1, handler.Calls);
+            return error;
+        }
+        return failure switch
+        {
+            "operation-timeout" => new OperationCanceledException(privateMessage),
+            "timeout" => new TimeoutException(privateMessage),
+            "http-busy" => new HttpRequestException(privateMessage, null, HttpStatusCode.TooManyRequests),
+            "http-unavailable" => new HttpRequestException(privateMessage, null, HttpStatusCode.ServiceUnavailable),
+            "network" => new HttpRequestException(privateMessage),
+            "unknown" => new InvalidOperationException(privateMessage),
+            _ => throw new ArgumentOutOfRangeException(nameof(failure))
+        };
+    }
     private static SleepAiService Service(SleepAiOptions options, ISleepAiAccess access, ISleepAiProvider provider)
     {
         var wrapped = Options.Create(options); var clock = new Clock();
@@ -573,10 +746,11 @@ public sealed class SleepAiTests
         public int Calls { get; private set; }
         public List<bool> Retries { get; } = [];
         public Exception? Error { get; init; }
+        public Action? BeforeError { get; init; }
         public Task<string?> GenerateAsync(SleepPredictionRequest request, SleepAiTimeBounds bounds, bool retry, CancellationToken ct)
         {
             ct.ThrowIfCancellationRequested(); Calls++; Retries.Add(retry);
-            if (Error is not null) throw Error;
+            if (Error is not null) { BeforeError?.Invoke(); throw Error; }
             return Task.FromResult<string?>(responses[Math.Min(Calls - 1, responses.Length - 1)]);
         }
     }
@@ -603,6 +777,18 @@ public sealed class SleepAiTests
                 model = "synthetic-2026-10-01", output = new[] { new { type = "message", id = "msg_synthetic", status = "completed", role = "assistant",
                     content = new[] { new { type = "output_text", text = output, annotations = Array.Empty<object>() } } } }
             }) };
+        }
+    }
+    private sealed class ErrorWireHandler(HttpStatusCode status) : HttpMessageHandler
+    {
+        public int Calls { get; private set; }
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            Calls++;
+            return Task.FromResult(new HttpResponseMessage(status)
+            {
+                Content = JsonContent.Create(new { error = new { message = "synthetic private provider body and credential", type = "synthetic_error", code = "private_provider_code" } })
+            });
         }
     }
 }
