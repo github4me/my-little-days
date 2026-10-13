@@ -3673,4 +3673,10 @@ locally built, different Apple build 44; retain both release histories.
 
 ## AI backend deployment checkpoint — 13 October 2026
 
-See [the scoped deployment record](AI-BACKEND-DEPLOYMENT-2026-10-13.md) for the current target, live GitHub protection/variable readback, migration prerequisite, exact tests and release acceptance. The owner requested no repeat retention or spending-cap checks; those checks and approval flags are unchanged. This backend deployment is initially disabled and is separate from AI activation or TestFlight.
+See [the scoped deployment record](AI-BACKEND-DEPLOYMENT-2026-10-13.md) for the current target, live GitHub protection/variable readback, migration prerequisite, exact tests and release acceptance. The owner requested no repeat retention or spending-cap checks; those checks and approval flags are unchanged. This backend deployment keeps AI disabled and is separate from AI activation or TestFlight.
+
+Run `38380435550` deployed `7a79d5ebccd2ba0205fae5624b59e508de304c72`
+successfully: all CI passed, migration `0009` applied, final catalog check showed
+zero pending scripts, and temporary firewall access was removed. Live anonymous
+health and protected-route checks passed after startup propagation. Signed-in
+SQL/API and physical-device acceptance remain outstanding; see the release record.

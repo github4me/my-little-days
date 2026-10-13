@@ -102,4 +102,78 @@ env -i HOME=/Users/chao PATH=/usr/bin:/bin:/usr/sbin:/sbin DOTNET_ROOT=/Users/ch
    dedicated synthetic-family reads remain separate acceptance if credentials
    are unavailable. Do not log tokens or private records.
 
-Deployment state: **not dispatched yet**. No native-device acceptance is claimed.
+## Published release and browser-fixture repair
+
+Published the scoped backend release with the GitHub plugin as
+`092b83cae6fc1c5e98b89f9cdc4faae2f3dbc4e9`. Its push CI run
+[`38355035136`](https://github.com/github4me/my-little-days/actions/runs/38355035136)
+passed all API/disposable-SQL checks: FamilyApi.Tests 352 passed and
+DatabaseMigrator.Tests 80 passed, with zero failures or skips (432 total).
+The migration-helper regression suite also passed.
+
+The browser job failed because its fixed `2026-07-01` birth date no longer
+represented the intended two-month-old child in October. The app correctly
+excluded an activity whose age range ends at three completed months. Changed
+only this fixture to the first day two calendar months before the test date;
+did not change app behavior, assertions or timer behavior.
+
+Published the two-hunk `tests/browser.mjs` fix with the GitHub plugin as
+`7a79d5ebccd2ba0205fae5624b59e508de304c72` (parent `092b83c`). This is the frozen
+deployment SHA. No unrelated dirty mobile/UI/Watch changes were included.
+An isolated release copy passed `node --check`, scoped Prettier (unchanged),
+`npm run export:web -- --clear`, and the complete `npm run test:browser` suite.
+
+## Deployment execution
+
+Dispatched [Deploy family API and database #16](https://github.com/github4me/my-little-days/actions/runs/38380435550)
+on 13 October 2026 at 21:00 AEDT (10:00 UTC), using the frozen SHA above,
+`database_bootstrapped=true`, and `adopt_ef=false`.
+
+- Initial validation, TypeScript/Watch/browser verification and API/SQL
+  verification all passed. The deployment run repeated the 352 API and 80
+  migrator tests with zero failures or skips, plus the 41 firewall cases and
+  two recovery checks.
+- Same-run database artifact `11802713397` and API artifact `11802483885`
+  both identify release SHA `7a79d5e`; no artifact from another run was used.
+- Migration job `115241065491` initially reported one pending script,
+  `0009_ConflictReplacementAudit.sql`. Apply succeeded at 10:06:29 UTC. The
+  post-apply catalog/checksum check reported `Pending database scripts: 0`
+  at 10:06:33 UTC. The exact temporary SQL firewall rule was removed at
+  10:06:35 UTC; the recovery cleanup step also passed.
+- Rechecked the trusted branch before API deployment; it still pointed to
+  the frozen SHA.
+- Deployment job `115241451799` succeeded. Azure OneDeploy receipt
+  `1dd6852a-c575-44cb-a1c7-872e3ed4d3bd` reported `complete:true`, `active:true`,
+  status 4. The deployment action confirmed success at 10:08:17 UTC and
+  its liveness check passed. The complete workflow concluded successfully.
+
+## Live acceptance and remaining limits
+
+Anonymous sequential GETs were made without tokens, cookies, private payloads,
+redirect following or automatic retries. Before deployment the new capabilities
+route returned 404. The first post-deploy pass caught startup propagation:
+liveness/readiness returned 200, `/v1/me` briefly returned 502 and the new route
+still returned 404. No settings change, restart or redeployment was used. After
+a bounded 30-second wait, the second sequential pass succeeded:
+
+| Route | Result | Evidence scope |
+| --- | --- | --- |
+| `/health/live` | 200, `{"status":"ok"}` | Process responds |
+| `/health/ready` | 200, `{"status":"ready"}` | Recovery gate open, not a SQL query |
+| `/v1/me` | 401, `{"code":"unauthorized"}` | Existing account route requires sign-in |
+| `/v2/sleep-predictions/capabilities` | 401, `{"code":"unauthorized"}` | New AI route deployed and requires sign-in |
+
+All four final responses included `Cache-Control: no-store`,
+`Referrer-Policy: no-referrer`, and `X-Content-Type-Options: nosniff`.
+
+AI remains disabled: `SleepAi__Enabled=false` was read back earlier in this
+task, the release defaults to disabled, and this operation did not modify App
+Service settings or approval flags. Retention and spending-cap checks were not
+repeated. No real child data was sent and no mobile build was released.
+
+Authenticated `/v1/me` SQL-backed readiness, signed-in capabilities and synthetic
+prediction requests through the deployed API, and physical-device acceptance
+remain unverified. Anonymous health/auth checks and earlier direct synthetic
+provider smoke tests do not establish those outcomes. Use a dedicated test
+account with owner-assisted sign-in; do not extract another session's token or
+test account/family deletion on real data. AI activation is a separate step.
