@@ -1,5 +1,27 @@
 # My Little Days: manual Azure and GitHub setup runbook
 
+## One-minute AI backend timeouts — 14 October 2026 AEDT
+
+The owner confirmed each AI stage is limited to one minute; the nested limits
+do not need to total three minutes. The [scoped backend operation](AI-TIMEOUT-BACKEND-2026-10-14.md)
+changed only generation/repair 30→60 seconds and provider network 25→60 seconds.
+GitHub plugin commit `46a50aa9d1987d8f69c5e6c7f727893a72c54884` deployed in
+[workflow 38464800939](https://github.com/github4me/my-little-days/actions/runs/38464800939),
+attempt 1, all five jobs successful at **13 October 20:48:33 UTC**.
+Same-run API 435 and disposable-SQL 80 tests passed, zero failures/skips; the
+mobile/browser job also passed. Catalog/checksum verification reported zero
+pending scripts; none applied. Only run-owned firewall rule
+`github-db-38464800939-1` was removed and absence checked. Same-run artifact
+digests matched. OneDeploy `427b3277-93fc-4c0a-9f39-828b0db85b64` succeeded at
+20:48:28 UTC, liveness at 20:48:29 UTC; independent anonymous health 200/protected 401
+checks passed at 20:49:46 UTC. These are not signed-in SQL/provider acceptance.
+
+The existing App Service, SQL targets, hosting tenant/subscription and protected
+trusted-branch restrictions were freshly checked; no environment setting,
+schema, identity, model, prompt, budget, retention or infrastructure change.
+No provider dashboard was reopened. No new manual setup is required. TestFlight
+client delivery and physical-device acceptance are tracked separately.
+
 ## Overlap-aware AI and build 66 — 13 October 2026 UTC / 14 October AEDT
 
 The owner requested TestFlight after allowing AI to interpret overlapping manual
