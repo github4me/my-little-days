@@ -190,7 +190,7 @@ public sealed class SleepAiService(IOptions<SleepAiOptions> options, ISleepAiAcc
         try
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeout.CancelAfter(TimeSpan.FromSeconds(30));
+            timeout.CancelAfter(TimeSpan.FromSeconds(60));
             for (var attempt = 0; attempt < 2; attempt++)
             {
                 // Recheck on the retry as permissions may have changed in flight.
@@ -247,7 +247,7 @@ public static class SleepAiRegistration
             return new ResponsesClient(new ApiKeyCredential(options.ApiKey), new ResponsesClientOptions
             {
                 RetryPolicy = new ClientRetryPolicy(0),
-                NetworkTimeout = TimeSpan.FromSeconds(25),
+                NetworkTimeout = TimeSpan.FromSeconds(60),
                 ClientLoggingOptions = new() { EnableLogging = false, EnableMessageLogging = false, EnableMessageContentLogging = false }
             }).AsIChatClient(options.Model);
         });
