@@ -38,6 +38,7 @@ if (config.Push.RegistrationEnabled || config.Push.EventCreationEnabled || confi
 builder.Services.AddSingleton<RecoveryGate>();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<FamilyService>();
+builder.Services.AddSleepAi(builder.Configuration);
 builder.Services.AddPublicIdentityAdmission(config);
 builder.Services.AddAccountIdentityDeletion(builder.Configuration, config);
 builder.Services.AddScoped<DeletionProcessor>();
@@ -212,6 +213,7 @@ fullApi.AddEndpointFilter(async (context, next) =>
     return await next(context);
 });
 fullApi.MapGet("/capabilities", () => new FullFamilyCapabilities(2, FullDomainValidation.RecordKinds, FullDomainValidation.MaxSeedBytes));
+fullApi.MapSleepPredictions();
 fullApi.MapGet("/push/capabilities", (HttpContext context) =>
 {
     var allowed = config.Push.Allows(PublicIdentityAdmission.Get(context).ObjectId);

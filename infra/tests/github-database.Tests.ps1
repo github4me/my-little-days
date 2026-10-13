@@ -14,7 +14,7 @@ $null = New-Item -ItemType File -Path (Join-Path $temp 'env')
 $script:caseCount = 0
 function Assert($condition, [string]$message) { if (!$condition) { throw $message } }
 function Reset-Test {
-    $global:dbTest = @{ Rules=@(); Calls=[Collections.Generic.List[string]]::new(); FailApply=$false; FailCreate=$false; FailCleanup=$false; FailCheck=$false; WrongIdentity=$false; Ip='20.30.40.50'; DriftOnCreate=$false }
+    $global:dbTest = @{ Rules=@(); Calls=[Collections.Generic.List[string]]::new(); FailApply=$false; FailCreate=$false; FailCleanup=$false; FailCheck=$false; WrongIdentity=$false; Ip='20.30.40.50'; DriftOnCreate=$false; Applied=$false; FailPostCheck=$false; PostCheckOutput=@('Pending database scripts: 0') }
     $env:GITHUB_ACTIONS='true'; $env:GITHUB_EVENT_NAME='workflow_dispatch'
     $env:GITHUB_RUN_ID='123'; $env:GITHUB_RUN_ATTEMPT='2'; $env:GITHUB_ENV=Join-Path $temp 'env'
     $env:AZURE_SUBSCRIPTION_ID='4768a858-f23f-4a39-bb64-eabc9c142627'
@@ -56,6 +56,11 @@ function global:az {
 function global:dotnet {
     $global:dbTest.Calls.Add('dotnet ' + ($args -join ' '))
     $global:LASTEXITCODE = if (($args -contains '--apply' -and $global:dbTest.FailApply) -or ($args -contains '--check' -and $global:dbTest.FailCheck)) { 1 } else { 0 }
+    if ($args -contains '--apply') { $global:dbTest.Applied=$true }
+    if ($args -contains '--check' -and $global:dbTest.Applied) {
+        if ($global:dbTest.FailPostCheck) { $global:LASTEXITCODE=1 }
+        return $global:dbTest.PostCheckOutput
+    }
 }
 function global:Invoke-RestMethod { param($Uri,$TimeoutSec) Assert ($Uri -ceq 'https://api.ipify.org') 'Unexpected IP service'; return $global:dbTest.Ip }
 function global:Start-Sleep { param($Seconds) }
@@ -77,6 +82,21 @@ try {
         $calls = $global:dbTest.Calls -join "`n"
         Assert ($calls.IndexOf('--check') -lt $calls.IndexOf('--apply')) 'Check must precede apply'
         Assert ($calls.IndexOf('--apply') -lt $calls.IndexOf('firewall-rule delete')) 'Cleanup must follow apply'
+        Assert (@($global:dbTest.Calls | Where-Object { $_ -match '--check' }).Count -eq 2) 'Successful release must recheck the final schema'
+        Assert ($calls.IndexOf('--apply') -lt $calls.LastIndexOf('--check') -and
+            $calls.LastIndexOf('--check') -lt $calls.IndexOf('firewall-rule delete')) 'Final schema check must run after apply and before firewall cleanup'
+    }
+    # PostMigrationCatalogFailureBlocksReleaseAndCleansOwnRule
+    Run-Case { $global:dbTest.FailPostCheck=$true } $true {
+        Assert ($global:dbTest.Applied) 'Catalog failure must be tested after apply'
+        Assert ($global:dbTest.Rules.Count -eq 0) 'Failed final schema check leaked firewall rule'
+    }
+    # PostMigrationRequiresExactlyOneExplicitZeroPendingResult
+    foreach ($result in @(@('Pending database scripts: 1'), @(), @('Pending database scripts: 0','Pending database scripts: 0'), @('Pending database scripts: 0','Pending database scripts: 1'))) {
+        Run-Case { $global:dbTest.PostCheckOutput=$result } $true {
+            Assert ($global:dbTest.Applied) 'Pending-result failure must be tested after apply'
+            Assert ($global:dbTest.Rules.Count -eq 0) 'Invalid final pending result leaked firewall rule'
+        }
     }
     Run-Case { $global:dbTest.FailApply=$true } $true { Assert ($global:dbTest.Rules.Count -eq 0) 'Failed migration leaked firewall rule' }
     Run-Case { $global:dbTest.FailCreate=$true } $true { Assert ($global:dbTest.Rules.Count -eq 0) 'Uncertain creation leaked rule' }

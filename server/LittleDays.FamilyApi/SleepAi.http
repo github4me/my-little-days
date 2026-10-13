@@ -1,0 +1,36 @@
+# No launch profile is committed. Set ASPNETCORE_URLS=http://localhost:5080 for the isolated local test host.
+@baseUrl = http://localhost:5080
+@token = replace-with-a-local-test-token
+
+### Read capability without sending any child records (JWT and directory admission required)
+GET {{baseUrl}}/v2/sleep-predictions/capabilities
+Authorization: Bearer {{token}}
+
+### Synthetic-only fixture. Update now to current UTC before using an isolated test deployment.
+# Disabled by default; do not enable against real children without the documented rollout gates.
+POST {{baseUrl}}/v2/sleep-predictions
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "schemaVersion": 1,
+  "inputRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "consentVersion": "sleep-ai-v1",
+  "familyId": null,
+  "membershipId": null,
+  "historyId": null,
+  "ageDays": 100,
+  "timeZone": "Australia/Melbourne",
+  "now": "2026-10-12T08:00:00Z",
+  "records": [
+    {"kind": "sleep", "start": "2026-10-12T02:00:00Z", "end": "2026-10-12T03:00:00Z", "ongoing": false, "feedKind": null, "amountMl": null},
+    {"kind": "feed", "start": "2026-10-12T03:10:00Z", "end": "2026-10-12T03:20:00Z", "ongoing": false, "feedKind": "formula", "amountMl": 120}
+  ]
+}
+
+### Malformed context must be rejected, not treated as personal-data authorization
+POST {{baseUrl}}/v2/sleep-predictions
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"schemaVersion": 1, "inputRevision": "invalid"}

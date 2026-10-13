@@ -3669,3 +3669,8 @@ locally built, different Apple build 44; retain both release histories.
   were not demonstrated by archive/upload. Do not uninstall the data-bearing
   app to test. The source build-number baseline is advanced to **47** to avoid
   reuse on the next local release.
+
+
+## AI backend deployment checkpoint — 13 October 2026
+
+See [the scoped deployment record](AI-BACKEND-DEPLOYMENT-2026-10-13.md) for the current target, live GitHub protection/variable readback, migration prerequisite, exact tests and release acceptance. The owner requested no repeat retention or spending-cap checks; those checks and approval flags are unchanged. This backend deployment is initially disabled and is separate from AI activation or TestFlight.

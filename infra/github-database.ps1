@@ -117,6 +117,16 @@ try {
     if (!$ready) { throw 'Database preflight failed. Schema was not applied.' }
     & dotnet $MigratorPath --apply @extra
     if ($LASTEXITCODE -ne 0) { throw 'Database migration failed. Do not deploy the API.' }
+    # An apply receipt is not final schema evidence. Recheck the actual catalog
+    # and journal, and require the migrator's explicit zero-pending result.
+    $postCheck = @(& dotnet $MigratorPath --check)
+    $postCheckExit = $LASTEXITCODE
+    $postCheck | Write-Output
+    $pendingResults = @($postCheck | Where-Object { $_ -cmatch '^Pending database scripts: [0-9]+$' })
+    if ($postCheckExit -ne 0 -or $pendingResults.Count -ne 1 -or
+        $pendingResults[0] -cne 'Pending database scripts: 0') {
+        throw 'Post-migration schema verification failed or scripts remain pending. Do not deploy the API.'
+    }
 } catch { $migrationFailure = $_; throw }
 finally {
     try { Remove-RunRule }
