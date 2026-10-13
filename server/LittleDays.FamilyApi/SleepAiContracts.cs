@@ -157,10 +157,14 @@ public static class SleepAiValidation
                      record.FeedKind is "formula" or "expressed" && record.AmountMl is null ||
                      (record.End ?? (record.Ongoing ? request.Now : record.Start)) - record.Start > TimeSpan.FromHours(24)) Invalid();
         }
-        // Do not infer missing intervals or resolve conflicting sleep records.
-        var sleep = request.Records.Where(x => x.Kind == "sleep").OrderBy(x => x.Start).ToArray();
-        for (var i = 1; i < sleep.Length; i++)
-            if (sleep[i].Start < (sleep[i - 1].End ?? request.Now)) Invalid();
+        // Legacy clients retain their strict contract. Whole-day requests pass
+        // overlapping manual records unchanged so only the model interprets them.
+        if (request.SchemaVersion == 1)
+        {
+            var sleep = request.Records.Where(x => x.Kind == "sleep").OrderBy(x => x.Start).ToArray();
+            for (var i = 1; i < sleep.Length; i++)
+                if (sleep[i].Start < (sleep[i - 1].End ?? request.Now)) Invalid();
+        }
         return bounds;
     }
 
@@ -213,19 +217,31 @@ public static class SleepAiValidation
     {
         if (!ValidWholeDayPeriods(periods, bounds)) return false;
         var sleep = request.Records.Where(record => record.Kind == "sleep").ToArray();
+        // Classify evidence only: never merge, trim, deduplicate or choose a
+        // recorded boundary locally. Index identity keeps duplicate occurrences.
+        var uncertain = sleep.Select((record, index) => sleep.Where((_, other) => other != index).Any(other =>
+            record.Start < (other.End ?? request.Now) && other.Start < (record.End ?? request.Now))).ToArray();
+        var isolated = sleep.Where((_, index) => !uncertain[index]).ToArray();
+        var conflicting = sleep.Where((_, index) => uncertain[index]).ToArray();
         foreach (var period in periods)
         {
-            var anchor = sleep.FirstOrDefault(record => record.Start == period.SleepStart &&
+            var anchor = isolated.FirstOrDefault(record => record.Start == period.SleepStart &&
                 (record.Ongoing ? period.SleepEnd > request.Now : record.End == period.SleepEnd));
-            // Observed/ongoing segments have no invented settling advice. Every
-            // unobserved segment must retain its actual AI-generated settling range.
-            if (anchor is null ? period.SootheStart is null : period.SootheStart is not null) return false;
+            // A model's reconciliation is an estimate, not a new recorded fact.
+            // It may omit unusable conflict evidence; only already-started,
+            // intersecting evidence permits no retrospective settling advice.
+            var conflictAnchor = anchor is null && period.SleepStart <= request.Now && conflicting.Any(record =>
+                period.SleepStart < (record.End ?? request.Now) && period.SleepEnd > record.Start);
+            if (anchor is not null || conflictAnchor
+                ? period.SootheStart is not null
+                : period.SootheStart is null) return false;
             var start = period.SootheStart ?? period.SleepStart;
-            if (sleep.Any(record => !ReferenceEquals(record, anchor) &&
+            if (isolated.Any(record => !ReferenceEquals(record, anchor) &&
                 start < (record.End ?? request.Now) && period.SleepEnd > record.Start)) return false;
         }
-        // A partial future-only answer cannot masquerade as a whole-day plan.
-        return sleep.Where(record => record.End is null || record.End > bounds.TodayStart)
+        // Unambiguous observed sleep stays exact. Conflicting inputs are left
+        // for the model to judge, never required as contradictory exact anchors.
+        return isolated.Where(record => record.End is null || record.End > bounds.TodayStart)
             .All(record => periods.Any(period => period.SleepStart == record.Start &&
                 (record.Ongoing ? period.SleepEnd > request.Now : period.SleepEnd == record.End)));
     }

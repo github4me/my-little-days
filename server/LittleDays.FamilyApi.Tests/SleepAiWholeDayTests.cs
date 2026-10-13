@@ -61,6 +61,225 @@ public sealed class SleepAiWholeDayTests
         Assert.All(result.Periods.Take(2), period => { Assert.Null(period.SootheStart); Assert.Null(period.SootheEnd); });
     }
 
+    [Theory]
+    [InlineData("partial")]
+    [InlineData("one-millisecond")]
+    [InlineData("duplicate-object")]
+    [InlineData("duplicate-value")]
+    [InlineData("nested")]
+    [InlineData("transitive")]
+    [InlineData("ongoing")]
+    [InlineData("multiple-ongoing")]
+    [InlineData("cross-midnight")]
+    public async Task WholeDayLetsAiReconcileRawManualOverlapsWithoutChangingRecords(string shape)
+    {
+        var first = Sleep(Midnight.AddHours(10), Midnight.AddHours(11));
+        SleepPredictionRecord[] records = shape switch
+        {
+            "partial" => [first, Sleep(first.Start.AddMinutes(50), first.Start.AddHours(2))],
+            "one-millisecond" => [first, Sleep(first.End!.Value.AddMilliseconds(-1), first.Start.AddHours(2))],
+            "duplicate-object" => [first, first],
+            "duplicate-value" => [first, first with { }],
+            "nested" => [Sleep(first.Start, first.Start.AddHours(3)), Sleep(first.Start.AddHours(1), first.Start.AddHours(2)),
+                Sleep(first.Start.AddHours(2.5), first.Start.AddHours(2.75))],
+            "transitive" => [first, Sleep(first.Start.AddMinutes(30), first.Start.AddHours(2)),
+                Sleep(first.Start.AddHours(1.5), first.Start.AddHours(3))],
+            "ongoing" => [Sleep(Now.AddHours(-2), null), Sleep(Now.AddHours(-1), Now.AddMinutes(-30))],
+            "multiple-ongoing" => [Sleep(Now.AddHours(-2), null), Sleep(Now.AddHours(-1), null)],
+            "cross-midnight" => [Sleep(Midnight.AddHours(-1), Midnight.AddHours(1)),
+                Sleep(Midnight.AddMinutes(30), Midnight.AddHours(2))],
+            _ => throw new InvalidOperationException()
+        };
+        // Deliberately unsorted raw evidence; no caller-side union or correction.
+        records = records.Reverse().ToArray();
+        var request = Request() with { Records = records };
+        var original = JsonSerializer.Serialize(request, SleepAiJson.Options);
+        var inferred = Period(records.Min(x => x.Start).AddMinutes(1),
+            records.Any(x => x.Ongoing) ? Now.AddMinutes(30) : records.Max(x => x.End!.Value).AddMinutes(-1), true);
+        var provider = new Provider(Output(inferred)); var access = new Access();
+
+        var result = await Service(access, provider).PredictAsync(User, request, default);
+
+        Assert.Equal("ready", result.Status); Assert.Equal(inferred, Assert.Single(result.Periods));
+        Assert.Equal(1, provider.Calls); Assert.Equal(2, access.Calls);
+        Assert.Equal(original, JsonSerializer.Serialize(request, SleepAiJson.Options));
+        Assert.Same(request, provider.LastRequest);
+        Assert.Equal(2, result.SchemaVersion); Assert.Equal(Midnight.AddDays(1), result.ExpiresAt);
+    }
+
+    [Fact]
+    public async Task WholeDayPreservesCoincidentZeroElapsedOngoingAnchorsWithOneExactOutput()
+    {
+        var request = Request() with { Records = [Sleep(Now, null), Sleep(Now, null)] };
+        var original = JsonSerializer.Serialize(request, SleepAiJson.Options);
+        var period = Period(Now, Now.AddMinutes(30), true);
+        var provider = new Provider(Output(period)); var access = new Access();
+
+        var result = await Service(access, provider).PredictAsync(User, request, default);
+
+        Assert.Equal("ready", result.Status); Assert.Equal(period, Assert.Single(result.Periods));
+        Assert.Null(result.Periods[0].SootheStart); Assert.Null(result.Periods[0].SootheEnd);
+        Assert.Equal(original, JsonSerializer.Serialize(request, SleepAiJson.Options));
+        Assert.Same(request, provider.LastRequest); Assert.Equal(2, provider.LastRequest!.Records.Length);
+        Assert.Equal(1, provider.Calls); Assert.Equal(2, access.Calls);
+    }
+
+    [Fact]
+    public void WholeDayAiMayChooseOrDiscountConflictsButMustRetainIsolatedSleep()
+    {
+        var conflict = Sleep(Midnight.AddHours(9), Midnight.AddHours(11));
+        var other = Sleep(Midnight.AddHours(10), Midnight.AddHours(12));
+        var isolated = Sleep(Midnight.AddHours(13), Midnight.AddHours(14));
+        var request = Request() with { Records = [conflict, other, isolated] };
+        var known = Period(isolated.Start, isolated.End!.Value, true);
+        var future = Period(Now.AddHours(1), Now.AddHours(2));
+        Assert.True(Accepts(request, Period(conflict.Start, conflict.End!.Value, true), known, future));
+        Assert.True(Accepts(request, Period(conflict.Start, other.End!.Value, true), known, future));
+        Assert.True(Accepts(request, known, future));
+        Assert.False(Accepts(request, future));
+        Assert.False(Accepts(request, known with { SleepStart = known.SleepStart.AddMilliseconds(1) }, future));
+        Assert.False(Accepts(request, known with { SleepEnd = known.SleepEnd.AddMilliseconds(-1) }, future));
+        Assert.False(Accepts(request, Period(conflict.Start, isolated.Start.AddMinutes(1), true), known, future));
+        Assert.False(Accepts(request, known, Period(known.SleepEnd.AddMinutes(10), known.SleepEnd.AddHours(1))));
+    }
+
+    [Theory]
+    [InlineData("no-intersection")]
+    [InlineData("touching-end")]
+    [InlineData("touching-start")]
+    [InlineData("future-null")]
+    [InlineData("invented-settling")]
+    [InlineData("one-null")]
+    [InlineData("overlapping-output")]
+    public void WholeDayConflictInterpretationsRetainStrictSettlingAndOutputRules(string invalid)
+    {
+        var request = Request() with { Records = [Sleep(Now.AddHours(-2), null), Sleep(Now.AddHours(-1), null)] };
+        var inferred = Period(Now.AddHours(-1.5), Now.AddMinutes(30), true);
+        SleepPredictionPeriod[] periods = invalid switch
+        {
+            "no-intersection" => [Period(Now.AddHours(-4), Now.AddHours(-3), true)],
+            "touching-end" => [Period(Now, Now.AddHours(1), true)],
+            "touching-start" => [Period(Now.AddHours(-3), Now.AddHours(-2), true)],
+            "future-null" => [Period(Now.AddMilliseconds(1), Now.AddHours(1), true)],
+            "invented-settling" => [Period(inferred.SleepStart, inferred.SleepEnd)],
+            "one-null" => [inferred with { SootheStart = inferred.SleepStart.AddMinutes(-20) }],
+            "overlapping-output" => [inferred, inferred with { SleepStart = inferred.SleepStart.AddMinutes(1) }],
+            _ => throw new InvalidOperationException()
+        };
+        Assert.True(Accepts(request, inferred));
+        Assert.False(Accepts(request, periods));
+        Assert.True(Accepts(request, Period(Now.AddMinutes(20), Now.AddHours(1))));
+    }
+
+    [Fact]
+    public void HistoricalOverlapIsContextAndDoesNotRequireTodaysReconstruction()
+    {
+        var request = Request() with { Records = [Sleep(Midnight.AddDays(-2).AddHours(10), Midnight.AddDays(-2).AddHours(12)),
+            Sleep(Midnight.AddDays(-2).AddHours(11), Midnight.AddDays(-2).AddHours(13))] };
+        var future = Period(Now.AddHours(1), Now.AddHours(2));
+        Assert.True(Accepts(request, future));
+        Assert.False(Accepts(request, Period(Midnight.AddHours(10), Midnight.AddHours(11), true), future));
+    }
+
+    [Fact]
+    public void FeedCoincidenceAndTouchingSleepsRemainIsolatedExactAnchors()
+    {
+        var first = Sleep(Midnight.AddHours(9), Midnight.AddHours(10));
+        var next = Sleep(first.End!.Value, first.End.Value.AddHours(1));
+        var feed = new SleepPredictionRecord { Kind = "feed", Start = first.Start, End = next.End,
+            Ongoing = false, FeedKind = "formula", AmountMl = 120 };
+        var request = Request() with { Records = [first, feed, next] };
+        var a = Period(first.Start, first.End.Value, true); var b = Period(next.Start, next.End!.Value, true);
+        Assert.True(Accepts(request, a, b));
+        Assert.False(Accepts(request, a));
+        Assert.False(Accepts(request, b));
+        Assert.False(Accepts(request, Period(first.Start, next.End.Value, true)));
+    }
+
+    [Fact]
+    public void WholeDayReconciliationStillProtectsIsolatedSleepOutsideTodaysAnchors()
+    {
+        var request = Request() with { Records = [Sleep(Midnight.AddHours(-2), Midnight),
+            Sleep(Midnight.AddHours(8), Midnight.AddHours(9)), Sleep(Midnight.AddHours(8.5), Midnight.AddHours(9.5))] };
+        var first = Period(Midnight.AddMinutes(20), Midnight.AddHours(1));
+        var reconciled = Period(Midnight.AddHours(8), Midnight.AddHours(9.5), true);
+        Assert.True(Accepts(request, first, reconciled));
+        // The prior-night record is not an obligatory output anchor, so only
+        // collision validation protects it from fabricated settling advice.
+        Assert.False(Accepts(request, first with { SootheStart = Midnight.AddTicks(-1) }, reconciled));
+    }
+
+    [Theory]
+    [InlineData("future")]
+    [InlineData("reversed")]
+    [InlineData("overlong")]
+    [InlineData("ongoing-state")]
+    [InlineData("feed-data")]
+    public async Task AcceptingOverlapDoesNotBypassOtherWholeDayInputGuards(string invalid)
+    {
+        var sleep = Sleep(Now.AddHours(-2), Now.AddHours(-1));
+        var bad = invalid switch
+        {
+            "future" => sleep with { End = Now.AddMilliseconds(1) },
+            "reversed" => sleep with { End = sleep.Start.AddMilliseconds(-1) },
+            "overlong" => sleep with { Start = sleep.End!.Value.AddHours(-24).AddMilliseconds(-1) },
+            "ongoing-state" => sleep with { Ongoing = true },
+            "feed-data" => sleep with { AmountMl = 120 },
+            _ => throw new InvalidOperationException()
+        };
+        var access = new Access(); var provider = new Provider("{}");
+        var error = await Assert.ThrowsAsync<ApiException>(() => Service(access, provider).PredictAsync(User,
+            Request() with { Records = [sleep, sleep, bad] }, default));
+        Assert.Equal(422, error.Status); Assert.Equal("invalid_input", error.Code);
+        Assert.Equal(0, access.Calls); Assert.Equal(0, provider.Calls);
+    }
+
+    [Fact]
+    public async Task SchemaOneStillRejectsOverlapBeforeAuthorityOrProviderCall()
+    {
+        var record = Sleep(Now.AddHours(-2), Now.AddHours(-1));
+        var request = Request() with { SchemaVersion = 1, ConsentVersion = "sleep-ai-v1", Records = [record, record] };
+        var access = new Access(); var provider = new Provider("{}");
+        var error = await Assert.ThrowsAsync<ApiException>(() => Service(access, provider).PredictAsync(User, request, default));
+        Assert.Equal(422, error.Status); Assert.Equal("invalid_input", error.Code);
+        Assert.Equal(0, access.Calls); Assert.Equal(0, provider.Calls); Assert.Null(provider.LastRequest);
+    }
+
+    [Fact]
+    public async Task WholeDayOverlapCanReturnInsufficientDataWithoutRetryOrFabricatedOutput()
+    {
+        var record = Sleep(Now.AddHours(-2), Now.AddHours(-1));
+        var provider = new Provider("{\"status\":\"insufficient_data\",\"periods\":[]}");
+        var access = new Access();
+        var response = await Service(access, provider).PredictAsync(User, Request() with { Records = [record, record] }, default);
+        Assert.Equal("insufficient_data", response.Status); Assert.Empty(response.Periods);
+        Assert.Equal(1, provider.Calls); Assert.Equal([false], provider.Retries); Assert.Equal(2, access.Calls);
+    }
+
+    [Fact]
+    public async Task WholeDayProviderReceivesEveryRawOverlapAndExplicitManualErrorInstructions()
+    {
+        var record = Sleep(Now.AddHours(-2), null);
+        var request = Request() with { Records = [record, record with { }, Sleep(Now.AddHours(-1), Now.AddMinutes(-30))] };
+        var before = JsonSerializer.Serialize(request, SleepAiJson.Options);
+        var fake = new ChatFake(); var provider = new OpenAiSleepProvider(fake, Options.Create(Enabled()));
+        await provider.GenerateAsync(request, SleepAiValidation.ValidateRequest(request, Now), false, default);
+        using var payload = JsonDocument.Parse(fake.Messages![1].Text);
+        Assert.Equal(JsonSerializer.Serialize(request.Records, SleepAiJson.Options), payload.RootElement.GetProperty("records").GetRawText());
+        Assert.Equal(3, payload.RootElement.GetProperty("records").GetArrayLength());
+        Assert.Equal(before, JsonSerializer.Serialize(request, SleepAiJson.Options));
+        var instructions = fake.Messages[0].Text;
+        Assert.Contains("manual timing errors or duplicates", instructions);
+        Assert.Contains("choose, combine or discount", instructions);
+        Assert.Contains("Overlap alone is not a reason to return insufficient_data", instructions);
+        Assert.Contains("Never interpret your reconciliation as editing a recorded fact, ending a timer or observing a wake event", instructions);
+        Assert.Contains("New records always outrank it", instructions);
+        Assert.Equal(["ageDays", "now", "previousEstimate", "records", "sleepEndLimit", "timeZone", "todayEnd", "todayStart"], payload.RootElement.EnumerateObject().Select(p => p.Name).Order().ToArray());
+        Assert.Equal("gpt-6-luna", fake.Options!.ModelId);
+        var raw = Assert.IsType<CreateResponseOptions>(fake.Options.RawRepresentationFactory!(fake));
+        Assert.False(raw.StoredOutputEnabled); Assert.False(raw.BackgroundModeEnabled);
+    }
+
     [Fact]
     public void PastUnobservedPlanContextIsAllowedButNeedsItsOwnAiSettlingWindow()
     {
@@ -433,8 +652,9 @@ public sealed class SleepAiWholeDayTests
         public int Calls { get; private set; }
         public List<bool> Retries { get; } = [];
         public Action? BeforeReturn { get; init; }
+        public SleepPredictionRequest? LastRequest { get; private set; }
         public Task<string?> GenerateAsync(SleepPredictionRequest request, SleepAiTimeBounds bounds, bool retry, CancellationToken ct)
-        { ct.ThrowIfCancellationRequested(); Calls++; Retries.Add(retry); BeforeReturn?.Invoke(); return Task.FromResult<string?>(output); }
+        { ct.ThrowIfCancellationRequested(); Calls++; LastRequest = request; Retries.Add(retry); BeforeReturn?.Invoke(); return Task.FromResult<string?>(output); }
     }
     private sealed class ChatFake : IChatClient
     {
