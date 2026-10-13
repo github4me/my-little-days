@@ -1,5 +1,65 @@
 # My Little Days: manual Azure and GitHub setup runbook
 
+## Overlap-aware AI and build 66 — 13 October 2026 UTC / 14 October AEDT
+
+The owner requested TestFlight after allowing AI to interpret overlapping manual
+sleep entries. See [the scoped operation record](AI-SLEEP-OVERLAP-2026-10-14.md).
+Raw minimized records are passed unchanged; no local reconciliation/prediction
+or saved-record mutation was added. Existing consent, model, credentials,
+budget/retention settings, output limits and isolated recorded facts remain.
+
+- The GitHub plugin published only three reviewed backend files over parent
+  `b97a7421bd9b93c60980c68382c22b2365facea8`. Backend
+  `fc5e8ecccf626e419d23c688d16f878e32c4f009` deployed successfully in
+  [workflow 38445012598](https://github.com/github4me/my-little-days/actions/runs/38445012598),
+  attempt 1. Inputs: `database_bootstrapped=true`, `adopt_ef=false`. All five jobs
+  passed; 435 API and 80 disposable-SQL migrator tests. The existing target is
+  App Service `little-days-api-522fpstfbtds2`, resource group
+  `my-little-days-pilot-rg`, hosting tenant
+  `7b7e6e31-a778-4334-aee2-e969fa27fd0e`, subscription
+  `4768a858-f23f-4a39-bb64-eabc9c142627`, no new slot or settings change.
+- Catalog/checksum-journal verification passed with **zero pending scripts**,
+  none applied. Only run-owned firewall rule `github-db-38445012598-1` was
+  removed and its absence rechecked. OneDeploy
+  `23b3b48d-1ed9-4e9c-840c-26ff9d480fb8`; package success **18:20:42 UTC**,
+  bounded liveness success **18:22:03 UTC** after one transient startup 500.
+- Fresh UI preflight observed trusted-branch restrictions on both deployment
+  environments, no required reviewers/wait timer, administrator bypass enabled.
+  No protection was changed. Ordinary infrastructure enable/apply gates remain
+  false. No provider retention/spending dashboard was reopened.
+- Sequential anonymous boundary checks at **18:23:46 UTC**: live/ready 200;
+  session, AI capabilities and empty prediction POST 401. These are not
+  authenticated SQL or live-model acceptance. No private records/tokens sent.
+- Client tree `f45fbe3036632791c6d146baff6820ec1864da5b` contains 523 files,
+  exactly 13 approved overlays over immutable build65. Source archive SHA-256
+  `4062e9f2645bfe8eff172a7b24499d9d8d2fb30db49bc8fbd81a0fe9b684f53a`.
+  Fresh frozen checks passed **1063 full +75 focused AI +25 component +3 App
+  +5 privacy**, zero failures/skips. Browser data is synthetic; 28 captures and
+  37 hashed evidence items bind to this revision. Watch35/widget10 also passed.
+- Local **0.2.3 (66)** Store archive passed Phone/Watch/widget signature/profile,
+  production configuration, OTA-off, runtime, locale and dSYM UUID checks.
+  IPA SHA-256 `36775a1de30c462cc913abe3e314cadcfbbebd8cfa63c305a99cc95cf1a9a3b1`.
+  Actual signed-Hermes dataflow proves debug output is gated to iOS build66 only;
+  builds65/67 and non-iOS are disabled. Independent artifact audit reproduced the
+  proof and verified 77 source hashes and all three symbol sets. Final feature
+  inspection passed **18:25:10 UTC**. Operation-owned temporary certificate
+  copies were removed; existing managed credentials remain unchanged.
+- Apple validation passed **18:27:19 UTC**, no errors. The single exact-IPA
+  upload succeeded **18:29:31.441 UTC**, no errors, delivery
+  `aa6187f0-ebe0-43b3-ad87-83442af43fc6`. At **18:36:58 UTC** delivery remains
+  **PROCESSING**, no errors/warnings and no indexed build66 yet. Public
+  **0.2.2 (58)** remains READY_FOR_SALE. Do not re-upload this delivery. Only working-checkout
+  iOS build-number bookkeeping advanced 65→66 after upload; frozen artifacts
+  remain unchanged.
+
+Physical iPhone/iPad/Watch and authenticated real-provider acceptance remain
+pending. Browser disposition is scoped TestFlight **ship**; native disposition
+is **recapture**. This is not public App Store release approval. Do not use a
+real family session/payload to eliminate the test gap. Evidence is under
+`work/ai-overlap-release-20261014/` and `artifacts/MyLittleDays-0.2.3-66.*`.
+Merge only this checkpoint and its operation record into a fresh remote runbook;
+do not publish the dirty local runbook wholesale.
+
 ## Whole-day AI and build 65 checkpoint — 13 October 2026 UTC / 14 October AEDT
 
 See [the whole-day AI operation record](AI-WHOLE-DAY-2026-10-13.md) for the
