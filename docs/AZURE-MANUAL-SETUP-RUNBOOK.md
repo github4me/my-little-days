@@ -1,5 +1,61 @@
 # My Little Days: manual Azure and GitHub setup runbook
 
+## Whole-day AI and build 65 checkpoint — 13 October 2026 UTC / 14 October AEDT
+
+See [the whole-day AI operation record](AI-WHOLE-DAY-2026-10-13.md) for the
+historical preparation checkpoint, schema 2 behavior and preserved schema 1
+compatibility. This update records completed stages, not public-release approval.
+Existing model/services/settings are retained; no provider retention or
+spending-dashboard check was repeated and no new credential/resource was added.
+
+- Backend `bb0209163d769272df455e7542d4081809c35686` deployed in trusted-branch
+  workflow `38399539520`, attempt 2, completed **12:59:50 UTC**. Attempt 1 stopped
+  on an unrelated browser-fill assertion before migration/deployment; unchanged-
+  SHA rerun succeeded without weakening tests. The existing App Service is
+  `little-days-api-522fpstfbtds2` in `my-little-days-pilot-rg`, hosting tenant
+  `7b7e6e31-a778-4334-aee2-e969fa27fd0e`, subscription
+  `4768a858-f23f-4a39-bb64-eabc9c142627`; no slot/settings change was made.
+  Catalog/journal verification found **zero pending SQL scripts**, none applied;
+  only run-owned firewall rule `github-db-38399539520-2` was removed and verified
+  absent. Backend CI passed 406 API and 80 disposable-SQL migrator tests.
+- Anonymous sequential checks at **13:00:48 UTC**: health live/ready 200;
+  session, AI capabilities and empty prediction POST 401. These prove the public
+  boundaries, not authenticated SQL access or model inference. Evidence:
+  `work/ai-whole-day-20261013/backend-release-verification.json`.
+- Public privacy/support commit `be0b4d481d6138d167464a485523f2b7ed045c83` changed
+  only the two approved HTML files. Pages run `38399720457` succeeded; coordinator
+  verified both unchanged public URLs HTTP 200 and exact approved bytes. Full
+  hashes and renewed-consent/prior-plan disclosures are in the operation record.
+- Build 65 frozen tree `7c74ff35f0c19326f9e44b4e56611754b91b3327` contains 523
+  files with exactly 24 approved overlays/two additions over build64. Frozen
+  checks passed **1,042 full + 54 focused AI + 19 component + 3 App + 5 privacy**;
+  all failures/skips zero. Browser evidence is synthetic, source-bound and
+  isolated from native Metro transforms; 22 captures are retained.
+- Local **0.2.3 (65)** Store archive, Phone/Watch/widget signatures, production
+  configuration, OTA-off, dSYM UUIDs and exact signed-Hermes debug dataflow passed.
+  IPA SHA-256 `b49fe3811af22eb10e1d8ddac639975d2c9c4b7fe8e7231ad9517c3f961ad2e5`;
+  final feature inspection passed **13:06:38 UTC**. Operation-owned temporary
+  signing material was removed; existing managed credentials were unchanged.
+- Apple validation passed **13:08:41 UTC**; the single exact-IPA upload succeeded
+  **13:11:06.042 UTC**, with no errors. Delivery
+  `322d122f-0c08-4b94-97ae-01c3512d18fd` is **COMPLETE** at **13:15:00 UTC**,
+  with no errors/warnings. Exact **0.2.3 (65)** is **VALID / IN_BETA_TESTING**,
+  available to **Team (Expo)** and **Early Birds**, both internal groups.
+  External state is **READY_FOR_BETA_SUBMISSION**, not external approval.
+  Evidence: `release-prep/upload.json` and `apple-status-1791897300440.json`.
+  Do not re-upload this delivery. Public
+  **0.2.2 (58)** remains READY_FOR_SALE. After upload success, only the checkout's
+  iOS build-number bookkeeping advanced 64→65; frozen archive/IPA are unchanged.
+
+Signed-in provider/schema 1/2 and physical iPhone/iPad/Watch acceptance remain
+pending. Browser disposition is scoped TestFlight **ship**; native disposition
+is **recapture**, not a production certification. Evidence is under
+`work/ai-whole-day-20261013/release-prep/` and `artifacts/MyLittleDays-0.2.3-65.*`.
+For later GitHub publication, merge only this reviewed section into a freshly
+read remote runbook with an expected-SHA lease; never publish the dirty local
+runbook wholesale. The operation-owned `runbook-checkpoint-fragment.md` contains
+only this section.
+
 For recurring failure patterns, product decisions and future working rules, see [project lessons and working memory](PROJECT-LESSONS.md). This runbook remains the source for exact setup and dated deployment evidence.
 
 Last updated: 20 September 2026 (Australia/Sydney).
