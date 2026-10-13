@@ -128,6 +128,11 @@ await page.evaluate(() =>
 await page.getByRole("tab", { name: "今天", exact: true }).click();
 assert.equal(await page.getByText("最近记录", { exact: true }).count(), 0);
 await page.evaluate(() => {
+  // Keep the intended two-month-old play fixture stable as the real clock moves.
+  // Do not freeze the clock: later checks exercise live feeding timers.
+  const today = new Date();
+  const birth = new Date(today.getFullYear(), today.getMonth() - 2, 1);
+  const birthDate = `${birth.getFullYear()}-${String(birth.getMonth() + 1).padStart(2, "0")}-01`;
   const a = new Date();
   a.setDate(a.getDate() - 1);
   a.setHours(6, 2, 0, 0);
@@ -197,7 +202,7 @@ await page.evaluate(() => {
     "little-days-v1",
     JSON.stringify({
       schemaVersion: 1,
-      profile: { name: "QQ", birthDate: "2026-07-01", sex: "male" },
+      profile: { name: "QQ", birthDate, sex: "male" },
       entries,
     }),
   );
