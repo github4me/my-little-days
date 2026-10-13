@@ -46,9 +46,12 @@ budget/retention settings, output limits and isolated recorded facts remain.
   copies were removed; existing managed credentials remain unchanged.
 - Apple validation passed **18:27:19 UTC**, no errors. The single exact-IPA
   upload succeeded **18:29:31.441 UTC**, no errors, delivery
-  `aa6187f0-ebe0-43b3-ad87-83442af43fc6`. At **18:36:58 UTC** delivery remains
-  **PROCESSING**, no errors/warnings and no indexed build66 yet. Public
-  **0.2.2 (58)** remains READY_FOR_SALE. Do not re-upload this delivery. Only working-checkout
+  `aa6187f0-ebe0-43b3-ad87-83442af43fc6`. Final readback at **18:40:12 UTC**
+  confirmed delivery **COMPLETE**, no errors/warnings, and **0.2.3 (66)**
+  **VALID / IN_BETA_TESTING** in the existing internal **Team (Expo)** and
+  **Early Birds** groups. External state is READY_FOR_BETA_SUBMISSION; no external
+  review or group change occurred. Public **0.2.2 (58)** remains READY_FOR_SALE.
+  Do not re-upload this delivery. Only working-checkout
   iOS build-number bookkeeping advanced 65→66 after upload; frozen artifacts
   remain unchanged.
 

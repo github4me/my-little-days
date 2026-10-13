@@ -1,6 +1,6 @@
 # AI handling of overlapping sleep — 14 October 2026
 
-Status: owner-authorized TestFlight upload succeeded; Apple processing pending.
+Status: owner-authorized TestFlight upload and Apple processing completed; build 66 is available to the existing internal test groups.
 Scoped backend commit
 `fc5e8ecccf626e419d23c688d16f878e32c4f009` is frozen for workflow
 [`38445012598`](https://github.com/github4me/my-little-days/actions/runs/38445012598).
@@ -89,7 +89,7 @@ Native iPhone/iPad/Watch acceptance and real-provider interpretation quality
 remain unverified. Browser fixtures are synthetic, not evidence of clinical
 accuracy. Native finish disposition: **recapture**, not release certification.
 
-## Build 66 release checkpoint — uploaded, Apple processing pending
+## Build 66 release checkpoint — available in internal TestFlight
 
 - Fresh GitHub UI preflight verified both `family-database` and `family-pilot`
   restrict deployment to `feature/family-invitations`. Both currently have no
@@ -149,10 +149,12 @@ accuracy. Native finish disposition: **recapture**, not release certification.
   were unchanged. Apple validation passed **18:27:19 UTC**. The single exact-IPA
   upload succeeded **18:29:31.441 UTC**, no errors, delivery
   `aa6187f0-ebe0-43b3-ad87-83442af43fc6`. Preserve this delivery and do not upload
-  it again. At **18:36:58 UTC** delivery remains **PROCESSING**, with no errors
-  or warnings and no indexed build66 yet. Public **0.2.2 (58)** remains
-  READY_FOR_SALE. TestFlight availability is not yet confirmed; no device
-  install occurred. Only working-checkout iOS build-number bookkeeping advanced
+  it again. Final Apple readback at **18:40:12 UTC** confirmed delivery
+  **COMPLETE**, no errors/warnings, and **0.2.3 (66)** **VALID / IN_BETA_TESTING**
+  in the existing internal **Team (Expo)** and **Early Birds** groups. External
+  state is READY_FOR_BETA_SUBMISSION; no external review/group change was made.
+  Public **0.2.2 (58)** remains READY_FOR_SALE. No device install occurred.
+  Only working-checkout iOS build-number bookkeeping advanced
   65→66 after upload success; the frozen source and signed IPA are unchanged.
 - Operation receipts live under `work/ai-overlap-release-20261014/`; credentials,
   personal records and tokens must not be copied into the operation record.
