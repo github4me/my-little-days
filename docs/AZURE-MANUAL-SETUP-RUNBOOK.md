@@ -4,6 +4,29 @@ For recurring failure patterns, product decisions and future working rules, see 
 
 Last updated: 20 September 2026 (Australia/Sydney).
 
+## AI TestFlight and activation checkpoint — 13 October 2026
+
+See [the AI TestFlight operation record](AI-TESTFLIGHT-2026-10-13.md) for the
+current scoped build64 and activation procedure. The owner kept the AUD 50
+budget and approved public OpenAI disclosures. On the corrected OpenAI project,
+the existing enforced USD 50 ceiling was lowered to USD 25, with alerts at
+USD 5/25; final UI readback confirmed the lower enforced limit. This is a
+conservative equivalent with currency/tax/enforcement headroom, not an exact
+AUD-denominated guarantee. Retention controls were not reopened; the prior
+owner ZDR approval remains an attestation, not fresh independent verification.
+Privacy/support commit `6d99f4e467bf614f87797cce05754ed69f9f062c` was published
+to the existing public Pages repo, with successful deployment and exact live
+byte verification. Separate app consent remains required. On the existing
+production App Service, the four non-secret AI activation/approval gates were
+then saved true (basis and exact fields in the operation record), while the
+key stayed masked and unchanged, model remained `gpt-6-luna` and temperature
+support false. Post-change health/routing/authentication checks passed at
+10:34:10 UTC. This is not signed-in model/SQL or physical-device acceptance.
+Build64 frozen tests and signed Phone/Watch/widget inspections passed. Apple
+validation and the single upload succeeded at 10:46:11 UTC; exact delivery is
+PROCESSING with no errors/warnings at 10:46:25 UTC. TestFlight availability and
+device acceptance are not yet implied. Public App Store 0.2.2 (58) is unchanged.
+
 This is the operator's step-by-step reference for infrastructure, SQL bootstrap, customer authentication, API settings and releases. It records known values without storing secrets. Existing names containing `pilot` are compatibility identifiers: do not rename them or create replacement resources just because the product now supports full family sharing.
 
 **Security release prerequisite (17 September):** follow the [security remediation and release checklist](SECURITY-REMEDIATION-2026-09-17.md) before the next database/API deployment. It documents automatic exact-IP firewall checks, additive DbUp migration 0004, the restore maintenance gate and the new native-only preview runtime. A manually maintained GitHub IP list is no longer required. No live firewall/settings changes or production restore were performed by that code remediation. Independent recovery evidence remains required; a maintenance flag is not a recovery ledger.
