@@ -1,5 +1,61 @@
 # My Little Days: manual Azure and GitHub setup runbook
 
+## AI hourly allowance and friendly failure reasons — 14 October 2026 AEDT
+
+Owner requested 30 AI attempts/account/hour, plain-language failure reasons under
+How to use, and TestFlight. Backend change is frozen at
+`d1cef775b8ea628c02b487e268aeb5648cd83cc3`, published via the GitHub plugin over
+`47c52fb8740b0a68da2e1dba8888dc65750d2d38`; only five service/config/test files
+changed. Deployment [38487274921](https://github.com/github4me/my-little-days/actions/runs/38487274921)
+was dispatched from `feature/family-invitations` with `database_bootstrapped=true`
+and `adopt_ef=false`. All five jobs completed successfully at **14 October
+00:03:30 UTC**. Same-run API461/migrator80 passed, exact artifact hashes matched;
+catalog/checksum validation returned zero pending scripts before/apply/after,
+none applied. Run-owned firewall rule `github-db-38487274921-1` removed and
+verified. OneDeploy `9e9d1f66-2667-4939-86f5-c55d3323ef5e` active/complete,
+status4; public liveness passed00:03:26.951UTC. No signed-in provider success or
+authenticated app SQL-backed readiness is inferred from this deployment.
+See [backend contract and tests](AI-FAILURE-BACKEND-2026-10-14.md) and
+[build 71 release evidence](AI-FAILURE-FEEDBACK-TESTFLIGHT-2026-10-14.md).
+
+Fresh manual checks used **Azure Portal → reticle.com.au tenant → subscription
+4768a858-f23f-4a39-bb64-eabc9c142627 → my-little-days-pilot-rg →
+little-days-api-522fpstfbtds2 → Settings → Environment variables → App settings**.
+The complete masked 26-setting list contained no `SleepAi__MaxRequestsPerAccountPerHour`
+or daily-limit override. No setting or secret was opened/edited; after deployment,
+the reviewed packaged `appsettings.json` value 30 therefore applies. Fixed UTC-hour
+account counters remain in-memory; this is not a distributed or rolling quota.
+Daily 200 attempts/instance, two simultaneous requests, one invalid-output repair,
+60-second AI timeouts, model, prompt, consent and AU$50 safeguards are unchanged.
+Provider retention/spending dashboards were not reopened.
+
+Fresh GitHub **Settings → Environments → family-pilot / family-database** checks
+confirmed only `feature/family-invitations`, no required reviewer or wait timer,
+and administrator bypass enabled. This is the actual protection state, not a
+claim of mandatory approval. Both existing deploy/migration gates were true and
+the target tenant/subscription/resource names matched above. No environment
+protection, infra gate, identity, or SQL configuration changed. No new SQL scripts.
+
+Apple/Expo read-only preflight confirmed build 70 COMPLETE / VALID /
+IN_BETA_TESTING in existing Team (Expo) and Early Birds groups, build 71 absent,
+production URL/IDs/scope/demo flag, Store distribution, runtime 0.2.3 and OTA off.
+All three existing signing sets match and expire 6 September 2027. Build 71 uses
+immutable build 70 plus twelve reviewed client/test overlays and app build number.
+Local Store archive/export and exact IPA/config/signature/Hermes/dSYM checks
+passed. Fresh tests:1077full,106AI/client,48component,3App,5privacy,35Watch,
+10widget. IPA SHA256 `87d00d175c8292aa86a0286372ebbb585c2af71433854638871532b41c394aad`.
+Independent artifact review passed. Apple validation00:15:54.738UTC and one
+upload00:17:57.565UTC succeeded, no errors; delivery
+`c2a15f43-47fc-4f4f-9687-a82cb1a17b8a`. Latest readback00:20:01.579UTC:
+PROCESSING, no errors/warnings, build71 not yet indexed. **Do not upload again.**
+Checkout build number is now71. See linked release evidence for exact hashes and
+later processing state; upload does not establish tester/device acceptance.
+Three operation-owned temporary signing copies and uploader submission-key
+copies were cleaned; managed originals remain. Public0.2.2(58) is unchanged.
+Physical iPhone is paired but its connection/lock-state check failed; no app was
+uninstalled or data reset. Exact prior live AI failure remains unproven.
+
+
 ## One-minute AI backend timeouts — 14 October 2026 AEDT
 
 The owner confirmed each AI stage is limited to one minute; the nested limits
