@@ -571,6 +571,21 @@ public sealed class SleepAiTests
         Assert.Equal(4096, root.GetProperty("max_output_tokens").GetInt32());
         Assert.False(root.TryGetProperty("previous_response_id", out _)); Assert.False(root.TryGetProperty("conversation", out _));
         Assert.False(root.TryGetProperty("tools", out var tools) && tools.GetArrayLength() > 0);
+        var system = root.GetProperty("input").EnumerateArray().Single(item => item.GetProperty("role").GetString() == "system")
+            .GetProperty("content")[0].GetProperty("text").GetString()!;
+        Assert.Contains("WHO guidance", system);
+        Assert.Contains("Australian Government-supported Raising Children Network", system);
+        Assert.Contains("soft starting points, anchored to usable recorded sleep timing", system);
+        Assert.Contains("If no usable timing anchor or repeatable sleep pattern exists, return insufficient_data rather than invent clock times", system);
+        Assert.Contains("Return only future periods: now <= sootheStart < sootheEnd <= sleepStart < sleepEnd", system);
+        Assert.Contains("Return insufficient_data with an empty periods array when evidence is insufficient, conflicting or any sleep is ongoing", system);
+        Assert.Contains("Output no more than 12 periods", system);
+        Assert.Contains("Do not browse, use tools, fetch sources or use stored conversations", system);
+        Assert.DoesNotContain("WHOLE-DAY RE-ESTIMATION", system);
+        Assert.DoesNotContain("previousEstimate", system);
+        Assert.Equal("string", root.GetProperty("text").GetProperty("format").GetProperty("schema")
+            .GetProperty("properties").GetProperty("periods").GetProperty("items").GetProperty("properties")
+            .GetProperty("sootheStart").GetProperty("type").GetString());
         Assert.Equal(1, transport.Calls);
     }
 

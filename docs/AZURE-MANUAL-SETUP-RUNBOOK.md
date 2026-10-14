@@ -1,5 +1,63 @@
 # My Little Days: manual Azure and GitHub setup runbook
 
+## Embedded sleep reference prompt and one-tap AI candidate — 14 October 2026 AEDT
+
+Owner approved the displayed sparse-data prompt and requested the simplified
+AI controls, TestFlight and Apple App Review. This is a preparation checkpoint:
+the backend prompt and SDK tests are complete; publication, deployment, signed
+mobile release, Apple processing, TestFlight availability and review submission
+are **pending** here. Public approval/release is not implied. See
+[the scoped prompt record](AI-REFERENCE-PROMPT-2026-10-14.md).
+
+Backend publication is limited to `SleepAiService.cs`, `SleepAiWholeDayTests.cs`,
+`SleepAiTests.cs`, the new prompt record and this insertion over trusted-branch
+parent `622330cbe9743c5119c4b602d2c9cb857a01d610`, tree
+`e71b02f1b705e619e4ec8a5c331f38d3ddca4266`. Only reviewed prompt text and actual SDK
+request assertions differ in the three code files. Do not publish the dirty
+checkout or the dirty local runbook wholesale. No new SQL script, Azure service,
+credential, model, consent version, quota, timeout or provider retention/spend
+setting change is needed. Existing AU$50 safeguards remain unchanged.
+
+Primary WHO daily-sleep and Raising Children Network tiredness references were
+reviewed and embedded as soft sparse-data context, not fixed wake-window rules.
+The AI does not browse. Actual records outrank previous estimates; missing data
+must not be fabricated to fill a schedule. The whole-day and old-client temporal
+contracts remain unchanged. Local isolated tests passed **195/195**, zero skipped;
+the full non-incremental backend build passed with zero warnings/errors. These
+synthetic checks are not evidence of clinical accuracy or live-provider success.
+
+Fresh root-agent GitHub UI read-only checks at approximately **04:37 UTC**:
+**github4me/my-little-days → Settings → Environments → family-pilot and
+family-database**. Both permit only `feature/family-invitations` (one branch,
+zero tags); required reviewers and wait timer are off, administrator bypass is
+on. Existing API/database enable flags are true. Target values match hosting
+tenant `7b7e6e31-a778-4334-aee2-e969fa27fd0e`, subscription
+`4768a858-f23f-4a39-bb64-eabc9c142627`, resource group `my-little-days-pilot-rg`,
+App Service `little-days-api-522fpstfbtds2`, SQL server
+`little-days-sql-522fpstfbtds2` and database `little-days-family`. Pilot client is
+`aed2ef4a-881b-47c0-9423-304b7bf3f42a`; database client is
+`f122630b-8e09-4aa1-a6c4-1bb122945afb`. No settings were changed. These are the
+observed protections, not a mandatory human approval gate; recheck if the
+trusted head or environment changes before dispatch.
+
+After a reviewed immutable GitHub plugin commit: **Actions → Deploy family API
+and database → Run workflow**; choose `feature/family-invitations`, set
+`database_bootstrapped=true`, `adopt_ef=false`. Expected result: same-revision CI,
+no new migrations and explicit **zero pending scripts**, successful exact-artifact
+deployment and cleanup of only the run-owned firewall rule. Retain run/commit,
+artifact hashes, catalog/checksum and cleanup receipts. Use bounded sequential
+health checks after startup; anonymous live/ready checks do not prove signed-in
+SQL job creation or real OpenAI completion. Do not change the ordinary
+infrastructure gates, SQL tier, security settings or provider dashboards.
+
+The mobile candidate must be built locally from frozen reviewed source; inspect
+Phone/Watch/widget Store signatures, production public values, runtime and
+OTA-off before a single Apple upload. Recheck exact build processing/tester
+availability before App Review submission and record that submission separately.
+Never treat the prior 73 upload as this candidate's acceptance. Physical iOS,
+paired Watch/widget and authenticated provider acceptance remain separate until
+demonstrated; do not uninstall/reset data-bearing apps to test them.
+
 ## Durable AI jobs — TestFlight 73, 14 October 2026 AEDT
 
 Owner requested implementation and TestFlight after pausing public App Review.
