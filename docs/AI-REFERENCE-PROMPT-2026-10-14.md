@@ -99,3 +99,49 @@ cleanup, deployment and bounded health evidence after execution. Then separately
 record the locally signed mobile artifact, one Apple upload, processing and
 TestFlight availability, and actual App Review submission state. Health checks
 do not prove authenticated SQL/provider or physical iOS app-switch acceptance.
+
+## Backend deployment checkpoint — 04:48 UTC
+
+The preparation status above is superseded for the backend only. The GitHub plugin
+published the exact five-file scope at
+`bf69205e77f2fe0216cd21e7f01c99b65540009f`, tree
+`ca46c02c167061660e5fb55b9e4d327d0e33d0f5`, over the reviewed parent. Independent
+readback at 04:41:52 UTC confirmed all five blobs byte-for-byte, no other changed
+paths, and unchanged immutable migration script blobs.
+
+[Deploy run 38512741393](https://github.com/github4me/my-little-days/actions/runs/38512741393),
+attempt 1, completed **successfully at 04:47:54 UTC** for that exact revision.
+All five jobs succeeded. Same-run real SQL/API tests passed **493**, migrator
+tests **91**, with zero failures or skips. Remote-tree TypeScript tests passed
+**718**, with zero failures or skips; general, Apple-guidance, sleep-chart and
+family-demo browser jobs passed. This remote backend tree is not the separately
+frozen mobile candidate, so these are not that candidate's test counts.
+
+The immutable uploaded and downloaded artifact SHA-256 values matched:
+
+- API `family-api-38512741393`, artifact `11870822045`:
+  `ee515d22648d3dcfa28024d844c91b7cad800355d84e52d159af76fcfa8f5d76`.
+- Database `family-database-38512741393`, artifact `11870617579`:
+  `386add3a0d74b860febee04f4157b1e2b345b70b826b535fb9bcab94463786c9`.
+
+Production migration checks reported zero pending before, during and after the
+no-op apply. The post-apply catalog/checksum-journal check completed at
+**04:46:47 UTC**, explicitly **zero pending scripts**; no new scripts were applied.
+Only run-owned firewall rule `github-db-38512741393-1` was removed, with absence
+rechecked, at **04:46:48 UTC**. The recovery cleanup step also succeeded.
+
+OneDeploy `73c79631-e79e-42e4-a37a-3bcbcdb3e9a3` completed at
+**04:47:48 UTC**, status 4, complete and active. Workflow liveness passed at
+04:47:51 UTC. Independent sequential anonymous GET checks at
+**04:48:26–04:48:27 UTC** returned live/ready **200**, and session, legacy AI
+capabilities and job capabilities **401**. No cookies, bearer token, child records
+or provider credentials were sent. These checks do not demonstrate signed-in
+SQL operations, live OpenAI completion or physical-device acceptance.
+
+Sanitized local receipts are under `work/ai-prompt-release74-20261014/`:
+`publication-verification.json`, `workflow-artifacts.json`, `ci-verification.json`,
+`deployment-run-success.json`, `deployment-verification.json`, and
+`boundary-check-1791953307710.json`. They contain metadata only, not private family
+payloads. No new services, settings, credentials, migrations or provider dashboard
+changes occurred in this scoped prompt release. The mobile/TestFlight and App
+Review gates remain separate and are not claimed complete by this checkpoint.

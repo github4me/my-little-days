@@ -1,5 +1,97 @@
 # My Little Days: manual Azure and GitHub setup runbook
 
+## One-tap AI mobile release and App Review preparation — 14 October 2026 AEDT
+
+The owner authorized the reviewed sparse-data prompt/UI, TestFlight and public
+App Review. Full scope, immutable inputs and remaining acceptance boundaries:
+[AI reference and UI release](AI-REFERENCE-UI-RELEASE-2026-10-14.md).
+
+**Mobile build 74:** source tree `63ce47eaf1bd19c6f867242372326690a49c6f76`,
+535 files, preserving build 73 plus five reviewed overlays. Frozen verification
+passed 1,156 tests, 199 scoped AI client tests, 57 component/4 full-app/5 privacy
+browser cases and the general browser suite. Local-only Mac production archive;
+Phone/Watch/widget Store signatures, symbols, runtime 0.2.3, disabled OTA,
+production configuration, demo off and compiled feature inspection passed.
+IPA SHA-256 `18d57578daf9ae1e5e579203328e731c7e77e95226fdac24e473318163d89439`.
+Apple validation succeeded 04:48:06 UTC; one upload succeeded 04:50:08 UTC,
+delivery `0997c5b8-ed69-4f67-abf2-55c71baca6a6`. At 04:54:07 UTC the exact build
+was VALID / IN_BETA_TESTING in existing internal groups Team (Expo) and Early
+Birds; delivery COMPLETE with no errors/warnings. No duplicate upload or group
+change was made. External status is READY_FOR_BETA_SUBMISSION, not external-beta
+approval. Physical installation remains separate.
+
+**Public support/privacy:** root-approved exact HTML text replacements only,
+GitHub plugin commit `f8626f0c4e1b34dfe0ffad857c8794eaae556f3a` in
+`github4me/my-little-days-privacy`, main. Pages run 38512555712 succeeded and
+04:40:53 UTC public HTTP 200 readback matched reviewed bytes. The pages describe
+one-tap optional consent and public 0.2.3 while retaining asynchronous storage,
+minimization, OpenAI and expiry/cancellation terms. No other website file changed.
+
+**Apple draft:** App Store Connect → Apps → My Little Days (6809826484) →
+iOS 0.2.3, version ID `c76215c3-f614-4d15-a1b6-ae28cab3372b`.
+Description, What's New and reviewer notes were saved/read back in en-AU;
+`PREPARE_FOR_SUBMISSION`, existing `AFTER_APPROVAL` release policy preserved.
+At 04:54:42 UTC exact processed build 74, ID
+`0997c5b8-ed69-4f67-abf2-55c71baca6a6`, was selected and read back. No
+ReviewSubmission was created and no App Review submission is made.
+The reviewer-owned email/OTP access method is preserved; no shared account or
+fixed password was created. Verify signed-in access separately before submission.
+
+**Remaining manual privacy step:** owner authentication is needed in App Store
+Connect → Apps → My Little Days → App Privacy → Health → Edit. Keep existing
+App Functionality; add Product Personalization for personalized sleep guidance.
+For the added purpose, verify linked to identity and not used for tracking;
+preserve all other answers. Preview and publish the authorized change, then
+read back the public label: all 11 original App Functionality categories remain;
+Product Personalization contains Health, Other User Content and Other Data
+Types; no tracking category is introduced. Website publication does not perform
+this Apple questionnaire step. The fresh browser tab is waiting for owner login.
+
+All 12 retained genuine core-feature screenshots were visually/hash reviewed.
+They are representative, not current build 74 captures: Records section order
+differs, and two iPad images retain the 0.2.2/58 footer. No AI imagery or accuracy
+claims were added. Root accepted retaining them as representative core-feature
+marketing assets without edits and reviewed the outstanding native gaps, without
+claiming device acceptance. App Review remains blocked on authenticated owner
+access and the Health-purpose privacy update; submission is a separate final gate.
+Physical iPhone/Watch/widget and live authenticated provider operation were not
+proved by synthetic tests, signing, health checks or upload. No data-bearing app
+was uninstalled/reset; model, AU$50 safeguards and provider dashboards unchanged.
+
+
+## Backend prompt deployment completion — 14 October 2026, 04:48 UTC
+
+The preparation checkpoint is now complete for the backend only. GitHub
+plugin commit `bf69205e77f2fe0216cd21e7f01c99b65540009f` contains exactly the five
+reviewed files, tree `ca46c02c167061660e5fb55b9e4d327d0e33d0f5`. Independent
+04:41:52 UTC readback matched every published blob and unchanged immutable SQL
+scripts. [Deploy run 38512741393](https://github.com/github4me/my-little-days/actions/runs/38512741393),
+attempt 1, completed at **04:47:54 UTC** with all five jobs successful on that
+revision. Same-run API/real-SQL **493** and migrator **91** tests passed, zero
+failures/skips. Remote-tree TypeScript **718** plus browser checks passed; those
+counts are distinct from the frozen mobile candidate's verification.
+
+API artifact `11870822045` upload/download SHA-256
+`ee515d22648d3dcfa28024d844c91b7cad800355d84e52d159af76fcfa8f5d76` and database
+artifact `11870617579` SHA-256
+`386add3a0d74b860febee04f4157b1e2b345b70b826b535fb9bcab94463786c9` matched.
+No scripts were applied; pre/apply/post checks reported zero pending, including
+the final catalog/checksum-journal check at **04:46:47 UTC**. Run-only firewall
+rule `github-db-38512741393-1` was removed and absence verified at **04:46:48 UTC**;
+recovery cleanup succeeded. OneDeploy
+`73c79631-e79e-42e4-a37a-3bcbcdb3e9a3` ended **04:47:48 UTC**, status 4,
+complete/active; workflow liveness passed 04:47:51 UTC.
+
+Independent anonymous sequential checks at **04:48:26–04:48:27 UTC** returned
+live/ready 200 and session/legacy-AI-capabilities/job-capabilities 401. No bearer
+token, private records or provider requests were used. This confirms process
+and anonymous access boundaries, not authenticated SQL/provider or native
+app-switch acceptance. No settings, new services or provider dashboard changes
+were made. [Prompt evidence](AI-REFERENCE-PROMPT-2026-10-14.md) and sanitized
+local operation receipts identify each boundary. TestFlight processing, tester
+availability, physical acceptance and actual Apple review submission remain
+separate checkpoints; do not mark them complete from this backend success.
+
 ## Embedded sleep reference prompt and one-tap AI candidate — 14 October 2026 AEDT
 
 Owner approved the displayed sparse-data prompt and requested the simplified
