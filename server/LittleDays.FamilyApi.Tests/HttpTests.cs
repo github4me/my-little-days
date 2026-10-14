@@ -10,6 +10,8 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Microsoft.IdentityModel.Protocols;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Microsoft.IdentityModel.Tokens;
@@ -254,6 +256,14 @@ public sealed class TestHost(PilotConfiguration config, string? connection = nul
         foreach (var pair in Values(config)) builder.UseSetting(pair.Key, pair.Value);
         foreach (var pair in overrides ?? new Dictionary<string, string?>()) builder.UseSetting(pair.Key, pair.Value);
         builder.UseSetting("ConnectionStrings:FamilyDatabase", connection ?? "Server=unconfigured.invalid;Database=unused;Integrated Security=true");
+        builder.ConfigureTestServices(services =>
+        {
+            // HTTP-only tests use provider/access fakes and intentionally no SQL.
+            // Durable store/worker behavior is exercised by isolated SQL tests.
+            if (connection is null) services.RemoveAll<ISleepAiAttemptStore>();
+            foreach (var worker in services.Where(x => x.ServiceType == typeof(IHostedService) &&
+                x.ImplementationType == typeof(SleepAiJobWorker)).ToArray()) services.Remove(worker);
+        });
         builder.ConfigureTestServices(services => services.PostConfigure<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme, options =>
         {
             var metadata = new OpenIdConnectConfiguration { Issuer = config.Entra.Authority };

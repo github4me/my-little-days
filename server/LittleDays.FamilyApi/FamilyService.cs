@@ -315,6 +315,13 @@ public sealed partial class FamilyService(PilotDatabase db, PilotConfiguration c
             throw new ApiException(409, "family_owner_cannot_delete");
         var row = new AccountDeletionRow { UserId = user.ObjectId, OperationId = request.OperationId, RequestedAt = Now, ReceiptHash = receiptHash, PendingEmail = user.Email };
         db.AccountDeletions.Add(row);
+        // Durable AI snapshots are optional feature data, not family records.
+        // Remove them synchronously when the account is denied access.
+        await db.SleepAiJobs.Where(x => x.UserId == user.ObjectId).ExecuteUpdateAsync(s => s
+            .SetProperty(x => x.State, "cancelled").SetProperty(x => x.RequestJson, (string?)null)
+            .SetProperty(x => x.ResultJson, (string?)null).SetProperty(x => x.ErrorCode, (string?)null)
+            .SetProperty(x => x.LeaseId, (Guid?)null).SetProperty(x => x.LeaseUntil, (DateTimeOffset?)null)
+            .SetProperty(x => x.UpdatedAt, Now), ct);
         // Include old grants and the current creator-or-last-editor erasure policy.
         await db.PushInstallations.Where(x => x.UserId == user.ObjectId).ExecuteUpdateAsync(s => s
             .SetProperty(x => x.Enabled, false).SetProperty(x => x.TokenHash, (string?)null).SetProperty(x => x.ProtectedToken, ""), ct);
@@ -603,6 +610,11 @@ public sealed partial class FamilyService(PilotDatabase db, PilotConfiguration c
     private async Task EndGrant(MembershipRow grant, string status, CancellationToken ct)
     {
         grant.Active = false; grant.EndedAt = Now; grant.Status = status;
+        await db.SleepAiJobs.Where(x => x.MembershipId == grant.Id).ExecuteUpdateAsync(s => s
+            .SetProperty(x => x.State, "cancelled").SetProperty(x => x.RequestJson, (string?)null)
+            .SetProperty(x => x.ResultJson, (string?)null).SetProperty(x => x.ErrorCode, (string?)null)
+            .SetProperty(x => x.LeaseId, (Guid?)null).SetProperty(x => x.LeaseUntil, (DateTimeOffset?)null)
+            .SetProperty(x => x.UpdatedAt, Now), ct);
         await db.PushInstallations.Where(x => x.MembershipId == grant.Id)
             .ExecuteUpdateAsync(s => s.SetProperty(x => x.Enabled, false).SetProperty(x => x.TokenHash, (string?)null)
                 .SetProperty(x => x.ProtectedToken, ""), ct);

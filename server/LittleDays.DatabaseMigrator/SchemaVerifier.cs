@@ -16,7 +16,7 @@ internal static class SchemaVerifier
         "0003_FamilySharedExtras.sql", "0004_FamilyAvailabilityBounds.sql",
         "0005_QueryIndexesAndOperationCounts.sql", "0006_FamilyPushAndTimerIndex.sql",
         "0007_TimerEndAttribution.sql", "0008_WidenPushLocale.sql",
-        "0009_ConflictReplacementAudit.sql"
+        "0009_ConflictReplacementAudit.sql", "0010_DurableSleepAiJobs.sql"
     ];
 
     internal static int Version(IEnumerable<string> applied) => applied
@@ -81,6 +81,29 @@ internal static class SchemaVerifier
             expected[("FamilyRecords", "ConflictPreviousEditedBy")] = new(36, 16, Nullable: true);
             expected[("FamilyRecords", "ConflictReplacedAt")] = new(43, 10, 34, 7, true);
             expected[("FamilyRecords", "ConflictPreviousJson")] = new(231, 2048, Nullable: true);
+        }
+        if (version >= 10)
+        {
+            foreach (var table in new[] { "SleepAiJobs", "SleepAiRevocations", "SleepAiAttempts" })
+            {
+                expected[(table, "UserId")] = new(36, 16);
+                expected[(table, "Id")] = new(36, 16);
+            }
+            expected[("SleepAiJobs", "ConsentGeneration")] = new(36, 16);
+            foreach (var name in new[] { "FamilyId", "MembershipId", "HistoryId", "LeaseId" })
+                expected[("SleepAiJobs", name)] = new(36, 16, Nullable: true);
+            foreach (var name in new[] { "InputRevision", "RequestHash" }) expected[("SleepAiJobs", name)] = new(167, 64);
+            expected[("SleepAiJobs", "State")] = new(167, 12);
+            expected[("SleepAiJobs", "ErrorCode")] = new(167, 40, Nullable: true);
+            expected[("SleepAiJobs", "Runs")] = new(56, 4);
+            foreach (var name in new[] { "RequestJson", "ResultJson" }) expected[("SleepAiJobs", name)] = new(231, -1, Nullable: true);
+            foreach (var name in new[] { "RequestNow", "CreatedAt", "UpdatedAt", "ExpiresAt" })
+                expected[("SleepAiJobs", name)] = new(43, 10, 34, 7);
+            expected[("SleepAiJobs", "LeaseUntil")] = new(43, 10, 34, 7, true);
+            expected[("SleepAiRevocations", "Kind")] = new(167, 8);
+            expected[("SleepAiRevocations", "ExpiresAt")] = new(43, 10, 34, 7);
+            expected[("SleepAiAttempts", "StartedAt")] = new(43, 10, 34, 7);
+            expected[("SleepAiAttempts", "LeaseUntil")] = new(43, 10, 34, 7, true);
         }
         using var command = factory();
         command.CommandText = """
@@ -197,6 +220,20 @@ internal static class SchemaVerifier
                     Filter: "ConflictReplacedBy IS NOT NULL"),
                 new("FamilyRecords", "IX_FamilyRecords_ConflictPreviousEditedBy", ["ConflictPreviousEditedBy"],
                     Filter: "ConflictPreviousEditedBy IS NOT NULL")
+            ]);
+        if (version >= 10)
+            indexes.AddRange([
+                new("SleepAiJobs", "PK_SleepAiJobs", ["UserId", "Id"], true, Primary: true),
+                new("SleepAiJobs", "IX_SleepAiJobs_State_CreatedAt", ["State", "CreatedAt"]),
+                new("SleepAiJobs", "IX_SleepAiJobs_ExpiresAt", ["ExpiresAt"]),
+                new("SleepAiJobs", "IX_SleepAiJobs_UserId_ConsentGeneration", ["UserId", "ConsentGeneration"]),
+                new("SleepAiJobs", "IX_SleepAiJobs_MembershipId", ["MembershipId"]),
+                new("SleepAiRevocations", "PK_SleepAiRevocations", ["UserId", "Kind", "Id"], true, Primary: true),
+                new("SleepAiRevocations", "IX_SleepAiRevocations_ExpiresAt", ["ExpiresAt"]),
+                new("SleepAiAttempts", "PK_SleepAiAttempts", ["Id"], true, Primary: true),
+                new("SleepAiAttempts", "IX_SleepAiAttempts_UserId_StartedAt", ["UserId", "StartedAt"]),
+                new("SleepAiAttempts", "IX_SleepAiAttempts_StartedAt", ["StartedAt"]),
+                new("SleepAiAttempts", "IX_SleepAiAttempts_LeaseUntil", ["LeaseUntil"])
             ]);
         return indexes;
     }
@@ -318,6 +355,15 @@ internal static class SchemaVerifier
             expected["FamilyNotificationEvents.CK_FamilyNotificationEvents_Category"] = "Category IN ('feed', 'diaper', 'sleep')";
             expected["NotificationSummaryBuckets.CK_NotificationSummaryBuckets_State"] = "State IN ('pending', 'leased', 'receipt', 'sent', 'cancelled', 'failed')";
             expected["NotificationSummaryBuckets.CK_NotificationSummaryBuckets_Attempts"] = "Attempts >= 0";
+        }
+        if (version >= 10)
+        {
+            expected["SleepAiJobs.CK_SleepAiJobs_State"] = "State IN ('queued','running','completed','failed','cancelled','expired')";
+            expected["SleepAiJobs.CK_SleepAiJobs_Runs"] = "Runs >= 0 AND Runs <= 2";
+            expected["SleepAiJobs.CK_SleepAiJobs_Context"] = "(FamilyId IS NULL AND MembershipId IS NULL AND HistoryId IS NULL) OR (FamilyId IS NOT NULL AND MembershipId IS NOT NULL AND HistoryId IS NOT NULL)";
+            expected["SleepAiJobs.CK_SleepAiJobs_Request"] = "RequestJson IS NULL OR (ISJSON(RequestJson) = 1 AND DATALENGTH(RequestJson) <= 393216)";
+            expected["SleepAiJobs.CK_SleepAiJobs_Result"] = "ResultJson IS NULL OR (ISJSON(ResultJson) = 1 AND DATALENGTH(ResultJson) <= 32768)";
+            expected["SleepAiRevocations.CK_SleepAiRevocations_Kind"] = "Kind IN ('job','consent')";
         }
         using var command = factory();
         command.CommandText = """

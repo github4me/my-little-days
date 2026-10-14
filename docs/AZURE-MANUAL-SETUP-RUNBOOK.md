@@ -1,5 +1,58 @@
 # My Little Days: manual Azure and GitHub setup runbook
 
+## Durable AI jobs — candidate 73, 14 October 2026 AEDT
+
+Owner requested implementation and TestFlight after pausing public App Review.
+The candidate replaces the phone's long prediction request with an acknowledged
+SQL job, existing-App-Service background processing and authenticated polling.
+No new paid Azure/Expo service, OpenAI model, provider retention or spend-setting
+change is authorized or needed. Public submission remains paused. Implementation,
+tests, deployment and Apple delivery are separate gates; this entry is not a
+completion receipt.
+
+Fresh read-only Azure Portal check: **reticle.com.au / Default Directory**
+(`7b7e6e31-a778-4334-aee2-e969fa27fd0e`) → subscription
+`4768a858-f23f-4a39-bb64-eabc9c142627` → resource group
+`my-little-days-pilot-rg` → App Service `little-days-api-522fpstfbtds2` →
+Settings → Configuration → General settings. **Always On is on**, HTTPS-only
+on, minimum TLS1.2, FTP disabled, SCM/FTP basic authentication off. Apply and
+Discard were disabled: no settings were changed. Existing Always On permits
+the in-process background worker; durable leases still handle process restarts.
+
+GitHub **Settings → Environments → family-pilot / family-database**, checked
+at approximately **02:03–02:04 UTC**: both allow only the branch
+`feature/family-invitations` (one branch, zero tags), required reviewers off,
+wait timer off, administrator bypass on, no environment secrets. This describes
+the actual protections, not mandatory human approval. Both existing enable
+variables are `true`. Pilot values match the above tenant/subscription, app and
+HTTPS public URL; client ID is `aed2ef4a-881b-47c0-9423-304b7bf3f42a`. Database
+client ID is `f122630b-8e09-4aa1-a6c4-1bb122945afb`, server
+`little-days-sql-522fpstfbtds2`, database `little-days-family`, same resource group.
+No environment/identity/firewall/security settings were changed.
+
+Deployment procedure, only after reviewed tests and a pinned GitHub commit:
+**Actions → Deploy family API and database → Run workflow**, choose
+`feature/family-invitations`, set `database_bootstrapped=true` after reviewing
+additive migration `0010_DurableSleepAiJobs.sql`, and leave `adopt_ef=false`.
+The existing workflow verifies that exact trusted-branch SHA, runs CI including
+disposable SQL tests, migrates with DbUp and cleans its exact temporary runner
+firewall rule before deploying the API. Verify the catalog/checksums and explicit
+zero pending scripts after migration, workflow artifacts/SHA and cleanup evidence.
+Check live/ready and protected job routes with bounded startup propagation;
+generic health is not signed-in SQL/provider acceptance. Do not re-enable the
+ordinary infrastructure path or change the existing SQL tier.
+
+New jobs use explicit consent `sleep-ai-jobs-v1`; older prediction clients remain
+supported. Public support/privacy wording and in-app consent must describe
+temporary request/result storage and cancellation before distributing 73.
+The existing GitHub Pages repository is `github4me/my-little-days-privacy`,
+branch `main`, paths `docs/index.html` and `docs/privacy/index.html`. Publish only
+reviewed scoped changes through the GitHub plugin and verify both public URLs.
+Build iOS locally from immutable build72 plus exact reviewed overlays; inspect
+Phone/Watch/widget Store signatures, production config, runtime0.2.3 and OTA-off
+before one Apple upload. The paired iPhone is locked; no uninstall or data reset
+is allowed. Native app-switch acceptance remains outstanding until demonstrated.
+
 ## AI hourly allowance and friendly failure reasons — 14 October 2026 AEDT
 
 Owner requested 30 AI attempts/account/hour, plain-language failure reasons under

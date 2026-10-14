@@ -17,6 +17,7 @@ public sealed partial class PilotDatabase(DbContextOptions<PilotDatabase> option
     protected override void OnModelCreating(ModelBuilder model)
     {
         ConfigurePush(model);
+        ConfigureSleepAiJobs(model);
         model.Entity<FamilyRow>(entity =>
         {
             entity.HasKey(x => x.Id);

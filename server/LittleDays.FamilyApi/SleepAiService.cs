@@ -181,17 +181,27 @@ public interface ISleepAiService
 }
 
 public sealed class SleepAiService(IOptions<SleepAiOptions> options, ISleepAiAccess access, ISleepAiProvider provider,
-    SleepAiBudget budget, TimeProvider clock) : ISleepAiService
+    SleepAiBudget budget, TimeProvider clock, ISleepAiAttemptStore? attempts = null) : ISleepAiService
 {
     public SleepPredictionCapabilities Capabilities => new(options.Value.IsAvailable, SleepAiValidation.ConsentVersion, "OpenAI", true);
 
     public async Task<SleepPredictionResponse> PredictAsync(PilotIdentity user, SleepPredictionRequest request, CancellationToken ct)
+        => await PredictCore(user, request, SleepAiValidation.ValidateRequest(request, clock.GetUtcNow()), null, ct);
+
+    // Only a committed, previously validated immutable SQL job uses this seam.
+    // Do not reapply the incoming HTTP clock-skew rule after time in the queue.
+    internal Task<SleepPredictionResponse> PredictQueuedAsync(PilotIdentity user, SleepPredictionRequest request,
+        Func<CancellationToken, Task> authorizeJob, CancellationToken ct) =>
+        PredictCore(user, request, SleepAiValidation.ValidateRequest(request, request.Now), authorizeJob, ct);
+
+    private async Task<SleepPredictionResponse> PredictCore(PilotIdentity user, SleepPredictionRequest request,
+        SleepAiTimeBounds bounds, Func<CancellationToken, Task>? authorizeJob, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        var bounds = SleepAiValidation.ValidateRequest(request, clock.GetUtcNow());
         EnsureResponseDay(request, bounds, clock.GetUtcNow());
         if (!Capabilities.Enabled) return Response(request, bounds, "unavailable", []);
         await access.AuthorizeAsync(user, request, ct);
+        if (authorizeJob is not null) await authorizeJob(ct);
         if (!budget.TryEnter()) throw new ApiException(429, "ai_busy");
         try
         {
@@ -200,16 +210,21 @@ public sealed class SleepAiService(IOptions<SleepAiOptions> options, ISleepAiAcc
             for (var attempt = 0; attempt < 2; attempt++)
             {
                 // Recheck on the retry as permissions may have changed in flight.
-                if (attempt > 0) await access.AuthorizeAsync(user, request, timeout.Token);
+                if (attempt > 0)
+                {
+                    await access.AuthorizeAsync(user, request, timeout.Token);
+                    if (authorizeJob is not null) await authorizeJob(timeout.Token);
+                }
                 timeout.Token.ThrowIfCancellationRequested();
                 EnsureResponseDay(request, bounds, clock.GetUtcNow());
-                if (!budget.TrySpend(user.ObjectId, out var rejection)) throw new ApiException(429, rejection switch
+                if (attempts is null && !budget.TrySpend(user.ObjectId, out var rejection)) throw new ApiException(429, rejection switch
                 {
                     SleepAiBudgetRejection.HourlyLimit => "ai_hourly_limit",
                     SleepAiBudgetRejection.DailyLimit => "ai_daily_limit",
                     _ => "ai_busy"
                 });
                 string? result;
+                await using var reservation = attempts is null ? null : await attempts.Reserve(user.ObjectId, timeout.Token);
                 try { result = await provider.GenerateAsync(request, bounds, attempt > 0, timeout.Token); }
                 catch (OperationCanceledException) { throw; }
                 catch (TimeoutException)
@@ -238,6 +253,7 @@ public sealed class SleepAiService(IOptions<SleepAiOptions> options, ISleepAiAcc
                 // Never return a result after account deletion, grant replacement,
                 // history change or restore maintenance. No SQL lock spans the AI call.
                 await access.AuthorizeAsync(user, request, ct);
+                if (authorizeJob is not null) await authorizeJob(ct);
                 ct.ThrowIfCancellationRequested();
                 EnsureResponseDay(request, bounds, clock.GetUtcNow());
                 if (SleepAiValidation.TryReadOutput(result, request, bounds, out var parsed))
@@ -272,7 +288,12 @@ public static class SleepAiRegistration
         services.Configure<SleepAiOptions>(configuration.GetSection("SleepAi"));
         services.AddSingleton<SleepAiBudget>();
         services.AddScoped<ISleepAiAccess, SleepAiAccess>();
-        services.AddScoped<ISleepAiService, SleepAiService>();
+        services.AddScoped<ISleepAiAttemptStore, SleepAiAttemptStore>();
+        services.AddScoped<SleepAiService>();
+        services.AddScoped<ISleepAiService>(sp => sp.GetRequiredService<SleepAiService>());
+        services.AddScoped<SleepAiJobStore>();
+        services.AddScoped<SleepAiJobProcessor>();
+        services.AddHostedService<SleepAiJobWorker>();
         // The factory never builds the network client while disabled. No key is
         // needed for existing app functionality or tests of the disabled feature.
         services.AddChatClient(sp =>

@@ -292,7 +292,7 @@ public sealed class MigrationTests
     {
         await using var db = await TestDatabase.Create();
         db.Runner().Apply();
-        var scripts = MigrationRunner.Scripts().Append(new SqlScript("0010_Drift.sql",
+        var scripts = MigrationRunner.Scripts().Append(new SqlScript("0011_Drift.sql",
             "CREATE TABLE dbo.Example(Id int); DROP INDEX IX_Operations_FamilyId ON dbo.Operations;")).ToArray();
         var error = Assert.ThrowsAny<Exception>(() => db.Runner(scripts: scripts).Apply());
         Assert.Contains("Schema verification failed", error.ToString(), StringComparison.Ordinal);
