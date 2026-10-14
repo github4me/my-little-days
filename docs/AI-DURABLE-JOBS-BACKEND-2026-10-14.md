@@ -1,8 +1,9 @@
 # Durable sleep AI jobs — backend implementation
 
-14 October 2026. Source implementation and local test evidence only; this document
-does not establish a production deployment, live provider completion or physical
-iPhone background acceptance. No live child data or paid inference was used.
+14 October 2026. Source implementation, isolated-SQL CI and production deployment
+evidence are recorded below. Signed-in durable-job completion, live provider
+completion and physical iPhone background acceptance remain unverified. No live
+child data or paid inference was used for these tests and deployment checks.
 
 ## Contract
 
@@ -83,7 +84,40 @@ API **366 passed / 0 failed / 125 skipped**; migrator **10 passed / 0 failed /
 30 skipped**. The final focused AI run passed **210**, with **15 SQL skips**;
 the focused migration run passed **1**, with **2 SQL skips**. SQL skips
 are explicit: no `FAMILY_TEST_SQL_CONNECTION` and Docker is not running. They are
-not SQL acceptance; the isolated-SQL CI gate must pass before deployment.
+not SQL acceptance; the later isolated-SQL CI gate below supplies that evidence.
+
+## Production deployment checkpoint
+
+The approved run [38500938755](https://github.com/github4me/my-little-days/actions/runs/38500938755)
+completed successfully at **2026-10-14 02:33:27 UTC**, using frozen commit
+`ad894407ce2c641740cfcf9d3230dbe4b8c68b8a`.
+
+- API and real SQL tests: **491 passed, 0 failed, 0 skipped**. This includes the
+  13 durable-job SQL tests, including the hosted-worker/caller-disconnect case.
+- Migrator and real SQL tests: **91 passed, 0 failed, 0 skipped**. The earlier
+  run was stopped by a synthetic `0010` fixture collision, not a production
+  migration error. Its test-only fix chooses the next unused fixture version,
+  adds three offline regression cases and requires the intended SQL exception
+  in rollback tests. Existing migration scripts remain unchanged.
+- Database artifact `11865429592` was downloaded with matching SHA-256
+  `3c17e5c3877a60c3150944a8a4bd5d419accfd95affa3865038eb13e01bf2f49`.
+  `0010_DurableSleepAiJobs.sql` applied successfully at 02:30:51 UTC. The
+  post-apply catalog/checksum check reported **0 pending scripts** at 02:30:55.
+  The run-owned SQL firewall rule was removed at 02:30:57; the recovery cleanup
+  step also succeeded. These are actual migration-job receipts, distinct from
+  the mocked firewall lifecycle tests in CI.
+- API artifact `11865474463` was downloaded with matching SHA-256
+  `3d783b9858e1487b4ad04c386d23b4e40fdf642cc6bb493ae8662620fc1a97df`.
+  OneDeploy `6bb3a355-1369-4b24-9306-15f0c0593c9b` completed with status 4.
+  After bounded cold-start 503 responses, `/health/live` returned
+  `{"status":"ok"}` at 02:33:23 UTC and its workflow check succeeded.
+
+Sanitized receipt: `work/async-ai-20261014/backend-deployment.json`.
+Public liveness does **not** prove a signed-in SQL-backed job or provider call.
+The workflow's mobile checks cover its checked-in branch; build 73's local app
+overlay and physical background/resume acceptance require separate evidence.
+
+## Requirement-to-test mapping
 
 | Requirement | Exact test evidence |
 | --- | --- |

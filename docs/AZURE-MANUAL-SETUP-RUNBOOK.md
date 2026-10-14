@@ -1,14 +1,64 @@
 # My Little Days: manual Azure and GitHub setup runbook
 
-## Durable AI jobs — candidate 73, 14 October 2026 AEDT
+## Durable AI jobs — TestFlight 73, 14 October 2026 AEDT
 
 Owner requested implementation and TestFlight after pausing public App Review.
 The candidate replaces the phone's long prediction request with an acknowledged
 SQL job, existing-App-Service background processing and authenticated polling.
 No new paid Azure/Expo service, OpenAI model, provider retention or spend-setting
 change is authorized or needed. Public submission remains paused. Implementation,
-tests, deployment and Apple delivery are separate gates; this entry is not a
-completion receipt.
+tests, deployment and Apple upload have completed; processing, tester availability
+and physical-device acceptance remain separate gates below.
+
+Reviewed backend was published through the GitHub plugin at
+`27a83f44ef4722ea8b0a7316ca7ab7f37f6a7ad2`. First run
+[38500246347](https://github.com/github4me/my-little-days/actions/runs/38500246347)
+passed all491API/SQL tests, but an old synthetic0010 migration fixture collided
+with the new approved0010. Migrator87passed/1failed; production migration and
+deployment were skipped. A one-file test-only fix uses the next available
+fixture number and asserts the intended SQL rollback exception, published at
+`ad894407ce2c641740cfcf9d3230dbe4b8c68b8a`. New run
+[38500938755](https://github.com/github4me/my-little-days/actions/runs/38500938755)
+completed successfully at **02:33:27 UTC** on the same trusted branch with
+bootstrap=true, adopt=false. API491 and migrator91 tests passed with zero skips.
+The immutable database artifact SHA256
+`3c17e5c3877a60c3150944a8a4bd5d419accfd95affa3865038eb13e01bf2f49`
+matched at download. Migration0010 completed02:30:51Z; the post-migration
+catalog/checksum check at02:30:55Z reported **zero pending scripts**. The exact
+run-owned firewall rule was removed at02:30:57Z and recovery cleanup succeeded.
+API artifact SHA256
+`3d783b9858e1487b4ad04c386d23b4e40fdf642cc6bb493ae8662620fc1a97df`
+matched at download; OneDeploy `6bb3a355-1369-4b24-9306-15f0c0593c9b`
+completed with status4. Bounded cold-start retries reached successful liveness
+at02:33:23Z. Independent root checks at02:35:30Z returned live200, ready200 and
+anonymous job-capabilities401. These checks do **not** establish authenticated
+SQL job creation, live OpenAI completion or native app-switch acceptance.
+See [backend evidence](AI-DURABLE-JOBS-BACKEND-2026-10-14.md).
+
+Public support/privacy updates were published through the GitHub plugin at
+`github4me/my-little-days-privacy@22578e8d67f4cb0d45bbd974ca78aeec44640c16`.
+Both existing Pages URLs returned200 and exact reviewed bytes at02:20:38UTC.
+The new disclosure is explicitly introduced for TestFlight73 and requires
+renewed consent for temporary server request/result storage.
+
+Mobile source is frozen from immutable72 plus24 reviewed overlays (8 additions,
+no removals): tree `e85aa2477fa6643ae26f4ac3384fe308b4d60153`,535files,
+archiveSHA256 `5db01a1e438064f12bcb287b20852d4f7db1ee27ee2b5ba75d63a0e05688a464`.
+Independent verification confirmed all511 untouched files match the baseline.
+Frozen verification passed1156 tests across14 suites, focused AI199,
+component browser57, full-App browser4 and privacy5; zero failures/skips.
+Fresh post-install native model tests passed Watch35 and widget10. Local archive
+and export succeeded; independent review passed the exact IPA, all three Store
+signatures, production configuration, runtime0.2.3/OTAoff, signed Hermes and
+archive/export/dSYM matching. IPA SHA256
+`6244129c298ab01025f8874881a2976deba86fbbf696d51e24402ddb51a92559`.
+Apple validation02:42:06.847UTC and one upload02:44:23.143UTC succeeded with no
+errors; delivery `0152f42c-0c53-40d0-895e-e981166ba39f`. Readback02:44:32UTC:
+PROCESSING, no errors/warnings, build73 not yet indexed. **Do not upload again.**
+Checkout bookkeeping is now73. Three operation-owned temporary signing copies
+and uploader submission-key copies were removed; originals retained. Public
+0.2.2(58) remains unchanged. See [release evidence](AI-DURABLE-JOBS-TESTFLIGHT-2026-10-14.md).
+Synthetic recovery checks do not certify physical iOS behavior.
 
 Fresh read-only Azure Portal check: **reticle.com.au / Default Directory**
 (`7b7e6e31-a778-4334-aee2-e969fa27fd0e`) → subscription
