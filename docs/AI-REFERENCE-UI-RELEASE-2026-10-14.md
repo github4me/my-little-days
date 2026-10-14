@@ -1,6 +1,59 @@
 # AI reference prompt and one-tap controls — 0.2.3 (74)
 
-## Checkpoint
+## Submitted to App Review — 05:40 UTC / 16:40 AEDT
+
+Apple confirmed submission at **2026-10-14T05:40:46.826Z**. The 05:40:53 UTC
+readback shows **WAITING_FOR_REVIEW** for both submission
+`eb4b85e6-0f3f-4ec6-97ce-2b20f0e796d7` and version **0.2.3**
+`c76215c3-f614-4d15-a1b6-ae28cab3372b`, with the one intended version item and
+exact selected build **74**, ID `0997c5b8-ed69-4f67-abf2-55c71baca6a6`.
+The existing **AFTER_APPROVAL** release choice is unchanged. This is submission,
+not approval or public release; public 0.2.2 (58) remains READY_FOR_SALE.
+
+The Account Holder confirmed agreement acceptance, and root verified the update
+notice had disappeared; no agent accepted the agreement. Corrected Health
+privacy answers also propagated: the unchanged strict canonical-AU public check
+passed at **05:39:34.532 UTC**, preserving all 11 App Functionality categories,
+adding Health to Product Personalization, and retaining linked/no-tracking.
+Both public website pages still matched reviewed bytes. No privacy guard was
+weakened to bypass the earlier CDN cache.
+
+Root readiness explicitly covers preserved reviewer-owned email/OTP instructions
+and current saved review fields, not tested build 74 native sign-in or provider
+completion. Representative screenshot and native gaps were reviewed; physical
+iPhone/Watch/widget, authenticated provider and native app-switch acceptance
+remain unverified. Internal TestFlight availability remains separately confirmed.
+
+Evidence under `work/ai-guidance-release-20261014/review/`:
+`public-check-1791956374533.json`, `root-readiness.json`,
+`draft-1791956428594.json`, `submitted-1791956448198.json` and
+`submit-1791956455948.json`. Earlier checkpoints below preserve the sequence.
+
+## Privacy and agreement checkpoint — 05:26 UTC / 16:26 AEDT
+
+The owner is now signed in to App Store Connect. Root published the Health
+purpose update in its UI: **App Functionality + Product Personalization**,
+**linked to identity**, **not used for tracking**. All 11 original data types
+remain. The first publication briefly showed a contradictory Not Linked Health
+preview; reopening revealed the questionnaire had saved No despite the inherited
+Yes presentation. Root explicitly selected Yes and republished. The resulting UI
+preview now shows only Linked data. This is recorded UI evidence, not a completed
+public-store readback: the first two `public-check` attempts still returned the
+old public label, so public propagation remains unverified.
+
+The Apps landing page also reports that the updated **Apple Developer Program
+License Agreement** must be accepted by the **Account Holder** before updates
+or submissions. The owner was asked to review and accept it at
+`https://developer.apple.com/account/`; no reply or acceptance confirmation is
+recorded at this checkpoint. No agreement was accepted by an agent.
+
+Build 74 remains available in internal TestFlight and selected for the 0.2.3
+draft. **No App Review submission has been made.** Remaining boundaries are the
+Account Holder's agreement acceptance, verified public privacy propagation,
+reviewer-access readiness and final submission. No readiness approval or external
+write was made by this documentation update; prior checkpoints below are history.
+
+## Earlier checkpoint — 04:55 UTC / 15:55 AEDT
 
 **14 October 2026, 04:55 UTC / 15:55 AEDT.** The owner requested the approved
 prompt/UI update, TestFlight delivery and Apple App Review. This is an updatable

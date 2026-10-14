@@ -1,5 +1,62 @@
 # My Little Days: manual Azure and GitHub setup runbook
 
+## App Review submitted — 14 October 2026, 05:40 UTC
+
+Account Holder agreement acceptance was confirmed by the owner and the update
+notice was absent on root's UI recheck; no agent accepted the agreement. Health
+privacy UI publication propagated to the canonical Australian App Store page:
+the unchanged strict public-check passed **05:39:34.532 UTC**, with the original
+11 App Functionality types, Health/Other User Content/Other Data Types for Product
+Personalization, only linked data and no tracking. Public support/privacy pages
+still matched the reviewed HTML. The earlier 900-second CDN cache did not require
+relaxing expected answers or changing the helper's verification URL.
+
+**Submission confirmed:** App Store Connect → Apps → My Little Days (6809826484)
+→ iOS **0.2.3**, version `c76215c3-f614-4d15-a1b6-ae28cab3372b`; exact selected
+build **74**, ID `0997c5b8-ed69-4f67-abf2-55c71baca6a6`. Submission
+`eb4b85e6-0f3f-4ec6-97ce-2b20f0e796d7` has submittedDate
+**2026-10-14T05:40:46.826Z** and one intended version item. Fresh readback at
+**05:40:53.765 UTC** shows submission and version **WAITING_FOR_REVIEW**.
+`AFTER_APPROVAL` remains selected; approval/public release has not occurred.
+Public 0.2.2 (58) remains READY_FOR_SALE; internal TestFlight 74 remains available.
+
+Root readiness explicitly preserves the owner's reviewer-controlled email/OTP
+route and verified current review fields, not a claim of exercised build 74
+native sign-in or live-provider operation. The known representative screenshot
+and native gaps were reviewed without claiming device tests passed. Receipts:
+`work/ai-guidance-release-20261014/review/public-check-1791956374533.json`,
+`root-readiness.json`, `submitted-1791956448198.json`, and
+`submit-1791956455948.json`. Await Apple's decision; do not resubmit or release
+again merely because review is pending. Earlier checkpoints below are history.
+
+## App Privacy publication and license gate — 14 October 2026, 05:26 UTC
+
+Owner login to App Store Connect is complete. Root published **Apps → My Little
+Days (6809826484) → App Privacy → Health** with both **App Functionality** and
+**Product Personalization**, linked to identity and not used for tracking; all
+11 original data types remain. The initial publication briefly showed Not Linked
+Health. Reopening the questionnaire showed No despite the inherited Yes display;
+root explicitly selected Yes and republished. The resulting UI preview shows
+only Linked data. Do not infer public propagation from the UI: the first two
+public-check attempts still returned the old label. Expected public readback is
+the same original 11 App Functionality types, Product Personalization containing
+Health/Other User Content/Other Data Types, only DATA_LINKED_TO_YOU, no tracking.
+
+**New Account Holder action:** the App Store Connect Apps landing banner says the
+updated Apple Developer Program License Agreement must be accepted before app
+updates/submissions. Location: `https://developer.apple.com/account/`, signed in
+as the existing team's Account Holder. The owner must review and decide whether
+to accept the displayed agreement; no agent accepted it. After the owner reports
+completion, verify the banner/gate has cleared rather than treating login as
+acceptance. The owner has been asked; no reply/acceptance is recorded here.
+
+TestFlight build 74 and its App Store draft selection remain intact. App Review
+is **not submitted**. Resume only after agreement acceptance, public privacy
+readback and remaining reviewer/final-readiness checks. The scoped helper's
+public-check, draft and submit stages stay separate. No readiness approval or
+external mutation was performed by this local documentation update. Earlier
+checkpoints below preserve the previously observed state.
+
 ## One-tap AI mobile release and App Review preparation — 14 October 2026 AEDT
 
 The owner authorized the reviewed sparse-data prompt/UI, TestFlight and public
