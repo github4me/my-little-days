@@ -1,5 +1,100 @@
 # My Little Days: manual Azure and GitHub setup runbook
 
+## AI timing logging rollout — 15 October 2026
+
+Owner requested deployment and activation. The existing Azure App Service
+collector is enabled and backend deployment is verified. No TestFlight,
+Apple review, app polling, AI model/tier, quota or timeout changes are included.
+
+Manual location: Azure Portal → **reticle.com.au**, tenant
+`7b7e6e31-a778-4334-aee2-e969fa27fd0e` → subscription
+`4768a858-f23f-4a39-bb64-eabc9c142627` → resource group
+`my-little-days-pilot-rg` → `little-days-api-522fpstfbtds2` → Monitoring →
+**App Service logs**. Changed Application logging **Off → File System**;
+kept Quota **35 MB** and set Retention Period **3 days**, then Save. Fresh
+readback by 10:12 UTC showed those values with Save disabled. Log stream then
+showed **Connected!** and existing runtime/application output. This verifies
+the collector, not yet a new `SleepAiTiming` event. Screenshot receipt:
+`/tmp/my-little-days-timing-logs-active-20261015.jpg`.
+No paid monitoring resource, broad request logging or SDK payload logging added.
+
+Fresh GitHub environment checks: `family-pilot` and `family-database` each
+restrict deployment to the single `feature/family-invitations` branch (no tags).
+Required reviewers and wait timer are **off**; admin bypass is **on**. These
+settings were inspected, not changed. Deployment-enabled flags are true;
+tenant/subscription and API/SQL target variables match the target above and
+`little-days-sql-522fpstfbtds2` / `little-days-family` respectively.
+
+Published scoped timing commit `bf5c41b4ffcbb3f94e0da6b7f5804a6cb2003693`
+through the GitHub plugin. Manual **Deploy family API and database** run
+`38718602528` stopped at NuGet restore: existing transitive Pkcs 9.0.11 has
+newly published CVE-2026-70162 / CVE-2026-84008 advisories. Migration and
+deployment were skipped; the disposable SQL container was cleaned up.
+No vulnerability checks were suppressed. The follow-up commit
+`cd2b8e569a31578ec89adbb37a58e05670f1beef` pins only API Pkcs **10.0.13**
+and migrator Pkcs **9.0.21**. API uses the patched 10.x assembly because the
+older ASP.NET shared-framework copy would otherwise outrank a 9.x package.
+Local API output/deps includes file version **10.0.1326.50504**.
+Sources: [Microsoft moderate advisory](https://github.com/dotnet/runtime/security/advisories/GHSA-2fmv-rv2c-59x7),
+[Microsoft high advisory](https://github.com/dotnet/runtime/security/advisories/GHSA-846f-f764-76mx).
+
+Local patched solution test: **402 passed, 0 failed, 155 skipped** (SQL-dependent
+tests require CI). Retry run **38719474883** completed real SQL tests:
+API **514 passed**, migrator **91 passed**, **zero failed/skipped**. Root cancelled
+the run before migration/deployment because its API artifact omitted Pkcs:
+CI SDK 10.0.402's shared-framework manifest won the build conflict, while the
+live runtime still reported ASP.NET **10.0.12**. Artifact `11963878809`, SHA-256
+`47a2058871f080b46a24ac140230632f66eb28d454094b49eaef330cc03fd9e3`, had no Pkcs
+DLL/deps entry and only a 10.0.0 minimum runtime. A successful audit/test is not
+proof that a patched binary is actually deployed. Migration/deploy both
+finished cancelled; no production SQL was touched by these two attempts.
+
+Final candidate **`2f4304ec0c1073eece979520b59452aa364a8c93`** adds only a
+`FrameworkReference Update="Microsoft.AspNetCore.App" TargetingPackVersion="10.0.12"`
+baseline to the API project. This matches the verified live framework while
+allowing the newer app-local Pkcs patch to win normally. A clean publish using
+exact SDK **10.0.402** verified Pkcs **10.0.13**, file version
+**10.0.1326.50504**, DLL SHA-256
+`eff9ed505c194f0f5c9faef1a175459cd0560eeb4ad08890c7c0c0e1ff4d34c3`.
+No audit/pruning suppression, custom copy target, new runtime/hosting model or
+workflow change was required. Reconsider this targeting-pack baseline only after
+the deployed shared framework is verified patched and the new artifact checked.
+
+Manual [workflow **38720666974**](https://github.com/github4me/my-little-days/actions/runs/38720666974)
+dispatched at about **10:29 UTC** from that frozen trusted branch, with
+`database_bootstrapped=true`, `adopt_ef=false`, and finished **Success** (6m52s).
+No SQL scripts, infrastructure or workflow definitions changed.
+
+- CI API **514 passed**, migrator **91 passed**: **605 passed, zero failed/skipped**
+  against disposable SQL. TypeScript, watch and browser verification also passed.
+- Catalog/checksum verification reported **Pending database scripts: 0** before
+  and after migration. Exact temporary rule `github-db-38720666974-1` was removed
+  and its absence verified at **10:35:34 UTC**. No existing rules were changed.
+- API artifact **11964667482**, SHA-256
+  `0ca9fd2a4d62630d561513cfcc8a8bc8be2c7b4c4159047424ed74e80a133ebe`,
+  independently verified to contain app-local Pkcs **10.0.13**, the DLL hash above,
+  matching deps entry and the dedicated Information logging category.
+- Database artifact **11964494438**, SHA-256
+  `bb8046dae036b841c735d9de6a3afaf71fd54c55a48f7c9e953a1a67000b2e41`.
+- Azure OneDeploy **2cbcf995-086b-42ea-a3b7-52f0781436ab** completed successfully
+  at **10:36:32 UTC**, `active: true`. Deployment receipt:
+  `/tmp/my-little-days-timing-deployed-20261015.jpg`.
+- Log stream showed the subsequent runtime restart and API startup. After startup,
+  `/health/live` and `/health/ready` returned **200** at about **10:38 UTC**;
+  anonymous `/v2/sleep-prediction-jobs/capabilities` returned **401 unauthorized**.
+  Readiness checks the recovery gate, not signed-in SQL/provider acceptance.
+
+The collector is verified connected, but **no genuine post-rollout SleepAiTiming
+sample has been observed yet**. The owner was asked to use AI suggestions once;
+do not create baby records or claim latency/bottleneck findings without that
+evidence. No phone build or device acceptance test was needed/performed.
+Definitions and evaluation caveats: [AI timing logging](AI-TIMING-LOGGING.md).
+
+Local exact-SDK proof used an operation-owned temporary SDK, not the installed
+SDK directory. Its first-run banner mentioned an ASP.NET development certificate;
+this does not establish whether a certificate was newly created or reused.
+No certificate trust or deletion operation was performed.
+
 ## App Review submitted — 14 October 2026, 05:40 UTC
 
 Account Holder agreement acceptance was confirmed by the owner and the update

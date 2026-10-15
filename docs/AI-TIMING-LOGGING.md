@@ -1,8 +1,12 @@
 # AI latency logging
 
-15 October 2026. Implemented and tested locally; **not deployed**. No live
-latency measurements or production log-collection verification are claimed.
-No app build, SQL migration, new monitoring service or package is needed.
+15 October 2026. **Deployed; existing Azure log collection enabled.** Release
+`2f4304ec0c1073eece979520b59452aa364a8c93` completed in
+[workflow 38720666974](https://github.com/github4me/my-little-days/actions/runs/38720666974).
+Post-startup health checks passed. No genuine AI timing sample has yet been
+captured, so no live latency or bottleneck finding is claimed. No app build,
+schema change or new monitoring service was needed. Existing Pkcs dependencies
+were security-patched as a deployment prerequisite; see the runbook.
 
 ## What is recorded
 
@@ -69,20 +73,21 @@ available yet, so no bottleneck or speed improvement is asserted.
 
 ## Collection and rollout boundary
 
-After an approved backend deployment, use the existing Azure App Service log
-destination, not a new paid monitoring resource. Target from the current
+The approved backend deployment uses the existing Azure App Service log
+destination, not a new paid monitoring resource. Verified target from the current
 runbook: Azure Portal → **reticle.com.au** tenant → subscription
 `4768a858-f23f-4a39-bb64-eabc9c142627` → `my-little-days-pilot-rg` →
 `little-days-api-522fpstfbtds2` → Monitoring → **Log stream**. Filter for
 `SleepAiTiming`. Verify the current target and deployed revision first.
 
-The previous 14 October checkpoint recorded Application logging **Off**.
-That is historical evidence, not proof of today's collector state. This task
-did not change Azure logging/storage settings or enable a collector. Production
-collection, its retention/limits, and a safe captured event must be verified
-before treating these logs as available for evaluation. Enabling a sink is a
-separate operational change to record in the runbook; do not enable broad HTTP,
-SDK, SQL or payload logging to obtain these events.
+On 15 October, Application logging changed **Off → File System**, preserving
+the **35 MB** quota and setting retention to **3 days**. Saved values were
+read back; Log stream connected and displayed runtime/application output,
+including the post-deployment startup. No broad HTTP, SDK, SQL or payload logging
+was enabled. The first genuine `SleepAiTiming` trace is still pending a real app
+AI request; generic health and startup output do not prove that end-to-end path.
+Deployment, package verification and manual-setting evidence are recorded in
+[the runbook](AZURE-MANUAL-SETUP-RUNBOOK.md#ai-timing-logging-rollout--15-october-2026).
 
 ## Verification
 
@@ -101,8 +106,16 @@ private records or production SQL were used.
   non-committed results, empty queues, correlation, clock movement and a broken
   log sink are covered.
 - Claim creation/run mapping assertions were added to the existing SQL tests.
-  Those require a disposable `FAMILY_TEST_SQL_CONNECTION`; skipped SQL tests
-  are not SQL-backed acceptance.
+  Those require a disposable `FAMILY_TEST_SQL_CONNECTION`; the local skipped
+  SQL tests were subsequently exercised by the release workflow.
+- Release CI, with disposable SQL: API **514 passed**, migrator **91 passed**;
+  **605 passed, 0 failed, 0 skipped**. TypeScript/watch/browser checks also passed.
+  Artifact inspection verified the logger configuration and actual patched Pkcs
+  DLL/deps entry, rather than relying on restore or tests alone.
+- Production migration verified **zero pending scripts**, and the workflow
+  verified removal of its exact temporary firewall rule. Post-startup liveness
+  and recovery-gate readiness returned 200. Signed-in/provider timing and native
+  app behavior remain unverified in this backend-only rollout.
 
 Commands (using the installed SDK with an isolated environment):
 
