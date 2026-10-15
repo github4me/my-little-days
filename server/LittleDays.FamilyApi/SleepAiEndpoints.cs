@@ -8,17 +8,24 @@ public static class SleepAiEndpoints
         api.MapGet("/sleep-prediction-jobs/capabilities", (Microsoft.Extensions.Options.IOptions<SleepAiOptions> options) =>
             TypedResults.Ok(new SleepPredictionJobCapabilities(options.Value.IsAvailable, SleepAiJobPolicy.ConsentVersion)))
             .WithName("SleepPredictionJobCapabilities");
-        api.MapPost("/sleep-prediction-jobs", async (HttpContext context, SleepAiJobStore store, CancellationToken ct) =>
+        api.MapPost("/sleep-prediction-jobs", async (HttpContext context, SleepAiJobStore store, SleepAiDiagnostics diagnostics, CancellationToken ct) =>
         {
             var request = await context.Request.ReadFromJsonAsync<CreateSleepPredictionJobRequest>(SleepAiJson.Options, ct)
                 ?? throw new ApiException(422, "invalid_input");
-            var job = await store.Enqueue(PublicIdentityAdmission.Get(context), request, ct);
+            diagnostics.SetJob(request.OperationId);
+            var job = await diagnostics.MeasureAsync(SleepAiStage.Enqueue,
+                () => store.Enqueue(PublicIdentityAdmission.Get(context), request, ct));
             return TypedResults.Accepted($"/v2/sleep-prediction-jobs/{job.JobId:D}", job);
         }).RequireRateLimiting("sensitive").WithName("CreateSleepPredictionJob")
             .WithSummary("Commit an explicitly consented durable AI task before acknowledging it.")
             .Produces<SleepPredictionJobResponse>(202).Produces(401).Produces(403).Produces(409).Produces(410).Produces(422).Produces(429).Produces(503);
-        api.MapGet("/sleep-prediction-jobs/{jobId:guid}", async (Guid jobId, HttpContext context, SleepAiJobStore store, CancellationToken ct) =>
-            TypedResults.Ok(await store.Get(PublicIdentityAdmission.Get(context), jobId, ct)))
+        api.MapGet("/sleep-prediction-jobs/{jobId:guid}", async (Guid jobId, HttpContext context, SleepAiJobStore store, SleepAiDiagnostics diagnostics, CancellationToken ct) =>
+        {
+            diagnostics.SetJob(jobId);
+            var job = await diagnostics.MeasureAsync(SleepAiStage.Poll,
+                () => store.Get(PublicIdentityAdmission.Get(context), jobId, ct));
+            return TypedResults.Ok(job);
+        })
             .WithName("ReadSleepPredictionJob").Produces<SleepPredictionJobResponse>().Produces(404);
         api.MapDelete("/sleep-prediction-jobs/{jobId:guid}", async (Guid jobId, HttpContext context, SleepAiJobStore store, CancellationToken ct) =>
         {

@@ -6,7 +6,11 @@ using Microsoft.Extensions.Options;
 
 namespace LittleDays.FamilyApi;
 
-public sealed record SleepAiJobClaim(Guid UserId, Guid JobId, Guid LeaseId, SleepPredictionRequest Request);
+public sealed record SleepAiJobClaim(Guid UserId, Guid JobId, Guid LeaseId, SleepPredictionRequest Request)
+{
+    public DateTimeOffset CreatedAt { get; init; }
+    public int Run { get; init; }
+}
 
 public sealed class SleepAiJobStore(PilotDatabase db, FamilyService family, RecoveryGate recovery,
     TimeProvider clock, IOptions<SleepAiOptions> options)
@@ -120,7 +124,7 @@ public sealed class SleepAiJobStore(PilotDatabase db, FamilyService family, Reco
             ?? throw new InvalidOperationException("Invalid durable AI job.");
         row.State = "running"; row.LeaseId = Guid.NewGuid(); row.LeaseUntil = now.AddMinutes(2);
         row.Runs++; row.UpdatedAt = now;
-        return new SleepAiJobClaim(row.UserId, row.Id, row.LeaseId.Value, request);
+        return new SleepAiJobClaim(row.UserId, row.Id, row.LeaseId.Value, request) { CreatedAt = row.CreatedAt, Run = row.Runs };
     }, ct);
 
     internal Task<bool> EnsureCurrent(SleepAiJobClaim claim, CancellationToken ct) => family.Transaction(async () =>

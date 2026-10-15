@@ -1,0 +1,122 @@
+# AI latency logging
+
+15 October 2026. Implemented and tested locally; **not deployed**. No live
+latency measurements or production log-collection verification are claimed.
+No app build, SQL migration, new monitoring service or package is needed.
+
+## What is recorded
+
+The existing application logger emits event **4100 / SleepAiTiming**, category
+`LittleDays.FamilyApi.SleepAiDiagnostics`. Only this category is enabled at
+Information; the application-wide Warning level and SDK content-logging
+restrictions are unchanged.
+
+| Stage | Measured work |
+| --- | --- |
+| Enqueue | Job validation/authorization and SQL enqueue, after HTTP JSON parsing |
+| Claim | Worker claim transaction, including its authorization checks |
+| QueueWait | Original job creation to successful claim transaction completion |
+| Access | Account/family authorization and current-job/consent checks |
+| Budget | Concurrency admission (attempt 0), or per-provider-attempt quota reservation |
+| Provider | One complete SDK response call, including transport and generation |
+| Validation | Structural/temporal validation of one provider output |
+| Processing | Service execution including access, budget, provider, validation and reservation disposal |
+| Persist | Completion transaction and its final authorization/lease checks |
+| ServerTotal | Original job creation to attempted completion, with committed/failure outcome |
+| Poll | Server-side authorized job read; not the phone's network round trip |
+
+Fields are `Stage`, `Job`, `Run`, `Attempt`, `DurationMs`, `Outcome`, `Model`,
+`ServiceTier`, `InputTokens`, `OutputTokens`, and `CachedInputTokens`.
+`Job` is a truncated SHA-256 correlation of the random operation UUID, not the
+raw ID. HTTP reads/enqueue use run 0; worker runs use 1 or 2. Provider attempt 1
+is the initial call and 2 is the existing invalid-output repair. Every stage
+logs its elapsed time on failure too; error outcomes are fixed categories,
+never exception messages. Empty queue checks emit nothing.
+
+The returned provider tier is captured when available, not inferred from the
+project's Fast setting. Unknown/missing tiers are `unknown`; missing token
+counts are null, not zero. Model values are restricted to the configured
+selected model or `other_configured_model`. Prompt/output text, records, child
+details, account/family IDs, input revisions, credentials, URLs and raw
+exceptions are excluded. Correlations are still operational metadata: keep
+logs access-restricted and do not publish them as user analytics.
+
+## Reading the timings correctly
+
+- Most stage timers use a monotonic clock. QueueWait/ServerTotal use stored UTC
+  creation time; negative values caused by clock movement are clamped to zero.
+- **Do not sum all stages.** Processing contains its sub-stages; QueueWait
+  already includes Claim. ServerTotal contains queueing plus service and save.
+- For recovered run 2, QueueWait is cumulative age since original creation,
+  including the earlier run and lease wait, not pure new queue delay.
+- Processing also includes reservation release and small uninstrumented
+  overhead. A large residual after its measured children is a reason to
+  investigate that path; it is not automatically AI time.
+- Provider `ok` means the SDK returned, not that the prediction is valid.
+  Check Validation and Processing. A successful Persist may store a failure;
+  check ServerTotal's outcome. `not_committed` never means saved success.
+- Poll measures server work only. The existing 4-second phone polling cadence,
+  suspension/background time, connectivity and rendering delay are not measured
+  by these server logs. They remain possible causes if ServerTotal is fast but
+  the UI is slow. Polling, request deadlines and prediction behavior are unchanged.
+
+For a representative sample, group by stage, outcome, returned tier, run and
+attempt. Compare median and p95 durations, sample counts and failure/timeout
+rates. Keep failed/timeout attempts separate but visible rather than silently
+dropping them. Compare similar input/output token sizes when evaluating Fast
+mode. Second provider attempts identify repair overhead. No live sample is
+available yet, so no bottleneck or speed improvement is asserted.
+
+## Collection and rollout boundary
+
+After an approved backend deployment, use the existing Azure App Service log
+destination, not a new paid monitoring resource. Target from the current
+runbook: Azure Portal → **reticle.com.au** tenant → subscription
+`4768a858-f23f-4a39-bb64-eabc9c142627` → `my-little-days-pilot-rg` →
+`little-days-api-522fpstfbtds2` → Monitoring → **Log stream**. Filter for
+`SleepAiTiming`. Verify the current target and deployed revision first.
+
+The previous 14 October checkpoint recorded Application logging **Off**.
+That is historical evidence, not proof of today's collector state. This task
+did not change Azure logging/storage settings or enable a collector. Production
+collection, its retention/limits, and a safe captured event must be verified
+before treating these logs as available for evaluation. Enabling a sink is a
+separate operational change to record in the runbook; do not enable broad HTTP,
+SDK, SQL or payload logging to obtain these events.
+
+## Verification
+
+The .NET testing guidance led to an internal worker test seam: the public
+production constructor still uses the same SQL store and prediction service.
+Tests use deterministic clocks and synthetic responses; no provider calls,
+private records or production SQL were used.
+
+- Release build: zero warnings/errors.
+- New focused timing tests: **21 passed, 0 failed, 0 skipped**.
+- Full solution: API **389 passed / 125 skipped**, migrator **13 passed /
+  30 skipped**, zero failures. SQL-dependent cases skipped because no disposable
+  database connection was supplied. Independent static review found no blockers.
+- Exact durations, stage separation, returned tier/token metadata, repair,
+  timeout/transport/cancellation, access/quota failures, save failure,
+  non-committed results, empty queues, correlation, clock movement and a broken
+  log sink are covered.
+- Claim creation/run mapping assertions were added to the existing SQL tests.
+  Those require a disposable `FAMILY_TEST_SQL_CONNECTION`; skipped SQL tests
+  are not SQL-backed acceptance.
+
+Commands (using the installed SDK with an isolated environment):
+
+```sh
+dotnet build server/LittleDays.slnx --configuration Release --no-incremental
+dotnet test server/LittleDays.FamilyApi.Tests/LittleDays.FamilyApi.Tests.csproj --configuration Release --no-restore --filter 'FullyQualifiedName~SleepAiDiagnosticsTests|FullyQualifiedName~SleepAiJobTimingTests|FullyQualifiedName~SleepAiTimingServiceTests'
+dotnet test server/LittleDays.slnx --configuration Release --no-restore --logger 'console;verbosity=quiet'
+```
+
+Examples of requirement evidence:
+
+| Requirement | Test |
+| --- | --- |
+| “add the loggings so that we can identify the bottle neck” — separate stages | `SuccessfulPredictionRecordsSeparateStageTimesAndReturnedProviderMetadataWithoutPayloads` |
+| Same requirement — queue/save/total | `WorkerSeparatesQueueClaimAndPersistenceAndOnlyReportsCommittedSuccess` |
+| Same requirement — repairs | `InvalidOutputRepairRecordsBothProviderAttemptsValidationOutcomesAndOneProcessingTotal` |
+| Same requirement — safe, non-intrusive logging | `TimingsUseMonotonicClockAndAllowlistedMetadataWithoutPrivateText`; `BrokenLoggerCannotFailSuccessfulWorkOrReplaceOriginalFailure` |

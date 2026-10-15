@@ -54,7 +54,7 @@ public interface ISleepAiProvider
     Task<string?> GenerateAsync(SleepPredictionRequest request, SleepAiTimeBounds bounds, bool retry, CancellationToken ct);
 }
 
-public sealed class OpenAiSleepProvider(IChatClient client, IOptions<SleepAiOptions> options) : ISleepAiProvider
+public sealed class OpenAiSleepProvider(IChatClient client, IOptions<SleepAiOptions> options, SleepAiDiagnostics? diagnostics = null) : ISleepAiProvider
 {
     public const string PromptVersion = "sleep-ai-v1";
     // Reviewed 2026-10-14; embedded reference only, never fetched at request time.
@@ -158,11 +158,12 @@ public sealed class OpenAiSleepProvider(IChatClient client, IOptions<SleepAiOpti
             request.AgeDays, request.TimeZone, request.Now, request.Records,
             bounds.TodayEnd, bounds.SleepEndLimit
         }, SleepAiJson.Options);
-        var response = await client.GetResponseAsync([
+        ChatMessage[] messages = [
             new(ChatRole.System, (request.SchemaVersion == 2 ? WholeDayInstructions : Instructions) +
                 (retry ? " Your previous response failed structural/temporal validation. Return a valid fresh result or insufficient_data; do not repeat the invalid response." : "")),
             new(ChatRole.User, payload)
-        ], new ChatOptions
+        ];
+        var chatOptions = new ChatOptions
         {
             ModelId = options.Value.Model,
             Temperature = options.Value.SupportsTemperature ? 0 : null,
@@ -175,7 +176,21 @@ public sealed class OpenAiSleepProvider(IChatClient client, IOptions<SleepAiOpti
                 StoredOutputEnabled = false,
                 BackgroundModeEnabled = false
             }
-        }, ct);
+        };
+        ChatResponse response;
+        using (var timing = diagnostics?.Start(SleepAiStage.Provider, retry ? 2 : 1))
+        {
+            timing?.ProviderMetadata(options.Value.Model, null, null, null, null);
+            try
+            {
+                response = await client.GetResponseAsync(messages, chatOptions, ct);
+                timing?.ProviderMetadata(response.ModelId ?? options.Value.Model,
+                    response.RawRepresentation is ResponseResult metadata ? metadata.ServiceTier.ToString() : null,
+                    response.Usage?.InputTokenCount, response.Usage?.OutputTokenCount, response.Usage?.CachedInputTokenCount);
+                timing?.Complete();
+            }
+            catch (Exception error) { timing?.Fail(error); throw; }
+        }
         // No retrieval of stored/background responses and no tool execution. A refusal,
         // interrupted completion or extra non-text assistant content is not a prediction.
         var completed = response.RawRepresentation is ResponseResult raw
@@ -235,7 +250,7 @@ public interface ISleepAiService
 }
 
 public sealed class SleepAiService(IOptions<SleepAiOptions> options, ISleepAiAccess access, ISleepAiProvider provider,
-    SleepAiBudget budget, TimeProvider clock, ISleepAiAttemptStore? attempts = null) : ISleepAiService
+    SleepAiBudget budget, TimeProvider clock, ISleepAiAttemptStore? attempts = null, SleepAiDiagnostics? diagnostics = null) : ISleepAiService
 {
     public SleepPredictionCapabilities Capabilities => new(options.Value.IsAvailable, SleepAiValidation.ConsentVersion, "OpenAI", true);
 
@@ -251,12 +266,33 @@ public sealed class SleepAiService(IOptions<SleepAiOptions> options, ISleepAiAcc
     private async Task<SleepPredictionResponse> PredictCore(PilotIdentity user, SleepPredictionRequest request,
         SleepAiTimeBounds bounds, Func<CancellationToken, Task>? authorizeJob, CancellationToken ct)
     {
+        using var processing = diagnostics?.Start(SleepAiStage.Processing);
+        try
+        {
+            var response = await PredictAuthorized(user, request, bounds, authorizeJob, ct);
+            processing?.Complete(response.Status);
+            return response;
+        }
+        catch (Exception error) { processing?.Fail(error); throw; }
+    }
+
+    private async Task<SleepPredictionResponse> PredictAuthorized(PilotIdentity user, SleepPredictionRequest request,
+        SleepAiTimeBounds bounds, Func<CancellationToken, Task>? authorizeJob, CancellationToken ct)
+    {
         ct.ThrowIfCancellationRequested();
         EnsureResponseDay(request, bounds, clock.GetUtcNow());
         if (!Capabilities.Enabled) return Response(request, bounds, "unavailable", []);
-        await access.AuthorizeAsync(user, request, ct);
-        if (authorizeJob is not null) await authorizeJob(ct);
-        if (!budget.TryEnter()) throw new ApiException(429, "ai_busy");
+        await Authorize(1, ct);
+        using (var admission = diagnostics?.Start(SleepAiStage.Budget))
+        {
+            if (!budget.TryEnter())
+            {
+                var error = new ApiException(429, "ai_busy");
+                admission?.Fail(error);
+                throw error;
+            }
+            admission?.Complete();
+        }
         try
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -266,19 +302,12 @@ public sealed class SleepAiService(IOptions<SleepAiOptions> options, ISleepAiAcc
                 // Recheck on the retry as permissions may have changed in flight.
                 if (attempt > 0)
                 {
-                    await access.AuthorizeAsync(user, request, timeout.Token);
-                    if (authorizeJob is not null) await authorizeJob(timeout.Token);
+                    await Authorize(attempt + 1, timeout.Token);
                 }
                 timeout.Token.ThrowIfCancellationRequested();
                 EnsureResponseDay(request, bounds, clock.GetUtcNow());
-                if (attempts is null && !budget.TrySpend(user.ObjectId, out var rejection)) throw new ApiException(429, rejection switch
-                {
-                    SleepAiBudgetRejection.HourlyLimit => "ai_hourly_limit",
-                    SleepAiBudgetRejection.DailyLimit => "ai_daily_limit",
-                    _ => "ai_busy"
-                });
                 string? result;
-                await using var reservation = attempts is null ? null : await attempts.Reserve(user.ObjectId, timeout.Token);
+                await using var reservation = await Reserve(attempt + 1, timeout.Token);
                 try { result = await provider.GenerateAsync(request, bounds, attempt > 0, timeout.Token); }
                 catch (OperationCanceledException) { throw; }
                 catch (TimeoutException)
@@ -306,11 +335,21 @@ public sealed class SleepAiService(IOptions<SleepAiOptions> options, ISleepAiAcc
                 timeout.Token.ThrowIfCancellationRequested();
                 // Never return a result after account deletion, grant replacement,
                 // history change or restore maintenance. No SQL lock spans the AI call.
-                await access.AuthorizeAsync(user, request, ct);
-                if (authorizeJob is not null) await authorizeJob(ct);
+                await Authorize(attempt + 1, ct);
                 ct.ThrowIfCancellationRequested();
                 EnsureResponseDay(request, bounds, clock.GetUtcNow());
-                if (SleepAiValidation.TryReadOutput(result, request, bounds, out var parsed))
+                bool valid;
+                SleepPredictionModelOutput? parsed;
+                using (var validation = diagnostics?.Start(SleepAiStage.Validation, attempt + 1))
+                {
+                    try
+                    {
+                        valid = SleepAiValidation.TryReadOutput(result, request, bounds, out parsed);
+                        validation?.Complete(valid ? "ok" : "invalid_output");
+                    }
+                    catch (Exception error) { validation?.Fail(error); throw; }
+                }
+                if (valid)
                     return Response(request, bounds, parsed!.Status, parsed.Periods);
             }
             throw new ApiException(503, "ai_invalid_response");
@@ -318,6 +357,36 @@ public sealed class SleepAiService(IOptions<SleepAiOptions> options, ISleepAiAcc
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         { throw new ApiException(504, "ai_timeout"); }
         finally { budget.Exit(); }
+
+        async Task Authorize(int attempt, CancellationToken token)
+        {
+            using var timing = diagnostics?.Start(SleepAiStage.Access, attempt);
+            try
+            {
+                await access.AuthorizeAsync(user, request, token);
+                if (authorizeJob is not null) await authorizeJob(token);
+                timing?.Complete();
+            }
+            catch (Exception error) { timing?.Fail(error); throw; }
+        }
+
+        async Task<IAsyncDisposable?> Reserve(int attempt, CancellationToken token)
+        {
+            using var timing = diagnostics?.Start(SleepAiStage.Budget, attempt);
+            try
+            {
+                if (attempts is null && !budget.TrySpend(user.ObjectId, out var rejection)) throw new ApiException(429, rejection switch
+                {
+                    SleepAiBudgetRejection.HourlyLimit => "ai_hourly_limit",
+                    SleepAiBudgetRejection.DailyLimit => "ai_daily_limit",
+                    _ => "ai_busy"
+                });
+                var reservation = attempts is null ? null : await attempts.Reserve(user.ObjectId, token);
+                timing?.Complete();
+                return reservation;
+            }
+            catch (Exception error) { timing?.Fail(error); throw; }
+        }
     }
 
     private SleepPredictionResponse Response(SleepPredictionRequest request, SleepAiTimeBounds bounds, string status, SleepPredictionPeriod[] periods)
@@ -341,6 +410,7 @@ public static class SleepAiRegistration
     {
         services.Configure<SleepAiOptions>(configuration.GetSection("SleepAi"));
         services.AddSingleton<SleepAiBudget>();
+        services.AddScoped<SleepAiDiagnostics>();
         services.AddScoped<ISleepAiAccess, SleepAiAccess>();
         services.AddScoped<ISleepAiAttemptStore, SleepAiAttemptStore>();
         services.AddScoped<SleepAiService>();
@@ -362,7 +432,7 @@ public static class SleepAiRegistration
             }).AsIChatClient(options.Model);
         });
         services.AddScoped<ISleepAiProvider>(sp => sp.GetRequiredService<IOptions<SleepAiOptions>>().Value.IsAvailable
-            ? new OpenAiSleepProvider(sp.GetRequiredService<IChatClient>(), sp.GetRequiredService<IOptions<SleepAiOptions>>())
+            ? new OpenAiSleepProvider(sp.GetRequiredService<IChatClient>(), sp.GetRequiredService<IOptions<SleepAiOptions>>(), sp.GetRequiredService<SleepAiDiagnostics>())
             : new DisabledSleepAiProvider());
         return services;
     }

@@ -50,6 +50,7 @@ public sealed class SleepAiJobSqlTests(SqlFixture sql) : IClassFixture<SqlFixtur
         s.Clock.Now = s.Clock.Now.AddMinutes(10);
         var replay = await s.Enqueue(request); Assert.Equal(created.JobId, replay.JobId);
         var claim = Assert.IsType<SleepAiJobClaim>(await s.Claim());
+        Assert.Equal(created.CreatedAt, claim.CreatedAt); Assert.Equal(1, claim.Run);
         Assert.Equal(request.Request.Now, claim.Request.Now); Assert.True(await s.Complete(claim));
         var completed = await s.Get(created.JobId); Assert.Equal("completed", completed.Status);
         Assert.Equal("insufficient_data", completed.Prediction!.Status);
@@ -76,6 +77,7 @@ public sealed class SleepAiJobSqlTests(SqlFixture sql) : IClassFixture<SqlFixtur
         var first = Assert.IsType<SleepAiJobClaim>(await s.Claim()); Assert.Null(await s.Claim());
         s.Clock.Now = s.Clock.Now.AddMinutes(2);
         var second = Assert.IsType<SleepAiJobClaim>(await s.Claim()); Assert.NotEqual(first.LeaseId, second.LeaseId);
+        Assert.Equal(first.CreatedAt, second.CreatedAt); Assert.Equal(1, first.Run); Assert.Equal(2, second.Run);
         Assert.False(await s.Complete(first));
         s.Clock.Now = s.Clock.Now.AddMinutes(2); Assert.Null(await s.Claim());
         var failed = await s.Get(request.OperationId); Assert.Equal("failed", failed.Status); Assert.Equal("ai_provider_unavailable", failed.ErrorCode);
