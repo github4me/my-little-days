@@ -9,6 +9,8 @@
   <ItemGroup>
     <PackageReference Include="dbup-sqlserver" Version="7.2.0" />
     <PackageReference Include="Azure.Identity" Version="1.21.0" />
+    <!-- Override SqlClient's transitive version for CVE-2026-70162 / CVE-2026-84008. -->
+    <PackageReference Include="System.Security.Cryptography.Pkcs" Version="9.0.21" />
     <EmbeddedResource Include="Scripts/*.sql" LogicalName="%(Filename)%(Extension)" />
   </ItemGroup>
 </Project>

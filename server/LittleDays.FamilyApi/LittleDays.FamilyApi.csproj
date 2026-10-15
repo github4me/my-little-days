@@ -12,6 +12,8 @@
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.12" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.12" />
     <PackageReference Include="Microsoft.Identity.Client" Version="4.84.2" />
+    <!-- Override SqlClient's transitive version for CVE-2026-70162 / CVE-2026-84008. -->
+    <PackageReference Include="System.Security.Cryptography.Pkcs" Version="10.0.13" />
     <!-- Historical EF sources remain for adoption tests, not API execution. -->
     <Compile Remove="Migrations/**/*.cs" />
   </ItemGroup>
