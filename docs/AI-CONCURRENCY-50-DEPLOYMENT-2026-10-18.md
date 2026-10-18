@@ -63,3 +63,10 @@ Local validation completed with SDK 10.0.401:
 Pending frozen release SHA, real-SQL workflow results, migration receipt,
 deployed artifact and live readiness checks. Record these separately; generic
 health is not authenticated SQL/provider acceptance.
+
+First scoped commit `c21106055947b620a3da6ac4e26890de71589fb0` failed disposable
+SQL CI [39101221820](https://github.com/github4me/my-little-days/actions/runs/39101221820)
+before any production release: SQL Server compiled the new-column check before
+recognizing the preceding ALTER ADD. Corrected the still-unreleased script 0011
+with the repository's normal `GO` batch boundary. Scripts 0001–0010 remain
+unchanged. A fresh green real-SQL run is required; no failure gate is bypassed.

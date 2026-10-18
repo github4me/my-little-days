@@ -3,6 +3,7 @@
 -- for existing jobs. Ordinary jobs retain their existing midnight expiry.
 ALTER TABLE dbo.SleepAiJobs ADD DiagnosticsConsentVersion varchar(40) NULL,
     DiagnosticsHistoryEpoch uniqueidentifier NULL;
+GO
 ALTER TABLE dbo.SleepAiJobs ADD CONSTRAINT CK_SleepAiJobs_DiagnosticsConsent CHECK
     ((DiagnosticsConsentVersion IS NULL AND DiagnosticsHistoryEpoch IS NULL) OR
      (DiagnosticsConsentVersion IS NOT NULL AND DiagnosticsConsentVersion = 'sleep-ai-failed-output-v1' AND DiagnosticsHistoryEpoch IS NOT NULL));
