@@ -4666,3 +4666,26 @@ live environment targets/protection settings; preserve existing AI approvals
 and the retained operator-IP rule. Remove only this run's temporary firewall
 rule. Verify package/runtime revision, startup and signed-in capture separately.
 No TestFlight rebuild is needed; live model acceptance remains pending.
+
+## AI schema correction deployed — 19 October 2026
+
+Runtime bb826c70e898cd068289703d7321a6194771fffb was deployed successfully by
+[run39144141365](https://github.com/github4me/my-little-days/actions/runs/39144141365).
+See [the completion receipt](AI-SCHEMA-FIX-2026-10-19.md#deployment-completed)
+for frozen source and downloaded artifact hashes, exact test results and gaps.
+Release CI passed811 API +157 migrator tests, zero failures/skips; all browser
+gates passed. Package embeds the exact corrected reference-only schema.
+
+Actual GitHub environment settings and unchanged reticle.com.au target values
+were rechecked before dispatch. Trusted feature/family-invitations,
+database_bootstrapped=true, adopt_ef=false. No new script or manual Azure setting
+was needed. Catalog verified pending0 at16:21:00/04/11 UTC; run-owned firewall
+rule removed16:21:13. Retained operator-IP access remains unchanged.
+
+Upload16:22:09 UTC; bounded cold-start checks became healthy16:23:35.
+Independent16:24:20 UTC live/ready200, unauthenticated jobs capabilities401,
+all no-store. No restart loop, identity/resource/cost/model/Fast/quota/capture
+change, public disclosure update or Apple upload. A post-startup SQL check found
+no new exchange rows; real-provider success and installed-device acceptance must
+be verified on the next user request rather than inferred from health. Preserve
+the existing capture/expiry/revocation/restore cleanup procedures.
