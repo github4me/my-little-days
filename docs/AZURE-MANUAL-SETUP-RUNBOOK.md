@@ -4570,3 +4570,35 @@ Public support/privacy versioned wording updated through the GitHub plugin in
 `facc9b39894ee14d8769974075b074679caf2855`. Both live Pages returned200 with the
 exact new wording13:04:02 UTC. Existing data categories and consent unchanged;
 no retention/spending-dashboard or provider-setting change.
+
+
+## Full AI exchange capture — activation release candidate, 19 October 2026
+
+Owner explicitly authorized all-user activation after the initial disabled
+implementation. Release configuration sets SleepAi:FullRequestCaptureEnabled=true
+for all newly enqueued resumable AI jobs, preserving initial AI consent, access
+checks, model, quotas and revocation cleanup. No mobile update or public policy
+change is part of this release. The request-clearing disclosure discrepancy
+remains outstanding; it is not represented as resolved.
+
+Target: reticle.com.au tenant 7b7e6e31-a778-4334-aee2-e969fa27fd0e, subscription
+4768a858-f23f-4a39-bb64-eabc9c142627, my-little-days-pilot-rg, API
+little-days-api-522fpstfbtds2, SQL little-days-sql-522fpstfbtds2 / little-days-family.
+Use Deploy family API and database on feature/family-invitations,
+database_bootstrapped=true, adopt_ef=false. Run disposable-SQL verification,
+apply only additive 0014_SleepAiExchangeCapture.sql before its API, require
+catalog verification and zero pending scripts. Preserve the retained operator
+IP rule; remove only release-owned temporary runner firewall rules.
+
+Capture retains provider JSON bodies and safe correlation/status/timing in
+restricted dbo.SleepAiExchanges for seven days, with hourly bounded cleanup.
+Exclude authorization headers and configured API key. Bodies above1MiB are
+explicitly marked truncated; capture is best effort, not lossless auditing.
+Cancellation, account/family revocation and restore-epoch boundaries still
+apply. Before opening a restored/rolled-back database, clear SleepAiExchanges
+as well as SleepAiFailedOutputs under maintenance. No private bodies in Git,
+application logs, screenshots or release receipts.
+
+Deployment, effective-configuration and SQL-backed capture verification remain
+pending. Generic health is not live inference/capture acceptance. See
+[the capture contract](AI-REQUEST-CAPTURE-2026-10-19.md).

@@ -25,6 +25,9 @@ public sealed class SleepAiOptions
     public string Model { get; set; } = SelectedModel;
     public string ApiKey { get; set; } = "";
     public bool SupportsTemperature { get; set; }
+    // Explicit deployment setting; initial AI opt-in, access checks and
+    // cancellation/revocation continue to apply to every captured job.
+    public bool FullRequestCaptureEnabled { get; set; }
     public int MaxRequestsPerAccountPerHour { get; set; } = 30;
     public int MaxRequestsPerInstancePerDay { get; set; } = 200;
     public int MaxConcurrentRequests { get; set; } = 50;
@@ -59,7 +62,7 @@ public interface ISleepAiProvider
 }
 
 public sealed class OpenAiSleepProvider(IChatClient client, IOptions<SleepAiOptions> options, SleepAiDiagnostics? diagnostics = null,
-    SleepAiFailureCapture? failures = null) : ISleepAiProvider
+    SleepAiFailureCapture? failures = null, SleepAiExchangeCapture? exchanges = null) : ISleepAiProvider
 {
     public const string PromptVersion = "sleep-ai-v1";
     // Reviewed 2026-10-14; embedded reference only, never fetched at request time.
@@ -264,6 +267,7 @@ public sealed class OpenAiSleepProvider(IChatClient client, IOptions<SleepAiOpti
             }
         };
         ChatResponse response;
+        exchanges?.BeginAttempt(retry ? 2 : 1, request.SchemaVersion);
         using (var timing = diagnostics?.Start(SleepAiStage.Provider, retry ? 2 : 1))
         {
             timing?.ProviderMetadata(options.Value.Model, null, null, null, null);
@@ -524,6 +528,10 @@ public static class SleepAiRegistration
         services.AddSingleton<SleepAiBudget>();
         services.AddScoped<SleepAiDiagnostics>();
         services.AddScoped<SleepAiFailureCapture>();
+        services.AddScoped<SleepAiExchangeCapture>();
+        services.AddScoped<SleepAiProviderHttpClient>();
+        services.AddHttpClient("SleepAiProviderWire")
+            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
         services.AddScoped<ISleepAiAccess, SleepAiAccess>();
         services.AddScoped<ISleepAiAttemptStore, SleepAiAttemptStore>();
         services.AddScoped<SleepAiService>();
@@ -539,14 +547,16 @@ public static class SleepAiRegistration
             if (!options.IsAvailable) throw new InvalidOperationException("Sleep AI is disabled.");
             return new ResponsesClient(new ApiKeyCredential(options.ApiKey), new ResponsesClientOptions
             {
+                Transport = new HttpClientPipelineTransport(sp.GetRequiredService<SleepAiProviderHttpClient>().Client),
                 RetryPolicy = new ClientRetryPolicy(0),
                 NetworkTimeout = TimeSpan.FromSeconds(60),
                 ClientLoggingOptions = new() { EnableLogging = false, EnableMessageLogging = false, EnableMessageContentLogging = false }
             }).AsIChatClient(options.Model);
-        });
+        }, ServiceLifetime.Scoped);
         services.AddScoped<ISleepAiProvider>(sp => sp.GetRequiredService<IOptions<SleepAiOptions>>().Value.IsAvailable
             ? new OpenAiSleepProvider(sp.GetRequiredService<IChatClient>(), sp.GetRequiredService<IOptions<SleepAiOptions>>(),
-                sp.GetRequiredService<SleepAiDiagnostics>(), sp.GetRequiredService<SleepAiFailureCapture>())
+                sp.GetRequiredService<SleepAiDiagnostics>(), sp.GetRequiredService<SleepAiFailureCapture>(),
+                sp.GetRequiredService<SleepAiExchangeCapture>())
             : new DisabledSleepAiProvider());
         return services;
     }

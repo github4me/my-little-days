@@ -295,6 +295,7 @@ public sealed partial class FamilyService(PilotDatabase db, PilotConfiguration c
         family.Revision++;
         await EndGrant(grant, "left", ct);
         await db.SleepAiFailedOutputs.Where(x => x.FamilyId == familyId).ExecuteDeleteAsync(ct);
+        await db.SleepAiExchanges.Where(x => x.FamilyId == familyId).ExecuteDeleteAsync(ct);
         await InvalidateTransfers(familyId, user.ObjectId, ct);
         foreach (var invite in await db.Invitations.Where(x => x.FamilyId == familyId && x.Status == "pending").ToArrayAsync(ct)) invite.Status = "revoked";
         return new OkResult();
@@ -620,6 +621,7 @@ public sealed partial class FamilyService(PilotDatabase db, PilotConfiguration c
             .SetProperty(x => x.LeaseId, (Guid?)null).SetProperty(x => x.LeaseUntil, (DateTimeOffset?)null)
             .SetProperty(x => x.UpdatedAt, Now), ct);
         await db.SleepAiFailedOutputs.Where(x => x.MembershipId == grant.Id).ExecuteDeleteAsync(ct);
+        await db.SleepAiExchanges.Where(x => x.MembershipId == grant.Id).ExecuteDeleteAsync(ct);
         await db.PushInstallations.Where(x => x.MembershipId == grant.Id)
             .ExecuteUpdateAsync(s => s.SetProperty(x => x.Enabled, false).SetProperty(x => x.TokenHash, (string?)null)
                 .SetProperty(x => x.ProtectedToken, ""), ct);

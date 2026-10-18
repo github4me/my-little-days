@@ -18,7 +18,7 @@ internal static class SchemaVerifier
         "0007_TimerEndAttribution.sql", "0008_WidenPushLocale.sql",
         "0009_ConflictReplacementAudit.sql", "0010_DurableSleepAiJobs.sql",
         "0011_SleepAiFailedOutputDiagnostics.sql", "0012_SleepAiAutomaticFailedOutputCapture.sql",
-        "0013_SleepAiFailureFields.sql"
+        "0013_SleepAiFailureFields.sql", "0014_SleepAiExchangeCapture.sql"
     ];
 
     internal static int Version(IEnumerable<string> applied) => applied
@@ -128,6 +128,29 @@ internal static class SchemaVerifier
         }
         if (version >= 13)
             expected[("SleepAiFailedOutputs", "FailureFieldsJson")] = new(231, 2048, Nullable: true);
+        if (version >= 14)
+        {
+            expected[("SleepAiJobs", "ExchangeHistoryEpoch")] = new(36, 16, Nullable: true);
+            foreach (var name in new[] { "UserId", "JobId", "ConsentGeneration", "HistoryEpoch" })
+                expected[("SleepAiExchanges", name)] = new(36, 16);
+            foreach (var name in new[] { "FamilyId", "MembershipId" })
+                expected[("SleepAiExchanges", name)] = new(36, 16, Nullable: true);
+            foreach (var name in new[] { "Run", "Attempt", "SchemaVersion" })
+                expected[("SleepAiExchanges", name)] = new(56, 4);
+            expected[("SleepAiExchanges", "HttpStatus")] = new(56, 4, Nullable: true);
+            foreach (var name in new[] { "StartedAt", "ExpiresAt" })
+                expected[("SleepAiExchanges", name)] = new(43, 10, 34, 7);
+            expected[("SleepAiExchanges", "FinishedAt")] = new(43, 10, 34, 7, true);
+            expected[("SleepAiExchanges", "RequestBody")] = new(231, -1);
+            expected[("SleepAiExchanges", "ResponseBody")] = new(231, -1, Nullable: true);
+            foreach (var name in new[] { "RequestBytes", "ResponseBytes" })
+                expected[("SleepAiExchanges", name)] = new(127, 8);
+            foreach (var name in new[] { "RequestTruncated", "ResponseTruncated" })
+                expected[("SleepAiExchanges", name)] = new(104, 1);
+            expected[("SleepAiExchanges", "ProviderRequestId")] = new(167, 200, Nullable: true);
+            expected[("SleepAiExchanges", "Outcome")] = new(167, 32);
+            expected[("SleepAiExchanges", "DurationMs")] = new(62, 8);
+        }
         using var command = factory();
         command.CommandText = """
             SELECT t.name, c.name, c.system_type_id, c.max_length, c.precision, c.scale, c.is_nullable, c.is_computed
@@ -266,6 +289,15 @@ internal static class SchemaVerifier
                 new("SleepAiFailedOutputs", "IX_SleepAiFailedOutputs_FamilyId", ["FamilyId"]),
                 new("SleepAiFailedOutputs", "IX_SleepAiFailedOutputs_MembershipId", ["MembershipId"]),
                 new("SleepAiFailedOutputs", "IX_SleepAiFailedOutputs_HistoryEpoch", ["HistoryEpoch"])
+            ]);
+        if (version >= 14)
+            indexes.AddRange([
+                new("SleepAiExchanges", "PK_SleepAiExchanges", ["UserId", "JobId", "Run", "Attempt"], true, Primary: true),
+                new("SleepAiExchanges", "IX_SleepAiExchanges_ExpiresAt", ["ExpiresAt"]),
+                new("SleepAiExchanges", "IX_SleepAiExchanges_UserId_ConsentGeneration", ["UserId", "ConsentGeneration"]),
+                new("SleepAiExchanges", "IX_SleepAiExchanges_FamilyId", ["FamilyId"]),
+                new("SleepAiExchanges", "IX_SleepAiExchanges_MembershipId", ["MembershipId"]),
+                new("SleepAiExchanges", "IX_SleepAiExchanges_HistoryEpoch", ["HistoryEpoch"])
             ]);
         return indexes;
     }
@@ -418,6 +450,14 @@ internal static class SchemaVerifier
         if (version >= 12)
             expected["SleepAiJobs.CK_SleepAiJobs_DiagnosticsConsent"] =
                 "DiagnosticsConsentVersion IS NULL OR (DiagnosticsConsentVersion IS NOT NULL AND DiagnosticsConsentVersion = 'sleep-ai-failed-output-v1' AND DiagnosticsHistoryEpoch IS NOT NULL)";
+        if (version >= 14)
+        {
+            expected["SleepAiExchanges.CK_SleepAiExchanges_Attempt"] = "Run IN (1,2) AND Attempt IN (1,2)";
+            expected["SleepAiExchanges.CK_SleepAiExchanges_Context"] = "(FamilyId IS NULL AND MembershipId IS NULL) OR (FamilyId IS NOT NULL AND MembershipId IS NOT NULL)";
+            expected["SleepAiExchanges.CK_SleepAiExchanges_Bounds"] = "SchemaVersion IN (1,2,3) AND RequestBytes >= -1 AND ResponseBytes >= -1 AND DurationMs >= 0 AND DATALENGTH(RequestBody) <= 2097152 AND (ResponseBody IS NULL OR DATALENGTH(ResponseBody) <= 2097152) AND (HttpStatus IS NULL OR HttpStatus BETWEEN 100 AND 599)";
+            expected["SleepAiExchanges.CK_SleepAiExchanges_Outcome"] = "Outcome IN ('dispatching','response_received','http_error','transport_error','cancelled','response_read_failed')";
+            expected["SleepAiExchanges.CK_SleepAiExchanges_Retention"] = "ExpiresAt = DATEADD(day,7,StartedAt)";
+        }
         using var command = factory();
         command.CommandText = """
             SELECT t.name, cc.name, cc.definition, cc.is_disabled, cc.is_not_trusted, cc.is_not_for_replication

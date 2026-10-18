@@ -15,7 +15,7 @@ public sealed class SleepAiFailureFieldsMigrationTests
     [Fact]
     public void FailureFieldMigrationAddsOnlyNullableBoundedMetadataWithoutBackfill()
     {
-        var scripts = MigrationRunner.Scripts();
+        var scripts = MigrationRunner.Scripts().Take(13).ToArray();
         Assert.Equal("0013_SleepAiFailureFields.sql", scripts.Last().Name);
         Assert.Equal(13, SchemaVerifier.Version(scripts.Select(x => x.Name)));
         var script = scripts.Last().Contents;
@@ -35,7 +35,8 @@ public sealed class SleepAiFailureFieldsMigrationTests
         db.Runner(scripts: MigrationRunner.Scripts().Take(12).ToArray()).Apply();
         await db.Execute(LegacyInsert);
         var checksum = await db.Count("SELECT CHECKSUM_AGG(BINARY_CHECKSUM(UserId,JobId,Reason,ResponseText,ExpiresAt)) FROM dbo.SleepAiFailedOutputs");
-        Assert.Single(db.Runner().Pending()); db.Runner().Apply();
+        var upgrade = db.Runner(scripts: MigrationRunner.Scripts().Take(13).ToArray());
+        Assert.Single(upgrade.Pending()); upgrade.Apply();
         Assert.Equal(checksum, await db.Count("SELECT CHECKSUM_AGG(BINARY_CHECKSUM(UserId,JobId,Reason,ResponseText,ExpiresAt)) FROM dbo.SleepAiFailedOutputs"));
         Assert.Equal(1, await db.Count("SELECT COUNT(*) FROM dbo.SleepAiFailedOutputs WHERE FailureFieldsJson IS NULL"));
         await db.Execute(LegacyInsert);
@@ -46,7 +47,7 @@ public sealed class SleepAiFailureFieldsMigrationTests
             SELECT COUNT(*) FROM sys.database_permissions WHERE grantee_principal_id=DATABASE_PRINCIPAL_ID('family_pilot_runtime')
               AND major_id=OBJECT_ID('dbo.SleepAiFailedOutputs') AND state='G' AND permission_name IN ('SELECT','INSERT','UPDATE','DELETE')
             """));
-        Assert.Empty(db.Runner().Pending()); db.Runner().Apply(); Assert.Empty(db.Runner().Pending());
+        Assert.Empty(upgrade.Pending()); upgrade.Apply(); Assert.Empty(upgrade.Pending());
         Assert.Equal(13, await db.Count("SELECT COUNT(*) FROM dbo.DatabaseMigrations"));
     }
 
@@ -67,6 +68,6 @@ public sealed class SleepAiFailureFieldsMigrationTests
     {
         await using var db = await TestDatabase.Create(); db.Runner().Apply(); await db.Execute(mutation);
         Assert.Contains("Schema verification failed", Assert.ThrowsAny<Exception>(() => db.Runner().Pending()).ToString());
-        Assert.Equal(13, await db.Count("SELECT COUNT(*) FROM dbo.DatabaseMigrations"));
+        Assert.Equal(14, await db.Count("SELECT COUNT(*) FROM dbo.DatabaseMigrations"));
     }
 }

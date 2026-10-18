@@ -43,6 +43,7 @@ public sealed class DeletionProcessor(PilotDatabase db, PilotConfiguration confi
                 var family = await db.Families.SingleAsync(x => x.Id == familyId, ct);
                 if (family.DeletedAt is null || family.PurgedAt is not null) return false;
                 await db.SleepAiFailedOutputs.Where(x => x.FamilyId == family.Id).ExecuteDeleteAsync(ct);
+                await db.SleepAiExchanges.Where(x => x.FamilyId == family.Id).ExecuteDeleteAsync(ct);
                 await db.Feeds.Where(x => x.FamilyId == family.Id).ExecuteDeleteAsync(ct);
                 await db.FamilyRecords.Where(x => x.FamilyId == family.Id).ExecuteDeleteAsync(ct);
                 await db.Invitations.Where(x => x.FamilyId == family.Id).ExecuteDeleteAsync(ct);

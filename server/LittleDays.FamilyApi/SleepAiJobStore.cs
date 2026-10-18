@@ -11,6 +11,7 @@ public sealed record SleepAiJobClaim(Guid UserId, Guid JobId, Guid LeaseId, Slee
     public DateTimeOffset CreatedAt { get; init; }
     public int Run { get; init; }
     public Guid? FailureCaptureHistoryEpoch { get; init; }
+    public Guid? ExchangeCaptureHistoryEpoch { get; init; }
 }
 
 public sealed class SleepAiJobStore(PilotDatabase db, FamilyService family, RecoveryGate recovery,
@@ -67,7 +68,8 @@ public sealed class SleepAiJobStore(PilotDatabase db, FamilyService family, Reco
                 DiagnosticsConsentVersion = value.DiagnosticsConsentVersion,
                 // Automatic server policy applies equally to old and new clients.
                 // Keep the client's actual optional consent field/hash unchanged.
-                DiagnosticsHistoryEpoch = family.SleepAiHistoryEpoch
+                DiagnosticsHistoryEpoch = family.SleepAiHistoryEpoch,
+                ExchangeHistoryEpoch = options.Value.FullRequestCaptureEnabled && !obsolete ? family.SleepAiHistoryEpoch : null
             };
             db.SleepAiJobs.Add(rowNew); return View(rowNew);
         }, ct);
@@ -96,6 +98,8 @@ public sealed class SleepAiJobStore(PilotDatabase db, FamilyService family, Reco
         foreach (var row in rows) Finish(row, "cancelled", null, null);
         // Do not join to jobs: their midnight cleanup precedes the diagnostic TTL.
         await db.SleepAiFailedOutputs.Where(x => x.UserId == user.ObjectId &&
+            (consent ? x.ConsentGeneration == id : x.JobId == id)).ExecuteDeleteAsync(ct);
+        await db.SleepAiExchanges.Where(x => x.UserId == user.ObjectId &&
             (consent ? x.ConsentGeneration == id : x.JobId == id)).ExecuteDeleteAsync(ct);
         return true;
     }, ct);
@@ -135,7 +139,9 @@ public sealed class SleepAiJobStore(PilotDatabase db, FamilyService family, Reco
         return new SleepAiJobClaim(row.UserId, row.Id, row.LeaseId.Value, request)
         { CreatedAt = row.CreatedAt, Run = row.Runs,
             FailureCaptureHistoryEpoch = row.DiagnosticsHistoryEpoch == family.SleepAiHistoryEpoch
-                ? row.DiagnosticsHistoryEpoch : null };
+                ? row.DiagnosticsHistoryEpoch : null,
+            ExchangeCaptureHistoryEpoch = row.ExchangeHistoryEpoch == family.SleepAiHistoryEpoch
+                ? row.ExchangeHistoryEpoch : null };
     }, ct);
 
     internal Task<bool> EnsureCurrent(SleepAiJobClaim claim, CancellationToken ct) => family.Transaction(async () =>
@@ -223,6 +229,33 @@ public sealed class SleepAiJobStore(PilotDatabase db, FamilyService family, Reco
         if (row.ExpiresAt > Now) return false;
         Finish(row, "expired", null, null); return true;
     }
+
+    internal Task<bool> StoreExchange(SleepAiJobClaim claim, SleepAiExchange exchange, CancellationToken ct) => family.Transaction(async () =>
+    {
+        CheckRecovery(); db.ChangeTracker.Clear();
+        if (!options.Value.FullRequestCaptureEnabled || claim.ExchangeCaptureHistoryEpoch != family.SleepAiHistoryEpoch ||
+            exchange.Attempt is not (1 or 2) || exchange.SchemaVersion != claim.Request.SchemaVersion || exchange.ExpiresAt <= Now) return false;
+        var job = await db.SleepAiJobs.FindAsync([claim.UserId, claim.JobId], ct);
+        if (job is null || job.State != "running" || job.Runs != claim.Run || job.LeaseId != claim.LeaseId || job.LeaseUntil <= Now ||
+            job.ExpiresAt <= Now || job.ExchangeHistoryEpoch != family.SleepAiHistoryEpoch) return false;
+        await Authorize(Identity(job.UserId), job, ct);
+        await CheckRevoked(job.UserId, job.Id, job.ConsentGeneration, ct);
+        var row = await db.SleepAiExchanges.FindAsync([job.UserId, job.Id, claim.Run, exchange.Attempt], ct);
+        if (row is null)
+        {
+            row = new SleepAiExchangeRow { UserId = job.UserId, JobId = job.Id, Run = claim.Run, Attempt = exchange.Attempt,
+                ConsentGeneration = job.ConsentGeneration, FamilyId = job.FamilyId, MembershipId = job.MembershipId,
+                HistoryEpoch = family.SleepAiHistoryEpoch };
+            db.SleepAiExchanges.Add(row);
+        }
+        row.SchemaVersion = exchange.SchemaVersion; row.StartedAt = exchange.StartedAt; row.FinishedAt = exchange.FinishedAt;
+        row.ExpiresAt = exchange.ExpiresAt; row.RequestBody = exchange.RequestBody; row.ResponseBody = exchange.ResponseBody;
+        row.RequestBytes = exchange.RequestBytes; row.ResponseBytes = exchange.ResponseBytes;
+        row.RequestTruncated = exchange.RequestTruncated; row.ResponseTruncated = exchange.ResponseTruncated;
+        row.HttpStatus = exchange.HttpStatus; row.ProviderRequestId = exchange.ProviderRequestId;
+        row.Outcome = exchange.Outcome; row.DurationMs = exchange.DurationMs;
+        return true;
+    }, ct);
     private void Finish(SleepAiJobRow row, string state, string? result, string? error)
     {
         row.State = state; row.ResultJson = result; row.ErrorCode = error;
@@ -241,6 +274,7 @@ public sealed class SleepAiJobStore(PilotDatabase db, FamilyService family, Reco
         // seven-day TTL and a durable restore epoch, independent of app version.
         var epoch = family.SleepAiHistoryEpoch;
         await db.Database.ExecuteSqlInterpolatedAsync($"DELETE TOP (500) FROM dbo.SleepAiFailedOutputs WHERE ExpiresAt <= {now} OR HistoryEpoch <> {epoch}", ct);
+        await db.Database.ExecuteSqlInterpolatedAsync($"DELETE TOP (500) FROM dbo.SleepAiExchanges WHERE ExpiresAt <= {now} OR HistoryEpoch <> {epoch}", ct);
         await db.Database.ExecuteSqlInterpolatedAsync($"DELETE TOP (500) FROM dbo.SleepAiJobs WHERE ExpiresAt <= {now}", ct);
         await db.Database.ExecuteSqlInterpolatedAsync($"DELETE TOP (500) FROM dbo.SleepAiRevocations WHERE ExpiresAt <= {now}", ct);
         await db.Database.ExecuteSqlInterpolatedAsync($"DELETE TOP (500) FROM dbo.SleepAiAttempts WHERE StartedAt < {metadataBefore}", ct);

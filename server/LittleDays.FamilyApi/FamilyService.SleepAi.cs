@@ -17,8 +17,11 @@ public sealed partial class FamilyService
         await db.SleepAiJobs.Where(x => x.UserId == userId ||
             x.FamilyId != null && affectedFamilies.Contains(x.FamilyId.Value))
             .ExecuteUpdateAsync(s => s.SetProperty(x => x.DiagnosticsConsentVersion, (string?)null)
-                .SetProperty(x => x.DiagnosticsHistoryEpoch, (Guid?)null), ct);
+                .SetProperty(x => x.DiagnosticsHistoryEpoch, (Guid?)null)
+                .SetProperty(x => x.ExchangeHistoryEpoch, (Guid?)null), ct);
         await db.SleepAiFailedOutputs.Where(x => x.UserId == userId ||
+            x.FamilyId != null && affectedFamilies.Contains(x.FamilyId.Value)).ExecuteDeleteAsync(ct);
+        await db.SleepAiExchanges.Where(x => x.UserId == userId ||
             x.FamilyId != null && affectedFamilies.Contains(x.FamilyId.Value)).ExecuteDeleteAsync(ct);
     }
     // Authorizes client-projected data without creating a family, copying its

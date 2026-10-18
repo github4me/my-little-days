@@ -9,12 +9,15 @@ public sealed class SleepAiJobProcessor
     private readonly Func<SleepAiJobClaim, SleepPredictionResponse?, string?, CancellationToken, Task<bool>> complete;
     private readonly SleepAiDiagnostics? diagnostics;
     private readonly SleepAiFailureCapture? failures;
+    private readonly SleepAiExchangeCapture? exchanges;
+    private readonly SleepAiJobStore? exchangeStore;
 
     public SleepAiJobProcessor(SleepAiJobStore store, SleepAiService service, SleepAiDiagnostics? diagnostics = null,
-        SleepAiFailureCapture? failures = null)
+        SleepAiFailureCapture? failures = null, SleepAiExchangeCapture? exchanges = null)
         : this(store.Claim, (claim, ct) => service.PredictQueuedAsync(
             new() { ObjectId = claim.UserId, Email = "" }, claim.Request,
-            async token => { await store.EnsureCurrent(claim, token); }, ct), store.Complete, diagnostics, failures) { }
+            async token => { await store.EnsureCurrent(claim, token); }, ct), store.Complete, diagnostics, failures)
+    { this.exchanges = exchanges; exchangeStore = store; }
 
     // Narrow in-memory seam for timing tests; production still uses the same SQL store/service.
     internal SleepAiJobProcessor(Func<CancellationToken, Task<SleepAiJobClaim?>> claimJob,
@@ -51,6 +54,7 @@ public sealed class SleepAiJobProcessor
     internal async Task Process(SleepAiJobClaim claim, CancellationToken stoppingToken)
     {
         failures?.StartAutomaticCapture(claim.FailureCaptureHistoryEpoch);
+        if (exchangeStore is not null) exchanges?.Start(claim, (value, token) => exchangeStore.StoreExchange(claim, value, token));
         diagnostics?.WallDuration(SleepAiStage.QueueWait, claim.CreatedAt);
         SleepPredictionResponse? result = null; string? error = null;
         try

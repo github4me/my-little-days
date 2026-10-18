@@ -8,6 +8,7 @@ public sealed partial class PilotDatabase
     public DbSet<SleepAiRevocationRow> SleepAiRevocations => Set<SleepAiRevocationRow>();
     public DbSet<SleepAiAttemptRow> SleepAiAttempts => Set<SleepAiAttemptRow>();
     public DbSet<SleepAiFailedOutputRow> SleepAiFailedOutputs => Set<SleepAiFailedOutputRow>();
+    public DbSet<SleepAiExchangeRow> SleepAiExchanges => Set<SleepAiExchangeRow>();
     private static void ConfigureSleepAiJobs(ModelBuilder model)
     {
         model.Entity<SleepAiJobRow>(e =>
@@ -50,6 +51,17 @@ public sealed partial class PilotDatabase
             e.HasIndex(x => x.MembershipId);
             e.HasIndex(x => x.HistoryEpoch);
         });
+        model.Entity<SleepAiExchangeRow>(e =>
+        {
+            e.ToTable("SleepAiExchanges"); e.HasKey(x => new { x.UserId, x.JobId, x.Run, x.Attempt });
+            e.Property(x => x.RequestBody).HasColumnType("nvarchar(max)");
+            e.Property(x => x.ResponseBody).HasColumnType("nvarchar(max)");
+            e.Property(x => x.ProviderRequestId).HasMaxLength(200).IsUnicode(false);
+            e.Property(x => x.Outcome).HasMaxLength(32).IsUnicode(false);
+            e.HasIndex(x => x.ExpiresAt);
+            e.HasIndex(x => new { x.UserId, x.ConsentGeneration });
+            e.HasIndex(x => x.FamilyId); e.HasIndex(x => x.MembershipId); e.HasIndex(x => x.HistoryEpoch);
+        });
     }
 }
 
@@ -76,6 +88,35 @@ public sealed class SleepAiJobRow
     public int Runs { get; set; }
     public string? DiagnosticsConsentVersion { get; set; }
     public Guid? DiagnosticsHistoryEpoch { get; set; }
+    public Guid? ExchangeHistoryEpoch { get; set; }
+}
+
+// No public API projection. Administrative access is restricted to unexpired,
+// current-epoch rows; no FK because jobs expire before this seven-day evidence.
+public sealed class SleepAiExchangeRow
+{
+    public Guid UserId { get; set; }
+    public Guid JobId { get; set; }
+    public int Run { get; set; }
+    public int Attempt { get; set; }
+    public Guid ConsentGeneration { get; set; }
+    public Guid? FamilyId { get; set; }
+    public Guid? MembershipId { get; set; }
+    public Guid HistoryEpoch { get; set; }
+    public int SchemaVersion { get; set; }
+    public DateTimeOffset StartedAt { get; set; }
+    public DateTimeOffset? FinishedAt { get; set; }
+    public DateTimeOffset ExpiresAt { get; set; }
+    public string RequestBody { get; set; } = "";
+    public string? ResponseBody { get; set; }
+    public long RequestBytes { get; set; }
+    public long ResponseBytes { get; set; }
+    public bool RequestTruncated { get; set; }
+    public bool ResponseTruncated { get; set; }
+    public int? HttpStatus { get; set; }
+    public string? ProviderRequestId { get; set; }
+    public string Outcome { get; set; } = "dispatching";
+    public double DurationMs { get; set; }
 }
 
 // Restricted diagnostic payloads are independent of midnight-expiring jobs.
