@@ -1,14 +1,17 @@
 # Failed AI output diagnostics — seven-day retention
 
-18 October 2026. **Backend deployed; capture not activated for existing apps.** Existing
-apps continue using their current AI consent and do not opt in automatically.
-This is separate from the metadata-only App Service timing log.
+18 October 2026. The owner subsequently requested automatic capture without a
+separate diagnostic opt-in. The [automatic rollout](AI-AUTOMATIC-FAILURE-CAPTURE-2026-10-18.md)
+records implementation/deployment status. The earlier backend is deployed;
+automatic capture is not live until that rollout is verified. This is separate
+from the metadata-only App Service timing log.
 
 ## Scope
 
-For a job with explicit `sleep-ai-failed-output-v1` diagnostic consent, retain
-each failed provider attempt (initial or repair), including an invalid first
-attempt subsequently repaired successfully:
+Under the automatic policy, newly enqueued resumable AI jobs retain each failed
+provider attempt (initial or repair), including an invalid first attempt
+subsequently repaired successfully. No separate diagnostic consent is required;
+initial AI consent and authoritative access checks remain unchanged:
 
 - Failed assistant response text, a fixed validation/error reason, and the
   zero-based output-period index where applicable.
@@ -45,8 +48,9 @@ cleanup until the worker resumes. Do not promise deletion at an exact second.
 Turning AI off / cancelling its consent clears corresponding diagnostics even
 after the parent job has expired at midnight. Individual job cancellation,
 account deletion, ended family access, closed families and obsolete history
-epochs also clear diagnostics. Final persistence rechecks authorization and
-authoritative job consent so late responses cannot recreate revoked data.
+epochs also clear diagnostics. Final persistence rechecks authorization, AI
+consent revocation and the server-assigned job history epoch so late responses
+cannot recreate revoked data.
 Failure to save optional diagnostics must not undo a completed prediction or
 trigger another paid inference. Capture is best-effort after job completion,
 in a second authorization-checked transaction. Cancelled, expired or revoked
@@ -59,35 +63,24 @@ before traffic is reopened. The same purge and clearing of job diagnostic
 consent are required before rolling back to an older API without these deletion
 hooks. Do not export payloads into unmanaged backups.
 
-## Consent and compatibility
+## Automatic policy and compatibility
 
-The existing durable-job consent remains `sleep-ai-jobs-v1`. The new optional
+The existing durable-job consent remains `sleep-ai-jobs-v1`. The optional
 job-envelope field `diagnosticsConsentVersion` is omitted when absent, preserving
-legacy serialized request hashes and operation replay. Missing/null means no
-capture. Unknown versions are rejected. Supported version and seven-day
-duration are additive capability metadata; they do not enable capture.
+legacy serialized request hashes and operation replay. Under the new policy,
+missing/null no longer prevents capture for newly enqueued resumable jobs.
+The server assigns the current history epoch separately; it does not fabricate
+a client consent version. Unknown supplied versions remain rejected for
+compatibility. Existing cancellation/revoke generations remain unchanged.
 
-A future client must send this field only after the server advertises support
-and the user explicitly agrees to the diagnostic retention. Existing enabled
-AI sessions must not inherit it. Keep the consent generation's revoke/retry
-behavior. Do not send the field to older servers that reject unknown fields.
+Old jobs with null diagnostic epochs are not backfilled. Null also marks
+lifecycle suppression and must not be re-enabled when claiming or recovering a
+job. The new additive script 0012 permits null diagnostic consent with a
+server-assigned epoch; applied script 0011 is unchanged. Historical synchronous
+routes remain outside the resumable-job diagnostic store.
 
-Suggested concise consent addition, **not yet published**:
-
-> With your permission, failed AI responses and failure details are kept in our
-> restricted server database for up to seven days to diagnose problems, then
-> automatically removed on the next cleanup. These responses may include sleep
-> times. We do not additionally retain the input history for diagnostics.
-> Turning off AI also removes these diagnostics once the app reconnects.
-
-Chinese draft:
-
-> 经你同意，失败的 AI 返回和失败原因会保存在受限的服务器数据库中，
-> 保留 7 天后由定期清理任务自动删除。返回内容可能包含睡眠时间；
-> 不会为此额外保存输入的历史记录。关闭 AI 后，联网时也会清除这些诊断数据。
-
-Client consent UI, public disclosures and capture activation remain pending.
-The additive migration and API backend were deployed in
+The public policy is updated without a new diagnostic popup. Initial AI
+sharing remains optional. The earlier additive migration and API were deployed in
 [release 39101954963](https://github.com/github4me/my-little-days/actions/runs/39101954963).
 See the [release receipt](AI-CONCURRENCY-50-DEPLOYMENT-2026-10-18.md) for exact
 SHA/artifact/SQL verification, and the manual runbook for the restore procedure.

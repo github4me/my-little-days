@@ -12,12 +12,12 @@ public sealed class SleepAiFailureCaptureTests
         """;
 
     [Theory]
-    [InlineData(null)]
-    [InlineData("sleep-ai-jobs-v1")]
-    [InlineData("sleep-ai-failed-output-v0")]
-    public async Task FailedResponsesRequireExplicitDiagnosticConsent(string? consent)
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FailedResponsesRequireServerEpochNotAnEmptyOrUnstartedScope(bool emptyEpoch)
     {
-        var f = new Fixture(consent, PrivateOutput);
+        var f = new Fixture(false, PrivateOutput);
+        if (emptyEpoch) f.Capture.StartAutomaticCapture(Guid.Empty);
         Assert.Equal("ai_invalid_response", (await Assert.ThrowsAsync<ApiException>(() => f.Predict())).Code);
         Assert.Equal(2, f.Client.Calls);
         Assert.Empty(f.Capture.Attempts);
@@ -27,7 +27,7 @@ public sealed class SleepAiFailureCaptureTests
     [Fact]
     public async Task RepairKeepsOnlyFailedResponseAndReason()
     {
-        var f = new Fixture(SleepAiFailureCapture.ConsentVersion, PrivateOutput, Ready);
+        var f = new Fixture(true, PrivateOutput, Ready);
         var result = await f.Predict();
         Assert.Equal("ready", result.Status);
         Assert.Equal(2, f.Client.Calls);
@@ -47,7 +47,7 @@ public sealed class SleepAiFailureCaptureTests
     [Fact]
     public async Task BothInvalidAttemptsAreRetainedWithoutInputOrLogPayloads()
     {
-        var f = new Fixture(SleepAiFailureCapture.ConsentVersion, PrivateOutput, "second-invalid-output");
+        var f = new Fixture(true, PrivateOutput, "second-invalid-output");
         var error = await Assert.ThrowsAsync<ApiException>(() => f.Predict());
         Assert.Equal("ai_invalid_response", error.Code);
         Assert.Collection(f.Capture.Attempts,
@@ -67,7 +67,7 @@ public sealed class SleepAiFailureCaptureTests
               {"sleepStart":"2026-10-18T17:30:00Z","sleepEnd":"2026-10-18T19:00:00Z","sootheStart":"2026-10-18T17:15:00Z","sootheEnd":"2026-10-18T17:25:00Z"}
             ]}
             """;
-        var f = new Fixture(SleepAiFailureCapture.ConsentVersion, overlappingOutput, Ready);
+        var f = new Fixture(true, overlappingOutput, Ready);
         Assert.Equal("ready", (await f.Predict()).Status);
         var failure = Assert.Single(f.Capture.Attempts);
         Assert.Equal("period_overlap", failure.Reason);
@@ -81,7 +81,7 @@ public sealed class SleepAiFailureCaptureTests
     [InlineData("{\"status\":\"insufficient_data\",\"periods\":[]}", "insufficient_data")]
     public async Task SuccessfulOutputIsNotRetained(string output, string status)
     {
-        var f = new Fixture(SleepAiFailureCapture.ConsentVersion, output);
+        var f = new Fixture(true, output);
         Assert.Equal(status, (await f.Predict()).Status);
         Assert.Empty(f.Capture.Attempts);
         Assert.Equal(1, f.Client.Calls);
@@ -95,7 +95,7 @@ public sealed class SleepAiFailureCaptureTests
     [InlineData("unexpected", "ai_provider_unavailable")]
     public async Task TransportFailuresKeepOnlySafeReasonAndDuration(string kind, string expected)
     {
-        var f = new Fixture(SleepAiFailureCapture.ConsentVersion, Ready);
+        var f = new Fixture(true, Ready);
         f.Client.Error = kind switch
         {
             "timeout" => new TimeoutException("private exception body"),
@@ -119,7 +119,7 @@ public sealed class SleepAiFailureCaptureTests
     [Fact]
     public async Task InterruptedCompletionRetainsOnlyAssistantTextNotReasoning()
     {
-        var f = new Fixture(SleepAiFailureCapture.ConsentVersion, PrivateOutput);
+        var f = new Fixture(true, PrivateOutput);
         f.Client.FinishReason = ChatFinishReason.Length;
         f.Client.Reasoning = "private-reasoning-must-not-be-retained";
         Assert.Equal("ai_invalid_response", (await Assert.ThrowsAsync<ApiException>(() => f.Predict())).Code);
@@ -136,7 +136,7 @@ public sealed class SleepAiFailureCaptureTests
     [Fact]
     public async Task ExternalCancellationDoesNotCreateFailureEvidence()
     {
-        var f = new Fixture(SleepAiFailureCapture.ConsentVersion, PrivateOutput);
+        var f = new Fixture(true, PrivateOutput);
         using var cancellation = new CancellationTokenSource();
         f.Client.OnCall = cancellation.Cancel;
         f.Client.Error = new OperationCanceledException(cancellation.Token);
@@ -150,7 +150,7 @@ public sealed class SleepAiFailureCaptureTests
     [InlineData(16385, true)]
     public void FailureResponseSizeBoundaryIsExplicitlyMarked(int length, bool truncated)
     {
-        var f = new Fixture(SleepAiFailureCapture.ConsentVersion, Ready);
+        var f = new Fixture(true, Ready);
         f.Capture.Record(1, "invalid_output", null, new string('x', length), TimeSpan.FromSeconds(2), SleepAiOptions.SelectedModel);
         var failure = Assert.Single(f.Capture.Attempts);
         Assert.Equal(Math.Min(length, 16384), failure.ResponseText!.Length);
@@ -161,7 +161,7 @@ public sealed class SleepAiFailureCaptureTests
     [Fact]
     public void TruncationDoesNotSplitSurrogatePair()
     {
-        var f = new Fixture(SleepAiFailureCapture.ConsentVersion, Ready);
+        var f = new Fixture(true, Ready);
         var output = new string('x', 16383) + "🌙";
         f.Capture.Record(1, "invalid_output", null, output, TimeSpan.Zero, SleepAiOptions.SelectedModel);
         var failure = Assert.Single(f.Capture.Attempts);
@@ -173,7 +173,7 @@ public sealed class SleepAiFailureCaptureTests
     [Fact]
     public void CaptureIsBoundedToTwoUniqueAttemptsAndSanitizesMetadata()
     {
-        var f = new Fixture(SleepAiFailureCapture.ConsentVersion, Ready);
+        var f = new Fixture(true, Ready);
         foreach (var attempt in new[] { 0, 1, 1, 2, 3 })
             f.Capture.Record(attempt, "private exception and input", 99, null, TimeSpan.FromMilliseconds(-1), "private-key");
         Assert.Equal(new[] { 1, 2 }, f.Capture.Attempts.Select(x => x.Attempt));
@@ -187,7 +187,7 @@ public sealed class SleepAiFailureCaptureTests
     [Fact]
     public void FailedOutputExpiresExactlySevenDaysAfterFailure()
     {
-        var f = new Fixture(SleepAiFailureCapture.ConsentVersion, Ready);
+        var f = new Fixture(true, Ready);
         f.Capture.Record(1, "invalid_output", null, PrivateOutput, TimeSpan.Zero, SleepAiOptions.SelectedModel);
         var failure = Assert.Single(f.Capture.Attempts);
         Assert.Equal(DateTimeOffset.Parse("2026-10-18T14:00:00Z"), failure.OccurredAt);
@@ -200,13 +200,13 @@ public sealed class SleepAiFailureCaptureTests
     [Fact]
     public void NewScopeOrDisposalClearsPriorPrivateOutput()
     {
-        var f = new Fixture(SleepAiFailureCapture.ConsentVersion, Ready);
+        var f = new Fixture(true, Ready);
         f.Capture.Record(1, "invalid_output", null, PrivateOutput, TimeSpan.Zero, SleepAiOptions.SelectedModel);
-        f.Capture.Start(null);
+        f.Capture.StartAutomaticCapture(null);
         Assert.Empty(f.Capture.Attempts);
         f.Capture.Record(1, "invalid_output", null, PrivateOutput, TimeSpan.Zero, SleepAiOptions.SelectedModel);
         Assert.Empty(f.Capture.Attempts);
-        f.Capture.Start(SleepAiFailureCapture.ConsentVersion);
+        f.Capture.StartAutomaticCapture(Guid.NewGuid());
         f.Capture.Record(1, "invalid_output", null, PrivateOutput, TimeSpan.Zero, SleepAiOptions.SelectedModel);
         Assert.Single(f.Capture.Attempts);
         f.Capture.Dispose();
@@ -216,13 +216,13 @@ public sealed class SleepAiFailureCaptureTests
     }
 
     [Theory]
-    [InlineData(null, 0)]
-    [InlineData(SleepAiFailureCapture.ConsentVersion, 1)]
-    public async Task WorkerStartsCaptureFromClaimedConsentNotPreviousScope(string? consent, int expected)
+    [InlineData(false, 0)]
+    [InlineData(true, 1)]
+    public async Task WorkerStartsAutomaticCaptureFromClaimedServerEpochNotPreviousScope(bool automatic, int expected)
     {
-        var f = new Fixture(SleepAiFailureCapture.ConsentVersion, Ready);
+        var f = new Fixture(true, Ready);
         var claim = new SleepAiJobClaim(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), f.Request)
-            { DiagnosticsConsentVersion = consent };
+            { FailureCaptureHistoryEpoch = automatic ? Guid.NewGuid() : null };
         var processor = new SleepAiJobProcessor(_ => Task.FromResult<SleepAiJobClaim?>(claim),
             (_, _) =>
             {
@@ -245,9 +245,9 @@ public sealed class SleepAiFailureCaptureTests
         public ChatFake Client { get; }
         public SleepAiService Service { get; }
         public SleepPredictionRequest Request { get; }
-        public Fixture(string? consent, params string[] outputs)
+        public Fixture(bool automatic, params string[] outputs)
         {
-            Capture = new(Clock); Capture.Start(consent); Client = new(Clock, outputs);
+            Capture = new(Clock); Capture.StartAutomaticCapture(automatic ? Guid.NewGuid() : null); Client = new(Clock, outputs);
             var options = Options.Create(new SleepAiOptions
             {
                 Enabled = true, ChildDataProcessingApproved = true, ZeroDataRetentionApproved = true,

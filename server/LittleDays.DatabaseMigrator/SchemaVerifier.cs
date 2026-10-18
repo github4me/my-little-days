@@ -17,7 +17,7 @@ internal static class SchemaVerifier
         "0005_QueryIndexesAndOperationCounts.sql", "0006_FamilyPushAndTimerIndex.sql",
         "0007_TimerEndAttribution.sql", "0008_WidenPushLocale.sql",
         "0009_ConflictReplacementAudit.sql", "0010_DurableSleepAiJobs.sql",
-        "0011_SleepAiFailedOutputDiagnostics.sql"
+        "0011_SleepAiFailedOutputDiagnostics.sql", "0012_SleepAiAutomaticFailedOutputCapture.sql"
     ];
 
     internal static int Version(IEnumerable<string> applied) => applied
@@ -412,6 +412,9 @@ internal static class SchemaVerifier
                 """;
             expected["SleepAiFailedOutputs.CK_SleepAiFailedOutputs_Retention"] = "ExpiresAt = DATEADD(day, 7, OccurredAt)";
         }
+        if (version >= 12)
+            expected["SleepAiJobs.CK_SleepAiJobs_DiagnosticsConsent"] =
+                "DiagnosticsConsentVersion IS NULL OR (DiagnosticsConsentVersion IS NOT NULL AND DiagnosticsConsentVersion = 'sleep-ai-failed-output-v1' AND DiagnosticsHistoryEpoch IS NOT NULL)";
         using var command = factory();
         command.CommandText = """
             SELECT t.name, cc.name, cc.definition, cc.is_disabled, cc.is_not_trusted, cc.is_not_for_replication

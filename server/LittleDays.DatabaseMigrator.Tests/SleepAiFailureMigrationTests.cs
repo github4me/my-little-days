@@ -8,7 +8,7 @@ public sealed class SleepAiFailureMigrationTests
     [Fact]
     public void FailureDiagnosticsMigrationIsAdditiveVersionElevenWithBoundedIndependentRetention()
     {
-        var scripts = MigrationRunner.Scripts();
+        var scripts = MigrationRunner.Scripts().Take(11).ToArray();
         Assert.Equal("0011_SleepAiFailedOutputDiagnostics.sql", scripts.Last().Name);
         Assert.Equal(11, SchemaVerifier.Version(scripts.Select(x => x.Name)));
         var script = scripts.Last().Contents;
@@ -68,7 +68,7 @@ public sealed class SleepAiFailureMigrationTests
         db.Runner(scripts: MigrationRunner.Scripts().Take(10).ToArray()).Apply();
         await db.Execute(LegacyJobInsert);
         var checksum = await db.Count("SELECT CHECKSUM_AGG(BINARY_CHECKSUM(UserId,Id,RequestHash,RequestJson,Runs)) FROM dbo.SleepAiJobs");
-        Assert.Single(db.Runner().Pending()); db.Runner().Apply();
+        Assert.Single(db.Runner(scripts: MigrationRunner.Scripts().Take(11).ToArray()).Pending()); db.Runner(scripts: MigrationRunner.Scripts().Take(11).ToArray()).Apply();
         Assert.Equal(checksum, await db.Count("SELECT CHECKSUM_AGG(BINARY_CHECKSUM(UserId,Id,RequestHash,RequestJson,Runs)) FROM dbo.SleepAiJobs"));
         await db.Execute(LegacyJobInsert);
         Assert.Equal(2, await db.Count("SELECT COUNT(*) FROM dbo.SleepAiJobs WHERE DiagnosticsConsentVersion IS NULL AND DiagnosticsHistoryEpoch IS NULL"));
@@ -78,7 +78,7 @@ public sealed class SleepAiFailureMigrationTests
             SELECT COUNT(*) FROM sys.database_permissions WHERE grantee_principal_id=DATABASE_PRINCIPAL_ID('family_pilot_runtime')
               AND major_id=OBJECT_ID('dbo.SleepAiFailedOutputs') AND state='G' AND permission_name IN ('SELECT','INSERT','UPDATE','DELETE')
             """));
-        Assert.Empty(db.Runner().Pending()); db.Runner().Apply(); Assert.Empty(db.Runner().Pending());
+        Assert.Empty(db.Runner(scripts: MigrationRunner.Scripts().Take(11).ToArray()).Pending()); db.Runner(scripts: MigrationRunner.Scripts().Take(11).ToArray()).Apply(); Assert.Empty(db.Runner(scripts: MigrationRunner.Scripts().Take(11).ToArray()).Pending());
         Assert.Equal(11, await db.Count("SELECT COUNT(*) FROM dbo.DatabaseMigrations"));
     }
 
@@ -96,7 +96,7 @@ public sealed class SleepAiFailureMigrationTests
     [InlineData("UPDATE dbo.SleepAiFailedOutputs SET OriginalLength=9")]
     public async Task FailureDiagnosticsDatabaseRejectsInvalidConsentRetentionContextAndPayloadBounds(string mutation)
     {
-        await using var db = await TestDatabase.Create(); db.Runner().Apply();
+        await using var db = await TestDatabase.Create(); db.Runner(scripts: MigrationRunner.Scripts().Take(11).ToArray()).Apply();
         await db.Execute(LegacyJobInsert); await db.Execute(DiagnosticInsert);
         await Assert.ThrowsAsync<SqlException>(() => db.Execute(mutation));
         Assert.Equal(1, await db.Count("SELECT COUNT(*) FROM dbo.SleepAiFailedOutputs WHERE OriginalLength=10 AND Truncated=0"));
@@ -110,8 +110,8 @@ public sealed class SleepAiFailureMigrationTests
     [InlineData("ALTER TABLE dbo.SleepAiFailedOutputs ALTER COLUMN Model varchar(99) NOT NULL")]
     public async Task FailureDiagnosticsCatalogDriftFailsClosed(string mutation)
     {
-        await using var db = await TestDatabase.Create(); db.Runner().Apply(); await db.Execute(mutation);
-        Assert.Contains("Schema verification failed", Assert.ThrowsAny<Exception>(() => db.Runner().Pending()).ToString());
+        await using var db = await TestDatabase.Create(); db.Runner(scripts: MigrationRunner.Scripts().Take(11).ToArray()).Apply(); await db.Execute(mutation);
+        Assert.Contains("Schema verification failed", Assert.ThrowsAny<Exception>(() => db.Runner(scripts: MigrationRunner.Scripts().Take(11).ToArray()).Pending()).ToString());
         Assert.Equal(11, await db.Count("SELECT COUNT(*) FROM dbo.DatabaseMigrations"));
     }
 }

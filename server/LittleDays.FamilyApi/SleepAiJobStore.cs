@@ -10,7 +10,7 @@ public sealed record SleepAiJobClaim(Guid UserId, Guid JobId, Guid LeaseId, Slee
 {
     public DateTimeOffset CreatedAt { get; init; }
     public int Run { get; init; }
-    public string? DiagnosticsConsentVersion { get; init; }
+    public Guid? FailureCaptureHistoryEpoch { get; init; }
 }
 
 public sealed class SleepAiJobStore(PilotDatabase db, FamilyService family, RecoveryGate recovery,
@@ -65,7 +65,9 @@ public sealed class SleepAiJobStore(PilotDatabase db, FamilyService family, Reco
                 CreatedAt = Now, UpdatedAt = Now, ExpiresAt = bounds.TodayEnd,
                 RequestJson = obsolete ? null : json, State = obsolete ? "cancelled" : "queued",
                 DiagnosticsConsentVersion = value.DiagnosticsConsentVersion,
-                DiagnosticsHistoryEpoch = value.DiagnosticsConsentVersion is null ? null : family.SleepAiHistoryEpoch
+                // Automatic server policy applies equally to old and new clients.
+                // Keep the client's actual optional consent field/hash unchanged.
+                DiagnosticsHistoryEpoch = family.SleepAiHistoryEpoch
             };
             db.SleepAiJobs.Add(rowNew); return View(rowNew);
         }, ct);
@@ -131,7 +133,9 @@ public sealed class SleepAiJobStore(PilotDatabase db, FamilyService family, Reco
         row.State = "running"; row.LeaseId = Guid.NewGuid(); row.LeaseUntil = now.AddMinutes(2);
         row.Runs++; row.UpdatedAt = now;
         return new SleepAiJobClaim(row.UserId, row.Id, row.LeaseId.Value, request)
-        { CreatedAt = row.CreatedAt, Run = row.Runs, DiagnosticsConsentVersion = row.DiagnosticsConsentVersion };
+        { CreatedAt = row.CreatedAt, Run = row.Runs,
+            FailureCaptureHistoryEpoch = row.DiagnosticsHistoryEpoch == family.SleepAiHistoryEpoch
+                ? row.DiagnosticsHistoryEpoch : null };
     }, ct);
 
     internal Task<bool> EnsureCurrent(SleepAiJobClaim claim, CancellationToken ct) => family.Transaction(async () =>
@@ -185,7 +189,7 @@ public sealed class SleepAiJobStore(PilotDatabase db, FamilyService family, Reco
                     return false;
                 await Authorize(Identity(row.UserId), row, ct);
                 await CheckRevoked(row.UserId, row.Id, row.ConsentGeneration, ct);
-                if (row.DiagnosticsConsentVersion == SleepAiFailureCapture.ConsentVersion &&
+                if (claim.FailureCaptureHistoryEpoch == family.SleepAiHistoryEpoch &&
                     row.DiagnosticsHistoryEpoch == family.SleepAiHistoryEpoch && failureCapture is not null)
                 {
                     foreach (var failed in failureCapture.Attempts.Where(x => x.Attempt is 1 or 2)
@@ -233,7 +237,7 @@ public sealed class SleepAiJobStore(PilotDatabase db, FamilyService family, Reco
         CheckRecovery(); var now = Now; var metadataBefore = now.AddDays(-2);
         // Only AI-owned tables; domain records and operation receipts are untouched.
         // Ordinary job/input retention is unchanged. Diagnostic output has its
-        // separately consented seven-day TTL and a durable restore epoch.
+        // seven-day TTL and a durable restore epoch, independent of app version.
         var epoch = family.SleepAiHistoryEpoch;
         await db.Database.ExecuteSqlInterpolatedAsync($"DELETE TOP (500) FROM dbo.SleepAiFailedOutputs WHERE ExpiresAt <= {now} OR HistoryEpoch <> {epoch}", ct);
         await db.Database.ExecuteSqlInterpolatedAsync($"DELETE TOP (500) FROM dbo.SleepAiJobs WHERE ExpiresAt <= {now}", ct);

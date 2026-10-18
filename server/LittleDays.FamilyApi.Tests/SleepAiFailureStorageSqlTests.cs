@@ -17,7 +17,7 @@ public sealed class SleepAiFailureStorageSqlTests(SqlFixture sql) : IClassFixtur
             return await action(new(db, family, new(new ConfigurationBuilder().Build()), Clock,
                 Microsoft.Extensions.Options.Options.Create(SleepAiJobTests.Enabled()), capture));
         }
-        public CreateSleepPredictionJobRequest Request(bool consent = true, FamilySummary? family = null)
+        public CreateSleepPredictionJobRequest Request(bool consent = false, FamilySummary? family = null)
         {
             var value = SleepAiJobTests.Request(Clock.Now);
             return value with
@@ -32,7 +32,7 @@ public sealed class SleepAiFailureStorageSqlTests(SqlFixture sql) : IClassFixtur
         public async Task<SleepAiJobClaim> Claim() => Assert.IsType<SleepAiJobClaim>(await Store(x => x.Claim(default)));
         public SleepAiFailureCapture Capture(int count = 1)
         {
-            var capture = new SleepAiFailureCapture(Clock); capture.Start(SleepAiFailureCapture.ConsentVersion);
+            var capture = new SleepAiFailureCapture(Clock); capture.StartAutomaticCapture(Scenario.Config.Family.HistoryId);
             for (var attempt = 1; attempt <= count; attempt++)
                 capture.Record(attempt, "invalid_json", null, $"synthetic failed output {attempt}",
                     TimeSpan.FromMilliseconds(12), "synthetic-2026-10-01");
@@ -57,10 +57,17 @@ public sealed class SleepAiFailureStorageSqlTests(SqlFixture sql) : IClassFixtur
     }
 
     [SqlFact]
-    public async Task ExplicitConsentStoresOnlyBoundedFailedOutputsOnceWithoutExposingThemInPrediction()
+    public Task AutomaticPolicyStoresBoundedFailedOutputsForLegacyClientWithoutExposingThemInPrediction() =>
+        VerifyAutomaticCapture(legacyConsentField: false);
+
+    [SqlFact]
+    public Task AutomaticPolicyStoresBoundedFailedOutputsForOptInClientWithoutExposingThemInPrediction() =>
+        VerifyAutomaticCapture(legacyConsentField: true);
+
+    private async Task VerifyAutomaticCapture(bool legacyConsentField)
     {
-        await using var s = new Setup(sql); var request = s.Request(); await s.Enqueue(request);
-        var claim = await s.Claim(); Assert.Equal(SleepAiFailureCapture.ConsentVersion, claim.DiagnosticsConsentVersion);
+        await using var s = new Setup(sql); var request = s.Request(consent: legacyConsentField); await s.Enqueue(request);
+        var claim = await s.Claim(); Assert.Equal(s.Scenario.Config.Family.HistoryId, claim.FailureCaptureHistoryEpoch);
         using var capture = s.Capture(3); Assert.True(await s.Complete(claim, capture));
         Assert.False(await s.Complete(claim, capture));
         var rows = await s.Failures(); Assert.Equal(2, rows.Length);
@@ -81,19 +88,41 @@ public sealed class SleepAiFailureStorageSqlTests(SqlFixture sql) : IClassFixtur
         Assert.DoesNotContain("synthetic failed output", json); Assert.DoesNotContain("invalid_json", json);
         await using var db = sql.Open(); var stored = await db.SleepAiJobs.FindAsync(s.Scenario.Owner.ObjectId, request.OperationId);
         Assert.Null(stored!.RequestJson); Assert.NotNull(stored.ResultJson);
+        Assert.Equal(request.DiagnosticsConsentVersion, stored.DiagnosticsConsentVersion);
+        Assert.Equal(s.Scenario.Config.Family.HistoryId, stored.DiagnosticsHistoryEpoch);
     }
 
     [SqlFact]
-    public async Task LegacyConsentNeverCapturesAndCannotBeRetrofittedOntoAnImmutableOperation()
+    public async Task LegacyClientAutomaticallyCapturesWithoutRetrofittingConsentOrChangingImmutableOperation()
     {
         await using var s = new Setup(sql); var request = s.Request(consent: false); await s.Enqueue(request);
         Assert.Equal("operation_reused", (await Assert.ThrowsAsync<ApiException>(() => s.Enqueue(request with
             { DiagnosticsConsentVersion = SleepAiFailureCapture.ConsentVersion }))).Code);
-        var claim = await s.Claim(); Assert.Null(claim.DiagnosticsConsentVersion);
+        Assert.Equal(request.OperationId, (await s.Enqueue(request)).JobId);
+        var claim = await s.Claim(); Assert.Equal(s.Scenario.Config.Family.HistoryId, claim.FailureCaptureHistoryEpoch);
         using var deliberatelyEnabledCollector = s.Capture();
         Assert.True(await s.Complete(claim, deliberatelyEnabledCollector, success: false));
-        Assert.Empty(await s.Failures());
+        Assert.Equal("synthetic failed output 1", Assert.Single(await s.Failures()).ResponseText);
+        await using var db = sql.Open();
+        Assert.Null((await db.SleepAiJobs.FindAsync(s.Scenario.Owner.ObjectId, request.OperationId))!.DiagnosticsConsentVersion);
         Assert.Equal("failed", (await s.Store(x => x.Get(s.Scenario.Owner, request.OperationId, default))).Status);
+    }
+
+    [SqlFact]
+    public async Task PrePolicyNullEpochJobCompletesWithoutCaptureOrRetroactiveConsent()
+    {
+        await using var s = new Setup(sql); var request = s.Request(); await s.Enqueue(request);
+        await using var db = sql.Open();
+        // Represents an immutable no-diagnostics job queued by the previous API.
+        await db.SleepAiJobs.Where(x => x.UserId == s.Scenario.Owner.ObjectId && x.Id == request.OperationId)
+            .ExecuteUpdateAsync(x => x.SetProperty(row => row.DiagnosticsHistoryEpoch, (Guid?)null));
+        Assert.Equal(request.OperationId, (await s.Enqueue(request)).JobId);
+        var claim = await s.Claim(); Assert.Null(claim.FailureCaptureHistoryEpoch);
+        using var collector = s.Capture();
+        Assert.True(await s.Complete(claim, collector, success: false)); Assert.Empty(await s.Failures());
+        var stored = await db.SleepAiJobs.AsNoTracking().SingleAsync(x => x.UserId == s.Scenario.Owner.ObjectId && x.Id == request.OperationId);
+        Assert.Equal("failed", stored.State); Assert.Null(stored.RequestJson);
+        Assert.Null(stored.DiagnosticsConsentVersion); Assert.Null(stored.DiagnosticsHistoryEpoch);
     }
 
     [SqlFact]
@@ -163,7 +192,24 @@ public sealed class SleepAiFailureStorageSqlTests(SqlFixture sql) : IClassFixtur
     }
 
     [SqlFact]
-    public async Task AccountDeletionPurgesAffectedFamilyOutputAndBlocksLateCaptureWithoutCancellingOtherMembersPrediction()
+    public async Task ClaimAfterHistoryRotationDoesNotRecaptureOldPersonalRequestUnderNewEpoch()
+    {
+        await using var s = new Setup(sql); await s.Enqueue(s.Request());
+        s.Scenario.Config.Family.HistoryId = Guid.NewGuid();
+        var claim = await s.Claim(); Assert.Null(claim.FailureCaptureHistoryEpoch);
+        using var capture = s.Capture();
+        Assert.True(await s.Complete(claim, capture)); Assert.Empty(await s.Failures());
+    }
+
+    [SqlFact]
+    public Task AccountDeletionPurgesAffectedFamilyOutputAndBlocksLateCaptureWithoutCancellingOtherMembersPrediction() =>
+        VerifyAccountDeletionCaptureSuppression(recoverLease: false);
+
+    [SqlFact]
+    public Task AccountDeletionSuppressionSurvivesLeaseRecoveryWithoutCancellingOtherMembersPrediction() =>
+        VerifyAccountDeletionCaptureSuppression(recoverLease: true);
+
+    private async Task VerifyAccountDeletionCaptureSuppression(bool recoverLease)
     {
         await using var s = new Setup(sql); var ownerFamily = await s.Scenario.Create();
         var caregiverFamily = await s.Scenario.Accept(await s.Scenario.Invite(ownerFamily.Id));
@@ -176,6 +222,12 @@ public sealed class SleepAiFailureStorageSqlTests(SqlFixture sql) : IClassFixtur
         Assert.Empty(await s.Failures());
         await using var db = sql.Open(); var row = await db.SleepAiJobs.FindAsync(s.Scenario.Owner.ObjectId, next.OperationId);
         Assert.Equal("running", row!.State); Assert.Null(row.DiagnosticsConsentVersion); Assert.Null(row.DiagnosticsHistoryEpoch);
+        if (recoverLease)
+        {
+            s.Clock.Now = s.Clock.Now.AddMinutes(2);
+            var recovered = await s.Claim(); Assert.Null(recovered.FailureCaptureHistoryEpoch);
+            Assert.False(await s.Complete(ownerInFlight, capture)); ownerInFlight = recovered;
+        }
         Assert.True(await s.Complete(ownerInFlight, capture)); Assert.Empty(await s.Failures());
         Assert.Equal("completed", (await s.Store(x => x.Get(s.Scenario.Owner, next.OperationId, default))).Status);
     }

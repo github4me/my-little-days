@@ -9,7 +9,8 @@ namespace LittleDays.FamilyApi;
 public sealed record CreateSleepPredictionJobRequest(Guid OperationId, string ConsentVersion,
     Guid ConsentGeneration, SleepPredictionRequest Request)
 {
-    // Omit null to preserve the exact pre-diagnostics idempotency fingerprint.
+    // Compatibility only: capture is now a server policy, not gated on this
+    // optional field. Omit null to preserve the legacy idempotency fingerprint.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? DiagnosticsConsentVersion { get; init; }
 }
@@ -19,9 +20,10 @@ public sealed record SleepPredictionJobResponse(Guid JobId, string InputRevision
     DateTimeOffset RequestNow, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, DateTimeOffset ExpiresAt,
     SleepPredictionResponse? Prediction, string? ErrorCode);
 
-/// <summary>Availability and independent consent version for short-lived SQL storage.</summary>
+/// <summary>Availability and initial AI consent version for short-lived SQL storage.</summary>
 public sealed record SleepPredictionJobCapabilities(bool Enabled, string ConsentVersion)
 {
+    // Kept for old clients; no separate diagnostic opt-in is required.
     public string DiagnosticsConsentVersion { get; init; } = SleepAiFailureCapture.ConsentVersion;
     public int DiagnosticsRetentionDays { get; init; } = 7;
 }

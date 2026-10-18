@@ -23,7 +23,7 @@ public sealed class SleepAiWorkerConcurrencyTests
             var capture = sp.GetRequiredService<SleepAiFailureCapture>(); captures.Add(capture);
             probes.Add(sp.GetRequiredService<ScopeProbe>());
             var claim = new SleepAiJobClaim(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), SleepAiJobTests.Request(clock.GetUtcNow()).Request)
-                { Run = 1, DiagnosticsConsentVersion = SleepAiFailureCapture.ConsentVersion };
+                { Run = 1, FailureCaptureHistoryEpoch = Guid.NewGuid() };
             var text = $"synthetic failure for {claim.JobId}";
             return new SleepAiJobProcessor(_ => Task.FromResult<SleepAiJobClaim?>(claim), async (received, ct) =>
             {
@@ -63,7 +63,7 @@ public sealed class SleepAiWorkerConcurrencyTests
         {
             sp.GetRequiredService<ScopeProbe>(); sp.GetRequiredService<SleepAiFailureCapture>();
             var claim = new SleepAiJobClaim(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), SleepAiJobTests.Request(clock.GetUtcNow()).Request)
-                { Run = 1, DiagnosticsConsentVersion = SleepAiFailureCapture.ConsentVersion };
+                { Run = 1, FailureCaptureHistoryEpoch = Guid.NewGuid() };
             return new SleepAiJobProcessor(_ => state == "claim" ? throw new InvalidOperationException("synthetic")
                 : Task.FromResult<SleepAiJobClaim?>(state == "empty" ? null : claim), (received, ct) =>
             {

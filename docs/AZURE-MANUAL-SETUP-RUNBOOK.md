@@ -1,5 +1,37 @@
 # My Little Days: manual Azure and GitHub setup runbook
 
+## Automatic failed AI output capture — 18 October 2026
+
+Owner instruction: “对所有app启用失败采集，不用授权”. The current resumable AI
+job service will capture failed output attempts for newly enqueued jobs from
+all current iOS/Android clients, without an additional diagnostics prompt or
+app upgrade. Initial AI opt-in and authoritative access remain unchanged.
+Do not backfill old null-epoch jobs or collect historical synchronous calls.
+See [the scoped rollout receipt](AI-AUTOMATIC-FAILURE-CAPTURE-2026-10-18.md).
+
+Status: code verification in progress; automatic capture not yet deployed.
+Privacy/support additions are live in `my-little-days-privacy` commit
+`5dca921343b082338828a7023167d9ea3ec1ddef`, Pages run `39103593943` succeeded.
+Public readback verifies no extra diagnostics prompt and seven-day retention.
+
+Manual rollout: use GitHub **Deploy family API and database**, trusted branch
+`feature/family-invitations`, `database_bootstrapped=true`, `adopt_ef=false`.
+Freeze the commit; verify disposable-SQL CI, apply only additive script 0012,
+require catalog verification and explicit zero pending scripts, then verify
+temporary runner firewall cleanup, API artifact and deployment health. Applied
+0011 remains immutable. Target is tenant `reticle.com.au`, subscription
+`4768a858-f23f-4a39-bb64-eabc9c142627`, resource group
+`my-little-days-pilot-rg`, API `little-days-api-522fpstfbtds2`, SQL
+`little-days-sql-522fpstfbtds2` / `little-days-family`. No operator-IP firewall
+rule, provider-control, paid-tier, model/Fast, quota, concurrency or polling
+changes. Restricted SQL output-only diagnostics retain the existing seven-day
+TTL/hourly cleanup and account/family/revocation/history safeguards.
+
+Before activation, verify public disclosures and environment protection state.
+After activation, record exact SHA/run/migration/no-op/cleanup/health results in
+the scoped receipt. Production payload readback is a separate acceptance gap;
+do not claim it from health/CI or export private payloads into logs or Git.
+
 ## AI concurrency 50 and failed-output diagnostics — 18 October 2026 release
 
 Owner authorized deployment of concurrency 50 together with the seven-day

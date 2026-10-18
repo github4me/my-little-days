@@ -33,7 +33,7 @@ public sealed class SleepAiJobProcessor
 
     internal async Task<SleepAiJobClaim?> Claim(CancellationToken stoppingToken)
     {
-        failures?.Start(null);
+        failures?.StartAutomaticCapture(null);
         SleepAiJobClaim? claim;
         using (var timing = diagnostics?.Start(SleepAiStage.Claim))
         {
@@ -50,7 +50,7 @@ public sealed class SleepAiJobProcessor
 
     internal async Task Process(SleepAiJobClaim claim, CancellationToken stoppingToken)
     {
-        failures?.Start(claim.DiagnosticsConsentVersion);
+        failures?.StartAutomaticCapture(claim.FailureCaptureHistoryEpoch);
         diagnostics?.WallDuration(SleepAiStage.QueueWait, claim.CreatedAt);
         SleepPredictionResponse? result = null; string? error = null;
         try

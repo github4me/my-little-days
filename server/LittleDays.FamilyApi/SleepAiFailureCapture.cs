@@ -11,6 +11,7 @@ public sealed record SleepAiFailedAttempt(int Attempt, string Reason, int? Perio
 
 public sealed class SleepAiFailureCapture(TimeProvider clock) : IDisposable
 {
+    // Retained only for compatibility with existing optional client fields.
     public const string ConsentVersion = "sleep-ai-failed-output-v1";
     public const int MaxResponseChars = 16 * 1024;
     public static readonly TimeSpan Retention = TimeSpan.FromDays(7);
@@ -21,12 +22,13 @@ public sealed class SleepAiFailureCapture(TimeProvider clock) : IDisposable
     private string? rejectedReason;
     public IReadOnlyList<SleepAiFailedAttempt> Attempts => attempts.AsReadOnly();
 
-    // A fresh scoped worker sets this from the immutable, explicitly opted-in
-    // job, never from an existing AI consent or the app's version.
-    public void Start(string? consentVersion)
+    // The server stamps each new, authorized AI job with the current history
+    // epoch. Null means pre-policy or lifecycle-suppressed: never backfill it.
+    // This is an operator policy, not a claim that the user gave extra consent.
+    public void StartAutomaticCapture(Guid? historyEpoch)
     {
         Dispose();
-        enabled = consentVersion == ConsentVersion;
+        enabled = historyEpoch is { } epoch && epoch != Guid.Empty;
     }
 
     internal void BeginAttempt()
