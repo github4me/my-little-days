@@ -377,8 +377,9 @@ public sealed class SleepAiTests
         if (duringProvider) { Assert.False(pending.IsCompleted); cancellation.Cancel(); }
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending);
         Assert.Equal(duringProvider ? 1 : 0, access.Calls);
-        Assert.True(budget.TryEnter()); Assert.True(budget.TryEnter()); Assert.False(budget.TryEnter());
-        budget.Exit(); budget.Exit();
+        for (var i = 0; i < options.Value.MaxConcurrentRequests; i++) Assert.True(budget.TryEnter());
+        Assert.False(budget.TryEnter());
+        for (var i = 0; i < options.Value.MaxConcurrentRequests; i++) budget.Exit();
     }
 
     [Theory]
@@ -451,7 +452,8 @@ public sealed class SleepAiTests
     [Fact]
     public async Task ThirdConcurrentRequestReturnsBusyWithoutSpendingAndFreedSlotsRemainUsable()
     {
-        var options = Options.Create(Enabled()); var clock = new Clock(); var budget = new SleepAiBudget(clock, options);
+        var settings = Enabled(); settings.MaxConcurrentRequests = 2;
+        var options = Options.Create(settings); var clock = new Clock(); var budget = new SleepAiBudget(clock, options);
         var provider = new DeferredProvider(); var service = new SleepAiService(options, new Access(), provider, budget, clock);
         var first = service.PredictAsync(User, Request(), default);
         var second = service.PredictAsync(User, Request(), default);
@@ -468,9 +470,47 @@ public sealed class SleepAiTests
     }
 
     [Fact]
+    public async Task FiftyConcurrentRequestsProceedAndFiftyFirstDoesNotSpendWithReleasedSlotReusable()
+    {
+        var settings = Enabled(); Assert.Equal(50, settings.MaxConcurrentRequests);
+        Assert.Equal(30, settings.MaxRequestsPerAccountPerHour); Assert.Equal(200, settings.MaxRequestsPerInstancePerDay);
+        var options = Options.Create(settings); var clock = new Clock(); var budget = new SleepAiBudget(clock, options);
+        var provider = new DeferredProvider(); var service = new SleepAiService(options, new Access(), provider, budget, clock);
+        var users = Enumerable.Range(0, 50).Select(_ => new PilotIdentity { ObjectId = Guid.NewGuid(), Email = "synthetic@example.test" }).ToArray();
+        var running = users.Select(user => service.PredictAsync(user, Request(), default)).ToArray();
+        Assert.Equal(50, provider.Calls); Assert.All(running, task => Assert.False(task.IsCompleted));
+        var denied = await Assert.ThrowsAsync<ApiException>(() => service.PredictAsync(users[0], Request(), default));
+        Assert.Equal(429, denied.Status); Assert.Equal("ai_busy", denied.Code); Assert.Equal(50, provider.Calls);
+        provider.Pending.SetResult(Ready);
+        Assert.All(await Task.WhenAll(running), result => Assert.Equal("ready", result.Status));
+        Assert.Equal("ready", (await service.PredictAsync(users[0], Request(), default)).Status); Assert.Equal(51, provider.Calls);
+        for (var attempt = 2; attempt < 30; attempt++) Assert.True(budget.TrySpend(users[0].ObjectId));
+        Assert.False(budget.TrySpend(users[0].ObjectId, out var reason)); Assert.Equal(SleepAiBudgetRejection.HourlyLimit, reason);
+    }
+
+    [Theory]
+    [InlineData(-1, false, 1)]
+    [InlineData(0, false, 1)]
+    [InlineData(1, true, 1)]
+    [InlineData(7, true, 7)]
+    [InlineData(50, true, 50)]
+    [InlineData(51, false, 50)]
+    [InlineData(int.MaxValue, false, 50)]
+    public void ConcurrencyConfigurationIsBoundedAndInvalidValuesDisableAi(int configured, bool available, int bounded)
+    {
+        var options = Enabled(); options.MaxConcurrentRequests = configured;
+        Assert.Equal(available, options.IsAvailable);
+        var budget = new SleepAiBudget(new Clock(), Options.Create(options));
+        for (var i = 0; i < bounded; i++) Assert.True(budget.TryEnter());
+        Assert.False(budget.TryEnter());
+        budget.Exit(); Assert.True(budget.TryEnter()); Assert.False(budget.TryEnter());
+        for (var i = 0; i < bounded; i++) budget.Exit();
+    }
+
+    [Fact]
     public void PerInstanceBudgetBoundsConcurrencyDailyCallsAndResetsOnlyRelevantWindow()
     {
-        var options = Enabled(); options.MaxRequestsPerAccountPerHour = 2; options.MaxRequestsPerInstancePerDay = 3;
+        var options = Enabled(); options.MaxRequestsPerAccountPerHour = 2; options.MaxRequestsPerInstancePerDay = 3; options.MaxConcurrentRequests = 2;
         var clock = new MutableClock(Now); var budget = new SleepAiBudget(clock, Options.Create(options));
         Assert.True(budget.TryEnter()); Assert.True(budget.TryEnter()); Assert.False(budget.TryEnter());
         budget.Exit(); Assert.True(budget.TryEnter()); budget.Exit(); budget.Exit();
@@ -661,7 +701,8 @@ public sealed class SleepAiTests
             for (var i = 0; i < 30; i++) Assert.True(budget.TrySpend(scenario.Owner.ObjectId));
         if (failure == "daily-limit")
             for (var i = 0; i < 200; i++) Assert.True(budget.TrySpend(Guid.NewGuid()));
-        if (failure == "busy") { Assert.True(budget.TryEnter()); Assert.True(budget.TryEnter()); }
+        if (failure == "busy")
+            for (var i = 0; i < options.Value.MaxConcurrentRequests; i++) Assert.True(budget.TryEnter());
         await using var host = new TestHost(scenario.Config);
         await using var isolated = host.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
         {
@@ -680,7 +721,8 @@ public sealed class SleepAiTests
         Assert.Equal(code, body.RootElement.GetProperty("code").GetString());
         Assert.DoesNotContain("synthetic private", text); Assert.DoesNotContain("periods", text);
         Assert.Equal(providerCalls, provider.Calls);
-        if (failure == "busy") { budget.Exit(); budget.Exit(); }
+        if (failure == "busy")
+            for (var i = 0; i < options.Value.MaxConcurrentRequests; i++) budget.Exit();
     }
 
     private static string Serialize(object value) => JsonSerializer.Serialize(value, SleepAiJson.Options);

@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Text.Json.Serialization;
 
 [assembly: InternalsVisibleTo("LittleDays.FamilyApi.Tests")]
 
@@ -6,7 +7,12 @@ namespace LittleDays.FamilyApi;
 
 /// <summary>Explicitly consents to short-lived server storage for a durable prediction.</summary>
 public sealed record CreateSleepPredictionJobRequest(Guid OperationId, string ConsentVersion,
-    Guid ConsentGeneration, SleepPredictionRequest Request);
+    Guid ConsentGeneration, SleepPredictionRequest Request)
+{
+    // Omit null to preserve the exact pre-diagnostics idempotency fingerprint.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DiagnosticsConsentVersion { get; init; }
+}
 
 /// <summary>Durable job metadata; only a completed, unexpired job contains a prediction.</summary>
 public sealed record SleepPredictionJobResponse(Guid JobId, string InputRevision, string Status,
@@ -14,7 +20,11 @@ public sealed record SleepPredictionJobResponse(Guid JobId, string InputRevision
     SleepPredictionResponse? Prediction, string? ErrorCode);
 
 /// <summary>Availability and independent consent version for short-lived SQL storage.</summary>
-public sealed record SleepPredictionJobCapabilities(bool Enabled, string ConsentVersion);
+public sealed record SleepPredictionJobCapabilities(bool Enabled, string ConsentVersion)
+{
+    public string DiagnosticsConsentVersion { get; init; } = SleepAiFailureCapture.ConsentVersion;
+    public int DiagnosticsRetentionDays { get; init; } = 7;
+}
 
 public static class SleepAiJobPolicy
 {
@@ -23,7 +33,8 @@ public static class SleepAiJobPolicy
     public static SleepAiTimeBounds Validate(CreateSleepPredictionJobRequest value, DateTimeOffset now)
     {
         if (value.OperationId == Guid.Empty || value.ConsentGeneration == Guid.Empty ||
-            value.ConsentVersion != ConsentVersion || value.Request is null || value.Request.SchemaVersion != 2)
+            value.ConsentVersion != ConsentVersion || value.Request is null || value.Request.SchemaVersion != 2 ||
+            value.DiagnosticsConsentVersion is not null && value.DiagnosticsConsentVersion != SleepAiFailureCapture.ConsentVersion)
             throw new ApiException(422, "invalid_input");
         return SleepAiValidation.ValidateRequest(value.Request, now);
     }

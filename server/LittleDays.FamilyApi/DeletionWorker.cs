@@ -42,6 +42,7 @@ public sealed class DeletionProcessor(PilotDatabase db, PilotConfiguration confi
             {
                 var family = await db.Families.SingleAsync(x => x.Id == familyId, ct);
                 if (family.DeletedAt is null || family.PurgedAt is not null) return false;
+                await db.SleepAiFailedOutputs.Where(x => x.FamilyId == family.Id).ExecuteDeleteAsync(ct);
                 await db.Feeds.Where(x => x.FamilyId == family.Id).ExecuteDeleteAsync(ct);
                 await db.FamilyRecords.Where(x => x.FamilyId == family.Id).ExecuteDeleteAsync(ct);
                 await db.Invitations.Where(x => x.FamilyId == family.Id).ExecuteDeleteAsync(ct);
@@ -100,6 +101,7 @@ public sealed class DeletionProcessor(PilotDatabase db, PilotConfiguration confi
             {
                 var job = await db.AccountDeletions.SingleAsync(x => x.UserId == userId, ct);
                 if (job.Status != "pending") return false;
+                await service.PurgeSleepAiFailuresForAccount(job.UserId, ct);
                 var memberEmails = await db.Memberships.Where(x => x.UserId == job.UserId).Select(x => x.Email).ToArrayAsync(ct);
                 var bindingEmail = config.Pilot.Identities.SingleOrDefault(x => x.ObjectId == job.UserId)?.Email;
                 var emails = memberEmails.Append(bindingEmail ?? "").Append(job.PendingEmail ?? "").Where(x => x.Length > 0).Distinct().ToArray();

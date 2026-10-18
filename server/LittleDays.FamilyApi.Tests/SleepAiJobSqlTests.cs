@@ -188,6 +188,7 @@ public sealed class SleepAiJobSqlTests(SqlFixture sql) : IClassFixture<SqlFixtur
     public async Task DurableConcurrencyAndDailyLimitsRemainAfterRestartAndStaleLeaseExpires()
     {
         await using var s = new Setup(sql); await using var db1 = sql.Open(); await using var db2 = sql.Open(); await using var db3 = sql.Open();
+        s.Options.MaxConcurrentRequests = 2;
         await using var first = await s.Reserve(db1); await using var second = await s.Reserve(db2, s.Scenario.Caregiver.ObjectId);
         Assert.Equal("ai_busy", (await Assert.ThrowsAsync<ApiException>(async () => { await using var lease = await s.Reserve(db3); })).Code);
         s.Clock.Now = s.Clock.Now.AddSeconds(75); await using var third = await s.Reserve(db3);
@@ -195,6 +196,33 @@ public sealed class SleepAiJobSqlTests(SqlFixture sql) : IClassFixture<SqlFixtur
         Assert.Equal("ai_daily_limit", (await Assert.ThrowsAsync<ApiException>(async () => { await using var lease = await s.Reserve(db3, s.Scenario.Other.ObjectId); })).Code);
         s.Clock.Now = new DateTimeOffset(s.Clock.Now.UtcDateTime.Date.AddDays(1), TimeSpan.Zero);
         await using var tomorrow = await s.Reserve(db3);
+    }
+
+    [SqlFact]
+    public async Task GlobalFiftyLeaseLimitIsAtomicAcrossContextsAndRejectedAttemptDoesNotSpend()
+    {
+        await using var s = new Setup(sql);
+        var users = s.Scenario.Config.Pilot.Identities.Select(x => x.ObjectId).ToArray();
+        var contexts = Enumerable.Range(0, 50).Select(_ => sql.Open()).ToArray();
+        var leases = new IAsyncDisposable?[50];
+        try
+        {
+            await Task.WhenAll(contexts.Select(async (db, index) => leases[index] = await s.Reserve(db, users[index % users.Length])));
+            await using var check = sql.Open();
+            Assert.Equal(50, await check.SleepAiAttempts.CountAsync(x => users.Contains(x.UserId) && x.LeaseUntil > s.Clock.Now));
+            var denied = await Assert.ThrowsAsync<ApiException>(async () => { await using var lease = await s.Reserve(check); });
+            Assert.Equal("ai_busy", denied.Code);
+            Assert.Equal(50, await check.SleepAiAttempts.CountAsync(x => users.Contains(x.UserId)));
+            await leases[0]!.DisposeAsync(); leases[0] = null;
+            await using var reused = await s.Reserve(check);
+            Assert.Equal(50, await check.SleepAiAttempts.CountAsync(x => users.Contains(x.UserId) && x.LeaseUntil > s.Clock.Now));
+            Assert.Equal(51, await check.SleepAiAttempts.CountAsync(x => users.Contains(x.UserId)));
+        }
+        finally
+        {
+            foreach (var lease in leases) if (lease is not null) await lease.DisposeAsync();
+            foreach (var db in contexts) await db.DisposeAsync();
+        }
     }
 
     private sealed class DeferredProvider : ISleepAiProvider

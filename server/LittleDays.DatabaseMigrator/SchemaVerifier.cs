@@ -16,7 +16,8 @@ internal static class SchemaVerifier
         "0003_FamilySharedExtras.sql", "0004_FamilyAvailabilityBounds.sql",
         "0005_QueryIndexesAndOperationCounts.sql", "0006_FamilyPushAndTimerIndex.sql",
         "0007_TimerEndAttribution.sql", "0008_WidenPushLocale.sql",
-        "0009_ConflictReplacementAudit.sql", "0010_DurableSleepAiJobs.sql"
+        "0009_ConflictReplacementAudit.sql", "0010_DurableSleepAiJobs.sql",
+        "0011_SleepAiFailedOutputDiagnostics.sql"
     ];
 
     internal static int Version(IEnumerable<string> applied) => applied
@@ -104,6 +105,25 @@ internal static class SchemaVerifier
             expected[("SleepAiRevocations", "ExpiresAt")] = new(43, 10, 34, 7);
             expected[("SleepAiAttempts", "StartedAt")] = new(43, 10, 34, 7);
             expected[("SleepAiAttempts", "LeaseUntil")] = new(43, 10, 34, 7, true);
+        }
+        if (version >= 11)
+        {
+            expected[("SleepAiJobs", "DiagnosticsConsentVersion")] = new(167, 40, Nullable: true);
+            expected[("SleepAiJobs", "DiagnosticsHistoryEpoch")] = new(36, 16, Nullable: true);
+            foreach (var name in new[] { "UserId", "JobId", "ConsentGeneration", "HistoryEpoch" })
+                expected[("SleepAiFailedOutputs", name)] = new(36, 16);
+            foreach (var name in new[] { "FamilyId", "MembershipId" })
+                expected[("SleepAiFailedOutputs", name)] = new(36, 16, Nullable: true);
+            foreach (var name in new[] { "Run", "Attempt", "OriginalLength" })
+                expected[("SleepAiFailedOutputs", name)] = new(56, 4);
+            expected[("SleepAiFailedOutputs", "PeriodIndex")] = new(56, 4, Nullable: true);
+            expected[("SleepAiFailedOutputs", "Reason")] = new(167, 64);
+            expected[("SleepAiFailedOutputs", "Model")] = new(167, 100);
+            expected[("SleepAiFailedOutputs", "ResponseText")] = new(231, -1, Nullable: true);
+            expected[("SleepAiFailedOutputs", "Truncated")] = new(104, 1);
+            expected[("SleepAiFailedOutputs", "DurationMs")] = new(62, 8);
+            foreach (var name in new[] { "OccurredAt", "ExpiresAt" })
+                expected[("SleepAiFailedOutputs", name)] = new(43, 10, 34, 7);
         }
         using var command = factory();
         command.CommandText = """
@@ -235,6 +255,15 @@ internal static class SchemaVerifier
                 new("SleepAiAttempts", "IX_SleepAiAttempts_StartedAt", ["StartedAt"]),
                 new("SleepAiAttempts", "IX_SleepAiAttempts_LeaseUntil", ["LeaseUntil"])
             ]);
+        if (version >= 11)
+            indexes.AddRange([
+                new("SleepAiFailedOutputs", "PK_SleepAiFailedOutputs", ["UserId", "JobId", "Run", "Attempt"], true, Primary: true),
+                new("SleepAiFailedOutputs", "IX_SleepAiFailedOutputs_ExpiresAt", ["ExpiresAt"]),
+                new("SleepAiFailedOutputs", "IX_SleepAiFailedOutputs_UserId_ConsentGeneration", ["UserId", "ConsentGeneration"]),
+                new("SleepAiFailedOutputs", "IX_SleepAiFailedOutputs_FamilyId", ["FamilyId"]),
+                new("SleepAiFailedOutputs", "IX_SleepAiFailedOutputs_MembershipId", ["MembershipId"]),
+                new("SleepAiFailedOutputs", "IX_SleepAiFailedOutputs_HistoryEpoch", ["HistoryEpoch"])
+            ]);
         return indexes;
     }
 
@@ -365,6 +394,24 @@ internal static class SchemaVerifier
             expected["SleepAiJobs.CK_SleepAiJobs_Result"] = "ResultJson IS NULL OR (ISJSON(ResultJson) = 1 AND DATALENGTH(ResultJson) <= 32768)";
             expected["SleepAiRevocations.CK_SleepAiRevocations_Kind"] = "Kind IN ('job','consent')";
         }
+        if (version >= 11)
+        {
+            expected["SleepAiJobs.CK_SleepAiJobs_DiagnosticsConsent"] =
+                "(DiagnosticsConsentVersion IS NULL AND DiagnosticsHistoryEpoch IS NULL) OR (DiagnosticsConsentVersion IS NOT NULL AND DiagnosticsConsentVersion = 'sleep-ai-failed-output-v1' AND DiagnosticsHistoryEpoch IS NOT NULL)";
+            expected["SleepAiFailedOutputs.CK_SleepAiFailedOutputs_Attempt"] = "Run IN (1,2) AND Attempt IN (1,2)";
+            expected["SleepAiFailedOutputs.CK_SleepAiFailedOutputs_Context"] =
+                "(FamilyId IS NULL AND MembershipId IS NULL) OR (FamilyId IS NOT NULL AND MembershipId IS NOT NULL)";
+            expected["SleepAiFailedOutputs.CK_SleepAiFailedOutputs_Bounds"] = """
+                OriginalLength >= 0 AND (PeriodIndex IS NULL OR PeriodIndex >= 0) AND DurationMs >= 0 AND
+                LEN(Reason) >= 1 AND LEN(Model) >= 1 AND (ResponseText IS NULL OR DATALENGTH(ResponseText) <= 32768)
+                """;
+            expected["SleepAiFailedOutputs.CK_SleepAiFailedOutputs_Length"] = """
+                (ResponseText IS NULL AND OriginalLength = 0 AND Truncated = 0) OR
+                (ResponseText IS NOT NULL AND ((Truncated = 0 AND OriginalLength = DATALENGTH(ResponseText) / 2) OR
+                 (Truncated = 1 AND OriginalLength > DATALENGTH(ResponseText) / 2)))
+                """;
+            expected["SleepAiFailedOutputs.CK_SleepAiFailedOutputs_Retention"] = "ExpiresAt = DATEADD(day, 7, OccurredAt)";
+        }
         using var command = factory();
         command.CommandText = """
             SELECT t.name, cc.name, cc.definition, cc.is_disabled, cc.is_not_trusted, cc.is_not_for_replication
@@ -470,7 +517,7 @@ internal static class SchemaVerifier
 
     private sealed class ExpressionParser
     {
-        private static readonly Regex TokenPattern = new(@"\G\s*(?<token>N?'(?:''|[^'])*'|\[(?:\]\]|[^\]])*\]|[A-Za-z_][A-Za-z0-9_]*|[0-9]+|<=|>=|<>|!=|[(),=<>])", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        private static readonly Regex TokenPattern = new(@"\G\s*(?<token>N?'(?:''|[^'])*'|\[(?:\]\]|[^\]])*\]|[A-Za-z_][A-Za-z0-9_]*|[0-9]+|<=|>=|<>|!=|[(),=<>/])", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
         private readonly List<string> tokens = [];
         private int position;
 
@@ -517,7 +564,7 @@ internal static class SchemaVerifier
         }
         private Node Predicate()
         {
-            var left = Atom();
+            var left = Division();
             if (Take("IS"))
             {
                 var not = Take("NOT");
@@ -528,12 +575,21 @@ internal static class SchemaVerifier
             {
                 Require("(");
                 var terms = new List<Node>();
-                do { terms.Add(new("=", "", [left, Atom()])); } while (Take(","));
+                do { terms.Add(new("=", "", [left, Division()])); } while (Take(","));
                 Require(")");
                 return terms.Count == 1 ? terms[0] : Node.Logical("OR", terms);
             }
             foreach (var op in new[] { "=", "<=", ">=", "<>", "!=", "<", ">" })
-                if (Take(op)) return new(op == "!=" ? "<>" : op, "", [left, Atom()]);
+                if (Take(op)) return new(op == "!=" ? "<>" : op, "", [left, Division()]);
+            return left;
+        }
+        private Node Division()
+        {
+            // Only the approved UTF-16 byte/character conversion needs arithmetic.
+            // Division binds before comparisons and stays ordered/left-associative;
+            // unlike AND/OR, reassociation or sorting would change integer results.
+            var left = Atom();
+            while (Take("/")) left = new("/", "", [left, Atom()]);
             return left;
         }
         private Node Atom()

@@ -9,9 +9,9 @@ public sealed class SleepAiJobMigrationTests
     public void DurableJobMigrationIsAdditiveAndApprovedAsVersionTen()
     {
         var scripts = MigrationRunner.Scripts();
-        Assert.Equal("0010_DurableSleepAiJobs.sql", scripts.Last().Name);
-        Assert.Equal(10, SchemaVerifier.Version(scripts.Select(x => x.Name)));
-        var script = scripts.Last().Contents;
+        Assert.Equal("0010_DurableSleepAiJobs.sql", scripts[9].Name);
+        Assert.Equal(10, SchemaVerifier.Version(scripts.Take(10).Select(x => x.Name)));
+        var script = scripts[9].Contents;
         Assert.DoesNotContain("ALTER TABLE dbo.FamilyRecords", script);
         Assert.DoesNotContain("DELETE FROM", script);
         Assert.Contains("GRANT SELECT, INSERT, UPDATE, DELETE ON OBJECT::dbo.SleepAiJobs", script);
@@ -24,8 +24,10 @@ public sealed class SleepAiJobMigrationTests
         db.Runner(scripts: MigrationRunner.Scripts().Take(9).ToArray()).Apply();
         await db.Execute("INSERT dbo.Families(Id,BabyName,Revision,CreatedAt) VALUES(NEWID(),N'Synthetic preserved family',4,SYSUTCDATETIME())");
         var checksum = await db.Count("SELECT CHECKSUM_AGG(BINARY_CHECKSUM(Id,BabyName,Revision,ProfileVersion)) FROM dbo.Families");
-        Assert.Single(db.Runner().Pending()); db.Runner().Apply();
-        Assert.Empty(db.Runner().Pending()); db.Runner().Apply(); Assert.Empty(db.Runner().Pending());
+        var queueScripts = MigrationRunner.Scripts().Take(10).ToArray();
+        Assert.Single(db.Runner(scripts: queueScripts).Pending()); db.Runner(scripts: queueScripts).Apply();
+        Assert.Empty(db.Runner(scripts: queueScripts).Pending()); db.Runner(scripts: queueScripts).Apply();
+        Assert.Empty(db.Runner(scripts: queueScripts).Pending());
         Assert.Equal(checksum, await db.Count("SELECT CHECKSUM_AGG(BINARY_CHECKSUM(Id,BabyName,Revision,ProfileVersion)) FROM dbo.Families"));
         Assert.Equal(3, await db.Count("SELECT COUNT(*) FROM sys.tables WHERE name IN ('SleepAiJobs','SleepAiAttempts','SleepAiRevocations')"));
         Assert.Equal(12, await db.Count("""
@@ -35,7 +37,7 @@ public sealed class SleepAiJobMigrationTests
               AND p.permission_name IN ('SELECT','INSERT','UPDATE','DELETE')
             """));
         await Assert.ThrowsAsync<SqlException>(() => db.Execute("INSERT dbo.SleepAiRevocations(UserId,Kind,Id,ExpiresAt) VALUES(NEWID(),'unknown',NEWID(),SYSUTCDATETIME())"));
-        Assert.Equal(MigrationRunner.Scripts().Count, await db.Count("SELECT COUNT(*) FROM dbo.DatabaseMigrations"));
+        Assert.Equal(10, await db.Count("SELECT COUNT(*) FROM dbo.DatabaseMigrations"));
     }
 
     [SqlTheory]

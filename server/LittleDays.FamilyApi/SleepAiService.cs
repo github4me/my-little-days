@@ -27,12 +27,16 @@ public sealed class SleepAiOptions
     public bool SupportsTemperature { get; set; }
     public int MaxRequestsPerAccountPerHour { get; set; } = 30;
     public int MaxRequestsPerInstancePerDay { get; set; } = 200;
+    public int MaxConcurrentRequests { get; set; } = 50;
+    // Invalid settings disable AI; also bound allocations for disabled services.
+    internal int ConcurrentRequestLimit => Math.Clamp(MaxConcurrentRequests, 1, 50);
 
     public bool IsAvailable => Enabled && ChildDataProcessingApproved && ZeroDataRetentionApproved &&
         HardSpendControlVerified && !string.IsNullOrWhiteSpace(ApiKey) && !ApiKey.StartsWith('@') &&
         !string.IsNullOrWhiteSpace(Model) && (Model == SelectedModel ||
         Regex.IsMatch(Model, @"^[a-zA-Z0-9.-]+-\d{4}-\d{2}-\d{2}$", RegexOptions.CultureInvariant)) &&
-        MaxRequestsPerAccountPerHour is >= 1 and <= 60 && MaxRequestsPerInstancePerDay is >= 1 and <= 10000;
+        MaxRequestsPerAccountPerHour is >= 1 and <= 60 && MaxRequestsPerInstancePerDay is >= 1 and <= 10000 &&
+        MaxConcurrentRequests is >= 1 and <= 50;
 }
 
 public interface ISleepAiAccess
@@ -54,7 +58,8 @@ public interface ISleepAiProvider
     Task<string?> GenerateAsync(SleepPredictionRequest request, SleepAiTimeBounds bounds, bool retry, CancellationToken ct);
 }
 
-public sealed class OpenAiSleepProvider(IChatClient client, IOptions<SleepAiOptions> options, SleepAiDiagnostics? diagnostics = null) : ISleepAiProvider
+public sealed class OpenAiSleepProvider(IChatClient client, IOptions<SleepAiOptions> options, SleepAiDiagnostics? diagnostics = null,
+    SleepAiFailureCapture? failures = null) : ISleepAiProvider
 {
     public const string PromptVersion = "sleep-ai-v1";
     // Reviewed 2026-10-14; embedded reference only, never fetched at request time.
@@ -196,8 +201,16 @@ public sealed class OpenAiSleepProvider(IChatClient client, IOptions<SleepAiOpti
         var completed = response.RawRepresentation is ResponseResult raw
             ? raw.Status == ResponseStatus.Completed && response.FinishReason is null
             : response.FinishReason == ChatFinishReason.Stop;
-        if (!completed || response.ContinuationToken is not null ||
-            response.Messages.Any(message => message.Contents.Any(content => content is not TextContent && content is not TextReasoningContent))) return null;
+        var rejection = !completed ? "incomplete_response"
+            : response.ContinuationToken is not null ? "continuation_response"
+            : response.Messages.Any(message => message.Contents.Any(content => content is not TextContent && content is not TextReasoningContent))
+                ? "non_text_response" : null;
+        if (rejection is not null)
+        {
+            // Only assistant text, never reasoning/tool content or raw SDK bodies.
+            failures?.RejectProviderResponse(response.Text, rejection);
+            return null;
+        }
         return response.Text;
     }
 }
@@ -219,7 +232,7 @@ public sealed class SleepAiBudget(TimeProvider clock, IOptions<SleepAiOptions> o
     private long hour = -1;
     private long day = -1;
     private int total;
-    private readonly SemaphoreSlim concurrency = new(2, 2);
+    private readonly SemaphoreSlim concurrency = new(options.Value.ConcurrentRequestLimit, options.Value.ConcurrentRequestLimit);
 
     public bool TryEnter() => concurrency.Wait(0);
     public void Exit() => concurrency.Release();
@@ -250,7 +263,8 @@ public interface ISleepAiService
 }
 
 public sealed class SleepAiService(IOptions<SleepAiOptions> options, ISleepAiAccess access, ISleepAiProvider provider,
-    SleepAiBudget budget, TimeProvider clock, ISleepAiAttemptStore? attempts = null, SleepAiDiagnostics? diagnostics = null) : ISleepAiService
+    SleepAiBudget budget, TimeProvider clock, ISleepAiAttemptStore? attempts = null, SleepAiDiagnostics? diagnostics = null,
+    SleepAiFailureCapture? failures = null) : ISleepAiService
 {
     public SleepPredictionCapabilities Capabilities => new(options.Value.IsAvailable, SleepAiValidation.ConsentVersion, "OpenAI", true);
 
@@ -308,21 +322,30 @@ public sealed class SleepAiService(IOptions<SleepAiOptions> options, ISleepAiAcc
                 EnsureResponseDay(request, bounds, clock.GetUtcNow());
                 string? result;
                 await using var reservation = await Reserve(attempt + 1, timeout.Token);
+                failures?.BeginAttempt();
+                var providerStarted = clock.GetTimestamp();
                 try { result = await provider.GenerateAsync(request, bounds, attempt > 0, timeout.Token); }
-                catch (OperationCanceledException) { throw; }
+                catch (OperationCanceledException)
+                {
+                    if (!ct.IsCancellationRequested) RecordFailure("ai_timeout");
+                    throw;
+                }
                 catch (TimeoutException)
                 {
                     ct.ThrowIfCancellationRequested();
+                    RecordFailure("ai_timeout");
                     throw new ApiException(504, "ai_timeout");
                 }
                 catch (ClientResultException error)
                 {
                     ct.ThrowIfCancellationRequested();
+                    RecordFailure(error.Status == 429 ? "ai_provider_busy" : "ai_provider_unavailable");
                     throw new ApiException(503, error.Status == 429 ? "ai_provider_busy" : "ai_provider_unavailable");
                 }
                 catch (HttpRequestException error)
                 {
                     ct.ThrowIfCancellationRequested();
+                    RecordFailure(error.StatusCode == System.Net.HttpStatusCode.TooManyRequests ? "ai_provider_busy" : "ai_provider_unavailable");
                     throw new ApiException(503, error.StatusCode == System.Net.HttpStatusCode.TooManyRequests ? "ai_provider_busy" : "ai_provider_unavailable");
                 }
                 catch (Exception)
@@ -330,8 +353,11 @@ public sealed class SleepAiService(IOptions<SleepAiOptions> options, ISleepAiAcc
                     // Only fixed categories cross the API boundary; provider messages,
                     // response bodies and request data must never be exposed or logged.
                     ct.ThrowIfCancellationRequested();
+                    RecordFailure("ai_provider_unavailable");
                     throw new ApiException(503, "ai_provider_unavailable");
                 }
+                var providerDuration = clock.GetElapsedTime(providerStarted);
+                if (timeout.IsCancellationRequested && !ct.IsCancellationRequested) RecordFailure("ai_timeout");
                 timeout.Token.ThrowIfCancellationRequested();
                 // Never return a result after account deletion, grant replacement,
                 // history change or restore maintenance. No SQL lock spans the AI call.
@@ -344,13 +370,18 @@ public sealed class SleepAiService(IOptions<SleepAiOptions> options, ISleepAiAcc
                 {
                     try
                     {
-                        valid = SleepAiValidation.TryReadOutput(result, request, bounds, out parsed);
+                        valid = SleepAiValidation.TryReadOutput(result, request, bounds, out parsed, out var failure);
+                        if (!valid) failures?.Record(attempt + 1, failure!.Reason, failure.PeriodIndex,
+                            result, providerDuration, options.Value.Model);
                         validation?.Complete(valid ? "ok" : "invalid_output");
                     }
                     catch (Exception error) { validation?.Fail(error); throw; }
                 }
                 if (valid)
                     return Response(request, bounds, parsed!.Status, parsed.Periods);
+
+                void RecordFailure(string reason) => failures?.Record(attempt + 1, reason, null, null,
+                    clock.GetElapsedTime(providerStarted), options.Value.Model);
             }
             throw new ApiException(503, "ai_invalid_response");
         }
@@ -411,6 +442,7 @@ public static class SleepAiRegistration
         services.Configure<SleepAiOptions>(configuration.GetSection("SleepAi"));
         services.AddSingleton<SleepAiBudget>();
         services.AddScoped<SleepAiDiagnostics>();
+        services.AddScoped<SleepAiFailureCapture>();
         services.AddScoped<ISleepAiAccess, SleepAiAccess>();
         services.AddScoped<ISleepAiAttemptStore, SleepAiAttemptStore>();
         services.AddScoped<SleepAiService>();
@@ -432,7 +464,8 @@ public static class SleepAiRegistration
             }).AsIChatClient(options.Model);
         });
         services.AddScoped<ISleepAiProvider>(sp => sp.GetRequiredService<IOptions<SleepAiOptions>>().Value.IsAvailable
-            ? new OpenAiSleepProvider(sp.GetRequiredService<IChatClient>(), sp.GetRequiredService<IOptions<SleepAiOptions>>(), sp.GetRequiredService<SleepAiDiagnostics>())
+            ? new OpenAiSleepProvider(sp.GetRequiredService<IChatClient>(), sp.GetRequiredService<IOptions<SleepAiOptions>>(),
+                sp.GetRequiredService<SleepAiDiagnostics>(), sp.GetRequiredService<SleepAiFailureCapture>())
             : new DisabledSleepAiProvider());
         return services;
     }

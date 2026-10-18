@@ -104,6 +104,20 @@ public static class SleepAiJson
 public sealed record SleepAiTimeBounds(DateTimeOffset HistoryStart, DateTimeOffset TodayStart,
     DateTimeOffset TodayEnd, DateTimeOffset SleepEndLimit);
 
+/// <summary>Fixed validation category and optional output-period position, never input values or JSON exception details.</summary>
+public sealed record SleepAiOutputFailure(string Reason, int? PeriodIndex = null)
+{
+    public static bool IsKnownReason(string reason) => reason is
+        "invalid_output" or "response_missing" or "response_too_large" or "invalid_json" or "invalid_schema" or
+        "output_missing" or "periods_missing" or "invalid_status" or "too_many_periods" or
+        "insufficient_data_with_periods" or "empty_periods" or "ongoing_sleep_unsupported" or
+        "period_missing" or "sleep_order" or "sleep_bounds" or "sleep_duration" or "period_overlap" or
+        "settling_missing" or "settling_incomplete" or "settling_before_now" or "settling_order" or
+        "settling_after_sleep" or "settling_too_early" or "settling_overlap" or
+        "recorded_sleep_overlap" or "recorded_sleep_has_settling" or "predicted_sleep_missing_settling" or
+        "recorded_sleep_missing";
+}
+
 public static class SleepAiValidation
 {
     public const string ConsentVersion = "sleep-ai-v1";
@@ -169,53 +183,93 @@ public static class SleepAiValidation
     }
 
     public static bool TryReadOutput(string? json, SleepPredictionRequest request, SleepAiTimeBounds bounds, out SleepPredictionModelOutput? output)
+        => TryReadOutput(json, request, bounds, out output, out _);
+
+    public static bool TryReadOutput(string? json, SleepPredictionRequest request, SleepAiTimeBounds bounds,
+        out SleepPredictionModelOutput? output, out SleepAiOutputFailure? failure)
     {
         output = null;
-        if (json is null || json.Length > 16 * 1024) return false;
+        failure = null;
+        if (json is null) return Reject(out failure, "response_missing");
+        if (json.Length > 16 * 1024) return Reject(out failure, "response_too_large");
         try { output = JsonSerializer.Deserialize<SleepPredictionModelOutput>(json, SleepAiJson.Options); }
-        catch (JsonException) { return false; }
-        if (output is null || output.Periods is null || output.Status is not ("ready" or "insufficient_data") ||
-            output.Periods.Length > (request.SchemaVersion == 2 ? MaxWholeDayPeriods : MaxPeriods)) return false;
-        if (output.Status == "insufficient_data") return output.Periods.Length == 0;
-        if (request.SchemaVersion == 2) return ValidWholeDayOutput(output.Periods, request, bounds);
-        if (output.Periods.Length == 0 || request.Records.Any(x => x.Kind == "sleep" && x.Ongoing)) return false;
-        DateTimeOffset? previousEnd = null;
-        foreach (var period in output.Periods)
+        catch (JsonException)
         {
-            if (period is null || period.SootheStart is null || period.SootheEnd is null ||
-                period.SootheStart < request.Now || period.SootheEnd <= period.SootheStart ||
-                period.SootheEnd > period.SleepStart || period.SleepStart >= period.SleepEnd ||
-                period.SleepStart >= bounds.TodayEnd || period.SleepEnd > bounds.SleepEndLimit ||
-                period.SootheStart < previousEnd) return false;
+            // Inspect syntax only after the original strict deserializer rejects it.
+            // Never retain exception messages, paths or input-derived values.
+            try { using var document = JsonDocument.Parse(json, new JsonDocumentOptions { MaxDepth = SleepAiJson.Options.MaxDepth }); }
+            catch (JsonException) { return Reject(out failure, "invalid_json"); }
+            return Reject(out failure, "invalid_schema");
+        }
+        if (output is null) return Reject(out failure, "output_missing");
+        if (output.Periods is null) return Reject(out failure, "periods_missing");
+        if (output.Status is not ("ready" or "insufficient_data")) return Reject(out failure, "invalid_status");
+        if (output.Periods.Length > (request.SchemaVersion == 2 ? MaxWholeDayPeriods : MaxPeriods))
+            return Reject(out failure, "too_many_periods");
+        if (output.Status == "insufficient_data")
+            return output.Periods.Length == 0 || Reject(out failure, "insufficient_data_with_periods");
+        if (request.SchemaVersion == 2) return ValidWholeDayOutput(output.Periods, request, bounds, out failure);
+        if (output.Periods.Length == 0) return Reject(out failure, "empty_periods");
+        if (request.Records.Any(x => x.Kind == "sleep" && x.Ongoing)) return Reject(out failure, "ongoing_sleep_unsupported");
+        DateTimeOffset? previousEnd = null;
+        for (var index = 0; index < output.Periods.Length; index++)
+        {
+            var period = output.Periods[index];
+            if (period is null) return Reject(out failure, "period_missing");
+            if (period.SootheStart is null || period.SootheEnd is null) return Reject(out failure, "settling_missing", index);
+            if (period.SootheStart < request.Now) return Reject(out failure, "settling_before_now", index);
+            if (period.SootheEnd <= period.SootheStart) return Reject(out failure, "settling_order", index);
+            if (period.SootheEnd > period.SleepStart) return Reject(out failure, "settling_after_sleep", index);
+            if (period.SleepStart >= period.SleepEnd) return Reject(out failure, "sleep_order", index);
+            if (period.SleepStart >= bounds.TodayEnd || period.SleepEnd > bounds.SleepEndLimit)
+                return Reject(out failure, "sleep_bounds", index);
+            if (period.SootheStart < previousEnd) return Reject(out failure, "settling_overlap", index);
             if (request.Records.Where(x => x.Kind == "sleep").Any(x =>
-                period.SootheStart < (x.End ?? request.Now) && period.SleepEnd > x.Start)) return false;
+                period.SootheStart < (x.End ?? request.Now) && period.SleepEnd > x.Start))
+                return Reject(out failure, "recorded_sleep_overlap", index);
             previousEnd = period.SleepEnd;
         }
         return true;
     }
 
     private static bool ValidWholeDayPeriods(SleepPredictionPeriod[]? periods, SleepAiTimeBounds bounds)
+        => ValidWholeDayPeriods(periods, bounds, out _);
+
+    private static bool ValidWholeDayPeriods(SleepPredictionPeriod[]? periods, SleepAiTimeBounds bounds,
+        out SleepAiOutputFailure? failure)
     {
-        if (periods is null || periods.Length is < 1 or > MaxWholeDayPeriods) return false;
+        failure = null;
+        if (periods is null) return Reject(out failure, "periods_missing");
+        if (periods.Length == 0) return Reject(out failure, "empty_periods");
+        if (periods.Length > MaxWholeDayPeriods) return Reject(out failure, "too_many_periods");
         DateTimeOffset? previousEnd = null;
-        foreach (var period in periods)
+        for (var index = 0; index < periods.Length; index++)
         {
-            if (period is null || period.SleepStart < bounds.TodayStart.AddHours(-24) ||
-                period.SleepStart >= bounds.TodayEnd || period.SleepEnd <= bounds.TodayStart ||
-                period.SleepStart >= period.SleepEnd || period.SleepEnd > bounds.SleepEndLimit ||
-                period.SleepEnd - period.SleepStart > TimeSpan.FromHours(24) || period.SleepStart < previousEnd) return false;
-            if ((period.SootheStart is null) != (period.SootheEnd is null)) return false;
-            if (period.SootheStart is { } soothe &&
-                (soothe >= period.SootheEnd || period.SootheEnd > period.SleepStart ||
-                 soothe < period.SleepStart.AddHours(-4) || soothe < previousEnd)) return false;
+            var period = periods[index];
+            if (period is null) return Reject(out failure, "period_missing");
+            if (period.SleepStart < bounds.TodayStart.AddHours(-24) || period.SleepStart >= bounds.TodayEnd ||
+                period.SleepEnd <= bounds.TodayStart) return Reject(out failure, "sleep_bounds", index);
+            if (period.SleepStart >= period.SleepEnd) return Reject(out failure, "sleep_order", index);
+            if (period.SleepEnd > bounds.SleepEndLimit) return Reject(out failure, "sleep_bounds", index);
+            if (period.SleepEnd - period.SleepStart > TimeSpan.FromHours(24)) return Reject(out failure, "sleep_duration", index);
+            if (period.SleepStart < previousEnd) return Reject(out failure, "period_overlap", index);
+            if ((period.SootheStart is null) != (period.SootheEnd is null)) return Reject(out failure, "settling_incomplete", index);
+            if (period.SootheStart is { } soothe)
+            {
+                if (soothe >= period.SootheEnd) return Reject(out failure, "settling_order", index);
+                if (period.SootheEnd > period.SleepStart) return Reject(out failure, "settling_after_sleep", index);
+                if (soothe < period.SleepStart.AddHours(-4)) return Reject(out failure, "settling_too_early", index);
+                if (soothe < previousEnd) return Reject(out failure, "settling_overlap", index);
+            }
             previousEnd = period.SleepEnd;
         }
         return true;
     }
 
-    private static bool ValidWholeDayOutput(SleepPredictionPeriod[] periods, SleepPredictionRequest request, SleepAiTimeBounds bounds)
+    private static bool ValidWholeDayOutput(SleepPredictionPeriod[] periods, SleepPredictionRequest request, SleepAiTimeBounds bounds,
+        out SleepAiOutputFailure? failure)
     {
-        if (!ValidWholeDayPeriods(periods, bounds)) return false;
+        if (!ValidWholeDayPeriods(periods, bounds, out failure)) return false;
         var sleep = request.Records.Where(record => record.Kind == "sleep").ToArray();
         // Classify evidence only: never merge, trim, deduplicate or choose a
         // recorded boundary locally. Index identity keeps duplicate occurrences.
@@ -223,8 +277,9 @@ public static class SleepAiValidation
             record.Start < (other.End ?? request.Now) && other.Start < (record.End ?? request.Now))).ToArray();
         var isolated = sleep.Where((_, index) => !uncertain[index]).ToArray();
         var conflicting = sleep.Where((_, index) => uncertain[index]).ToArray();
-        foreach (var period in periods)
+        for (var index = 0; index < periods.Length; index++)
         {
+            var period = periods[index];
             var anchor = isolated.FirstOrDefault(record => record.Start == period.SleepStart &&
                 (record.Ongoing ? period.SleepEnd > request.Now : record.End == period.SleepEnd));
             // A model's reconciliation is an estimate, not a new recorded fact.
@@ -232,18 +287,28 @@ public static class SleepAiValidation
             // intersecting evidence permits no retrospective settling advice.
             var conflictAnchor = anchor is null && period.SleepStart <= request.Now && conflicting.Any(record =>
                 period.SleepStart < (record.End ?? request.Now) && period.SleepEnd > record.Start);
-            if (anchor is not null || conflictAnchor
-                ? period.SootheStart is not null
-                : period.SootheStart is null) return false;
+            if (anchor is not null || conflictAnchor)
+            {
+                if (period.SootheStart is not null) return Reject(out failure, "recorded_sleep_has_settling", index);
+            }
+            else if (period.SootheStart is null) return Reject(out failure, "predicted_sleep_missing_settling", index);
             var start = period.SootheStart ?? period.SleepStart;
             if (isolated.Any(record => !ReferenceEquals(record, anchor) &&
-                start < (record.End ?? request.Now) && period.SleepEnd > record.Start)) return false;
+                start < (record.End ?? request.Now) && period.SleepEnd > record.Start))
+                return Reject(out failure, "recorded_sleep_overlap", index);
         }
         // Unambiguous observed sleep stays exact. Conflicting inputs are left
         // for the model to judge, never required as contradictory exact anchors.
         return isolated.Where(record => record.End is null || record.End > bounds.TodayStart)
             .All(record => periods.Any(period => period.SleepStart == record.Start &&
-                (record.Ongoing ? period.SleepEnd > request.Now : period.SleepEnd == record.End)));
+                (record.Ongoing ? period.SleepEnd > request.Now : period.SleepEnd == record.End))) ||
+            Reject(out failure, "recorded_sleep_missing");
+    }
+
+    private static bool Reject(out SleepAiOutputFailure? failure, string reason, int? periodIndex = null)
+    {
+        failure = new(reason, periodIndex);
+        return false;
     }
 
     private static DateTimeOffset LocalInstant(DateTime value, TimeZoneInfo zone)

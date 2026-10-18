@@ -1,5 +1,79 @@
 # My Little Days: manual Azure and GitHub setup runbook
 
+## AI concurrency 50 and failed-output diagnostics — 18 October 2026 release
+
+Owner authorized deployment of concurrency 50 together with the seven-day
+failed-output diagnostic backend. Preparation is in progress, not yet a live
+receipt. See [the scoped release record](AI-CONCURRENCY-50-DEPLOYMENT-2026-10-18.md).
+
+Target remains the existing `reticle.com.au` tenant, subscription and API/SQL
+resources listed below. No new paid resources or tier changes. Preserve provider
+retention/spend controls, model/Fast setting, 30/account/hour, daily limit and
+client polling. Deployment includes the schema and consent-gated diagnostic
+backend; installed clients without new diagnostic consent remain uncaptured.
+
+Fresh read-only preflight: remote trusted branch
+`feature/family-invitations` is `8599ebf8b8523186aad4fa5184795a78b855b86f`;
+local HEAD is older and must not be used as the release base. GitHub environments
+`family-database` and `family-pilot` restrict to that branch, with required
+reviewers/wait timer off and administrator bypass on. Those protections were
+inspected, not changed. Freeze the scoped successor SHA before dispatching
+`Deploy family API and database`, `database_bootstrapped=true`, `adopt_ef=false`.
+Require disposable SQL tests and additive migration 0011/catalog/zero-pending
+verification before the API deployment. Do not claim diagnostic activation or
+native acceptance from this backend-only release.
+
+Azure read-only check: API Running/Healthy, Linux B1 x 1 Australia Southeast;
+there is no `SleepAi__MaxConcurrentRequests` or hourly/daily quota override.
+Shipped `SleepAi:MaxConcurrentRequests=50` will apply without an environment
+setting write. Credentials remain masked; provider retention/spending dashboards
+were not opened. Infrastructure enabled/apply flags remain false.
+
+## Failed AI output diagnostics — 18 October 2026, pending rollout
+
+Owner requested seven-day automatic cleanup of failed AI response diagnostics.
+Local backend implementation only; **not deployed or collecting payloads**.
+Details and draft disclosure: [AI-FAILED-OUTPUT-DIAGNOSTICS.md](AI-FAILED-OUTPUT-DIAGNOSTICS.md).
+Existing ordinary timing-log retention/settings are unchanged. No Key Vault,
+new monitoring service or infrastructure tier change is required.
+
+Pending manual/release actions (do not infer approval to execute from this list):
+
+1. In the app consent flow and the existing public privacy/support pages, explain
+   failed-response-only diagnostics, possible sleep times in the response,
+   seven-day eligibility plus hourly deletion, restricted access and revocation.
+   Require explicit `sleep-ai-failed-output-v1` acceptance; existing
+   `sleep-ai-jobs-v1` acceptance is not sufficient. Verify old sessions send no
+   `diagnosticsConsentVersion`; new consent sends it only after capability
+   support is confirmed. No input-history copies or extra paid services.
+2. GitHub `github4me/my-little-days` → existing API/database workflow and
+   `family-database` / `family-pilot` environments: freeze the reviewed SHA,
+   recheck protections and target identifiers, run disposable SQL integration
+   and migration/catalog tests, then apply additive script 0011 before the API.
+   Existing scripts remain immutable. Verify **zero pending scripts** after
+   migration and legacy jobs/clients remain usable without diagnostic capture.
+3. Target must be rechecked: Azure Portal → `reticle.com.au` tenant
+   `7b7e6e31-a778-4334-aee2-e969fa27fd0e` → subscription
+   `4768a858-f23f-4a39-bb64-eabc9c142627` → `my-little-days-pilot-rg` →
+   `little-days-sql-522fpstfbtds2` / database `little-days-family`, and API
+   `little-days-api-522fpstfbtds2`. No change to provider retention/spending
+   dashboards, model, Fast setting, quotas or polling is part of this task.
+4. With an expressly consented **synthetic** test job, verify invalid initial and
+   repair outputs, fixed reason/index, no input history in diagnostic rows, no
+   raw payload in App Service logs or job responses, and revoke/delete cleanup.
+   Verify `ExpiresAt` is exactly failure UTC + seven days and expired rows are
+   removed by the bounded hourly worker. Do not use live family records as a
+   fixture or claim generic health verifies this path.
+5. For restricted administrative analysis, filter `SleepAiFailedOutputs` by
+   `ExpiresAt > SYSUTCDATETIME()` and the current configured `Family:HistoryId`
+   epoch. Avoid payload exports. SQL backup retention is separate and unchanged.
+   On a restored database or rollback to an API without diagnostic deletion hooks:
+   keep recovery maintenance enabled, explicitly
+   purge this diagnostic table including null-family personal rows, clear job
+   diagnostic consent/epoch, verify zero diagnostic rows, then complete the
+   existing history/reconciliation checks before reopening traffic. This is
+   a recovery-only future step, not authorization to purge the live database.
+
 ## AI timing logging rollout — 15 October 2026
 
 Owner requested deployment and activation. The existing Azure App Service

@@ -87,6 +87,43 @@ public sealed class SleepAiJobTests
     }
 
     [Fact]
+    public void OptionalDiagnosticsConsentPreservesLegacySerializationAndChangesExplicitOptInHash()
+    {
+        var request = Request(new Clock().Now);
+        var original = JsonSerializer.Serialize(new { request.OperationId, request.ConsentVersion,
+            request.ConsentGeneration, request.Request }, SleepAiJson.Options);
+        Assert.Equal(original, JsonSerializer.Serialize(request, SleepAiJson.Options));
+        var optedIn = request with { DiagnosticsConsentVersion = SleepAiFailureCapture.ConsentVersion };
+        var json = JsonSerializer.Serialize(optedIn, SleepAiJson.Options);
+        Assert.NotEqual(original, json);
+        Assert.Contains("\"diagnosticsConsentVersion\":\"sleep-ai-failed-output-v1\"", json);
+        Assert.Equal(json, JsonSerializer.Serialize(JsonSerializer.Deserialize<CreateSleepPredictionJobRequest>(json, SleepAiJson.Options), SleepAiJson.Options));
+    }
+
+    [Theory]
+    [InlineData(null, true)]
+    [InlineData("sleep-ai-failed-output-v1", true)]
+    [InlineData("", false)]
+    [InlineData("sleep-ai-jobs-v1", false)]
+    [InlineData("sleep-ai-failed-output-v2", false)]
+    public void FailedOutputRetentionRequiresExactOptionalConsent(string? version, bool accepted)
+    {
+        var clock = new Clock(); var request = Request(clock.Now) with { DiagnosticsConsentVersion = version };
+        if (accepted) Assert.True(SleepAiJobPolicy.Validate(request, clock.Now).TodayEnd > clock.Now);
+        else Assert.Equal("invalid_input", Assert.Throws<ApiException>(() => SleepAiJobPolicy.Validate(request, clock.Now)).Code);
+    }
+
+    [Fact]
+    public void FailedOutputExpiryIsExactlySevenDaysFromFailureNotJobCompletion()
+    {
+        var occurred = DateTimeOffset.Parse("2026-10-03T23:59:59+10:00");
+        var attempt = new SleepAiFailedAttempt(1, "invalid_json", null, "synthetic", 9, false, occurred, 12, "synthetic-2026-10-01");
+        Assert.Equal(occurred.AddHours(168), attempt.ExpiresAt);
+        Assert.True(attempt.ExpiresAt > occurred.AddDays(7).AddTicks(-1));
+        Assert.False(attempt.ExpiresAt > occurred.AddDays(7));
+    }
+
+    [Fact]
     public async Task QueuedExecutionPreservesOriginalSnapshotAfterAdmissionWindowAndUsesDurableAttemptPerRepair()
     {
         var clock = new Clock(); var request = Request(clock.Now).Request; clock.Now = clock.Now.AddMinutes(20);
@@ -145,7 +182,10 @@ public sealed class SleepAiJobTests
         client.DefaultRequestHeaders.Authorization = new("Bearer", host.Token(scenario.Owner));
         using var response = await client.GetAsync("/v2/sleep-prediction-jobs/capabilities");
         Assert.Equal("no-store", response.Headers.CacheControl!.ToString());
-        Assert.Equal(new(false, "sleep-ai-jobs-v1"), await response.Content.ReadFromJsonAsync<SleepPredictionJobCapabilities>());
+        var capabilities = await response.Content.ReadFromJsonAsync<SleepPredictionJobCapabilities>();
+        Assert.Equal(new(false, "sleep-ai-jobs-v1"), capabilities);
+        Assert.Equal(SleepAiFailureCapture.ConsentVersion, capabilities!.DiagnosticsConsentVersion);
+        Assert.Equal(7, capabilities.DiagnosticsRetentionDays);
         var old = await client.GetFromJsonAsync<SleepPredictionCapabilities>("/v2/sleep-predictions/capabilities");
         Assert.Equal("sleep-ai-v1", old!.ConsentVersion); Assert.Equal("sleep-ai-v2", old.WholeDayConsentVersion);
     }

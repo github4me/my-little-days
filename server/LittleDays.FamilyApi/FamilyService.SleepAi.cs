@@ -1,7 +1,26 @@
+using Microsoft.EntityFrameworkCore;
+
 namespace LittleDays.FamilyApi;
 
 public sealed partial class FamilyService
 {
+    internal Guid SleepAiHistoryEpoch => config.Family.HistoryId;
+
+    internal async Task PurgeSleepAiFailuresForAccount(Guid userId, CancellationToken ct)
+    {
+        var affectedFamilies = db.Memberships.Where(x => x.UserId == userId).Select(x => x.FamilyId)
+            .Union(db.Feeds.Where(x => x.RecordedBy == userId || x.LastEditedBy == userId).Select(x => x.FamilyId))
+            .Union(db.FamilyRecords.Where(x => x.RecordedBy == userId || x.LastEditedBy == userId ||
+                x.TimerEndedBy == userId || x.ConflictReplacedBy == userId || x.ConflictPreviousEditedBy == userId).Select(x => x.FamilyId));
+        // Remove capture authority without cancelling other members' normal AI
+        // predictions. Completion checks this authoritative row, not its claim.
+        await db.SleepAiJobs.Where(x => x.UserId == userId ||
+            x.FamilyId != null && affectedFamilies.Contains(x.FamilyId.Value))
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.DiagnosticsConsentVersion, (string?)null)
+                .SetProperty(x => x.DiagnosticsHistoryEpoch, (Guid?)null), ct);
+        await db.SleepAiFailedOutputs.Where(x => x.UserId == userId ||
+            x.FamilyId != null && affectedFamilies.Contains(x.FamilyId.Value)).ExecuteDeleteAsync(ct);
+    }
     // Authorizes client-projected data without creating a family, copying its
     // records to SQL, or holding a lifecycle lock over an external AI request.
     public Task<bool> AuthorizeSleepPrediction(PilotIdentity user, SleepPredictionRequest request, CancellationToken ct) =>

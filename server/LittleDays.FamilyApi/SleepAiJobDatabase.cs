@@ -7,6 +7,7 @@ public sealed partial class PilotDatabase
     public DbSet<SleepAiJobRow> SleepAiJobs => Set<SleepAiJobRow>();
     public DbSet<SleepAiRevocationRow> SleepAiRevocations => Set<SleepAiRevocationRow>();
     public DbSet<SleepAiAttemptRow> SleepAiAttempts => Set<SleepAiAttemptRow>();
+    public DbSet<SleepAiFailedOutputRow> SleepAiFailedOutputs => Set<SleepAiFailedOutputRow>();
     private static void ConfigureSleepAiJobs(ModelBuilder model)
     {
         model.Entity<SleepAiJobRow>(e =>
@@ -16,6 +17,7 @@ public sealed partial class PilotDatabase
             e.Property(x => x.RequestHash).HasMaxLength(64).IsUnicode(false);
             e.Property(x => x.State).HasMaxLength(12).IsUnicode(false);
             e.Property(x => x.ErrorCode).HasMaxLength(40).IsUnicode(false);
+            e.Property(x => x.DiagnosticsConsentVersion).HasMaxLength(40).IsUnicode(false);
             e.Property(x => x.RequestJson).HasColumnType("nvarchar(max)");
             e.Property(x => x.ResultJson).HasColumnType("nvarchar(max)");
             e.HasIndex(x => new { x.State, x.CreatedAt });
@@ -34,6 +36,18 @@ public sealed partial class PilotDatabase
             e.ToTable("SleepAiAttempts"); e.HasKey(x => x.Id);
             e.HasIndex(x => new { x.UserId, x.StartedAt });
             e.HasIndex(x => x.StartedAt); e.HasIndex(x => x.LeaseUntil);
+        });
+        model.Entity<SleepAiFailedOutputRow>(e =>
+        {
+            e.ToTable("SleepAiFailedOutputs"); e.HasKey(x => new { x.UserId, x.JobId, x.Run, x.Attempt });
+            e.Property(x => x.Reason).HasMaxLength(64).IsUnicode(false);
+            e.Property(x => x.Model).HasMaxLength(100).IsUnicode(false);
+            e.Property(x => x.ResponseText).HasColumnType("nvarchar(max)");
+            e.HasIndex(x => x.ExpiresAt);
+            e.HasIndex(x => new { x.UserId, x.ConsentGeneration });
+            e.HasIndex(x => x.FamilyId);
+            e.HasIndex(x => x.MembershipId);
+            e.HasIndex(x => x.HistoryEpoch);
         });
     }
 }
@@ -59,6 +73,31 @@ public sealed class SleepAiJobRow
     public Guid? LeaseId { get; set; }
     public DateTimeOffset? LeaseUntil { get; set; }
     public int Runs { get; set; }
+    public string? DiagnosticsConsentVersion { get; set; }
+    public Guid? DiagnosticsHistoryEpoch { get; set; }
+}
+
+// Restricted diagnostic payloads are independent of midnight-expiring jobs.
+// No input history, prompt, credentials or public API projection belongs here.
+public sealed class SleepAiFailedOutputRow
+{
+    public Guid UserId { get; set; }
+    public Guid JobId { get; set; }
+    public int Run { get; set; }
+    public int Attempt { get; set; }
+    public Guid ConsentGeneration { get; set; }
+    public Guid? FamilyId { get; set; }
+    public Guid? MembershipId { get; set; }
+    public Guid HistoryEpoch { get; set; }
+    public string Reason { get; set; } = "";
+    public int? PeriodIndex { get; set; }
+    public string? ResponseText { get; set; }
+    public int OriginalLength { get; set; }
+    public bool Truncated { get; set; }
+    public DateTimeOffset OccurredAt { get; set; }
+    public DateTimeOffset ExpiresAt { get; set; }
+    public double DurationMs { get; set; }
+    public string Model { get; set; } = "";
 }
 
 public sealed class SleepAiRevocationRow

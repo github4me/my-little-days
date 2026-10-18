@@ -10,10 +10,11 @@ public sealed record SleepAiJobClaim(Guid UserId, Guid JobId, Guid LeaseId, Slee
 {
     public DateTimeOffset CreatedAt { get; init; }
     public int Run { get; init; }
+    public string? DiagnosticsConsentVersion { get; init; }
 }
 
 public sealed class SleepAiJobStore(PilotDatabase db, FamilyService family, RecoveryGate recovery,
-    TimeProvider clock, IOptions<SleepAiOptions> options)
+    TimeProvider clock, IOptions<SleepAiOptions> options, SleepAiFailureCapture? failureCapture = null)
 {
     private DateTimeOffset Now => clock.GetUtcNow();
     private void CheckRecovery() { if (recovery.Blocked) throw new ApiException(503, "recovery_blocked"); }
@@ -62,7 +63,9 @@ public sealed class SleepAiJobStore(PilotDatabase db, FamilyService family, Reco
                 FamilyId = value.Request.FamilyId, MembershipId = value.Request.MembershipId, HistoryId = value.Request.HistoryId,
                 InputRevision = value.Request.InputRevision, RequestHash = hash, RequestNow = value.Request.Now,
                 CreatedAt = Now, UpdatedAt = Now, ExpiresAt = bounds.TodayEnd,
-                RequestJson = obsolete ? null : json, State = obsolete ? "cancelled" : "queued"
+                RequestJson = obsolete ? null : json, State = obsolete ? "cancelled" : "queued",
+                DiagnosticsConsentVersion = value.DiagnosticsConsentVersion,
+                DiagnosticsHistoryEpoch = value.DiagnosticsConsentVersion is null ? null : family.SleepAiHistoryEpoch
             };
             db.SleepAiJobs.Add(rowNew); return View(rowNew);
         }, ct);
@@ -89,6 +92,9 @@ public sealed class SleepAiJobStore(PilotDatabase db, FamilyService family, Reco
         var rows = await db.SleepAiJobs.Where(x => x.UserId == user.ObjectId &&
             (consent ? x.ConsentGeneration == id : x.Id == id)).ToArrayAsync(ct);
         foreach (var row in rows) Finish(row, "cancelled", null, null);
+        // Do not join to jobs: their midnight cleanup precedes the diagnostic TTL.
+        await db.SleepAiFailedOutputs.Where(x => x.UserId == user.ObjectId &&
+            (consent ? x.ConsentGeneration == id : x.JobId == id)).ExecuteDeleteAsync(ct);
         return true;
     }, ct);
 
@@ -124,7 +130,8 @@ public sealed class SleepAiJobStore(PilotDatabase db, FamilyService family, Reco
             ?? throw new InvalidOperationException("Invalid durable AI job.");
         row.State = "running"; row.LeaseId = Guid.NewGuid(); row.LeaseUntil = now.AddMinutes(2);
         row.Runs++; row.UpdatedAt = now;
-        return new SleepAiJobClaim(row.UserId, row.Id, row.LeaseId.Value, request) { CreatedAt = row.CreatedAt, Run = row.Runs };
+        return new SleepAiJobClaim(row.UserId, row.Id, row.LeaseId.Value, request)
+        { CreatedAt = row.CreatedAt, Run = row.Runs, DiagnosticsConsentVersion = row.DiagnosticsConsentVersion };
     }, ct);
 
     internal Task<bool> EnsureCurrent(SleepAiJobClaim claim, CancellationToken ct) => family.Transaction(async () =>
@@ -140,23 +147,71 @@ public sealed class SleepAiJobStore(PilotDatabase db, FamilyService family, Reco
         return true;
     }, ct);
 
-    public Task<bool> Complete(SleepAiJobClaim claim, SleepPredictionResponse? prediction, string? error, CancellationToken ct) => family.Transaction(async () =>
+    public async Task<bool> Complete(SleepAiJobClaim claim, SleepPredictionResponse? prediction, string? error, CancellationToken ct)
     {
-        CheckRecovery(); db.ChangeTracker.Clear();
-        var row = await db.SleepAiJobs.FindAsync([claim.UserId, claim.JobId], ct);
-        if (row is null || row.State != "running" || row.LeaseId != claim.LeaseId || row.LeaseUntil <= Now) return false;
-        if (Expire(row)) return false;
+        var completed = await family.Transaction(async () =>
+        {
+            CheckRecovery(); db.ChangeTracker.Clear();
+            var row = await db.SleepAiJobs.FindAsync([claim.UserId, claim.JobId], ct);
+            if (row is null || row.State != "running" || row.LeaseId != claim.LeaseId || row.LeaseUntil <= Now) return false;
+            if (Expire(row)) return false;
+            try
+            {
+                await Authorize(Identity(row.UserId), row, ct);
+                await CheckRevoked(row.UserId, row.Id, row.ConsentGeneration, ct);
+            }
+            catch (ApiException e) { Finish(row, "cancelled", null, SleepAiJobPolicy.SafeError(e.Code)); return false; }
+            if (prediction is not null && prediction.Status is "ready" or "insufficient_data")
+                Finish(row, "completed", Serialize(prediction), null);
+            else Finish(row, "failed", null, SleepAiJobPolicy.SafeError(error ?? "ai_provider_unavailable"));
+            return true;
+        }, ct);
+        // Diagnostics must never undo completion or cause another paid inference.
+        // A second lifecycle transaction rechecks authority after the first commits.
+        if (completed && failureCapture?.Attempts.Count > 0)
+            await StoreFailuresBestEffort(claim, ct);
+        return completed;
+    }
+
+    private async Task StoreFailuresBestEffort(SleepAiJobClaim claim, CancellationToken ct)
+    {
         try
         {
-            await Authorize(Identity(row.UserId), row, ct);
-            await CheckRevoked(row.UserId, row.Id, row.ConsentGeneration, ct);
+            await family.Transaction(async () =>
+            {
+                CheckRecovery(); db.ChangeTracker.Clear();
+                var row = await db.SleepAiJobs.FindAsync([claim.UserId, claim.JobId], ct);
+                if (row is null || row.Runs != claim.Run || row.State is not ("completed" or "failed") || row.ExpiresAt <= Now)
+                    return false;
+                await Authorize(Identity(row.UserId), row, ct);
+                await CheckRevoked(row.UserId, row.Id, row.ConsentGeneration, ct);
+                if (row.DiagnosticsConsentVersion == SleepAiFailureCapture.ConsentVersion &&
+                    row.DiagnosticsHistoryEpoch == family.SleepAiHistoryEpoch && failureCapture is not null)
+                {
+                    foreach (var failed in failureCapture.Attempts.Where(x => x.Attempt is 1 or 2)
+                        .DistinctBy(x => x.Attempt).Take(2))
+                    {
+                        if (failed.ExpiresAt <= Now) continue;
+                        db.SleepAiFailedOutputs.Add(new()
+                        {
+                            UserId = row.UserId, JobId = row.Id, Run = row.Runs, Attempt = failed.Attempt,
+                            ConsentGeneration = row.ConsentGeneration, FamilyId = row.FamilyId, MembershipId = row.MembershipId,
+                            HistoryEpoch = family.SleepAiHistoryEpoch, Reason = failed.Reason, PeriodIndex = failed.PeriodIndex,
+                            ResponseText = failed.ResponseText, OriginalLength = failed.OriginalLength, Truncated = failed.Truncated,
+                            OccurredAt = failed.OccurredAt, ExpiresAt = failed.ExpiresAt,
+                            DurationMs = failed.DurationMs, Model = failed.Model
+                        });
+                    }
+                }
+                return true;
+            }, ct);
         }
-        catch (ApiException e) { Finish(row, "cancelled", null, SleepAiJobPolicy.SafeError(e.Code)); return false; }
-        if (prediction is not null && prediction.Status is "ready" or "insufficient_data")
-            Finish(row, "completed", Serialize(prediction), null);
-        else Finish(row, "failed", null, SleepAiJobPolicy.SafeError(error ?? "ai_provider_unavailable"));
-        return true;
-    }, ct);
+        catch (Exception e) when (e is not OutOfMemoryException and not StackOverflowException and not AccessViolationException)
+        {
+            // No response text or exception details enter application logs.
+            db.ChangeTracker.Clear();
+        }
+    }
 
     private bool Expire(SleepAiJobRow row)
     {
@@ -177,7 +232,10 @@ public sealed class SleepAiJobStore(PilotDatabase db, FamilyService family, Reco
     {
         CheckRecovery(); var now = Now; var metadataBefore = now.AddDays(-2);
         // Only AI-owned tables; domain records and operation receipts are untouched.
-        // Expired/private input/output is cleared hourly, not retained for debugging.
+        // Ordinary job/input retention is unchanged. Diagnostic output has its
+        // separately consented seven-day TTL and a durable restore epoch.
+        var epoch = family.SleepAiHistoryEpoch;
+        await db.Database.ExecuteSqlInterpolatedAsync($"DELETE TOP (500) FROM dbo.SleepAiFailedOutputs WHERE ExpiresAt <= {now} OR HistoryEpoch <> {epoch}", ct);
         await db.Database.ExecuteSqlInterpolatedAsync($"DELETE TOP (500) FROM dbo.SleepAiJobs WHERE ExpiresAt <= {now}", ct);
         await db.Database.ExecuteSqlInterpolatedAsync($"DELETE TOP (500) FROM dbo.SleepAiRevocations WHERE ExpiresAt <= {now}", ct);
         await db.Database.ExecuteSqlInterpolatedAsync($"DELETE TOP (500) FROM dbo.SleepAiAttempts WHERE StartedAt < {metadataBefore}", ct);

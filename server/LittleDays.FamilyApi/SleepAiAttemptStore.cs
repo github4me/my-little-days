@@ -25,7 +25,7 @@ public sealed class SleepAiAttemptStore(PilotDatabase db, FamilyService family,
                 throw new ApiException(429, "ai_daily_limit");
             if (await db.SleepAiAttempts.CountAsync(x => x.UserId == userId && x.StartedAt >= hour, ct) >= options.Value.MaxRequestsPerAccountPerHour)
                 throw new ApiException(429, "ai_hourly_limit");
-            if (await db.SleepAiAttempts.CountAsync(x => x.LeaseUntil > now, ct) >= 2)
+            if (await db.SleepAiAttempts.CountAsync(x => x.LeaseUntil > now, ct) >= options.Value.ConcurrentRequestLimit)
                 throw new ApiException(429, "ai_busy");
             db.SleepAiAttempts.Add(new() { Id = id, UserId = userId, StartedAt = now, LeaseUntil = now.AddSeconds(75) });
             return true;
