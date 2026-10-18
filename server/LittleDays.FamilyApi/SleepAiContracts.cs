@@ -24,7 +24,7 @@ public sealed record SleepPredictionRequest
         get => previousEstimate;
         init { previousEstimate = value; PreviousEstimateSpecified = true; }
     }
-    // Schema 2 requires an explicit null on the first request, not an omitted field.
+    // Schemas 2 and 3 require explicit null on the first request, not an omitted field.
     [JsonIgnore]
     public bool PreviousEstimateSpecified { get; private init; }
 }
@@ -62,7 +62,8 @@ public sealed record SleepPredictionResponse(int SchemaVersion, string InputRevi
 
 /// <summary>Availability of the optional explicitly consented cloud AI service.</summary>
 public sealed record SleepPredictionCapabilities(bool Enabled, string ConsentVersion, string Provider, bool RequiresSignIn,
-    int WholeDaySchemaVersion = 2, string WholeDayConsentVersion = "sleep-ai-v2");
+    int WholeDaySchemaVersion = 2, string WholeDayConsentVersion = "sleep-ai-v2",
+    int RemainingDaySchemaVersion = 3, string RemainingDayConsentVersion = "sleep-ai-v2");
 
 /// <summary>Strict provider-only schema. Operational status unavailable is owned by the service, not the model.</summary>
 public sealed record SleepPredictionModelOutput
@@ -165,10 +166,10 @@ public static class SleepAiValidation
 
     public static SleepAiTimeBounds ValidateRequest(SleepPredictionRequest request, DateTimeOffset serverNow)
     {
-        if (request.SchemaVersion is not (1 or 2) ||
-            request.ConsentVersion != (request.SchemaVersion == 2 ? WholeDayConsentVersion : ConsentVersion) ||
+        if (request.SchemaVersion is not (1 or 2 or 3) ||
+            request.ConsentVersion != (request.SchemaVersion >= 2 ? WholeDayConsentVersion : ConsentVersion) ||
             request.SchemaVersion == 1 && request.PreviousEstimate is not null ||
-            request.SchemaVersion == 2 && !request.PreviousEstimateSpecified ||
+            request.SchemaVersion >= 2 && !request.PreviousEstimateSpecified ||
             request.InputRevision is null || !Regex.IsMatch(request.InputRevision, "^[a-fA-F0-9]{64}$", RegexOptions.CultureInvariant) ||
             request.AgeDays is < 0 or > 2191 || request.Records is null || request.Records.Length > MaxRecords ||
             request.TimeZone is null || request.TimeZone.Length > 100 ||
@@ -188,11 +189,15 @@ public static class SleepAiValidation
         // Schema 1 never resolves today's midnight; preserve its behavior in
         // zones that skip/duplicate that boundary. Only whole-day plans use it.
         var bounds = new SleepAiTimeBounds(LocalInstant(date.AddDays(-7), zone),
-            request.SchemaVersion == 2 ? LocalInstant(date, zone) : default,
-            LocalInstant(date.AddDays(1), zone), LocalInstant(date.AddDays(1).AddHours(12), zone));
+            request.SchemaVersion >= 2 ? LocalInstant(date, zone) : default,
+            LocalInstant(date.AddDays(1), zone), request.SchemaVersion == 3
+                ? LocalInstant(date.AddDays(1), zone) : LocalInstant(date.AddDays(1).AddHours(12), zone));
         if (request.SchemaVersion == 2 && request.PreviousEstimate is { } prior &&
             (prior.GeneratedAt < bounds.TodayStart || prior.GeneratedAt > request.Now ||
              !ValidWholeDayPeriods(prior.Periods, bounds))) Invalid();
+        if (request.SchemaVersion == 3 && request.PreviousEstimate is { } previous &&
+            (previous.GeneratedAt < bounds.TodayStart || previous.GeneratedAt > request.Now ||
+             !ValidRemainingDayPeriods(previous.Periods, bounds.TodayStart, bounds, previous.GeneratedAt, true, out _))) Invalid();
         foreach (var record in request.Records)
         {
             if (record is null || record.Kind is not ("sleep" or "feed") || record.Start > request.Now ||
@@ -245,11 +250,14 @@ public static class SleepAiValidation
         if (output is null) return Reject(out failure, "output_missing");
         if (output.Periods is null) return Reject(out failure, "periods_missing");
         if (output.Status is not ("ready" or "insufficient_data")) return Reject(out failure, "invalid_status");
-        if (output.Periods.Length > (request.SchemaVersion == 2 ? MaxWholeDayPeriods : MaxPeriods))
+        if (output.Periods.Length > (request.SchemaVersion >= 2 ? MaxWholeDayPeriods : MaxPeriods))
             return Reject(out failure, "too_many_periods");
         if (output.Status == "insufficient_data")
             return output.Periods.Length == 0 || Reject(out failure, "insufficient_data_with_periods");
         if (request.SchemaVersion == 2) return ValidWholeDayOutput(output.Periods, request, bounds, out failure);
+        if (request.SchemaVersion == 3)
+            return ValidRemainingDayPeriods(output.Periods, request.Now, bounds,
+                request.Records.Any(record => record.Kind == "sleep" && record.Ongoing) ? request.Now : null, false, out failure);
         if (output.Periods.Length == 0) return Reject(out failure, "empty_periods");
         if (request.Records.Any(x => x.Kind == "sleep" && x.Ongoing)) return Reject(out failure, "ongoing_sleep_unsupported");
         DateTimeOffset? previousEnd = null;
@@ -268,6 +276,49 @@ public static class SleepAiValidation
             if (request.Records.Where(x => x.Kind == "sleep").Any(x =>
                 period.SootheStart < (x.End ?? request.Now) && period.SleepEnd > x.Start))
                 return Reject(out failure, "recorded_sleep_overlap", index);
+            previousEnd = period.SleepEnd;
+        }
+        return true;
+    }
+
+    // Predictions are a separate layer over authoritative stored observations.
+    // This path deliberately never requires the model to reproduce a recorded
+    // interval, reconcile it into a new fact, or invent past settling advice.
+    private static bool ValidRemainingDayPeriods(SleepPredictionPeriod[]? periods, DateTimeOffset earliest,
+        SleepAiTimeBounds bounds, DateTimeOffset? ongoingAt, bool previousEstimate, out SleepAiOutputFailure? failure)
+    {
+        failure = null;
+        if (periods is null) return Reject(out failure, "periods_missing");
+        if (periods.Length > MaxWholeDayPeriods) return Reject(out failure, "too_many_periods");
+        DateTimeOffset? previousEnd = null;
+        for (var index = 0; index < periods.Length; index++)
+        {
+            var period = periods[index];
+            if (period is null) return Reject(out failure, "period_missing", index);
+            if (Minute(period.SleepStart) < Minute(earliest) || period.SleepStart >= bounds.TodayEnd ||
+                period.SleepEnd > bounds.SleepEndLimit || period.SleepEnd <= earliest)
+                return Reject(out failure, "sleep_bounds", index);
+            if (period.SleepStart >= period.SleepEnd) return Reject(out failure, "sleep_order", index);
+            if (period.SleepEnd - period.SleepStart > TimeSpan.FromHours(24)) return Reject(out failure, "sleep_duration", index);
+            if (period.SleepStart < previousEnd) return Reject(out failure, "period_overlap", index);
+            if ((period.SootheStart is null) != (period.SootheEnd is null))
+                return Reject(out failure, "settling_incomplete", index);
+            if (period.SootheStart is { } soothe)
+            {
+                if (Minute(soothe) < Minute(earliest)) return Reject(out failure, "settling_before_now", index);
+                if (soothe >= period.SootheEnd) return Reject(out failure, "settling_order", index);
+                if (period.SootheEnd > period.SleepStart) return Reject(out failure, "settling_after_sleep", index);
+                if (soothe < period.SleepStart.AddHours(-4)) return Reject(out failure, "settling_too_early", index);
+                if (soothe < previousEnd) return Reject(out failure, "settling_overlap", index);
+            }
+            else if (index != 0 || ongoingAt is null ||
+                // Prior estimates have a completion timestamp, not their request
+                // time. They are bounded untrusted context; only a current output
+                // must anchor its ongoing remainder to the exact current minute.
+                (previousEstimate
+                    ? period.SleepStart > ongoingAt
+                    : !SameMinute(period.SleepStart, ongoingAt.Value)))
+                return Reject(out failure, "predicted_sleep_missing_settling", index);
             previousEnd = period.SleepEnd;
         }
         return true;

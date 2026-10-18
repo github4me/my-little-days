@@ -1,0 +1,75 @@
+{
+  "type": "object",
+  "description": "Only predicted sleep and begin-settling windows for the remaining day through todayEnd (next local midnight). currentMinute is request now rounded down to the start of its minute; starts may use that boundary, but sleepEnd must be strictly after exact now. Recorded sleep is authoritative and rendered separately; never echo it. Temporal comparisons remain mandatory even when this JSON schema is satisfied.",
+  "additionalProperties": false,
+  "required": ["status", "periods"],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["ready", "insufficient_data"],
+      "description": "ready: supported remaining-day estimates, possibly empty if no further sleep is supported before midnight. insufficient_data: neither a usable timing anchor nor a repeatable sleep pattern exists; periods must be empty."
+    },
+    "periods": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 24,
+      "description": "Chronological, nonoverlapping predictions only. Every sleepStart is in the current minute or later and before todayEnd; every sleepEnd is strictly after now and at or before todayEnd. Each period lasts at most 24 hours. A following settling window cannot start before the previous sleep ends. Never fill the array merely to reach a sleep count or total.",
+      "items": {
+        "anyOf": [
+          { "$ref": "#/$defs/futureSleep" },
+          { "$ref": "#/$defs/currentSleepRemainder" }
+        ]
+      }
+    }
+  },
+  "$defs": {
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\\.[0-9]{1,7})?(Z|[+-](0[0-9]|1[0-3]):[0-5][0-9]|[+-]14:00)$",
+      "description": "Full ISO 8601 date and time with the correct offset for that instant in the supplied IANA timeZone, or the equivalent UTC instant with Z. Interpret local clock times and calendar boundaries in the supplied IANA timeZone, including daylight-saving changes. Minute precision is sufficient: prefer seconds :00 without rounding into the next minute. Optional fractional seconds have at most seven digits."
+    },
+    "futureSleep": {
+      "type": "object",
+      "description": "A future sleep with both begin-settling timestamps. Require currentMinute <= sootheStart < sootheEnd <= sleepStart < sleepEnd <= todayEnd, where currentMinute is request now rounded down to the start of its minute. sleepEnd must still be strictly after exact now. sootheStart must be no more than four hours before sleepStart; that is a format limit, not a suggested settling duration.",
+      "additionalProperties": false,
+      "required": ["sleepStart", "sleepEnd", "sootheStart", "sootheEnd"],
+      "properties": {
+        "sleepStart": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Predicted sleep start, not an already-recorded start. Must be at or after sootheEnd and strictly before todayEnd."
+        },
+        "sleepEnd": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Predicted end, strictly after sleepStart and request now. At most todayEnd; truncate the prediction horizon there, not an instruction to wake the child."
+        },
+        "sootheStart": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Earliest suggested time to BEGIN settling. Not before the current minute or previous predicted sleep end."
+        },
+        "sootheEnd": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Latest suggested time to BEGIN settling, strictly after sootheStart and no later than sleepStart. This window is not the duration of settling."
+        }
+      }
+    },
+    "currentSleepRemainder": {
+      "type": "object",
+      "description": "Optional first period only, and only if an ongoing sleep record supports current sleep. Predict its remainder, never its recorded portion. sleepStart must be in the same minute as request now. Both settling fields must be null. All other periods use futureSleep.",
+      "additionalProperties": false,
+      "required": ["sleepStart", "sleepEnd", "sootheStart", "sootheEnd"],
+      "properties": {
+        "sleepStart": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Request now to the same minute, never the original recorded sleep start."
+        },
+        "sleepEnd": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Predicted remaining sleep end, strictly after request now and sleepStart, and at or before todayEnd."
+        },
+        "sootheStart": { "type": "null" },
+        "sootheEnd": { "type": "null" }
+      }
+    }
+  }
+}

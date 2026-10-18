@@ -19,4 +19,8 @@
     <!-- Historical EF sources remain for adoption tests, not API execution. -->
     <Compile Remove="Migrations/**/*.cs" />
   </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Schemas/sleep-prediction-remaining-day-v3.schema.json"
+                      LogicalName="LittleDays.FamilyApi.SleepPredictionRemainingDayV3Schema" />
+  </ItemGroup>
 </Project>

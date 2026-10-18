@@ -186,7 +186,10 @@ public sealed class SleepAiJobTests
         Assert.Equal(new(false, "sleep-ai-jobs-v1"), capabilities);
         Assert.Equal(SleepAiFailureCapture.ConsentVersion, capabilities!.DiagnosticsConsentVersion);
         Assert.Equal(7, capabilities.DiagnosticsRetentionDays);
+        Assert.Equal(3, capabilities.RemainingDaySchemaVersion);
+        Assert.Equal("sleep-ai-v2", capabilities.RemainingDayConsentVersion);
         var old = await client.GetFromJsonAsync<SleepPredictionCapabilities>("/v2/sleep-predictions/capabilities");
         Assert.Equal("sleep-ai-v1", old!.ConsentVersion); Assert.Equal("sleep-ai-v2", old.WholeDayConsentVersion);
+        Assert.Equal(3, old.RemainingDaySchemaVersion); Assert.Equal("sleep-ai-v2", old.RemainingDayConsentVersion);
     }
 }

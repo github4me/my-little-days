@@ -23,6 +23,8 @@ public sealed record SleepPredictionJobResponse(Guid JobId, string InputRevision
 /// <summary>Availability and initial AI consent version for short-lived SQL storage.</summary>
 public sealed record SleepPredictionJobCapabilities(bool Enabled, string ConsentVersion)
 {
+    public int RemainingDaySchemaVersion { get; init; } = 3;
+    public string RemainingDayConsentVersion { get; init; } = SleepAiValidation.WholeDayConsentVersion;
     // Kept for old clients; no separate diagnostic opt-in is required.
     public string DiagnosticsConsentVersion { get; init; } = SleepAiFailureCapture.ConsentVersion;
     public int DiagnosticsRetentionDays { get; init; } = 7;
@@ -35,7 +37,7 @@ public static class SleepAiJobPolicy
     public static SleepAiTimeBounds Validate(CreateSleepPredictionJobRequest value, DateTimeOffset now)
     {
         if (value.OperationId == Guid.Empty || value.ConsentGeneration == Guid.Empty ||
-            value.ConsentVersion != ConsentVersion || value.Request is null || value.Request.SchemaVersion != 2 ||
+            value.ConsentVersion != ConsentVersion || value.Request is null || value.Request.SchemaVersion is not (2 or 3) ||
             value.DiagnosticsConsentVersion is not null && value.DiagnosticsConsentVersion != SleepAiFailureCapture.ConsentVersion)
             throw new ApiException(422, "invalid_input");
         return SleepAiValidation.ValidateRequest(value.Request, now);

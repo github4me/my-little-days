@@ -50,7 +50,7 @@ public static class SleepAiEndpoints
         }).RequireRateLimiting("sensitive")
             .WithName("CreateSleepPrediction")
             .WithSummary("Validate and return optional AI-only sleep periods; never stores input records.")
-            .WithDescription("Schema 1 retains future-only periods and consent v1. Schema 2 requires consent v2 and explicit previousEstimate, preserves observed whole-day sleep, and expires at the next local midnight.")
+            .WithDescription("Schema 1 retains future-only periods and consent v1. Schema 2 preserves observed whole-day sleep. Schema 3 returns only the remaining predictions from now to next local midnight using the previous seven complete local days excluding today as the baseline, with today's records as adjustment context. Schemas 2 and 3 require consent v2 and explicit previousEstimate, and expire at the next local midnight.")
             .Produces<SleepPredictionResponse>()
             .Produces(401).Produces(403).Produces(409).Produces(410).Produces(422).Produces(429).Produces(503).Produces(504);
         return api;
