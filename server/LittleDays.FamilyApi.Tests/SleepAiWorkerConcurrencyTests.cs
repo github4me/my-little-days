@@ -112,10 +112,15 @@ public sealed class SleepAiWorkerConcurrencyTests
         var run = worker.Run(stopping.Token); var firstWait = await clock.NextWait();
         Assert.Equal(limit, started); Assert.Equal(limit, active); Assert.Equal(limit, maximum); Assert.Equal(1, cleanups);
         releases[0].SetResult();
-        await clock.NextWait();
+        var secondWait = await clock.NextWait();
+        // WaitAsync may resume the dispatcher before its completion callback has
+        // disposed the previous timeout timer. Observe cleanup itself, not the
+        // unrelated creation of the replacement timer on another continuation.
+        await firstWait.WhenDisposed.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.True(firstWait.Disposed); Assert.Equal(limit + 1, started); Assert.Equal(limit, active);
         Assert.Equal(limit, maximum); Assert.Equal(1, stopped); Assert.Equal(1, cleanups);
         stopping.Cancel(); await run.WaitAsync(TimeSpan.FromSeconds(5));
+        await secondWait.WhenDisposed.WaitAsync(TimeSpan.FromSeconds(5)); Assert.True(secondWait.Disposed);
         Assert.Equal(0, active); Assert.Equal(limit + 1, stopped);
     }
 
@@ -199,11 +204,13 @@ public sealed class SleepAiWorkerConcurrencyTests
 
     private sealed class ControlledTimer(TimerCallback callback, object? state, TimeSpan dueTime) : ITimer
     {
+        private readonly TaskCompletionSource disposed = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TimeSpan DueTime { get; private set; } = dueTime;
-        public bool Disposed { get; private set; }
+        public bool Disposed => disposed.Task.IsCompletedSuccessfully;
+        public Task WhenDisposed => disposed.Task;
         public bool Change(TimeSpan dueTime, TimeSpan period) { DueTime = dueTime; return !Disposed; }
         public void Fire() => callback(state);
-        public void Dispose() => Disposed = true;
+        public void Dispose() => disposed.TrySetResult();
         public ValueTask DisposeAsync() { Dispose(); return ValueTask.CompletedTask; }
     }
 

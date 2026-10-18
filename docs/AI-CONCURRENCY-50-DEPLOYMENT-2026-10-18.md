@@ -70,3 +70,12 @@ before any production release: SQL Server compiled the new-column check before
 recognizing the preceding ALTER ADD. Corrected the still-unreleased script 0011
 with the repository's normal `GO` batch boundary. Scripts 0001–0010 remain
 unchanged. A fresh green real-SQL run is required; no failure gate is bypassed.
+
+Corrected migration commit `cfba2b87129f0875fd53a1395aa9be190afee1b9` passed all
+real-SQL migration cases (122 passed, zero skipped), and the API suite reached
+656 passed / two failed / zero skipped in CI 39101423238. Both failures were a
+test-only race: the next dispatcher wait could be observed before .NET completed
+the previous timeout timer's disposal. The controlled test timer now exposes an
+explicit disposal completion signal. Tests await it while retaining every
+50-slot/reuse/shutdown assertion; replacement-timer shutdown disposal is also
+asserted. Production worker behavior is unchanged by this test correction.
