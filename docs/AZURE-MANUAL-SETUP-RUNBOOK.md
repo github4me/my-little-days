@@ -4602,3 +4602,43 @@ application logs, screenshots or release receipts.
 Deployment, effective-configuration and SQL-backed capture verification remain
 pending. Generic health is not live inference/capture acceptance. See
 [the capture contract](AI-REQUEST-CAPTURE-2026-10-19.md).
+
+## Full AI capture activation completed — 19 October 2026
+
+This supersedes the earlier local-only/pending activation checkpoint. The owner
+explicitly authorized all-user capture without public policy/consent changes.
+Runtime `d19200022d32bf760f8986318799abf65f51e51a` deployed successfully in
+[run39133786764](https://github.com/github4me/my-little-days/actions/runs/39133786764).
+See [the deployment receipt](AI-CAPTURE-DEPLOYMENT-2026-10-19.md) for frozen
+source/artifact hashes and exact tests, configuration and acceptance evidence.
+
+Existing reticle.com.au tenant/subscription, my-little-days-pilot-rg and
+little-days-api-522fpstfbtds2 / little-days-sql-522fpstfbtds2 /
+little-days-family were verified unchanged. In GitHub → Deploy family API and
+database, use trusted feature/family-invitations with
+database_bootstrapped=true and adopt_ef=false. Release verification passed806
+API +157 migrator tests with zero skips. Only additive0014 was applied, catalog
+verified and pending scripts0; the temporary runner rule was removed14:01:50 UTC.
+Preserve the separately approved retained operator-IP rule.
+
+Azure → API → Environment variables → App settings had no
+SleepAi__FullRequestCaptureEnabled override. Reviewed package appsettings sets
+SleepAi:FullRequestCaptureEnabled=true. Existing model/Fast/quotas/AI approvals
+were preserved. No manual Azure setting/resource/cost or identity change was
+needed. Both deployment environments restricted the trusted branch, with no
+reviewer/wait gate and admin bypass on; these controls were read, not changed.
+
+API package deployed14:02:51 UTC; independent live/ready200 and unauthenticated
+jobs capabilities401/no-store at14:03:10–11. Live SQL confirmed the table/job
+column and five trusted CHECKs. First capture query returned0 rows; signed-in
+request/response acceptance and underlying provider-error diagnosis remain
+outstanding. Generic health is not that evidence. Read only current-history,
+unexpired rows; never export private bodies or credentials into release records.
+
+Seven-day capture applies to new resumable jobs for AI-enabled users, excludes
+credentials, has explicit1MiB/body truncation markers and best-effort gap
+metadata. Existing cleanup/authority/epoch boundaries remain. Restore/rollback
+maintenance must purge SleepAiExchanges with SleepAiFailedOutputs before
+reopening traffic. Public request-clearing wording remains inconsistent; no
+privacy text changed. Backend-only: no TestFlight/App Review submission or
+physical-device acceptance occurred in this deployment.

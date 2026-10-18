@@ -120,3 +120,15 @@ Skipped methods require disposable SQL; they are not successful SQL evidence.
 `git diff --check` and explicit new-file whitespace checks passed. Tests use
 only synthetic inputs; no real AI request, release, credentials change or
 private-payload export occurred.
+
+## Subsequent activation receipt
+
+The owner subsequently authorized all-user activation. Backend runtime
+`d19200022d32bf760f8986318799abf65f51e51a` was deployed successfully in
+run39133786764, with806 API +157 migrator tests passing against disposable SQL
+(zero failures/skips), additive0014 applied and zero pending scripts verified.
+This supersedes the local-only SQL-pending statements above. Capture is enabled
+for new resumable AI jobs; first signed-in live capture remains unverified.
+No mobile build or public disclosure update was made. See the exact evidence,
+limitations and outstanding checks in
+[the deployment receipt](AI-CAPTURE-DEPLOYMENT-2026-10-19.md).
