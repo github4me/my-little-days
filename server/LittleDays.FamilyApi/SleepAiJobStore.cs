@@ -201,6 +201,7 @@ public sealed class SleepAiJobStore(PilotDatabase db, FamilyService family, Reco
                             UserId = row.UserId, JobId = row.Id, Run = row.Runs, Attempt = failed.Attempt,
                             ConsentGeneration = row.ConsentGeneration, FamilyId = row.FamilyId, MembershipId = row.MembershipId,
                             HistoryEpoch = family.SleepAiHistoryEpoch, Reason = failed.Reason, PeriodIndex = failed.PeriodIndex,
+                            FailureFieldsJson = Serialize(failed.Fields),
                             ResponseText = failed.ResponseText, OriginalLength = failed.OriginalLength, Truncated = failed.Truncated,
                             OccurredAt = failed.OccurredAt, ExpiresAt = failed.ExpiresAt,
                             DurationMs = failed.DurationMs, Model = failed.Model

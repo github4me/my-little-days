@@ -43,6 +43,7 @@ public sealed partial class PilotDatabase
             e.Property(x => x.Reason).HasMaxLength(64).IsUnicode(false);
             e.Property(x => x.Model).HasMaxLength(100).IsUnicode(false);
             e.Property(x => x.ResponseText).HasColumnType("nvarchar(max)");
+            e.Property(x => x.FailureFieldsJson).HasMaxLength(1024);
             e.HasIndex(x => x.ExpiresAt);
             e.HasIndex(x => new { x.UserId, x.ConsentGeneration });
             e.HasIndex(x => x.FamilyId);
@@ -91,6 +92,7 @@ public sealed class SleepAiFailedOutputRow
     public Guid HistoryEpoch { get; set; }
     public string Reason { get; set; } = "";
     public int? PeriodIndex { get; set; }
+    public string? FailureFieldsJson { get; set; }
     public string? ResponseText { get; set; }
     public int OriginalLength { get; set; }
     public bool Truncated { get; set; }

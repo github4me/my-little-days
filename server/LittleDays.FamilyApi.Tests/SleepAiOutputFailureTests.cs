@@ -24,12 +24,62 @@ public sealed class SleepAiOutputFailureTests
     private static string Output(params SleepPredictionPeriod[] periods) => JsonSerializer.Serialize(
         new SleepPredictionModelOutput { Status = "ready", Periods = periods }, SleepAiJson.Options);
 
+    [Theory]
+    [InlineData("invalid_output", "$")]
+    [InlineData("response_missing", "$")]
+    [InlineData("response_too_large", "$")]
+    [InlineData("invalid_json", "$")]
+    [InlineData("invalid_schema", "$")]
+    [InlineData("output_missing", "$")]
+    [InlineData("periods_missing", "$.periods")]
+    [InlineData("invalid_status", "$.status")]
+    [InlineData("too_many_periods", "$.periods")]
+    [InlineData("insufficient_data_with_periods", "$.status|$.periods")]
+    [InlineData("empty_periods", "$.periods")]
+    [InlineData("ongoing_sleep_unsupported", "$.periods")]
+    [InlineData("period_missing", "$.periods[3]")]
+    [InlineData("sleep_order", "$.periods[3].sleepStart|$.periods[3].sleepEnd")]
+    [InlineData("sleep_bounds", "$.periods[3].sleepStart|$.periods[3].sleepEnd")]
+    [InlineData("sleep_duration", "$.periods[3].sleepStart|$.periods[3].sleepEnd")]
+    [InlineData("period_overlap", "$.periods[3].sleepStart|$.periods[3].sleepEnd")]
+    [InlineData("settling_missing", "$.periods[3].sootheStart|$.periods[3].sootheEnd")]
+    [InlineData("settling_incomplete", "$.periods[3].sootheStart|$.periods[3].sootheEnd")]
+    [InlineData("settling_before_now", "$.periods[3].sootheStart")]
+    [InlineData("settling_order", "$.periods[3].sootheStart|$.periods[3].sootheEnd")]
+    [InlineData("settling_after_sleep", "$.periods[3].sootheEnd|$.periods[3].sleepStart")]
+    [InlineData("settling_too_early", "$.periods[3].sootheStart|$.periods[3].sleepStart")]
+    [InlineData("settling_overlap", "$.periods[3].sootheStart")]
+    [InlineData("recorded_sleep_overlap", "$.periods[3].sootheStart|$.periods[3].sleepStart|$.periods[3].sleepEnd")]
+    [InlineData("recorded_sleep_has_settling", "$.periods[3].sootheStart|$.periods[3].sootheEnd")]
+    [InlineData("predicted_sleep_missing_settling", "$.periods[3].sootheStart|$.periods[3].sootheEnd")]
+    [InlineData("recorded_sleep_missing", "$.periods")]
+    [InlineData("recorded_sleep_ambiguous", "$.periods[3].sleepStart|$.periods[3].sleepEnd")]
+    public void EveryValidationReasonHasItsExpectedCanonicalFields(string reason, string fields)
+    {
+        Assert.True(SleepAiOutputFailure.IsKnownReason(reason));
+        Assert.Equal(fields.Split('|'), new SleepAiOutputFailure(reason, 3).Fields);
+    }
+
+    [Theory]
+    [InlineData("ai_timeout")]
+    [InlineData("ai_provider_busy")]
+    [InlineData("ai_provider_unavailable")]
+    [InlineData("incomplete_response")]
+    [InlineData("non_text_response")]
+    [InlineData("continuation_response")]
+    public void ProviderFailuresIdentifyProviderRatherThanOutputFields(string reason)
+    {
+        Assert.Equal(new[] { "$provider" }, SleepAiOutputFailure.FieldsFor(reason, null));
+    }
+
     private static void Rejects(string? json, SleepPredictionRequest request, string reason, int? index = null)
     {
         var bounds = SleepAiValidation.ValidateRequest(request, request.Now);
         var originalRequest = JsonSerializer.Serialize(request, SleepAiJson.Options);
         Assert.False(SleepAiValidation.TryReadOutput(json, request, bounds, out var output, out var failure));
-        Assert.Equal(new SleepAiOutputFailure(reason, index), failure);
+        Assert.Equal(reason, failure!.Reason);
+        Assert.Equal(index, failure.PeriodIndex);
+        Assert.NotEmpty(failure.Fields);
         Assert.True(SleepAiOutputFailure.IsKnownReason(failure!.Reason));
         Assert.InRange(failure.Reason.Length, 1, 64);
         Assert.False(SleepAiValidation.TryReadOutput(json, request, bounds, out var legacyOutput));
@@ -65,7 +115,7 @@ public sealed class SleepAiOutputFailureTests
     [MemberData(nameof(EnvelopeFailures))]
     public void EnvelopeFailuresReturnOnlyFixedReasonsWithoutInputOrJsonPaths(int schema, string? json, string reason)
     {
-        Rejects(json, Request(schema), reason);
+        Rejects(json, Request(schema), reason, reason == "period_missing" ? 0 : null);
     }
 
     [Theory]

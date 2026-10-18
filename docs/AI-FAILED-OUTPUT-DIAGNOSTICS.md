@@ -1,5 +1,49 @@
 # Failed AI output diagnostics — seven-day retention
 
+## Minute matching and canonical failure fields — local update, 18 October 2026
+
+**Implemented locally; not deployed.** The new behavior must not be inferred
+from the deployment evidence for the earlier automatic-capture policy below.
+
+Whole-day recorded sleep anchors now match by UTC minute in both the API and
+app validator. Seconds/fractions in the same minute are accepted; crossing a
+minute boundary is not. No original record or AI response timestamp is rounded
+or rewritten. Adjacent recorded-boundary checks use the same precision, while
+AI output ordering, duration, bounds, settling rules and an ongoing sleep's
+estimated wake strictly after `now` remain enforced. Distinct records cannot
+collapse into one minute-matched output, and one isolated record cannot be reused
+for two outputs. The provider prompt describes this same-minute rule and still
+prefers copying supplied timestamps unchanged.
+
+Every classified output-validation failure now supplies canonical affected
+fields in addition to the existing fixed reason and optional zero-based output
+period index. Examples (synthetic metadata only):
+
+| Failure reason | Fields |
+| --- | --- |
+| `predicted_sleep_missing_settling` at period 0 | `$.periods[0].sootheStart`, `$.periods[0].sootheEnd` |
+| Invalid timestamp in period 2 | `$.periods[2].sleepStart` (reason `invalid_schema`) |
+| `recorded_sleep_missing` | `$.periods` |
+| `ai_timeout` / provider transport failure | `$provider` |
+| Unparseable JSON | `$` (reason `invalid_json`) |
+
+Fields are copied, deduplicated and limited to four allowlisted paths. Unknown
+JSON member names, exception messages, request values and input-record indexes
+are not copied into metadata. Additive script `0013_SleepAiFailureFields.sql`
+adds nullable `FailureFieldsJson nvarchar(1024)` to `SleepAiFailedOutputs`;
+previous API inserts and historical null metadata remain valid, without
+backfill. Prior migrations, seven-day expiry, cancellation/revocation and
+access checks are unchanged.
+
+Scope remains failed provider attempts/output validation, not a guarantee to
+capture every application exception. Admission, authorization, worker/SQL and
+unexpected validator exceptions retain their existing safe job/timing error
+handling; they are not mislabelled as invalid model-output payloads. Capture
+is still best-effort and cannot preserve cancelled/revoked work.
+
+Local evidence and remaining rollout checks are in
+[the verification receipt](AI-MINUTE-VALIDATION-2026-10-18.md).
+
 18 October 2026. The owner subsequently requested automatic capture without a
 separate diagnostic opt-in. The [automatic rollout](AI-AUTOMATIC-FAILURE-CAPTURE-2026-10-18.md)
 records implementation/deployment status. Automatic capture is deployed and

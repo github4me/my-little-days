@@ -15,7 +15,7 @@ public sealed class SleepAiAutomaticFailureMigrationTests
     [Fact]
     public void AutomaticCaptureMigrationIsAdditiveVersionTwelveWithoutBackfillOrRetentionChanges()
     {
-        var scripts = MigrationRunner.Scripts();
+        var scripts = MigrationRunner.Scripts().Take(12).ToArray();
         Assert.Equal("0012_SleepAiAutomaticFailedOutputCapture.sql", scripts.Last().Name);
         Assert.Equal(12, SchemaVerifier.Version(scripts.Select(x => x.Name)));
         var script = scripts.Last().Contents;
@@ -41,7 +41,8 @@ public sealed class SleepAiAutomaticFailureMigrationTests
             """);
         var jobs = await db.Count("SELECT CHECKSUM_AGG(BINARY_CHECKSUM(*)) FROM dbo.SleepAiJobs");
         var outputs = await db.Count("SELECT CHECKSUM_AGG(BINARY_CHECKSUM(*)) FROM dbo.SleepAiFailedOutputs");
-        Assert.Single(db.Runner().Pending()); db.Runner().Apply();
+        var runner = db.Runner(scripts: MigrationRunner.Scripts().Take(12).ToArray());
+        Assert.Single(runner.Pending()); runner.Apply();
         Assert.Equal(jobs, await db.Count("SELECT CHECKSUM_AGG(BINARY_CHECKSUM(*)) FROM dbo.SleepAiJobs"));
         Assert.Equal(outputs, await db.Count("SELECT CHECKSUM_AGG(BINARY_CHECKSUM(*)) FROM dbo.SleepAiFailedOutputs"));
         Assert.Equal(1, await db.Count("SELECT COUNT(*) FROM dbo.SleepAiJobs WHERE DiagnosticsConsentVersion IS NULL AND DiagnosticsHistoryEpoch IS NULL"));
@@ -52,7 +53,7 @@ public sealed class SleepAiAutomaticFailureMigrationTests
         // New API may stamp an epoch without inventing client consent.
         await db.Execute("UPDATE dbo.SleepAiJobs SET DiagnosticsHistoryEpoch=NEWID() WHERE DiagnosticsConsentVersion IS NULL");
         Assert.Equal(1, await db.Count("SELECT COUNT(*) FROM dbo.SleepAiJobs WHERE DiagnosticsConsentVersion IS NULL AND DiagnosticsHistoryEpoch IS NOT NULL"));
-        Assert.Empty(db.Runner().Pending()); db.Runner().Apply(); Assert.Empty(db.Runner().Pending());
+        Assert.Empty(runner.Pending()); runner.Apply(); Assert.Empty(runner.Pending());
         Assert.Equal(12, await db.Count("SELECT COUNT(*) FROM dbo.DatabaseMigrations"));
     }
 
@@ -62,7 +63,7 @@ public sealed class SleepAiAutomaticFailureMigrationTests
     [InlineData("UPDATE dbo.SleepAiJobs SET DiagnosticsConsentVersion='sleep-ai-failed-output-v1'")]
     public async Task AutomaticPolicyStillRejectsInvalidLegacyConsentForms(string mutation)
     {
-        await using var db = await TestDatabase.Create(); db.Runner().Apply(); await db.Execute(JobInsert);
+        await using var db = await TestDatabase.Create(); db.Runner(scripts: MigrationRunner.Scripts().Take(12).ToArray()).Apply(); await db.Execute(JobInsert);
         await Assert.ThrowsAsync<SqlException>(() => db.Execute(mutation));
         Assert.Equal(1, await db.Count("SELECT COUNT(*) FROM dbo.SleepAiJobs WHERE DiagnosticsConsentVersion IS NULL AND DiagnosticsHistoryEpoch IS NULL"));
     }
@@ -73,8 +74,9 @@ public sealed class SleepAiAutomaticFailureMigrationTests
     [InlineData("ALTER TABLE dbo.SleepAiJobs DROP CONSTRAINT CK_SleepAiJobs_DiagnosticsConsent; ALTER TABLE dbo.SleepAiJobs WITH CHECK ADD CONSTRAINT CK_SleepAiJobs_DiagnosticsConsent CHECK (DiagnosticsConsentVersion IS NULL OR DiagnosticsConsentVersion IS NOT NULL)")]
     public async Task AutomaticPolicyCatalogRejectsMissingUntrustedOrBroadenedCheck(string mutation)
     {
-        await using var db = await TestDatabase.Create(); db.Runner().Apply(); await db.Execute(mutation);
-        Assert.Contains("Schema verification failed", Assert.ThrowsAny<Exception>(() => db.Runner().Pending()).ToString());
+        await using var db = await TestDatabase.Create();
+        var runner = db.Runner(scripts: MigrationRunner.Scripts().Take(12).ToArray()); runner.Apply(); await db.Execute(mutation);
+        Assert.Contains("Schema verification failed", Assert.ThrowsAny<Exception>(() => runner.Pending()).ToString());
         Assert.Equal(12, await db.Count("SELECT COUNT(*) FROM dbo.DatabaseMigrations"));
     }
 }

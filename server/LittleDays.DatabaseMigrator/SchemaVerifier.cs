@@ -17,7 +17,8 @@ internal static class SchemaVerifier
         "0005_QueryIndexesAndOperationCounts.sql", "0006_FamilyPushAndTimerIndex.sql",
         "0007_TimerEndAttribution.sql", "0008_WidenPushLocale.sql",
         "0009_ConflictReplacementAudit.sql", "0010_DurableSleepAiJobs.sql",
-        "0011_SleepAiFailedOutputDiagnostics.sql", "0012_SleepAiAutomaticFailedOutputCapture.sql"
+        "0011_SleepAiFailedOutputDiagnostics.sql", "0012_SleepAiAutomaticFailedOutputCapture.sql",
+        "0013_SleepAiFailureFields.sql"
     ];
 
     internal static int Version(IEnumerable<string> applied) => applied
@@ -125,6 +126,8 @@ internal static class SchemaVerifier
             foreach (var name in new[] { "OccurredAt", "ExpiresAt" })
                 expected[("SleepAiFailedOutputs", name)] = new(43, 10, 34, 7);
         }
+        if (version >= 13)
+            expected[("SleepAiFailedOutputs", "FailureFieldsJson")] = new(231, 2048, Nullable: true);
         using var command = factory();
         command.CommandText = """
             SELECT t.name, c.name, c.system_type_id, c.max_length, c.precision, c.scale, c.is_nullable, c.is_computed

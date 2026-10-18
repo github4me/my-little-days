@@ -107,6 +107,43 @@ public sealed record SleepAiTimeBounds(DateTimeOffset HistoryStart, DateTimeOffs
 /// <summary>Fixed validation category and optional output-period position, never input values or JSON exception details.</summary>
 public sealed record SleepAiOutputFailure(string Reason, int? PeriodIndex = null)
 {
+    // Canonical output locations only: never retain arbitrary JSON member names,
+    // input record positions/values, or exception messages in diagnostic metadata.
+    public string? SchemaField { get; init; }
+    public IReadOnlyList<string> Fields => SchemaField is { } schemaPath ? [schemaPath] : FieldsFor(Reason, PeriodIndex);
+
+    public static IReadOnlyList<string> FieldsFor(string reason, int? periodIndex)
+    {
+        var period = periodIndex is >= 0 and < SleepAiValidation.MaxWholeDayPeriods
+            ? $"$.periods[{periodIndex}]" : "$.periods";
+        if (periodIndex is not (>= 0 and < SleepAiValidation.MaxWholeDayPeriods) && reason is
+            ("period_missing" or "sleep_order" or "sleep_bounds" or "sleep_duration" or "period_overlap" or
+            "recorded_sleep_ambiguous" or "settling_missing" or "settling_incomplete" or "settling_order" or
+            "recorded_sleep_has_settling" or "predicted_sleep_missing_settling" or "settling_before_now" or
+            "settling_overlap" or "settling_after_sleep" or "settling_too_early" or "recorded_sleep_overlap"))
+            return ["$.periods"];
+        return reason switch
+        {
+            "ai_timeout" or "ai_provider_busy" or "ai_provider_unavailable" or
+                "incomplete_response" or "non_text_response" or "continuation_response" => ["$provider"],
+            "invalid_status" => ["$.status"],
+            "insufficient_data_with_periods" => ["$.status", "$.periods"],
+            "periods_missing" or "too_many_periods" or "empty_periods" or
+                "recorded_sleep_missing" or "ongoing_sleep_unsupported" => ["$.periods"],
+            "period_missing" => [period],
+            "sleep_order" or "sleep_bounds" or "sleep_duration" or "period_overlap" or
+                "recorded_sleep_ambiguous" => [$"{period}.sleepStart", $"{period}.sleepEnd"],
+            "settling_missing" or "settling_incomplete" or "settling_order" or
+                "recorded_sleep_has_settling" or "predicted_sleep_missing_settling" =>
+                [$"{period}.sootheStart", $"{period}.sootheEnd"],
+            "settling_before_now" or "settling_overlap" => [$"{period}.sootheStart"],
+            "settling_after_sleep" => [$"{period}.sootheEnd", $"{period}.sleepStart"],
+            "settling_too_early" => [$"{period}.sootheStart", $"{period}.sleepStart"],
+            "recorded_sleep_overlap" => [$"{period}.sootheStart", $"{period}.sleepStart", $"{period}.sleepEnd"],
+            _ => ["$"]
+        };
+    }
+
     public static bool IsKnownReason(string reason) => reason is
         "invalid_output" or "response_missing" or "response_too_large" or "invalid_json" or "invalid_schema" or
         "output_missing" or "periods_missing" or "invalid_status" or "too_many_periods" or
@@ -115,7 +152,7 @@ public sealed record SleepAiOutputFailure(string Reason, int? PeriodIndex = null
         "settling_missing" or "settling_incomplete" or "settling_before_now" or "settling_order" or
         "settling_after_sleep" or "settling_too_early" or "settling_overlap" or
         "recorded_sleep_overlap" or "recorded_sleep_has_settling" or "predicted_sleep_missing_settling" or
-        "recorded_sleep_missing";
+        "recorded_sleep_missing" or "recorded_sleep_ambiguous";
 }
 
 public static class SleepAiValidation
@@ -193,13 +230,17 @@ public static class SleepAiValidation
         if (json is null) return Reject(out failure, "response_missing");
         if (json.Length > 16 * 1024) return Reject(out failure, "response_too_large");
         try { output = JsonSerializer.Deserialize<SleepPredictionModelOutput>(json, SleepAiJson.Options); }
-        catch (JsonException)
+        catch (JsonException error)
         {
             // Inspect syntax only after the original strict deserializer rejects it.
             // Never retain exception messages, paths or input-derived values.
-            try { using var document = JsonDocument.Parse(json, new JsonDocumentOptions { MaxDepth = SleepAiJson.Options.MaxDepth }); }
+            try
+            {
+                using var document = JsonDocument.Parse(json, new JsonDocumentOptions { MaxDepth = SleepAiJson.Options.MaxDepth });
+                failure = new("invalid_schema") { SchemaField = SchemaFailureField(document.RootElement, error.Path) };
+                return false;
+            }
             catch (JsonException) { return Reject(out failure, "invalid_json"); }
-            return Reject(out failure, "invalid_schema");
         }
         if (output is null) return Reject(out failure, "output_missing");
         if (output.Periods is null) return Reject(out failure, "periods_missing");
@@ -215,7 +256,7 @@ public static class SleepAiValidation
         for (var index = 0; index < output.Periods.Length; index++)
         {
             var period = output.Periods[index];
-            if (period is null) return Reject(out failure, "period_missing");
+            if (period is null) return Reject(out failure, "period_missing", index);
             if (period.SootheStart is null || period.SootheEnd is null) return Reject(out failure, "settling_missing", index);
             if (period.SootheStart < request.Now) return Reject(out failure, "settling_before_now", index);
             if (period.SootheEnd <= period.SootheStart) return Reject(out failure, "settling_order", index);
@@ -246,7 +287,7 @@ public static class SleepAiValidation
         for (var index = 0; index < periods.Length; index++)
         {
             var period = periods[index];
-            if (period is null) return Reject(out failure, "period_missing");
+            if (period is null) return Reject(out failure, "period_missing", index);
             if (period.SleepStart < bounds.TodayStart.AddHours(-24) || period.SleepStart >= bounds.TodayEnd ||
                 period.SleepEnd <= bounds.TodayStart) return Reject(out failure, "sleep_bounds", index);
             if (period.SleepStart >= period.SleepEnd) return Reject(out failure, "sleep_order", index);
@@ -277,11 +318,19 @@ public static class SleepAiValidation
             record.Start < (other.End ?? request.Now) && other.Start < (record.End ?? request.Now))).ToArray();
         var isolated = sleep.Where((_, index) => !uncertain[index]).ToArray();
         var conflicting = sleep.Where((_, index) => uncertain[index]).ToArray();
+        var matched = new HashSet<SleepPredictionRecord>();
         for (var index = 0; index < periods.Length; index++)
         {
             var period = periods[index];
-            var anchor = isolated.FirstOrDefault(record => record.Start == period.SleepStart &&
-                (record.Ongoing ? period.SleepEnd > request.Now : record.End == period.SleepEnd));
+            var matches = isolated.Where(record => SameMinute(record.Start, period.SleepStart) &&
+                (record.Ongoing ? period.SleepEnd > request.Now : record.End is { } end && SameMinute(end, period.SleepEnd))).ToArray();
+            // Two distinct observations in one minute bucket must not be silently
+            // collapsed into one record. Identical occurrences remain compatible.
+            if (matches.Select(record => (record.Start, record.End, record.Ongoing)).Distinct().Skip(1).Any())
+                return Reject(out failure, "recorded_sleep_ambiguous", index);
+            var anchor = matches.FirstOrDefault();
+            if (anchor is not null && !matched.Add(anchor))
+                return Reject(out failure, "recorded_sleep_ambiguous", index);
             // A model's reconciliation is an estimate, not a new recorded fact.
             // It may omit unusable conflict evidence; only already-started,
             // intersecting evidence permits no retrospective settling advice.
@@ -294,15 +343,59 @@ public static class SleepAiValidation
             else if (period.SootheStart is null) return Reject(out failure, "predicted_sleep_missing_settling", index);
             var start = period.SootheStart ?? period.SleepStart;
             if (isolated.Any(record => !ReferenceEquals(record, anchor) &&
-                start < (record.End ?? request.Now) && period.SleepEnd > record.Start))
+                Minute(start) < Minute(record.End ?? request.Now) && Minute(period.SleepEnd) > Minute(record.Start)))
                 return Reject(out failure, "recorded_sleep_overlap", index);
         }
-        // Unambiguous observed sleep stays exact. Conflicting inputs are left
+        // Unambiguous observed sleep matches to the minute; neither the original
+        // timestamps nor the AI output are rewritten. Conflicting inputs are left
         // for the model to judge, never required as contradictory exact anchors.
         return isolated.Where(record => record.End is null || record.End > bounds.TodayStart)
-            .All(record => periods.Any(period => period.SleepStart == record.Start &&
-                (record.Ongoing ? period.SleepEnd > request.Now : period.SleepEnd == record.End))) ||
+            .All(record => periods.Any(period => SameMinute(period.SleepStart, record.Start) &&
+                (record.Ongoing ? period.SleepEnd > request.Now : record.End is { } end && SameMinute(period.SleepEnd, end)))) ||
             Reject(out failure, "recorded_sleep_missing");
+    }
+
+    private static long Minute(DateTimeOffset time) => time.UtcTicks / TimeSpan.TicksPerMinute;
+    private static bool SameMinute(DateTimeOffset left, DateTimeOffset right) => Minute(left) == Minute(right);
+
+    private static string SchemaFailureField(JsonElement root, string? exceptionPath)
+    {
+        // Inspect only the bounded known schema. Do not copy an unrecognized key
+        // from JsonException.Path (the model could put private text in a key).
+        if (root.ValueKind != JsonValueKind.Object) return "$";
+        foreach (var key in new[] { "status", "periods" })
+            if (!root.TryGetProperty(key, out _)) return $"$.{key}";
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var property in root.EnumerateObject())
+        {
+            if (property.Name is not ("status" or "periods")) return "$";
+            if (!seen.Add(property.Name)) return $"$.{property.Name}";
+        }
+        if (root.GetProperty("status").ValueKind is not (JsonValueKind.String or JsonValueKind.Null)) return "$.status";
+        var periods = root.GetProperty("periods");
+        if (periods.ValueKind is not (JsonValueKind.Array or JsonValueKind.Null)) return "$.periods";
+        if (periods.ValueKind == JsonValueKind.Array)
+        {
+            var index = 0;
+            foreach (var period in periods.EnumerateArray())
+            {
+                if (index >= MaxWholeDayPeriods) return "$.periods";
+                var prefix = $"$.periods[{index++}]";
+                if (period.ValueKind == JsonValueKind.Null) continue;
+                if (period.ValueKind != JsonValueKind.Object) return prefix;
+                foreach (var key in new[] { "sleepStart", "sleepEnd", "sootheStart", "sootheEnd" })
+                    if (!period.TryGetProperty(key, out _)) return $"{prefix}.{key}";
+                seen.Clear();
+                foreach (var property in period.EnumerateObject())
+                {
+                    if (property.Name is not ("sleepStart" or "sleepEnd" or "sootheStart" or "sootheEnd")) return prefix;
+                    if (!seen.Add(property.Name)) return $"{prefix}.{property.Name}";
+                }
+            }
+        }
+        return exceptionPath is not null && Regex.IsMatch(exceptionPath,
+            @"^\$\.(status|periods(\[(0|[1-9]|1[0-9]|2[0-3])\](\.(sleepStart|sleepEnd|sootheStart|sootheEnd))?)?)$",
+            RegexOptions.CultureInvariant) ? exceptionPath : "$";
     }
 
     private static bool Reject(out SleepAiOutputFailure? failure, string reason, int? periodIndex = null)

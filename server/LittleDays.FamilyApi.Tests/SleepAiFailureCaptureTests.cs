@@ -35,6 +35,7 @@ public sealed class SleepAiFailureCaptureTests
         Assert.Equal(1, attempt.Attempt);
         Assert.Equal(PrivateOutput, attempt.ResponseText);
         Assert.Equal("invalid_json", attempt.Reason);
+        Assert.Equal(new[] { "$" }, attempt.Fields);
         Assert.Null(attempt.PeriodIndex);
         Assert.Equal(PrivateOutput.Length, attempt.OriginalLength);
         Assert.False(attempt.Truncated);
@@ -107,6 +108,7 @@ public sealed class SleepAiFailureCaptureTests
         Assert.Equal(expected, (await Assert.ThrowsAsync<ApiException>(() => f.Predict())).Code);
         var failure = Assert.Single(f.Capture.Attempts);
         Assert.Equal(expected, failure.Reason);
+        Assert.Equal(new[] { "$provider" }, failure.Fields);
         Assert.Null(failure.ResponseText);
         Assert.Equal(0, failure.OriginalLength);
         Assert.False(failure.Truncated);
@@ -181,7 +183,68 @@ public sealed class SleepAiFailureCaptureTests
         {
             Assert.Equal("invalid_output", x.Reason); Assert.Null(x.PeriodIndex);
             Assert.Equal(0d, x.DurationMs); Assert.Equal("unknown", x.Model);
+            Assert.Equal(new[] { "$" }, x.Fields);
         });
+    }
+
+    [Fact]
+    public void CaptureCopiesDistinctCanonicalOutputFieldsWithoutRetainingCallerMutation()
+    {
+        var f = new Fixture(true, Ready);
+        string[] fields = ["$.periods[0].sleepStart", "$.periods[23].sootheEnd", "$.periods[23].sootheEnd"];
+        f.Capture.Record(1, "invalid_schema", 0, PrivateOutput, TimeSpan.Zero, SleepAiOptions.SelectedModel, fields);
+        fields[0] = "private-input-value";
+        var failure = Assert.Single(f.Capture.Attempts);
+        Assert.Equal(new[] { "$.periods[0].sleepStart", "$.periods[23].sootheEnd" }, failure.Fields);
+        Assert.Equal("invalid_schema", failure.Reason);
+        Assert.DoesNotContain("private-input-value", JsonSerializer.Serialize(failure));
+    }
+
+    [Theory]
+    [InlineData("$.privateChildName")]
+    [InlineData("$.records[0].start")]
+    [InlineData("$.periods[-1].sleepStart")]
+    [InlineData("$.periods[24].sleepStart")]
+    [InlineData("$.periods[01].sleepStart")]
+    [InlineData("$.periods[0].sleepStart\n")]
+    [InlineData("$provider")]
+    public void CaptureRejectsUnapprovedFieldPathsInsteadOfPersistingThem(string path)
+    {
+        var f = new Fixture(true, Ready);
+        f.Capture.Record(1, "invalid_json", null, PrivateOutput, TimeSpan.Zero, SleepAiOptions.SelectedModel, [path]);
+        Assert.Equal(new[] { "$" }, Assert.Single(f.Capture.Attempts).Fields);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(5)]
+    public void CaptureRejectsEmptyOrOversizedFieldLists(int count)
+    {
+        var f = new Fixture(true, Ready);
+        f.Capture.Record(1, "invalid_json", null, null, TimeSpan.Zero, SleepAiOptions.SelectedModel,
+            Enumerable.Repeat("$.status", count).ToArray());
+        Assert.Equal(new[] { "$" }, Assert.Single(f.Capture.Attempts).Fields);
+    }
+
+    [Fact]
+    public void CaptureAcceptsFourCanonicalLocationsButRejectsNullMembers()
+    {
+        var f = new Fixture(true, Ready);
+        string[] fields = ["$", "$.status", "$.periods", "$.periods[23]"];
+        f.Capture.Record(1, "invalid_schema", null, null, TimeSpan.Zero, SleepAiOptions.SelectedModel, fields);
+        f.Capture.Record(2, "invalid_json", null, null, TimeSpan.Zero, SleepAiOptions.SelectedModel, [null!]);
+        Assert.Equal(new[] { "$", "$.status", "$.periods", "$.periods[23]" }, f.Capture.Attempts[0].Fields);
+        Assert.Equal(new[] { "$" }, f.Capture.Attempts[1].Fields);
+    }
+
+    [Fact]
+    public void TransportAndSanitizedUnknownReasonsCannotBorrowUnrelatedOutputFields()
+    {
+        var f = new Fixture(true, Ready);
+        f.Capture.Record(1, "ai_timeout", null, null, TimeSpan.Zero, SleepAiOptions.SelectedModel, ["$.status"]);
+        f.Capture.Record(2, "private-exception", null, null, TimeSpan.Zero, SleepAiOptions.SelectedModel, ["$.status"]);
+        Assert.Equal(new[] { "$provider" }, f.Capture.Attempts[0].Fields);
+        Assert.Equal(new[] { "$" }, f.Capture.Attempts[1].Fields);
     }
 
     [Fact]

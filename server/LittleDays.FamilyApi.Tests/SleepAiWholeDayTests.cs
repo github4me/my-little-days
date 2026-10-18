@@ -137,7 +137,8 @@ public sealed class SleepAiWholeDayTests
         Assert.True(Accepts(request, Period(conflict.Start, other.End!.Value, true), known, future));
         Assert.True(Accepts(request, known, future));
         Assert.False(Accepts(request, future));
-        Assert.False(Accepts(request, known with { SleepStart = known.SleepStart.AddMilliseconds(1) }, future));
+        Assert.True(Accepts(request, known with { SleepStart = known.SleepStart.AddMilliseconds(1) }, future));
+        Assert.False(Accepts(request, known with { SleepStart = known.SleepStart.AddMinutes(1) }, future));
         Assert.False(Accepts(request, known with { SleepEnd = known.SleepEnd.AddMilliseconds(-1) }, future));
         Assert.False(Accepts(request, Period(conflict.Start, isolated.Start.AddMinutes(1), true), known, future));
         Assert.False(Accepts(request, known, Period(known.SleepEnd.AddMinutes(10), known.SleepEnd.AddHours(1))));
@@ -326,11 +327,11 @@ public sealed class SleepAiWholeDayTests
         periods = mutation switch
         {
             "missing-completed" => [current],
-            "shift-completed-start" => [first with { SleepStart = first.SleepStart.AddTicks(1) }, current],
-            "shift-completed-end" => [first with { SleepEnd = first.SleepEnd.AddTicks(1) }, current],
+            "shift-completed-start" => [first with { SleepStart = first.SleepStart.AddMinutes(1) }, current],
+            "shift-completed-end" => [first with { SleepEnd = first.SleepEnd.AddMinutes(1) }, current],
             "invent-completed-settling" => [Period(first.SleepStart, first.SleepEnd), current],
             "missing-ongoing" => [first],
-            "shift-ongoing-start" => [first, current with { SleepStart = current.SleepStart.AddTicks(1) }],
+            "shift-ongoing-start" => [first, current with { SleepStart = current.SleepStart.AddMinutes(1) }],
             "ongoing-end-at-now" => [first, current with { SleepEnd = Now }],
             "ongoing-end-before-now" => [first, current with { SleepEnd = Now.AddTicks(-1) }],
             "invent-ongoing-settling" => [first, Period(current.SleepStart, current.SleepEnd)],
@@ -646,7 +647,9 @@ public sealed class SleepAiWholeDayTests
         Assert.Contains("Do not preserve predictions contradicted by data", system, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Do not invent unrecorded past sleep merely to fill the timeline", system);
         Assert.Contains("Do not move a missed prediction forward to now as though a new wake event occurred", system);
-        Assert.Contains("Each isolated completed recorded sleep intersecting today MUST appear with its exact start/end unchanged", system);
+        Assert.Contains("Each isolated completed recorded sleep intersecting today MUST appear with its recorded start/end preserved to the same minute", system);
+        Assert.Contains("never round into the next minute", system);
+        Assert.Contains("never collapse distinct records merely because their minute labels coincide", system);
         Assert.Contains("both sootheStart and sootheEnd MUST be null", system);
         Assert.Contains("An ongoing timer alone is not a reason to return insufficient_data", system);
         Assert.Contains("This is a format limit, not a recommended settling duration", system);

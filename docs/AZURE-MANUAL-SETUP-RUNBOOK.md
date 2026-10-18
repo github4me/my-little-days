@@ -1,5 +1,75 @@
 # My Little Days: manual Azure and GitHub setup runbook
 
+## Pending minute-validation and failure-field rollout — 18 October 2026
+
+**Backend deployment authorized by the subsequent “deploy” request; verification
+in progress, not yet live.** See
+[verification receipt](AI-MINUTE-VALIDATION-2026-10-18.md). Use the following
+compatible schema/API sequence; the client build remains a separate release:
+
+1. Freeze a reviewed SHA and verify the disposable-SQL CI tests, including
+   `SleepAiFailureFieldsMigrationTests` and `SleepAiFailureStorageSqlTests`.
+2. GitHub → **Deploy family API and database**, trusted branch
+   `feature/family-invitations`, fields `database_bootstrapped=true`,
+   `adopt_ef=false`. Recheck environment protection and the frozen artifact.
+   Target remains `reticle.com.au` tenant `7b7e6e31-a778-4334-aee2-e969fa27fd0e`,
+   subscription `4768a858-f23f-4a39-bb64-eabc9c142627`, resource group
+   `my-little-days-pilot-rg`, SQL server `little-days-sql-522fpstfbtds2`,
+   database `little-days-family`, API `little-days-api-522fpstfbtds2`.
+3. Apply only the pending additive `0013_SleepAiFailureFields.sql` before the
+   API artifact. Expected: `dbo.SleepAiFailedOutputs.FailureFieldsJson`
+   nullable `nvarchar(1024)`; earlier API inserts still work, historical rows
+   remain null, existing expiry/permissions unchanged. Require catalog
+   verification and explicit zero pending scripts after apply. Do not edit
+   applied scripts 0011/0012 or remove the retained operator-IP rule below.
+4. Verify bounded startup health plus authenticated, SQL-backed readiness.
+   Deploy a matching client build through the documented local iOS build and
+   Apple upload path. Older installed apps keep exact timestamp validation and
+   may still reject minute-rounded results; API success alone is not device
+   acceptance. No paid EAS build or provider settings change is needed here.
+5. Restricted failure inspection may select reason, period index and canonical
+   `FailureFieldsJson` only for unexpired/current-history rows. Verify field
+   persistence without exporting private response text into logs or Git.
+   Record release SHA, migration result, health, upload/processing and physical
+   device acceptance separately. No row backfill or retention change.
+
+## Restricted AI failure readback and retained operator IP — 18 October 2026
+
+Owner requested inspection of saved failures and explicitly approved
+“允许放行，不删除” for the current operator IPv4 `202.80.150.41`.
+At approximately 07:22 UTC, Azure Portal → `reticle.com.au` tenant
+`7b7e6e31-a778-4334-aee2-e969fa27fd0e` → subscription
+`4768a858-f23f-4a39-bb64-eabc9c142627` → resource group
+`my-little-days-pilot-rg` → SQL database `little-days-family` on
+`little-days-sql-522fpstfbtds2` → **Query editor** → Microsoft Entra
+authentication was blocked by the SQL firewall. Used its exact-IP allowlist
+action, then connected successfully with the existing administrator session.
+
+Verified under SQL server → **Networking → Public access → Firewall rules**:
+rule `QueryEditorClientIPAddress_1792308105044` has Start IPv4 and End IPv4
+both `202.80.150.41`. It is deliberately retained, not a temporary runner
+rule. **Selected networks** remains selected; **Allow Azure services and
+resources to access this server** remains unchecked. Existing application
+outbound rules and the previous operator rule were not edited. Future release
+cleanup must not remove this expressly retained operator rule. A changed
+operator IP requires a fresh scoped access decision, not a broad range.
+
+For restricted failure inspection, freshly read only `Family__HistoryId`
+from API → **Environment variables → App settings**, confirming
+`64136b6e-01e2-4c48-890f-bef208eac9e3`; no setting was changed or secret revealed.
+Read-only SQL queries filtered diagnostics by that epoch and
+`ExpiresAt > SYSUTCDATETIME()`. Live readback found four retained failed
+attempts across two finally failed jobs; all four had untruncated response
+text. Fixed reasons: three `recorded_sleep_missing`, one
+`predicted_sleep_missing_settling`. All four expiry intervals were exactly
+604800 seconds (seven days). This verifies live capture and stored expiry,
+not a future physical-cleanup run or capture of every failure. Diagnostics
+can also disappear earlier through cancellation/revocation.
+
+No request-history/payload export, database data write, inference, deployment,
+provider-control change or app release was performed. Private AI response
+contents are intentionally absent from this runbook.
+
 ## Automatic failed AI output capture — 18 October 2026
 
 Owner instruction: “对所有app启用失败采集，不用授权”. The current resumable AI

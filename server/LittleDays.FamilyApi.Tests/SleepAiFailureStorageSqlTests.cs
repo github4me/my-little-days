@@ -78,6 +78,7 @@ public sealed class SleepAiFailureStorageSqlTests(SqlFixture sql) : IClassFixtur
             Assert.Equal(request.ConsentGeneration, row.ConsentGeneration);
             Assert.Equal(s.Scenario.Config.Family.HistoryId, row.HistoryEpoch);
             Assert.Equal("invalid_json", row.Reason); Assert.Null(row.PeriodIndex);
+            Assert.Equal(new[] { "$" }, JsonSerializer.Deserialize<string[]>(row.FailureFieldsJson!));
             Assert.StartsWith("synthetic failed output", row.ResponseText);
             Assert.Equal(row.ResponseText!.Length, row.OriginalLength); Assert.False(row.Truncated);
             Assert.Equal(row.OccurredAt.AddDays(7), row.ExpiresAt); Assert.Equal(12, row.DurationMs);
@@ -86,10 +87,31 @@ public sealed class SleepAiFailureStorageSqlTests(SqlFixture sql) : IClassFixtur
         Assert.Equal("completed", response.Status);
         var json = JsonSerializer.Serialize(response, SleepAiJson.Options);
         Assert.DoesNotContain("synthetic failed output", json); Assert.DoesNotContain("invalid_json", json);
+        Assert.DoesNotContain("failureFields", json, StringComparison.OrdinalIgnoreCase);
         await using var db = sql.Open(); var stored = await db.SleepAiJobs.FindAsync(s.Scenario.Owner.ObjectId, request.OperationId);
         Assert.Null(stored!.RequestJson); Assert.NotNull(stored.ResultJson);
         Assert.Equal(request.DiagnosticsConsentVersion, stored.DiagnosticsConsentVersion);
         Assert.Equal(s.Scenario.Config.Family.HistoryId, stored.DiagnosticsHistoryEpoch);
+    }
+
+    [SqlFact]
+    public async Task SpecificFailureFieldMetadataIsPersistedWithPrivateReasonOnly()
+    {
+        await using var s = new Setup(sql); var request = s.Request(); await s.Enqueue(request);
+        using var capture = new SleepAiFailureCapture(s.Clock);
+        capture.StartAutomaticCapture(s.Scenario.Config.Family.HistoryId);
+        capture.Record(1, "predicted_sleep_missing_settling", 3, "synthetic-output", TimeSpan.FromMilliseconds(12),
+            SleepAiOptions.SelectedModel, ["$.periods[3].sootheStart", "$.periods[3].sootheEnd"]);
+        Assert.True(await s.Complete(await s.Claim(), capture, success: false));
+        var row = Assert.Single(await s.Failures());
+        Assert.Equal("predicted_sleep_missing_settling", row.Reason);
+        Assert.Equal(3, row.PeriodIndex);
+        Assert.Equal(new[] { "$.periods[3].sootheStart", "$.periods[3].sootheEnd" },
+            JsonSerializer.Deserialize<string[]>(row.FailureFieldsJson!));
+        Assert.Equal(row.OccurredAt.AddDays(7), row.ExpiresAt);
+        var result = JsonSerializer.Serialize(await s.Store(x => x.Get(s.Scenario.Owner, request.OperationId, default)));
+        Assert.DoesNotContain("sootheStart", result);
+        Assert.DoesNotContain("synthetic-output", result);
     }
 
     [SqlFact]
