@@ -9,8 +9,10 @@ protocol's need for `recorded_sleep_missing`/exact history reproduction checks.
 
 New clients use schema 3, with the existing `sleep-ai-v2` data-sharing consent
 and durable-job consent. The backend retains schemas 1 and 2 for existing apps.
-This is a local implementation checkpoint, **not a deployment or TestFlight
-release**. Current public/test builds do not acquire these changes automatically.
+This file records the local implementation checkpoint. The later backend deployment
+and TestFlight77 upload are recorded in the [release receipt](AI-REMAINING-DAY-TESTFLIGHT-2026-10-18.md),
+including separate Apple processing and device acceptance status. Installed apps
+do not acquire these changes automatically without the matching update.
 
 ## Model input and output
 

@@ -1,6 +1,7 @@
 # AI prompt 合并与前后端契约核对
 
-状态：本地实现及自动化验证完成；未部署后端、未发布 TestFlight。
+本地实现及自动化验证完成。后续部署与 TestFlight77 上传已执行，处理状态见
+[发布记录](AI-REMAINING-DAY-TESTFLIGHT-2026-10-18.md)。
 
 ## 范围
 

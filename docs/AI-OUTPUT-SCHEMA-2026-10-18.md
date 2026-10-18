@@ -1,5 +1,8 @@
 # AI 剩余当日预测：结果输出 Schema
 
+本文记录实现及本地测试；后续后端部署与 TestFlight77 上传状态见
+[发布记录](AI-REMAINING-DAY-TESTFLIGHT-2026-10-18.md)。
+
 ## 实际发送给 AI 的定义
 
 [sleep-prediction-remaining-day-v3.schema.json](../server/LittleDays.FamilyApi/Schemas/sleep-prediction-remaining-day-v3.schema.json)

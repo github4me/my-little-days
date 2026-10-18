@@ -1,6 +1,7 @@
 # 七天规律优先：AI Prompt 更新
 
-状态：本地实现，未部署、未发布 TestFlight。实际英文指令位于
+本文记录本地实现及验证；后续已部署后端并上传 TestFlight77，Apple 处理状态见
+[发布记录](AI-REMAINING-DAY-TESTFLIGHT-2026-10-18.md)。实际英文指令位于
 [RemainingDayInstructions](../server/LittleDays.FamilyApi/SleepAiService.cs)。
 仅改变新协议 schema 3；旧版 schema 1/2 路径保留。
 

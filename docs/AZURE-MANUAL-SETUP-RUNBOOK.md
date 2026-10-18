@@ -4527,3 +4527,46 @@ successfully: all CI passed, migration `0009` applied, final catalog check showe
 zero pending scripts, and temporary firewall access was removed. Live anonymous
 health and protected-route checks passed after startup propagation. Signed-in
 SQL/API and physical-device acceptance remain outstanding; see the release record.
+
+## Remaining-day AI deployment and TestFlight77 — 18 October 2026
+
+Owner authorized deployment and TestFlight upload. Backend deployed and
+TestFlight0.2.4(77) internally available at13:06 UTC /19 October00:06 Melbourne. See
+[release receipt](AI-REMAINING-DAY-TESTFLIGHT-2026-10-18.md).
+Existing tenant `reticle.com.au`, subscription `4768a858-f23f-4a39-bb64-eabc9c142627`,
+resource group `my-little-days-pilot-rg`, API `little-days-api-522fpstfbtds2`, SQL
+`little-days-sql-522fpstfbtds2` / `little-days-family` remain the targets.
+
+GitHub plugin published only13 reviewed backend/test/doc files as
+`3e79a3d80b62cd440e16bfee0fbbb92db584c790`. Deploy workflow run39128756633 uses
+the trusted branch, `database_bootstrapped=true`, `adopt_ef=false`; no new SQL
+script or setting. Both environments' branch restrictions, target variables and
+actual protection settings were checked before dispatch. Release CI's real SQL
+tests passed782 API +137 migrator tests, zero failures/skips. All five deployment
+jobs succeeded; no-op catalog verified zero pending scripts before/after,
+temporary runner rule removed12:53:18 UTC. API deployment
+`e0df83c4-173b-422d-a874-c43ecff1e943` passed health12:55:39; independent checks
+12:56:05 returned live/ready200 and unauthenticated AI jobs capabilities401.
+
+Local-only Apple candidate0.2.4(77), source tree
+`be594e3ad473a8f5927743a1f0edbb276675556a`, is derived from frozen76 with only
+reviewed remaining-day changes. Use existing Expo production/store configuration,
+Apple app6809826484/teamA9974KXQ4G and managed Phone/Watch/Widget profiles.
+Frozen verification1,160 passes and fresh browser70+4+5 passed. Native Watch35 /
+Widget10 passed; all three Store signatures/profiles, packaged production values,
+runtime0.2.4, OTAoff and dSYM UUIDs verified. Signed Hermes is byte-identical to
+recompiled reviewed production JavaScript. IPA SHA-256
+`adb8a860727cbc0736bd13fab42effbb459aa298b51df1166a9aad4a8bf2cff8`.
+Apple validation13:00:07 and one upload13:02:18 UTC succeeded without errors;
+delivery `93de67a9-6f84-44c0-8307-95d251c62c13` COMPLETE,77 VALID/IN_BETA_TESTING
+at13:06:04 UTC. Existing Team (Expo) and Early Birds groups have access without
+mutation. Public0.2.3(75) remains READY_FOR_SALE; no App Review/public release or
+external beta submission. Temporary signing copies/keychain/profiles cleaned,
+managed credentials retained. MyPhone unavailable; no uninstall/data reset or
+physical acceptance. No paid EAS cloud build or real-user AI inference.
+
+Public support/privacy versioned wording updated through the GitHub plugin in
+`github4me/my-little-days-privacy` commit
+`facc9b39894ee14d8769974075b074679caf2855`. Both live Pages returned200 with the
+exact new wording13:04:02 UTC. Existing data categories and consent unchanged;
+no retention/spending-dashboard or provider-setting change.
