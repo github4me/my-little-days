@@ -563,7 +563,7 @@ internal static class SchemaVerifier
 
     private sealed class ExpressionParser
     {
-        private static readonly Regex TokenPattern = new(@"\G\s*(?<token>N?'(?:''|[^'])*'|\[(?:\]\]|[^\]])*\]|[A-Za-z_][A-Za-z0-9_]*|[0-9]+|<=|>=|<>|!=|[(),=<>/])", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        private static readonly Regex TokenPattern = new(@"\G\s*(?<token>N?'(?:''|[^'])*'|\[(?:\]\]|[^\]])*\]|[A-Za-z_][A-Za-z0-9_]*|[0-9]+|<=|>=|<>|!=|[(),=<>/\-])", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
         private readonly List<string> tokens = [];
         private int position;
 
@@ -625,6 +625,13 @@ internal static class SchemaVerifier
                 Require(")");
                 return terms.Count == 1 ? terms[0] : Node.Logical("OR", terms);
             }
+            if (Take("BETWEEN"))
+            {
+                // SQL Server stores BETWEEN as two comparisons. Keep both
+                // inclusive bounds and the surrounding AND/OR precedence.
+                var lower = Division(); Require("AND"); var upper = Division();
+                return Node.Logical("AND", [new(">=", "", [left, lower]), new("<=", "", [left, upper])]);
+            }
             foreach (var op in new[] { "=", "<=", ">=", "<>", "!=", "<", ">" })
                 if (Take(op)) return new(op == "!=" ? "<>" : op, "", [left, Division()]);
             return left;
@@ -640,6 +647,15 @@ internal static class SchemaVerifier
         }
         private Node Atom()
         {
+            if (Take("-"))
+            {
+                // Only signed numeric literals are approved (unknown byte
+                // count = -1). Do not introduce arbitrary unary arithmetic.
+                var literal = Atom();
+                if (literal.Kind != "NUMBER" || literal.Value.StartsWith('-'))
+                    throw new FormatException("Only negative numeric literals are supported.");
+                return new("NUMBER", "-" + literal.Value, []);
+            }
             if (Take("("))
             {
                 var nested = Or();

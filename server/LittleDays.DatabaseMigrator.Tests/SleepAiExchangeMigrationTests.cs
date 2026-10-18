@@ -4,6 +4,32 @@ namespace LittleDays.DatabaseMigrator.Tests;
 
 public sealed class SleepAiExchangeMigrationTests
 {
+    [Theory]
+    [InlineData("[RequestBytes]>=(-1)", "RequestBytes >= -1")]
+    [InlineData("[ResponseBytes]>=(-(1))", "ResponseBytes >= -1")]
+    [InlineData("([HttpStatus]>=(100) AND [HttpStatus]<=(599))", "HttpStatus BETWEEN 100 AND 599")]
+    [InlineData("[HttpStatus] IS NULL OR ([HttpStatus]>=(100) AND [HttpStatus]<=(599))", "HttpStatus IS NULL OR HttpStatus BETWEEN 100 AND 599")]
+    [InlineData("([SchemaVersion]=(3) OR [SchemaVersion]=(2) OR [SchemaVersion]=(1)) AND [RequestBytes]>=(-1)", "SchemaVersion IN (1,2,3) AND RequestBytes >= -1")]
+    public void CaptureBoundsParserMatchesCatalogNegativeLiteralsAndBetweenExpansion(string catalog, string approved) =>
+        Assert.Equal(SchemaVerifier.NormalizeExpression(approved), SchemaVerifier.NormalizeExpression(catalog));
+
+    [Theory]
+    [InlineData("HttpStatus BETWEEN 100 AND 599", "HttpStatus >= 100 AND HttpStatus <= 600")]
+    [InlineData("HttpStatus BETWEEN 100 AND 599", "HttpStatus > 100 AND HttpStatus <= 599")]
+    [InlineData("RequestBytes >= -1", "RequestBytes >= 1")]
+    [InlineData("RequestBytes >= -1 AND ResponseBytes >= -1", "RequestBytes >= -1 OR ResponseBytes >= -1")]
+    public void CaptureBoundsParserRejectsChangedBoundsAndLogicalGrouping(string approved, string changed) =>
+        Assert.NotEqual(SchemaVerifier.NormalizeExpression(approved), SchemaVerifier.NormalizeExpression(changed));
+
+    [Theory]
+    [InlineData("RequestBytes >= -OtherColumn")]
+    [InlineData("RequestBytes >= --1")]
+    [InlineData("RequestBytes >= -(-1)")]
+    [InlineData("HttpStatus BETWEEN 100 OR 599")]
+    [InlineData("HttpStatus BETWEEN 100 AND")]
+    public void CaptureBoundsParserRemainsFailClosedForUnapprovedArithmetic(string expression) =>
+        Assert.Throws<FormatException>(() => SchemaVerifier.NormalizeExpression(expression));
+
     [Fact]
     public void FullCaptureMigrationIsAdditiveAndVerifiesSevenDayRetentionAndIndexes()
     {
