@@ -1,6 +1,6 @@
 # Failed AI output diagnostics — seven-day retention
 
-18 October 2026. **Local implementation; not deployed or activated.** Existing
+18 October 2026. **Backend deployed; capture not activated for existing apps.** Existing
 apps continue using their current AI consent and do not opt in automatically.
 This is separate from the metadata-only App Service timing log.
 
@@ -86,11 +86,13 @@ Chinese draft:
 > 保留 7 天后由定期清理任务自动删除。返回内容可能包含睡眠时间；
 > 不会为此额外保存输入的历史记录。关闭 AI 后，联网时也会清除这些诊断数据。
 
-Client consent UI, public disclosures, migration deployment and activation are
-pending; none was changed online in this task. See the manual runbook for the
-release gate and restore procedure.
+Client consent UI, public disclosures and capture activation remain pending.
+The additive migration and API backend were deployed in
+[release 39101954963](https://github.com/github4me/my-little-days/actions/runs/39101954963).
+See the [release receipt](AI-CONCURRENCY-50-DEPLOYMENT-2026-10-18.md) for exact
+SHA/artifact/SQL verification, and the manual runbook for the restore procedure.
 
-## Local verification
+## Initial local verification (before release)
 
 The .NET testing skills guided focused reason/consent/retention boundary tests,
 alongside regression tests preserving the existing AI output contract. The
@@ -108,3 +110,14 @@ expiry deletion, revocation and late-completion SQL cases are present and
 compile, but require a disposable SQL Server before rollout. This local result
 does not verify actual database cleanup, deployed behavior or renewed consent
 on a device.
+
+## Release verification
+
+Final frozen code SHA `ba389416d8ad40ae7c310af5d2b1cc80e059905f` passed **658 API
+tests and 122 migration tests**, zero failures/skips, against disposable SQL in
+both push CI and the production release's verification stage. This includes
+expiry/deletion, explicit-consent, legacy-client, isolation and migration/catalog
+tests. Production script 0011 applied; post-apply catalog verification reported
+zero pending scripts, with temporary firewall access removed. Independent live
+health checks passed. These results do not prove new client consent or live
+payload capture; neither was activated by this backend-only release.

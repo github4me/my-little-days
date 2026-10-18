@@ -3,8 +3,21 @@
 ## AI concurrency 50 and failed-output diagnostics — 18 October 2026 release
 
 Owner authorized deployment of concurrency 50 together with the seven-day
-failed-output diagnostic backend. Preparation is in progress, not yet a live
-receipt. See [the scoped release record](AI-CONCURRENCY-50-DEPLOYMENT-2026-10-18.md).
+failed-output diagnostic backend. **Deployed successfully** in
+[release 39101954963](https://github.com/github4me/my-little-days/actions/runs/39101954963),
+frozen SHA `ba389416d8ad40ae7c310af5d2b1cc80e059905f`, completed 05:59:29 UTC.
+See [the scoped release record](AI-CONCURRENCY-50-DEPLOYMENT-2026-10-18.md).
+
+Verification: API 658 and migrator 122 tests passed with zero failures/skips
+against disposable SQL; mobile/browser checks passed. Production migration
+0011 completed 05:55:34 UTC, catalog verification returned explicit **zero
+pending scripts** at 05:55:39, and this run's temporary firewall rule was removed
+05:55:41. Exact API artifact `12127176527` contains concurrency 50, hourly 30,
+daily 200 and patched Pkcs 10.0.13. Deployment startup health succeeded at
+05:59:25; independent checks at 05:59:48 returned live/ready 200 and protected
+AI capabilities 401 without credentials. These are not authenticated device or
+paid-provider load-test results. Existing apps still lack diagnostic consent;
+payload capture is not activated for them.
 
 Target remains the existing `reticle.com.au` tenant, subscription and API/SQL
 resources listed below. No new paid resources or tier changes. Preserve provider
@@ -25,19 +38,21 @@ native acceptance from this backend-only release.
 
 Azure read-only check: API Running/Healthy, Linux B1 x 1 Australia Southeast;
 there is no `SleepAi__MaxConcurrentRequests` or hourly/daily quota override.
-Shipped `SleepAi:MaxConcurrentRequests=50` will apply without an environment
+Shipped `SleepAi:MaxConcurrentRequests=50` applies without an environment
 setting write. Credentials remain masked; provider retention/spending dashboards
 were not opened. Infrastructure enabled/apply flags remain false.
 
-## Failed AI output diagnostics — 18 October 2026, pending rollout
+## Failed AI output diagnostics — 18 October 2026, backend deployed / activation pending
 
 Owner requested seven-day automatic cleanup of failed AI response diagnostics.
-Local backend implementation only; **not deployed or collecting payloads**.
+Backend deployment is verified above; **existing clients are not collecting
+payloads** without new explicit diagnostic consent.
 Details and draft disclosure: [AI-FAILED-OUTPUT-DIAGNOSTICS.md](AI-FAILED-OUTPUT-DIAGNOSTICS.md).
 Existing ordinary timing-log retention/settings are unchanged. No Key Vault,
 new monitoring service or infrastructure tier change is required.
 
-Pending manual/release actions (do not infer approval to execute from this list):
+Activation/recovery checklist (backend deployment steps 2–3 completed in the
+receipt above; do not infer approval to execute future actions from this list):
 
 1. In the app consent flow and the existing public privacy/support pages, explain
    failed-response-only diagnostics, possible sleep times in the response,
