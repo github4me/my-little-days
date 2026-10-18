@@ -1,11 +1,11 @@
 # My Little Days: manual Azure and GitHub setup runbook
 
-## Pending minute-validation and failure-field rollout — 18 October 2026
+## Minute-validation and failure-field backend rollout — 18 October 2026
 
-**Backend deployment authorized by the subsequent “deploy” request; verification
-in progress, not yet live.** See
-[verification receipt](AI-MINUTE-VALIDATION-2026-10-18.md). Use the following
-compatible schema/API sequence; the client build remains a separate release:
+**Backend deployed and active**, release `39111462996` completed 08:35:21 UTC,
+frozen SHA `d3199262be188e930285acb2eac722abbd4c12c7`. See the
+[verification receipt](AI-MINUTE-VALIDATION-2026-10-18.md). The following
+compatible schema/API sequence was used; the client build remains a separate release:
 
 1. Freeze a reviewed SHA and verify the disposable-SQL CI tests, including
    `SleepAiFailureFieldsMigrationTests` and `SleepAiFailureStorageSqlTests`.
@@ -32,6 +32,25 @@ compatible schema/API sequence; the client build remains a separate release:
    persistence without exporting private response text into logs or Git.
    Record release SHA, migration result, health, upload/processing and physical
    device acceptance separately. No row backfill or retention change.
+
+Verified release evidence: push CI `39109659763` and release verification both
+passed **732 API + 137 migrator tests**, zero failures/skips, using disposable SQL;
+TypeScript/Watch/browser checks passed too. Production had exactly one pending
+script (0013), applied successfully 08:33:12 UTC, post-apply catalog/journal check
+returned zero pending at 08:33:17, runner firewall cleanup succeeded at 08:33:19.
+Release API artifact `12130143133` was downloaded: digest, embedded release SHA,
+new minute/field code, unchanged quotas/model and patched Pkcs 10.0.13 verified.
+API deployment and bounded startup health succeeded; independent sequential
+checks at 08:35:33 returned live/ready 200 and unauthenticated AI capabilities 401.
+Ready is a recovery gate, not a SQL probe. Both environment branch restrictions
+were rechecked; reviewers/wait timer disabled, administrator bypass enabled,
+unchanged. No provider control, paid tier, credential, model/Fast, concurrency,
+quota, polling or seven-day retention setting was changed.
+
+Outstanding: signed-in runtime SQL/device acceptance, naturally occurring
+failure-field readback, and a matching client release. No TestFlight upload or
+paid real-data inference was performed. Old installed apps can still reject
+minute-rounded results; do not treat this server release as mobile acceptance.
 
 ## Restricted AI failure readback and retained operator IP — 18 October 2026
 

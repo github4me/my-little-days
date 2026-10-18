@@ -1,9 +1,12 @@
 # Failed AI output diagnostics — seven-day retention
 
-## Minute matching and canonical failure fields — local update, 18 October 2026
+## Minute matching and canonical failure fields — backend release, 18 October 2026
 
-**Implemented locally; not deployed.** The new behavior must not be inferred
-from the deployment evidence for the earlier automatic-capture policy below.
+**Backend deployed at 08:35:21 UTC; matching client changes remain local.**
+Release `39111462996`, SHA `d3199262be188e930285acb2eac722abbd4c12c7`, applied
+0013 with catalog verification and zero pending scripts before API deployment.
+732 API and 137 migrator tests passed against disposable SQL, zero failed/skipped.
+No new app upload, live-family inference or historical-row backfill was performed.
 
 Whole-day recorded sleep anchors now match by UTC minute in both the API and
 app validator. Seconds/fractions in the same minute are accepted; crossing a
@@ -41,7 +44,7 @@ unexpected validator exceptions retain their existing safe job/timing error
 handling; they are not mislabelled as invalid model-output payloads. Capture
 is still best-effort and cannot preserve cancelled/revoked work.
 
-Local evidence and remaining rollout checks are in
+Local and production evidence, plus outstanding client/device checks, are in
 [the verification receipt](AI-MINUTE-VALIDATION-2026-10-18.md).
 
 18 October 2026. The owner subsequently requested automatic capture without a
