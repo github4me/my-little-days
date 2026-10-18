@@ -4642,3 +4642,27 @@ maintenance must purge SleepAiExchanges with SleepAiFailedOutputs before
 reopening traffic. Public request-clearing wording remains inconsistent; no
 privacy text changed. Backend-only: no TestFlight/App Review submission or
 physical-device acceptance occurred in this deployment.
+
+## AI schema correction — release candidate, 19 October 2026
+
+Owner authorized “fix deploy” after live capture identified schema3 HTTP400
+invalid_json_schema (`$ref` with a description sibling) and older schema2
+recorded_sleep_missing failures for cross-midnight evidence. See
+[the bounded correction and test matrix](AI-SCHEMA-FIX-2026-10-19.md).
+Descriptions move to containing definitions; validation is not weakened.
+Legacy whole-day instructions explicitly preserve overnight recorded endpoints.
+
+Reuse tenant reticle.com.au, subscription4768a858-f23f-4a39-bb64-eabc9c142627,
+my-little-days-pilot-rg, API little-days-api-522fpstfbtds2, SQL server
+little-days-sql-522fpstfbtds2 / little-days-family. GitHub → Deploy family API
+and database → trusted feature/family-invitations, database_bootstrapped=true,
+adopt_ef=false. Freeze reviewed source first and keep the branch fixed through
+deployment. Require real-SQL CI and actual catalog verification with zero
+pending scripts; there are no new/modified SQL scripts in this correction.
+
+No new Azure setting, identity, quota, provider model/Fast, capture retention,
+cost, public privacy/consent or app distribution step is introduced. Recheck
+live environment targets/protection settings; preserve existing AI approvals
+and the retained operator-IP rule. Remove only this run's temporary firewall
+rule. Verify package/runtime revision, startup and signed-in capture separately.
+No TestFlight rebuild is needed; live model acceptance remains pending.

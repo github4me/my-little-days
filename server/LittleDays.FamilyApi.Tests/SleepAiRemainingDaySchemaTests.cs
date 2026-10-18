@@ -48,6 +48,7 @@ public sealed class SleepAiRemainingDaySchemaTests
         Assert.True(format.GetProperty("strict").GetBoolean());
         var schema = format.GetProperty("schema");
         Assert.True(JsonElement.DeepEquals(OpenAiSleepProvider.RemainingDayOutputSchema, schema));
+        AssertReferenceKeywords(schema);
         Assert.Equal(24, schema.GetProperty("properties").GetProperty("periods").GetProperty("maxItems").GetInt32());
         Assert.Equal(2, schema.GetProperty("properties").GetProperty("periods").GetProperty("items").GetProperty("anyOf").GetArrayLength());
         Assert.Equal("date-time", schema.GetProperty("$defs").GetProperty("timestamp").GetProperty("format").GetString());
@@ -61,6 +62,47 @@ public sealed class SleepAiRemainingDaySchemaTests
             .GetProperty("content")[0].GetProperty("text").GetString()!;
         Assert.StartsWith(OpenAiSleepProvider.RemainingDayInstructions, system);
         Assert.Equal(retry, system.Contains("previous response failed structural/temporal validation", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void RemainingDaySchemaReferencesHaveNoSiblingKeywords()
+    {
+        AssertReferenceKeywords(OpenAiSleepProvider.RemainingDayOutputSchema);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RemainingDayWireReturnsDisplayableReadyPredictionWithoutRecordedHistory(bool ongoing)
+    {
+        var request = new SleepPredictionRequest
+        {
+            SchemaVersion = 3, ConsentVersion = "sleep-ai-v2", InputRevision = new('b', 64),
+            FamilyId = null, MembershipId = null, HistoryId = null, AgeDays = 106,
+            TimeZone = "Australia/Melbourne", Now = Now, PreviousEstimate = null,
+            Records = [new() { Kind = "sleep", Start = Now.AddHours(-2), End = ongoing ? null : Now.AddHours(-1),
+                Ongoing = ongoing, FeedKind = null, AmountMl = null }]
+        };
+        var future = new SleepPredictionPeriod { SleepStart = Now.AddHours(1), SleepEnd = Now.AddHours(2),
+            SootheStart = Now.AddMinutes(40), SootheEnd = Now.AddMinutes(55) };
+        SleepPredictionPeriod[] expected = ongoing ? [new() { SleepStart = Now.AddSeconds(-Now.Second),
+            SleepEnd = Now.AddMinutes(30), SootheStart = null, SootheEnd = null }, future] : [future];
+        var output = JsonSerializer.Serialize(new { status = "ready", periods = expected }, SleepAiJson.Options);
+        using var transport = new WireHandler(output);
+        using var http = new HttpClient(transport);
+        using var client = new ResponsesClient(new ApiKeyCredential("synthetic-not-real"), new ResponsesClientOptions
+        {
+            Transport = new HttpClientPipelineTransport(http), RetryPolicy = new ClientRetryPolicy(0),
+            ClientLoggingOptions = new() { EnableLogging = false, EnableMessageLogging = false, EnableMessageContentLogging = false }
+        }).AsIChatClient("gpt-6-luna");
+        var bounds = SleepAiValidation.ValidateRequest(request, Now);
+        var result = await new OpenAiSleepProvider(client, Options.Create(SleepAiJobTests.Enabled()))
+            .GenerateAsync(request, bounds, false, default);
+
+        Assert.True(SleepAiValidation.TryReadOutput(result, request, bounds, out var parsed, out var failure), failure?.Reason);
+        Assert.Equal("ready", parsed!.Status); Assert.Equal(expected, parsed.Periods);
+        Assert.All(parsed.Periods, period => Assert.True(period.SleepStart >= Now.AddSeconds(-Now.Second)));
+        Assert.Equal(1, transport.Calls);
     }
 
     [Fact]
@@ -147,18 +189,35 @@ public sealed class SleepAiRemainingDaySchemaTests
         Assert.Equal(fields.Order(), schema.GetProperty("required").EnumerateArray().Select(value => value.GetString()!).Order());
     }
 
-    private sealed class WireHandler : HttpMessageHandler
+    private static void AssertReferenceKeywords(JsonElement node)
+    {
+        if (node.ValueKind == JsonValueKind.Object)
+        {
+            if (node.TryGetProperty("$ref", out var reference))
+            {
+                Assert.StartsWith("#/$defs/", reference.GetString());
+                Assert.Equal(["$ref"], node.EnumerateObject().Select(property => property.Name).ToArray());
+            }
+            foreach (var property in node.EnumerateObject()) AssertReferenceKeywords(property.Value);
+        }
+        else if (node.ValueKind == JsonValueKind.Array)
+            foreach (var value in node.EnumerateArray()) AssertReferenceKeywords(value);
+    }
+
+    private sealed class WireHandler(string output = EmptyOutput) : HttpMessageHandler
     {
         public int Calls { get; private set; }
         public string? Body { get; private set; }
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
             Calls++; Body = await request.Content!.ReadAsStringAsync(ct);
+            using var wire = JsonDocument.Parse(Body);
+            AssertReferenceKeywords(wire.RootElement.GetProperty("text").GetProperty("format").GetProperty("schema"));
             return new(HttpStatusCode.OK) { Content = JsonContent.Create(new
             {
                 id = "resp_synthetic", @object = "response", created_at = 1792314935, status = "completed", model = "gpt-6-luna",
                 output = new[] { new { type = "message", id = "msg_synthetic", status = "completed", role = "assistant",
-                    content = new[] { new { type = "output_text", text = EmptyOutput, annotations = Array.Empty<object>() } } } }
+                    content = new[] { new { type = "output_text", text = output, annotations = Array.Empty<object>() } } } }
             }) };
         }
     }

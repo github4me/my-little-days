@@ -31,41 +31,35 @@
     },
     "futureSleep": {
       "type": "object",
-      "description": "A future sleep with both begin-settling timestamps. Require currentMinute <= sootheStart < sootheEnd <= sleepStart < sleepEnd <= todayEnd, where currentMinute is request now rounded down to the start of its minute. sleepEnd must still be strictly after exact now. sootheStart must be no more than four hours before sleepStart; that is a format limit, not a suggested settling duration.",
+      "description": "A future sleep with both begin-settling timestamps. Require currentMinute <= sootheStart < sootheEnd <= sleepStart < sleepEnd <= todayEnd, where currentMinute is request now rounded down to the start of its minute. sleepEnd must still be strictly after exact now. sootheStart must be no more than four hours before sleepStart; that is a format limit, not a suggested settling duration. sleepStart is predicted, not an already-recorded start, and must be at or after sootheEnd and strictly before todayEnd. sleepEnd is strictly after sleepStart and request now, and at most todayEnd; this boundary is not an instruction to wake the child. sootheStart is the earliest suggested time to BEGIN settling, not before the current minute or previous predicted sleep end. sootheEnd is the latest suggested time to BEGIN settling, strictly after sootheStart and no later than sleepStart; this window is not the duration of settling.",
       "additionalProperties": false,
       "required": ["sleepStart", "sleepEnd", "sootheStart", "sootheEnd"],
       "properties": {
         "sleepStart": {
-          "$ref": "#/$defs/timestamp",
-          "description": "Predicted sleep start, not an already-recorded start. Must be at or after sootheEnd and strictly before todayEnd."
+          "$ref": "#/$defs/timestamp"
         },
         "sleepEnd": {
-          "$ref": "#/$defs/timestamp",
-          "description": "Predicted end, strictly after sleepStart and request now. At most todayEnd; truncate the prediction horizon there, not an instruction to wake the child."
+          "$ref": "#/$defs/timestamp"
         },
         "sootheStart": {
-          "$ref": "#/$defs/timestamp",
-          "description": "Earliest suggested time to BEGIN settling. Not before the current minute or previous predicted sleep end."
+          "$ref": "#/$defs/timestamp"
         },
         "sootheEnd": {
-          "$ref": "#/$defs/timestamp",
-          "description": "Latest suggested time to BEGIN settling, strictly after sootheStart and no later than sleepStart. This window is not the duration of settling."
+          "$ref": "#/$defs/timestamp"
         }
       }
     },
     "currentSleepRemainder": {
       "type": "object",
-      "description": "Optional first period only, and only if an ongoing sleep record supports current sleep. Predict its remainder, never its recorded portion. sleepStart must be in the same minute as request now. Both settling fields must be null. All other periods use futureSleep.",
+      "description": "Optional first period only, and only if an ongoing sleep record supports current sleep. Predict its remainder, never its recorded portion. sleepStart must be in the same minute as request now, never the original recorded sleep start. sleepEnd is the predicted remaining sleep end, strictly after request now and sleepStart, and at or before todayEnd. Both settling fields must be null. All other periods use futureSleep.",
       "additionalProperties": false,
       "required": ["sleepStart", "sleepEnd", "sootheStart", "sootheEnd"],
       "properties": {
         "sleepStart": {
-          "$ref": "#/$defs/timestamp",
-          "description": "Request now to the same minute, never the original recorded sleep start."
+          "$ref": "#/$defs/timestamp"
         },
         "sleepEnd": {
-          "$ref": "#/$defs/timestamp",
-          "description": "Predicted remaining sleep end, strictly after request now and sleepStart, and at or before todayEnd."
+          "$ref": "#/$defs/timestamp"
         },
         "sootheStart": { "type": "null" },
         "sootheEnd": { "type": "null" }

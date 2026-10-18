@@ -589,6 +589,31 @@ public sealed class SleepAiWholeDayTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public async Task WholeDayProviderRetainsCrossMidnightAnchorsInInitialAndRetryInstructions(bool retry)
+    {
+        var overnight = Sleep(Midnight.AddHours(-5), Midnight.AddHours(7));
+        var request = Request() with { Records = [overnight] };
+        var fake = new ChatFake();
+        await new OpenAiSleepProvider(fake, Options.Create(Enabled())).GenerateAsync(
+            request, SleepAiValidation.ValidateRequest(request, Now), retry, default);
+
+        using var payload = JsonDocument.Parse(fake.Messages![1].Text);
+        var record = Assert.Single(payload.RootElement.GetProperty("records").EnumerateArray());
+        Assert.Equal(overnight.Start, record.GetProperty("start").GetDateTimeOffset());
+        Assert.Equal(overnight.End, record.GetProperty("end").GetDateTimeOffset());
+        Assert.True(record.GetProperty("start").GetDateTimeOffset() <
+            payload.RootElement.GetProperty("todayStart").GetDateTimeOffset());
+        var system = fake.Messages[0].Text!;
+        Assert.Contains("Include that isolated overnight record with its original previous-date start", system);
+        Assert.Contains("Do not omit it, clip its start to todayStart or replace its recorded end", system);
+        Assert.Contains("First retain the mandatory recorded anchors, then add supported predictions", system);
+        Assert.Contains("This check must also be repeated after a failed response", system);
+        Assert.Equal(retry, system.Contains("previous response failed structural/temporal validation", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public async Task ActualWholeDaySdkPromptUsesEmbeddedReferencesAndSparseDataLimitsWithoutBrowsing(bool retry)
     {
         using var transport = new WireHandler(); using var http = new HttpClient(transport);
