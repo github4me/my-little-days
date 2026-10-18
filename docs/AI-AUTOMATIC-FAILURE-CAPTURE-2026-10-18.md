@@ -2,7 +2,8 @@
 
 18 October 2026. Owner instruction: “对所有app启用失败采集，不用授权”.
 
-Status: implementation and verification in progress; not yet activated in production.
+Status: deployed and activated in production, release completed 06:30:25 UTC
+on 18 October 2026 (17:30 Melbourne).
 This replaces the separate diagnostic opt-in introduced in the earlier backend
 release. Initial AI enablement, sign-in and authoritative access checks remain
 required. No additional diagnostic-consent popup or mobile upgrade is required
@@ -50,6 +51,16 @@ and operational documents through the GitHub plugin. Run disposable SQL CI and
 the existing manual API/database workflow, with `database_bootstrapped=true`
 and `adopt_ef=false`, freezing the release SHA.
 
+Frozen candidate: `d3c592b67727a1ab489d8ee76e4fea0a37694748` (GitHub plugin
+commit/ref update from trusted parent `36908b80ac406468fe3d6f57c324e7b27237cf53`).
+Push CI `39103794262`; manual release `39103865059`, dispatched 06:23:29 UTC
+with the inputs above. Both completed successfully; the branch remained frozen
+through release. Immediately preceding dispatch, the GitHub settings UI confirmed both
+`family-database` and `family-pilot` restrict deployment to
+`feature/family-invitations`; required reviewers and wait timer were disabled,
+administrator bypass enabled. These existing protections were observed, not
+strengthened or weakened by this task.
+
 Production targets remain the existing `reticle.com.au` tenant, subscription
 `4768a858-f23f-4a39-bb64-eabc9c142627`, resource group
 `my-little-days-pilot-rg`, API `little-days-api-522fpstfbtds2` and database
@@ -69,9 +80,65 @@ executed locally. Command: `env -u FAMILY_TEST_SQL_CONNECTION
 /Users/chao/Applications/.dotnet/dotnet test server/LittleDays.slnx
 --configuration Release --no-restore`, exit 0. The migrator summary was confirmed
 with a clean project rerun using `--no-build --no-restore`.
-Disposable SQL CI and deployment/catalog/health receipt are pending. No
-live-family payload has been used as a fixture and no paid inference is triggered
-by these checks.
+Disposable SQL CI and deployment/catalog/health verification subsequently
+completed below. No live-family payload was used as a fixture and no paid
+inference was triggered by these checks.
+
+Push CI API/SQL job `117605277779` completed the real disposable-SQL suite:
+**661 API tests and 130 migrator tests passed, zero failed/skipped** (06:24 UTC).
+Command: `dotnet test server/LittleDays.slnx --configuration Release`.
+
+| Requirement | Evidence |
+| --- | --- |
+| “对所有app启用失败采集，不用授权” (current resumable clients, no extra diagnostic opt-in) | `AutomaticPolicyStoresBoundedFailedOutputsForLegacyClientWithoutExposingThemInPrediction`; `AutomaticPolicyStoresBoundedFailedOutputsForOptInClientWithoutExposingThemInPrediction` |
+| Preserve actual client consent and replay identity | `LegacyClientAutomaticallyCapturesWithoutRetrofittingConsentOrChangingImmutableOperation` |
+| Never revive pre-policy or lifecycle-suppressed jobs | `PrePolicyNullEpochJobCompletesWithoutCaptureOrRetroactiveConsent`; `AccountDeletionSuppressionSurvivesLeaseRecoveryWithoutCancellingOtherMembersPrediction` |
+| Seven-day expiry and history isolation | `ExactSevenDayBoundaryDeletesDiagnosticsButNeverFamilyRecords`; `ClaimAfterHistoryRotationDoesNotRecaptureOldPersonalRequestUnderNewEpoch` |
+| Schema-first compatibility, immutable prior scripts and verified no-op | `AutomaticCaptureUpgradePreservesPriorJobsAndOutputsAndHasVerifiedNoOp`; `AutomaticPolicyCatalogRejectsMissingUntrustedOrBroadenedCheck` |
+
+The .NET testing skills guided explicit output/hash/expiry/lifecycle assertions
+and independent gap review, rather than merely testing whether calls completed.
+
+Release verification job `117605505890` independently repeated the same
+**661 API / 130 migrator passes, zero failures/skips** before production SQL.
+Push CI `39103794262` also completed its TypeScript/Watch/browser checks.
+
+Actual release API artifact `12127262904` (`family-api-39103865059`, 30,351,406
+bytes) is bound to the frozen SHA. Downloaded ZIP SHA-256
+`149813bc40b70276313ddf47ed5d4f1a0477d461671f6cb3f75b4d67fef00a42` matches
+GitHub's published digest. Packaged configuration preserves concurrency 50,
+account/hour 30, daily 200, model `gpt-6-luna`, and metadata-only Information
+logging for `SleepAiDiagnostics`. App-local Pkcs 10.0.13 (file version
+10.0.1326.50504) is preserved; DLL SHA-256
+`eff9ed505c194f0f5c9faef1a175459cd0560eeb4ad08890c7c0c0e1ff4d34c3` matches the
+previous patched artifact. Provider source/timeouts/retry settings are unchanged;
+artifact inspection does not independently prove the provider's runtime service
+tier. No paid inference was made to remeasure it.
+
+Production migration job `117606324433` succeeded:
+
+- 06:29:00 UTC: exactly one pending script, `0012_SleepAiAutomaticFailedOutputCapture.sql`.
+- 06:29:11 UTC: migration completed successfully.
+- 06:29:16 UTC: post-apply catalog/journal verification returned `Pending database scripts: 0`.
+- 06:29:19 UTC: this run's temporary exact runner-IP SQL firewall rule was removed.
+
+API deploy job `117606496033` succeeded. OneDeploy
+`314eadfc-fffe-4f6a-a8f4-b83c0794750a` installed the package; public liveness
+passed at 06:30:22 UTC and all five release jobs completed successfully at
+06:30:25 UTC. [Verified release](https://github.com/github4me/my-little-days/actions/runs/39103865059).
+
+Independent sequential read-only checks at 06:31:29–30 UTC returned:
+
+- `/health/live`: 200, `status: ok`.
+- `/health/ready`: 200, `status: ready` (recovery gate, not a SQL probe).
+- Unauthenticated `/v2/sleep-prediction-jobs/capabilities`: 401,
+  `code: unauthorized`, preserving authentication.
+
+Automatic capture is active prospectively for new resumable AI jobs from current
+iOS/Android clients, without a mobile release or extra diagnostic consent.
+No already-completed uncaptured failure was recovered. No device or real-family
+failure was induced. Waiting for a naturally occurring eligible failure and
+restricted SQL readback remains a separate production acceptance step.
 
 Live payload readback is a separate acceptance step, not proved by health or
 CI. The previous administrative SQL lookup was blocked by the local operator IP

@@ -2,8 +2,8 @@
 
 18 October 2026. The owner subsequently requested automatic capture without a
 separate diagnostic opt-in. The [automatic rollout](AI-AUTOMATIC-FAILURE-CAPTURE-2026-10-18.md)
-records implementation/deployment status. The earlier backend is deployed;
-automatic capture is not live until that rollout is verified. This is separate
+records implementation/deployment status. Automatic capture is deployed and
+active for new resumable jobs from 18 October 2026, 06:30 UTC. This is separate
 from the metadata-only App Service timing log.
 
 ## Scope

@@ -9,7 +9,8 @@ app upgrade. Initial AI opt-in and authoritative access remain unchanged.
 Do not backfill old null-epoch jobs or collect historical synchronous calls.
 See [the scoped rollout receipt](AI-AUTOMATIC-FAILURE-CAPTURE-2026-10-18.md).
 
-Status: code verification in progress; automatic capture not yet deployed.
+Status: **deployed and active**, release `39103865059` completed 06:30:25 UTC,
+frozen SHA `d3c592b67727a1ab489d8ee76e4fea0a37694748`.
 Privacy/support additions are live in `my-little-days-privacy` commit
 `5dca921343b082338828a7023167d9ea3ec1ddef`, Pages run `39103593943` succeeded.
 Public readback verifies no extra diagnostics prompt and seven-day retention.
@@ -31,6 +32,17 @@ Before activation, verify public disclosures and environment protection state.
 After activation, record exact SHA/run/migration/no-op/cleanup/health results in
 the scoped receipt. Production payload readback is a separate acceptance gap;
 do not claim it from health/CI or export private payloads into logs or Git.
+
+Verified: push CI and release checks passed **661 API + 130 migrator tests**,
+zero failures/skips, against disposable SQL, plus TypeScript/Watch/browser
+checks. Production 0012 completed 06:29:11 UTC; post-apply catalog check returned
+zero pending scripts 06:29:16; temporary SQL rule removed 06:29:19. Release API
+artifact `12127262904` digest/settings/patched Pkcs verified. Independent checks
+06:31:29–30 returned live/ready 200 and unauthenticated AI capabilities 401.
+Both environments still restrict the trusted branch; reviewers/wait timer are
+disabled and administrator bypass enabled (observed, unchanged). No new app
+build or real-data inference was required. Initial AI opt-in remains required;
+this removes only the additional diagnostic opt-in.
 
 ## AI concurrency 50 and failed-output diagnostics — 18 October 2026 release
 
