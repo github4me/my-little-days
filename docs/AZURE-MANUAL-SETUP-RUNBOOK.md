@@ -4689,3 +4689,31 @@ change, public disclosure update or Apple upload. A post-startup SQL check found
 no new exchange rows; real-provider success and installed-device acceptance must
 be verified on the next user request rather than inferred from health. Preserve
 the existing capture/expiry/revocation/restore cleanup procedures.
+
+## Apple App Review0.2.4(77) submitted — 19 October2026
+
+Owner explicitly directed submission without correcting public/in-app privacy
+wording. Submitted existing build77 at18 October19:51:55.614 UTC /19 October
+06:51:55 Melbourne. Fresh API readback19:52:02 confirms WAITING_FOR_REVIEW.
+See [the exact review receipt](APPLE-REVIEW-0.2.4-77-2026-10-19.md).
+
+Target App Store Connect app6809826484 /teamA9974KXQ4G; new version resource
+73bed9b0-213d-42a2-b657-0efb65eee7f2, existing accepted build
+93de67a9-6f84-44c0-8307-95d251c62c13, submission
+eee36c47-2c86-4165-b385-7154c667e7f6. Use App Store Connect → My Little Days →
+Distribution → App Review to inspect this submission, not TestFlight beta review.
+Existing release preference AFTER_APPROVAL/automatic to all users is preserved;
+public0.2.3(75) was unchanged. Approval/publication remain pending.
+
+Existing managed submission identity verified production target and accepted
+signed77/hash/symbol/feature records. Created draft, retained12 COMPLETE gallery
+images and listing content, saved truthful77 review notes/What's New, preserved
+private review contacts/own-email OTP access, selected77, created one submission
+item and submitted using the official API. No new binary, signing change, EAS
+cloud build, App Privacy publication/attestation, agreement acceptance, commerce,
+region, Azure or provider change. No private payload/contact/credential export.
+
+The private review note accurately discloses full-exchange seven-day diagnostic
+capture and that public/in-app retention text remains unupdated. This discrepancy
+is not resolved by successful submission and may require Apple follow-up. Do not
+report submitted, approved and publicly available as the same checkpoint.

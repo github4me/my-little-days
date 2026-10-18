@@ -1,0 +1,20 @@
+My Little Days is a diary for parents and caregivers. Personal recording and optional tips need no app account. Optional family sharing and AI sleep suggestions require verified email sign-in.
+
+VERSION 0.2.4 (BUILD 77)
+Records > Sleep guidance estimates only remaining sleep and windows to BEGIN settling, from the current time to the next local midnight. Recorded sleep remains authoritative and is rendered separately; AI does not recreate past sleep or change saved records. It first considers the previous seven complete local dates (excluding today), then today's observations and exact age in days. Broad WHO total-sleep and Raising Children Network tiredness references provide soft context. No browsing, on-device prediction, diagnosis, treatment or guaranteed sleep times. Insufficient evidence can return no estimate.
+
+AI REVIEW WALKTHROUGH
+Use a fictional baby profile and fictional recent sleep/feed records. Sign in as below. In Records > Sleep guidance, the AI consent link opens sharing details without enabling. Enable AI and Turn off AI are separate one-tap actions. Relevant new/edited records update suggestions automatically; no manual refresh or debug panel. Returning after backgrounding reconnects to the server task. The breathing brain indicates pending work; How to use reports failures.
+Green marks recorded sleep, red predicted sleep, yellow windows in which to BEGIN settling, not settling duration. The full-day clock has two connected turns; 00/03/06/09/12 labels are outside. Tap for original period times. Never wake, delay feeds or keep a child awake to match an estimate; follow their cues and individual medical advice.
+
+AI SERVICE AND STORAGE
+Our authenticated server sends OpenAI age in days, timezone/current time, sleep/feed times/types/milk amounts for seven previous complete local dates and today, plus the earlier same-day AI estimate. Names, full birth dates, notes, photos and account/family identifiers are excluded from the provider input.
+Server tasks/results allow generation to continue independently of the app. Ordinary task input clears at task termination; ordinary results expire at local midnight. Separately, restricted diagnostic capture retains provider request/response bodies, timing/errors and task correlation for seven days, with periodic cleanup. Credentials are excluded. This includes successful and failed exchanges. Turning AI off stops future sending and requests task/result/diagnostic cleanup once connected; it cannot recall data already sent. The latest backend schema correction is deployed. The public and in-app retention wording has not been updated to describe this separate full-exchange diagnostic capture.
+
+SIGN-IN: EMAIL ONE-TIME CODE, NO FIXED PASSWORD
+Use your own email/inbox. More > My account > Login opens Microsoft sign-in; receive the code directly and complete registration. No fixed demo password or developer-forwarded code. AI does not require joining a family. For family testing, create a separate fictional review family; a second reviewer-controlled email/device can join after the replacement warning. Never join a customer's family.
+
+OTHER FEATURES
+Bottle amounts support dragging either side, direct input and 5 mL steps; More sets capacity (250 mL default). Watch feed timers can be discarded; finishing saves directly. Widgets show saved summaries. Care reminders are local; family-entry push is disabled.
+More > Delete account explains ownership prerequisites and progress. Deletion removes records created or last edited by that account; use disposable data. Ordinary leaving retains contributions.
+More > Buy me a coffee offers three unchanged approved consumable tips, not subscriptions or unlocks. StoreKit supplies prices. Support: contact@reticle.com.au.
