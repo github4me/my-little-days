@@ -308,9 +308,11 @@ public sealed class FullHistorySqlTests(SqlFixture sql) : IClassFixture<SqlFixtu
         var created = await s.Call(x => x.CreateFullFamily(s.Owner, Request([s.Caregiver.Email]), default));
         var grant = await s.Call(x => x.AcceptInvitation(s.Caregiver, Assert.Single(created.Snapshot.Invitations).Id, new(Guid.NewGuid()), default));
         var ownerEntry = created.Snapshot.Entries[0];
-        var forbidden = new FullRecordOperation(Guid.NewGuid(), ownerEntry.Entry.GetProperty("id").GetString()!, grant.MembershipId,
+        var sharedDelete = new FullRecordOperation(Guid.NewGuid(), ownerEntry.Entry.GetProperty("id").GetString()!, grant.MembershipId,
             created.HistoryId, "delete", "entry", ownerEntry.Version, null, null);
-        await Code("record_forbidden", () => s.Call(x => x.ApplyFullRecord(s.Caregiver, created.FamilyId, forbidden, default)));
+        await s.Call(x => x.ApplyFullRecord(s.Caregiver, created.FamilyId, sharedDelete, default));
+        Assert.DoesNotContain((await s.Call(x => x.FullSnapshot(s.Owner, created.FamilyId, default))).Entries,
+            x => x.Entry.GetProperty("id").GetString() == sharedDelete.RecordId);
         var timer = FullDomainTests.Json("""{"id":"timer-caregiver","type":"sleep","start":"2026-09-01T10:00:00Z","note":""}""");
         var operation = Create(s, grant, timer);
         var receipt = await s.Call(x => x.ApplyFullRecord(s.Caregiver, created.FamilyId, operation, default));

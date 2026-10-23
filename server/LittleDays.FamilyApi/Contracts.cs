@@ -29,7 +29,8 @@ public sealed record FeedOperation(Guid OperationId, Guid RecordId, Guid Members
     string Kind, string? BaseVersion, SharedFeedInput? Feed);
 public sealed record FeedReceipt(Guid OperationId, Guid HistoryId, string Revision);
 public sealed record FullFamilyCapabilities(int SchemaVersion, string[] RecordKinds, int MaxSeedBytes,
-    int ExtrasSchemaVersion = 1, int CareSchemaVersion = 2, bool ConflictReplacementEnabled = true);
+    int ExtrasSchemaVersion = 1, int CareSchemaVersion = 2, bool ConflictReplacementEnabled = true,
+    bool CollaborativeEditingEnabled = true);
 public sealed record FullFamilyProfile(string Name, string BirthDate, string Sex);
 public sealed record ReplacedEntrySummary(string Id, string Type, DateTimeOffset Start,
     DateTimeOffset? End = null, decimal? Amount = null, string? FeedKind = null, bool NoteChanged = false);
@@ -44,7 +45,7 @@ public sealed record FullFamilySnapshot(int SchemaVersion, FullFamilyProfile Pro
     FamilyMember[] Members, FamilyInvitation[] Invitations, SharedFeed[] Feeds, OwnershipTransfer? OwnershipTransfer,
     int ExtrasSchemaVersion = 1, SharedExtraRecord[]? ExtraRecords = null, bool WatchRecordingEnabled = false,
     int CareSchemaVersion = 2, bool CrossMemberTimerCompletionEnabled = false,
-    bool ConflictReplacementEnabled = false)
+    bool ConflictReplacementEnabled = false, bool CollaborativeEditingEnabled = false)
 {
     // Legacy apps reject new care kinds. Omit them from the old representation,
     // never relabel them or delete the underlying records. Existing per-record
@@ -61,7 +62,8 @@ public sealed record FullRecordOperation(Guid OperationId, string RecordId, Guid
     string Kind, string Collection, string? BaseVersion, JsonElement? Entry, JsonElement? CareRecord,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] JsonElement? ExtraRecord = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? ReplacesOperationId = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TimerCompletion = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TimerCompletion = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? EditPolicy = null);
 public sealed record FullProfileRequest(Guid OperationId, Guid? MembershipId, Guid? HistoryId,
     string BaseVersion, JsonElement Profile) : IGrantContext;
 public sealed record CreateFamilyRequest(Guid OperationId, string BabyName);

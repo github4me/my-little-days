@@ -96,7 +96,7 @@ public sealed partial class FamilyService
         await ExpireInvitations(family, ct);
         // The capability is current host configuration, not part of a family's
         // data revision. A gate change must invalidate a cached enabled result.
-        var etag = $"\"v2-extras1-care{careSchemaVersion}-watch{(config.Family.EnforceSingleActiveTimers ? 1 : 0)}-cross-timer1-replace1:{config.Family.HistoryId:D}:{Revision(family)}:{grant.Id:D}\"";
+        var etag = $"\"v2-extras1-care{careSchemaVersion}-watch{(config.Family.EnforceSingleActiveTimers ? 1 : 0)}-cross-timer1-replace1-collab1:{config.Family.HistoryId:D}:{Revision(family)}:{grant.Id:D}\"";
         if (ifNoneMatch == etag) return new ConditionalSnapshot<FullFamilySnapshot>(etag, null);
         return new ConditionalSnapshot<FullFamilySnapshot>(etag, (await FullSnapshotData(family, grant, ct, expire: false)).ForCareSchema(careSchemaVersion));
     }, ct);
@@ -108,6 +108,7 @@ public sealed partial class FamilyService
     public async Task<FeedReceipt> ApplyFullRecord(PilotIdentity user, Guid familyId, FullRecordOperation operation, CancellationToken ct)
     {
         var value = FullDomainValidation.Operation(operation);
+        var collaborativeUpdate = RecordEditingPolicy.IsCollaborativeUpdate(operation);
         var hash = Fingerprint("record-v2", new { familyId, operation });
         var json = value is null ? null : RecordJson(operation.Collection, value.Value);
         var outcome = await FamilyTransaction(familyId, async () =>
@@ -160,7 +161,8 @@ public sealed partial class FamilyService
             }
             else
             {
-                if (row is null || row.Deleted || Convert.ToBase64String(row.Version) != operation.BaseVersion)
+                if (row is null || row.Deleted ||
+                    !collaborativeUpdate && Convert.ToBase64String(row.Version) != operation.BaseVersion)
                 {
                     if (row is not null && !row.Deleted && value is not null &&
                         CanOfferConflictReplacement(grant, user, row, operation, value.Value))
@@ -176,10 +178,12 @@ public sealed partial class FamilyService
                 var previous = ReadRecord(row);
                 var timerCompletion = operation.Collection == "entry" && value is not null &&
                     IsTimerCompletion(previous, value.Value);
-                var competingTimerReplacement = replacement?.TimerCompletion is not null && value is not null &&
-                    IsCompetingTimerCompletion(previous, value.Value, replacement.TimerCompletion);
-                if (operation.TimerCompletion is not null && replacement is null && !timerCompletion) Invalid();
+                var completionKind = replacement?.TimerCompletion ?? (collaborativeUpdate ? operation.TimerCompletion : null);
+                var competingTimerReplacement = completionKind is not null && value is not null &&
+                    IsCompetingTimerCompletion(previous, value.Value, completionKind);
+                if (operation.TimerCompletion is not null && replacement is null && !timerCompletion && !competingTimerReplacement) Invalid();
                 if (grant.Role != "owner" && row.RecordedBy != user.ObjectId &&
+                    !collaborativeUpdate && operation.Kind != "delete" &&
                     !(timerCompletion && IsPureTimerCompletion(previous, value!.Value)) && !competingTimerReplacement)
                     throw new ApiException(403, "record_forbidden");
                 if (operation.Collection == "extra" && value is not null &&
@@ -279,7 +283,7 @@ public sealed partial class FamilyService
             records.Where(x => x.Collection == "extra").OrderBy(x => x.Id, StringComparer.Ordinal)
                 .Select(x => new SharedExtraRecord(ReadRecord(x), Convert.ToBase64String(x.Version), x.RecordedBy, x.LastEditedBy)).ToArray(),
             config.Family.EnforceSingleActiveTimers, CrossMemberTimerCompletionEnabled: true,
-            ConflictReplacementEnabled: true);
+            ConflictReplacementEnabled: true, CollaborativeEditingEnabled: true);
         return FamilyAvailability.RequireResponseBudget(snapshot);
     }
 

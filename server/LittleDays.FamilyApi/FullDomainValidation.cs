@@ -147,6 +147,7 @@ public static partial class FullDomainValidation
             string.IsNullOrWhiteSpace(operation.RecordId) || operation.RecordId.Length > 128 ||
             operation.Kind is not ("create" or "update" or "delete") || operation.Collection is not ("entry" or "care" or "extra")) Invalid();
         if (operation.Kind == "create" ? operation.BaseVersion is not null : !RowVersion(operation.BaseVersion)) Invalid();
+        if (operation.EditPolicy is not null && !RecordEditingPolicy.IsCollaborativeUpdate(operation)) Invalid();
         if (operation.ReplacesOperationId is Guid replacement &&
             (replacement == Guid.Empty || replacement == operation.OperationId || operation.Kind != "update" || operation.Collection != "entry")) Invalid();
         if (operation.TimerCompletion is not null &&
