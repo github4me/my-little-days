@@ -1,0 +1,2 @@
+Improved AI sleep guidance connection recovery. Refreshing account status now restores AI availability correctly, controls stay accessible during temporary disconnections, and reconnecting resumes the existing request without creating a duplicate.
+
