@@ -28,7 +28,7 @@ public sealed class RecordEditingPolicyTests
     public void SharedCollectionsAcceptExplicitCollaborativeUpdates(string collection)
     {
         var operation = Update(collection);
-        Assert.True(RecordEditingPolicy.IsCollaborativeUpdate(operation));
+        Assert.True(RecordEditingPolicy.IsCollaborativeSave(operation));
         var value = FullDomainValidation.Operation(operation);
         Assert.Equal(operation.RecordId, value!.Value.GetProperty("id").GetString());
     }
@@ -40,18 +40,17 @@ public sealed class RecordEditingPolicyTests
     public void OwnerOnlySingletonsNeverAcceptCollaborativePolicy(string id)
     {
         var operation = Update("extra", id);
-        Assert.False(RecordEditingPolicy.IsCollaborativeUpdate(operation));
+        Assert.False(RecordEditingPolicy.IsCollaborativeSave(operation));
         Assert.Equal("invalid_input", Assert.Throws<ApiException>(() => FullDomainValidation.Operation(operation)).Code);
     }
 
     [Theory]
-    [InlineData("create")]
     [InlineData("delete")]
     [InlineData("unknown")]
-    public void PolicyDoesNotBypassCreateDeleteOrInvalidKindValidation(string kind)
+    public void LastSavePolicyDoesNotBypassDeleteOrInvalidKindValidation(string kind)
     {
         var operation = Update() with { Kind = kind, BaseVersion = kind == "create" ? null : "AAAAAAAAAAE=" };
-        Assert.False(RecordEditingPolicy.IsCollaborativeUpdate(operation));
+        Assert.False(RecordEditingPolicy.IsCollaborativeSave(operation));
         Assert.Equal("invalid_input", Assert.Throws<ApiException>(() => FullDomainValidation.Operation(operation)).Code);
     }
 
@@ -74,7 +73,7 @@ public sealed class RecordEditingPolicyTests
         var legacy = new { operation.OperationId, operation.RecordId, operation.MembershipId, operation.HistoryId,
             operation.Kind, operation.Collection, operation.BaseVersion, operation.Entry, operation.CareRecord };
         Assert.Equal(JsonSerializer.Serialize(legacy), JsonSerializer.Serialize(operation));
-        Assert.False(RecordEditingPolicy.IsCollaborativeUpdate(operation));
+        Assert.False(RecordEditingPolicy.IsCollaborativeSave(operation));
         FullDomainValidation.Operation(operation);
         var collaborative = operation with { EditPolicy = RecordEditingPolicy.LastServerSaveWins };
         Assert.Equal(RecordEditingPolicy.LastServerSaveWins,
@@ -89,8 +88,53 @@ public sealed class RecordEditingPolicyTests
     {
         var operation = Update(collection) with { Kind = "delete", Entry = null, CareRecord = null, ExtraRecord = null, EditPolicy = null };
         Assert.Null(FullDomainValidation.Operation(operation));
-        Assert.False(RecordEditingPolicy.IsCollaborativeUpdate(operation));
+        Assert.False(RecordEditingPolicy.IsCollaborativeSave(operation));
         Assert.Equal("invalid_input", Assert.Throws<ApiException>(() => FullDomainValidation.Operation(operation with { BaseVersion = null })).Code);
+    }
+
+    [Theory]
+    [InlineData("entry")]
+    [InlineData("care")]
+    [InlineData("extra")]
+    public void SharedCreatesOptIntoLastSaveAndDeletesOptIntoFirstDelete(string collection)
+    {
+        var create = Update(collection) with { Kind = "create", BaseVersion = null };
+        Assert.True(RecordEditingPolicy.IsCollaborativeSave(create));
+        Assert.False(RecordEditingPolicy.IsFirstDeleteWins(create));
+        Assert.Equal(create.RecordId, FullDomainValidation.Operation(create)!.Value.GetProperty("id").GetString());
+        var delete = Update(collection) with {
+            Kind = "delete", Entry = null, CareRecord = null, ExtraRecord = null,
+            EditPolicy = RecordEditingPolicy.FirstDeleteWins
+        };
+        Assert.True(RecordEditingPolicy.IsFirstDeleteWins(delete));
+        Assert.False(RecordEditingPolicy.IsCollaborativeSave(delete));
+        Assert.Null(FullDomainValidation.Operation(delete));
+        Assert.Equal("invalid_input", Assert.Throws<ApiException>(() => FullDomainValidation.Operation(delete with { BaseVersion = null })).Code);
+        Assert.Equal("invalid_input", Assert.Throws<ApiException>(() => FullDomainValidation.Operation(delete with { ReplacesOperationId = Guid.NewGuid() })).Code);
+    }
+
+    [Theory]
+    [InlineData("create")]
+    [InlineData("update")]
+    public void FirstDeletePolicyNeverAppliesToSaves(string kind)
+    {
+        var operation = Update() with { Kind = kind, BaseVersion = kind == "create" ? null : "AAAAAAAAAAE=", EditPolicy = RecordEditingPolicy.FirstDeleteWins };
+        Assert.False(RecordEditingPolicy.IsFirstDeleteWins(operation));
+        Assert.Equal("invalid_input", Assert.Throws<ApiException>(() => FullDomainValidation.Operation(operation)).Code);
+    }
+
+    [Theory]
+    [InlineData("avatar")]
+    [InlineData("play-selection")]
+    [InlineData("reminder-settings")]
+    public void FirstDeletePolicyNeverAppliesToOwnerOnlySingletons(string id)
+    {
+        var operation = Update("extra", id) with {
+            Kind = "delete", Entry = null, CareRecord = null, ExtraRecord = null,
+            EditPolicy = RecordEditingPolicy.FirstDeleteWins
+        };
+        Assert.False(RecordEditingPolicy.IsFirstDeleteWins(operation));
+        Assert.Equal("invalid_input", Assert.Throws<ApiException>(() => FullDomainValidation.Operation(operation)).Code);
     }
 
     [Fact]

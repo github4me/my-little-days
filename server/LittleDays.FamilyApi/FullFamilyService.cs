@@ -96,7 +96,7 @@ public sealed partial class FamilyService
         await ExpireInvitations(family, ct);
         // The capability is current host configuration, not part of a family's
         // data revision. A gate change must invalidate a cached enabled result.
-        var etag = $"\"v2-extras1-care{careSchemaVersion}-watch{(config.Family.EnforceSingleActiveTimers ? 1 : 0)}-cross-timer1-replace1-collab1:{config.Family.HistoryId:D}:{Revision(family)}:{grant.Id:D}\"";
+        var etag = $"\"v2-extras1-care{careSchemaVersion}-watch{(config.Family.EnforceSingleActiveTimers ? 1 : 0)}-cross-timer1-replace1-collab2:{config.Family.HistoryId:D}:{Revision(family)}:{grant.Id:D}\"";
         if (ifNoneMatch == etag) return new ConditionalSnapshot<FullFamilySnapshot>(etag, null);
         return new ConditionalSnapshot<FullFamilySnapshot>(etag, (await FullSnapshotData(family, grant, ct, expire: false)).ForCareSchema(careSchemaVersion));
     }, ct);
@@ -108,7 +108,8 @@ public sealed partial class FamilyService
     public async Task<FeedReceipt> ApplyFullRecord(PilotIdentity user, Guid familyId, FullRecordOperation operation, CancellationToken ct)
     {
         var value = FullDomainValidation.Operation(operation);
-        var collaborativeUpdate = RecordEditingPolicy.IsCollaborativeUpdate(operation);
+        var collaborativeSave = RecordEditingPolicy.IsCollaborativeSave(operation);
+        var firstDeleteWins = RecordEditingPolicy.IsFirstDeleteWins(operation);
         var hash = Fingerprint("record-v2", new { familyId, operation });
         var json = value is null ? null : RecordJson(operation.Collection, value.Value);
         var outcome = await FamilyTransaction(familyId, async () =>
@@ -150,9 +151,16 @@ public sealed partial class FamilyService
             }
             var idHash = RecordIdHash(operation.RecordId);
             var row = await db.FamilyRecords.SingleOrDefaultAsync(x => x.FamilyId == familyId && x.Collection == operation.Collection && x.IdHash == idHash, ct);
-            if (operation.Kind == "create")
+            if (firstDeleteWins && row?.Deleted == true)
             {
-                if (row is not null) throw new ApiException(412, "record_changed");
+                // A different member may already have deleted this ID. Acknowledge
+                // this intent durably without changing the first tombstone or actor.
+                var alreadyDeleted = new FeedReceipt(operation.OperationId, config.Family.HistoryId, Revision(family));
+                SaveReceipt(user, operation.OperationId, familyId, grant.Id, "record-v2", hash, alreadyDeleted);
+                return new RecordApplyOutcome(alreadyDeleted);
+            }
+            if (operation.Kind == "create" && row is null)
+            {
                 if (operation.Collection == "entry") await GuardActiveTimer(familyId, operation.RecordId, value!.Value, ct);
                 await CheckRecordBudget(familyId, null, json!, ct);
                 row = NewRecord(familyId, operation.Collection, value!.Value, user.ObjectId, json);
@@ -161,8 +169,8 @@ public sealed partial class FamilyService
             }
             else
             {
-                if (row is null || row.Deleted ||
-                    !collaborativeUpdate && Convert.ToBase64String(row.Version) != operation.BaseVersion)
+                if (row is null || row.Deleted || operation.Kind == "create" && !collaborativeSave ||
+                    !collaborativeSave && !firstDeleteWins && Convert.ToBase64String(row.Version) != operation.BaseVersion)
                 {
                     if (row is not null && !row.Deleted && value is not null &&
                         CanOfferConflictReplacement(grant, user, row, operation, value.Value))
@@ -178,12 +186,12 @@ public sealed partial class FamilyService
                 var previous = ReadRecord(row);
                 var timerCompletion = operation.Collection == "entry" && value is not null &&
                     IsTimerCompletion(previous, value.Value);
-                var completionKind = replacement?.TimerCompletion ?? (collaborativeUpdate ? operation.TimerCompletion : null);
+                var completionKind = replacement?.TimerCompletion ?? (collaborativeSave ? operation.TimerCompletion : null);
                 var competingTimerReplacement = completionKind is not null && value is not null &&
                     IsCompetingTimerCompletion(previous, value.Value, completionKind);
                 if (operation.TimerCompletion is not null && replacement is null && !timerCompletion && !competingTimerReplacement) Invalid();
                 if (grant.Role != "owner" && row.RecordedBy != user.ObjectId &&
-                    !collaborativeUpdate && operation.Kind != "delete" &&
+                    !collaborativeSave && operation.Kind != "delete" &&
                     !(timerCompletion && IsPureTimerCompletion(previous, value!.Value)) && !competingTimerReplacement)
                     throw new ApiException(403, "record_forbidden");
                 if (operation.Collection == "extra" && value is not null &&
