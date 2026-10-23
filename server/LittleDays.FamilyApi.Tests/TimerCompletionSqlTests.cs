@@ -116,7 +116,7 @@ public sealed class TimerCompletionSqlTests(SqlFixture sql) : IClassFixture<SqlF
     }
 
     [SqlFact]
-    public async Task CrossMemberSubMinuteSleepStopCompletesWithAttributionAndDeleteRemainsForbidden()
+    public async Task CrossMemberSubMinuteSleepStopKeepsAttributionAndSharedDeletionRequiresCurrentVersion()
     {
         var setup = await Setup();
         var sleep = Sleep("quick-sleep", "2026-09-19T14:00:00Z");
@@ -124,7 +124,6 @@ public sealed class TimerCompletionSqlTests(SqlFixture sql) : IClassFixture<SqlF
         var active = await setup.Entry("quick-sleep");
         var delete = Delete(setup, setup.OtherGrant, active);
 
-        await Code("record_forbidden", () => setup.Apply(setup.Other, delete));
         await setup.Apply(setup.Other, Update(setup, setup.OtherGrant, active,
             Sleep("quick-sleep", "2026-09-19T14:00:00Z", "2026-09-19T14:00:30Z")));
 
@@ -132,6 +131,10 @@ public sealed class TimerCompletionSqlTests(SqlFixture sql) : IClassFixture<SqlF
         Assert.Equal("2026-09-19T14:00:30Z", completed.Entry.GetProperty("end").GetString());
         Assert.Equal(setup.Caregiver.ObjectId, completed.RecordedBy);
         Assert.Equal(setup.Other.ObjectId, completed.EndedBy);
+        await Code("record_changed", () => setup.Apply(setup.Other, delete));
+        await setup.Apply(setup.Other, Delete(setup, setup.OtherGrant, completed));
+        Assert.DoesNotContain((await setup.Snapshot()).Entries,
+            x => x.Entry.GetProperty("id").GetString() == "quick-sleep");
 
         var own = Sleep("own-quick-delete", "2026-09-19T14:01:00Z");
         await setup.Apply(setup.Caregiver, Create(setup, setup.CaregiverGrant, own));
