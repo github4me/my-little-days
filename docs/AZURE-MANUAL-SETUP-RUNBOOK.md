@@ -4717,3 +4717,53 @@ The private review note accurately discloses full-exchange seven-day diagnostic
 capture and that public/in-app retention text remains unupdated. This discrepancy
 is not resolved by successful submission and may require Apple follow-up. Do not
 report submitted, approved and publicly available as the same checkpoint.
+
+## 27 October 2026 — Backend deployment authorized independently of wording
+
+The owner explicitly requested deployment without the deletion-wording update.
+Do not reimpose the 26 October copy coordination hold or change app/public copy
+in this backend-only operation. Publish the four reviewed retention backend/test
+files over `86841a7c5909cbe06d538907bc95f3a6ccdfe36d` using the GitHub plugin and
+an expected-head lease; deploy collaboration and retention together.
+
+Location: GitHub `github4me/my-little-days`, Actions **Deploy family API and
+database**, branch `feature/family-invitations`; existing reticle.com.au tenant,
+production subscription `4768a858-f23f-4a39-bb64-eabc9c142627`, resource group
+`my-little-days-pilot-rg`, App Service `little-days-api-522fpstfbtds2`, database
+`little-days-family`. Exact inputs: `database_bootstrapped=true`, `adopt_ef=false`.
+Expected result: exact-revision SQL-backed CI passes, catalog verification and
+zero pending migrations, temporary runner firewall rule removed, API artifact
+deployed and liveness healthy. Do not treat these as real-device destructive-flow
+acceptance. Fresh environment inspection: both deployment environments allow
+only the trusted branch, with no reviewer/wait gate; target identifiers match.
+No environment protection or cost/quota setting is changed.
+
+The frozen release and measured outcome will be recorded in
+`docs/FAMILY-RETENTION-BACKEND-2026-10-27.md`. At this preparation checkpoint,
+deployment has not yet been dispatched. App Store review and wording are left
+unchanged as requested.
+
+**Completion:** runtime `b965493f1ba9f164d99b48698b9945721d49363e` deployed in
+GitHub run 40392392849/deployment 33, attempt 2, all five jobs successful. Exact
+revision SQL CI: API 845+migrator 157 passed, failed 0/skipped 0. Independent push
+CI also passed after an unchanged browser retry. Deployment attempt 1 was
+cancelled before any production job because its browser dependency download
+was unusually slow; only that verification job/dependents were retried, with
+the same source and full checks. No test or protection was weakened.
+
+Catalog checks explicitly reported pending 0 before/through/after the no-op;
+runner rule `github-db-40392392849-2` was removed 20:20:13 UTC on 26 October.
+Deployment downloaded and verified API artifact 12686245659, SHA256
+`4bace42c96b870c527605f9b20038a8e7966175ceab108171416ef0308be1112`.
+Azure deployment `1ca0846f-b45d-4025-8e52-be9ec9ca1f52` is Succeeded (Active),
+package completed 20:21:18 UTC. Bounded cold-start checks recovered 20:22:55 UTC.
+Independent 20:23:39 UTC /07:23:39 Melbourne checks returned live 200, ready 200,
+anonymous capabilities 401, all no-store. Daily quota override 1000 was freshly
+read; package concurrency 50/account-hour 30 and existing AI settings preserved.
+No new service, tier, credential, infrastructure-gate, Apple or mobile change.
+Shared records/tombstones are now retained on account deletion; active-member
+collaboration uses last successful server save/first deletion for marked
+operations. Physical signed-in/two-device acceptance remains unverified; no
+real account was deleted for testing. See the scoped report for complete
+artifact/source evidence. This supersedes only the dated deployment hold above;
+the user-requested wording gap remains unchanged.
