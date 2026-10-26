@@ -83,7 +83,7 @@ public sealed class DeletionProcessor(PilotDatabase db, PilotConfiguration confi
             if (!await DrainOperationReceipts(() => service.Transaction(async () =>
             {
                 if (!await db.AccountDeletions.AnyAsync(x => x.UserId == userId && x.Status == "pending", ct)) return 0;
-                // Purge device/event attribution before deleting the source records.
+                // Purge device/event attribution before anonymizing shared records.
                 // Each SQL statement is bounded; release the lifecycle lock between
                 // batches. Orphan links carry only opaque IDs and expire separately.
                 return await db.Database.ExecuteSqlInterpolatedAsync($"""
@@ -115,25 +115,21 @@ public sealed class DeletionProcessor(PilotDatabase db, PilotConfiguration confi
                     .Union(db.Invitations.Where(x => x.RecipientUserId == job.UserId || emails.Contains(x.Email)).Select(x => x.FamilyId))
                     .Union(db.OwnershipTransfers.Where(x => x.FromUserId == job.UserId || x.ToUserId == job.UserId).Select(x => x.FamilyId))
                     .Distinct().ToArrayAsync(ct);
-                // The pilot has no earlier-version archive: deleting the current content is
-                // safer than claiming an edited note was erased by zeroing its attribution.
-                await db.Feeds.Where(x => x.RecordedBy == job.UserId || x.LastEditedBy == job.UserId).ExecuteDeleteAsync(ct);
-                await db.FamilyRecords.Where(x => x.RecordedBy == job.UserId || x.LastEditedBy == job.UserId).ExecuteDeleteAsync(ct);
-                // Timer completion is attribution, not ownership of the record. If
-                // another member subsequently edited the completed record, erase the
-                // deleting account's remaining opaque attribution without broadening
-                // the established authored/last-edited content deletion policy.
-                await db.FamilyRecords.Where(x => x.TimerEndedBy == job.UserId)
-                    .ExecuteUpdateAsync(s => s.SetProperty(x => x.TimerEndedBy, (Guid?)null), ct);
-                // A retained conflict summary contains the previous editor's
-                // contribution. Clear the complete summary rather than leaving
-                // content behind with anonymized attribution.
-                await db.FamilyRecords.Where(x => x.ConflictPreviousEditedBy == job.UserId)
+                // Shared records belong to the family, not to the account that
+                // created or last edited them. Retain content AND deletion markers.
+                // The empty GUID is non-account attribution, never a new member.
+                await db.Feeds.Where(x => x.RecordedBy == job.UserId || x.LastEditedBy == job.UserId)
                     .ExecuteUpdateAsync(s => s
-                        .SetProperty(x => x.ConflictReplacedBy, (Guid?)null)
-                        .SetProperty(x => x.ConflictPreviousEditedBy, (Guid?)null)
-                        .SetProperty(x => x.ConflictReplacedAt, (DateTimeOffset?)null)
-                        .SetProperty(x => x.ConflictPreviousJson, (string?)null), ct);
+                        .SetProperty(x => x.RecordedBy, x => x.RecordedBy == job.UserId ? Guid.Empty : x.RecordedBy)
+                        .SetProperty(x => x.LastEditedBy, x => x.LastEditedBy == job.UserId ? Guid.Empty : x.LastEditedBy), ct);
+                await db.FamilyRecords.Where(x => x.RecordedBy == job.UserId || x.LastEditedBy == job.UserId ||
+                        x.TimerEndedBy == job.UserId || x.ConflictReplacedBy == job.UserId || x.ConflictPreviousEditedBy == job.UserId)
+                    .ExecuteUpdateAsync(s => s
+                        .SetProperty(x => x.RecordedBy, x => x.RecordedBy == job.UserId ? Guid.Empty : x.RecordedBy)
+                        .SetProperty(x => x.LastEditedBy, x => x.LastEditedBy == job.UserId ? Guid.Empty : x.LastEditedBy)
+                        .SetProperty(x => x.TimerEndedBy, x => x.TimerEndedBy == job.UserId ? null : x.TimerEndedBy)
+                        .SetProperty(x => x.ConflictReplacedBy, x => x.ConflictReplacedBy == job.UserId ? Guid.Empty : x.ConflictReplacedBy)
+                        .SetProperty(x => x.ConflictPreviousEditedBy, x => x.ConflictPreviousEditedBy == job.UserId ? Guid.Empty : x.ConflictPreviousEditedBy), ct);
                 await db.Invitations.Where(x => x.RecipientUserId == job.UserId || emails.Contains(x.Email)).ExecuteDeleteAsync(ct);
                 await db.OwnershipTransfers.Where(x => x.FromUserId == job.UserId || x.ToUserId == job.UserId).ExecuteDeleteAsync(ct);
                 if (await db.Operations.AnyAsync(x => x.UserId == job.UserId, ct))

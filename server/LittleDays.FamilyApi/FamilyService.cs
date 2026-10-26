@@ -327,7 +327,8 @@ public sealed partial class FamilyService(PilotDatabase db, PilotConfiguration c
         // Failed output can contain a family's observed sleep times. Without
         // record-level provenance, erase affected-family diagnostic copies too.
         await PurgeSleepAiFailuresForAccount(user.ObjectId, ct);
-        // Include old grants and the current creator-or-last-editor erasure policy.
+        // Revoke device access and pending notifications, including old grants.
+        // Shared record content remains with the family after account deletion.
         await db.PushInstallations.Where(x => x.UserId == user.ObjectId).ExecuteUpdateAsync(s => s
             .SetProperty(x => x.Enabled, false).SetProperty(x => x.TokenHash, (string?)null).SetProperty(x => x.ProtectedToken, ""), ct);
         await db.NotificationSummaryBuckets.Where(x => x.RecipientUserId == user.ObjectId && (x.State == "pending" || x.State == "leased"))

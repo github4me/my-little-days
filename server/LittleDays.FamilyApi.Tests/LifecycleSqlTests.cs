@@ -169,7 +169,7 @@ public sealed class LifecycleSqlTests(SqlFixture sql) : IClassFixture<SqlFixture
     }
 
     [SqlFact]
-    public async Task AccountDeletionImmediatelyDisablesPurgesContributionsAndWaitsForDirectoryConfirmation()
+    public async Task AccountDeletionImmediatelyDisablesRetainsContributionsAndWaitsForDirectoryConfirmation()
     {
         var s = new Scenario(sql);
         var family = await s.Create();
@@ -187,8 +187,13 @@ public sealed class LifecycleSqlTests(SqlFixture sql) : IClassFixture<SqlFixture
         Assert.Empty((await s.Call(x => x.Me(s.Caregiver, default))).Families);
         Assert.False(await RunCleanup(s, new UnconfiguredAccountIdentityDeletion()));
         Assert.Equal("awaiting_identity_deletion", (await s.Call(x => x.DeletionStatus(new(result.DeletionId, delete.ReceiptSecret), default))).Status);
-        var retained = Assert.Single((await s.Call(x => x.Snapshot(s.Owner, family.Id, default))).Feeds);
-        Assert.Equal(s.Owner.ObjectId, retained.RecordedBy);
+        var retained = (await s.Call(x => x.Snapshot(s.Owner, family.Id, default))).Feeds;
+        Assert.Equal(2, retained.Length);
+        var anonymized = retained.Single(x => x.Id == own.RecordId);
+        Assert.Equal(Guid.Empty, anonymized.RecordedBy);
+        Assert.Equal(Guid.Empty, anonymized.LastEditedBy);
+        Assert.Equal(own.Feed!.Amount, anonymized.Amount);
+        Assert.Equal(s.Owner.ObjectId, retained.Single(x => x.Id != own.RecordId).RecordedBy);
         await using (var db = sql.Open())
         {
             Assert.Empty(await db.Memberships.Where(x => x.UserId == s.Caregiver.ObjectId).ToArrayAsync());
@@ -206,7 +211,7 @@ public sealed class LifecycleSqlTests(SqlFixture sql) : IClassFixture<SqlFixture
     }
 
     [SqlFact]
-    public async Task DeletedEditorsContentIsRemovedRatherThanOnlyRemovingAttribution()
+    public async Task DeletingLastEditorRetainsAnotherMembersOriginalRecordAndItsCurrentContent()
     {
         var s = new Scenario(sql);
         var family = await s.Create();
@@ -220,7 +225,11 @@ public sealed class LifecycleSqlTests(SqlFixture sql) : IClassFixture<SqlFixture
         await s.Call(x => x.AcceptOwnership(s.Caregiver, family.Id, transfer.Id, s.Context(caregiver), default));
         await s.Call(x => x.DeleteAccount(s.Owner, DeleteRequest(), default));
         await RunCleanup(s, new IdentityDeletionStub());
-        Assert.Empty((await s.Call(x => x.Snapshot(s.Caregiver, family.Id, default))).Feeds);
+        var retained = Assert.Single((await s.Call(x => x.Snapshot(s.Caregiver, family.Id, default))).Feeds);
+        Assert.Equal(s.Caregiver.ObjectId, retained.RecordedBy);
+        Assert.Equal(Guid.Empty, retained.LastEditedBy);
+        Assert.Equal(111, retained.Amount);
+        Assert.Equal("Deleted user's contributed note", retained.Note);
     }
 
     [SqlFact]

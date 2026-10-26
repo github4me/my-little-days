@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 
 namespace LittleDays.FamilyApi.Tests;
@@ -7,7 +8,7 @@ namespace LittleDays.FamilyApi.Tests;
 public sealed class FullHistoryDeletionSqlTests(SqlFixture sql) : IClassFixture<SqlFixture>
 {
     [SqlFact]
-    public async Task LeavingPreservesFullRecordsButAccountDeletionPurgesAuthoredAndLastEditedContent()
+    public async Task AccountDeletionPreservesSharedRecordsAndAnonymizesOnlyTheDeletedAccount()
     {
         var s = new Scenario(sql);
         var family = await s.Create();
@@ -15,7 +16,15 @@ public sealed class FullHistoryDeletionSqlTests(SqlFixture sql) : IClassFixture<
         await using (var db = sql.Open())
         {
             var now = DateTimeOffset.UtcNow;
-            db.FamilyRecords.AddRange(
+            var conflict = Record(family.Id, "entry", "conflict", s.Caregiver.ObjectId, s.Caregiver.ObjectId);
+            conflict.ConflictReplacedBy = s.Caregiver.ObjectId;
+            conflict.ConflictPreviousEditedBy = s.Caregiver.ObjectId;
+            conflict.ConflictReplacedAt = now;
+            conflict.ConflictPreviousJson = "{\"id\":\"conflict\",\"type\":\"sleep\",\"start\":\"2026-10-25T20:00:00Z\"}";
+            var tombstone = Record(family.Id, "entry", "deleted", s.Caregiver.ObjectId, s.Caregiver.ObjectId);
+            tombstone.Deleted = true;
+            tombstone.RecordJson = "{}";
+            db.FamilyRecords.AddRange(conflict, tombstone,
                 Record(family.Id, "entry", "authored", s.Caregiver.ObjectId, s.Owner.ObjectId),
                 Record(family.Id, "care", "edited", s.Owner.ObjectId, s.Caregiver.ObjectId),
                 Record(family.Id, "entry", "retained", s.Owner.ObjectId, s.Owner.ObjectId),
@@ -31,7 +40,7 @@ public sealed class FullHistoryDeletionSqlTests(SqlFixture sql) : IClassFixture<
             await db.SaveChangesAsync();
         }
         await s.Call(x => x.Leave(s.Caregiver, family.Id, s.Context(caregiver), default));
-        await using (var db = sql.Open()) Assert.Equal(4, await db.FamilyRecords.CountAsync(x => x.FamilyId == family.Id));
+        await using (var db = sql.Open()) Assert.Equal(6, await db.FamilyRecords.CountAsync(x => x.FamilyId == family.Id));
         var deletion = await s.Call(x => x.DeleteAccount(s.Caregiver, Request(), default));
         long beforeCleanup;
         await using (var db = sql.Open())
@@ -46,7 +55,24 @@ public sealed class FullHistoryDeletionSqlTests(SqlFixture sql) : IClassFixture<
         await using (var db = sql.Open())
         {
             var retained = await db.FamilyRecords.Where(x => x.FamilyId == family.Id).OrderBy(x => x.Id).ToArrayAsync();
-            Assert.Equal(["ended-only", "retained"], retained.Select(x => x.Id));
+            Assert.Equal(["authored", "conflict", "deleted", "edited", "ended-only", "retained"], retained.Select(x => x.Id));
+            Assert.All(retained.Where(x => !x.Deleted), x => Assert.Equal("{\"private\":\"content\"}", x.RecordJson));
+            Assert.Equal(Guid.Empty, retained.Single(x => x.Id == "authored").RecordedBy);
+            Assert.Equal(s.Owner.ObjectId, retained.Single(x => x.Id == "authored").LastEditedBy);
+            Assert.Equal(s.Owner.ObjectId, retained.Single(x => x.Id == "edited").RecordedBy);
+            Assert.Equal(Guid.Empty, retained.Single(x => x.Id == "edited").LastEditedBy);
+            Assert.Equal(s.Owner.ObjectId, retained.Single(x => x.Id == "retained").RecordedBy);
+            Assert.Equal(s.Owner.ObjectId, retained.Single(x => x.Id == "retained").LastEditedBy);
+            var conflict = retained.Single(x => x.Id == "conflict");
+            Assert.Equal(Guid.Empty, conflict.ConflictReplacedBy);
+            Assert.Equal(Guid.Empty, conflict.ConflictPreviousEditedBy);
+            Assert.NotNull(conflict.ConflictReplacedAt);
+            Assert.Equal("{\"id\":\"conflict\",\"type\":\"sleep\",\"start\":\"2026-10-25T20:00:00Z\"}", conflict.ConflictPreviousJson);
+            var tombstone = retained.Single(x => x.Id == "deleted");
+            Assert.True(tombstone.Deleted);
+            Assert.Equal("{}", tombstone.RecordJson);
+            Assert.Equal(Guid.Empty, tombstone.RecordedBy);
+            Assert.Equal(Guid.Empty, tombstone.LastEditedBy);
             Assert.All(retained, x => Assert.Null(x.TimerEndedBy));
             Assert.Equal(beforeCleanup + 1, (await db.Families.SingleAsync(x => x.Id == family.Id)).Revision);
             var job = await db.AccountDeletions.SingleAsync(x => x.OperationId == deletion.DeletionId);
@@ -55,6 +81,71 @@ public sealed class FullHistoryDeletionSqlTests(SqlFixture sql) : IClassFixture<
             var authorization = new DurableAccountDeletionAuthorization(db);
             Assert.True(await authorization.HasPendingRequestAsync(s.Caregiver.ObjectId, default));
             Assert.False(await authorization.HasPendingRequestAsync(s.Owner.ObjectId, default));
+            Assert.Empty(await db.Memberships.Where(x => x.UserId == s.Caregiver.ObjectId).ToArrayAsync());
+        }
+    }
+
+    [SqlFact]
+    public async Task RemainingMembersCanReadAndEditRetainedRecordsButCannotResurrectDeletedIds()
+    {
+        var s = new Scenario(sql);
+        var family = await s.Call(x => x.CreateFullFamily(s.Owner,
+            new(Guid.NewGuid(), "family-sharing-v1", FullDomainTests.Seed([s.Caregiver.Email])), default));
+        var member = await s.Call(x => x.AcceptInvitation(s.Caregiver, Assert.Single(family.Snapshot.Invitations).Id,
+            new(Guid.NewGuid()), default));
+        var edited = family.Snapshot.Entries[0];
+        var value = JsonNode.Parse(edited.Entry.GetRawText())!;
+        value["note"] = "Shared change to keep";
+        var save = new FullRecordOperation(Guid.NewGuid(), value["id"]!.GetValue<string>(), member.MembershipId,
+            family.HistoryId, "update", "entry", edited.Version, FullDomainTests.Json(value.ToJsonString()), null,
+            EditPolicy: RecordEditingPolicy.LastServerSaveWins);
+        await s.Call(x => x.ApplyFullRecord(s.Caregiver, family.FamilyId, save, default));
+        var removed = family.Snapshot.Entries[1];
+        var deletedId = removed.Entry.GetProperty("id").GetString()!;
+        var delete = new FullRecordOperation(Guid.NewGuid(), deletedId, member.MembershipId, family.HistoryId,
+            "delete", "entry", removed.Version, null, null, EditPolicy: RecordEditingPolicy.FirstDeleteWins);
+        await s.Call(x => x.ApplyFullRecord(s.Caregiver, family.FamilyId, delete, default));
+        await s.Call(x => x.DeleteAccount(s.Caregiver, Request(), default));
+        await using (var db = sql.Open())
+            Assert.True(await new DeletionProcessor(db, s.Config, TimeProvider.System, new CompleteDeletion()).Process(default));
+
+        var snapshot = await s.Call(x => x.FullSnapshot(s.Owner, family.FamilyId, default));
+        var retained = snapshot.Entries.Single(x => x.Entry.GetProperty("id").GetString() == save.RecordId);
+        Assert.Equal("Shared change to keep", retained.Entry.GetProperty("note").GetString());
+        Assert.Equal(s.Owner.ObjectId, retained.RecordedBy);
+        Assert.Equal(Guid.Empty, retained.LastEditedBy);
+        Assert.DoesNotContain(snapshot.Entries, x => x.Entry.GetProperty("id").GetString() == deletedId);
+        Assert.Equal("account_deleted", (await Assert.ThrowsAsync<ApiException>(() => s.Call(x =>
+            x.FullSnapshot(s.Caregiver, family.FamilyId, default)))).Code);
+
+        value["note"] = "Remaining member can still edit";
+        await s.Call(x => x.ApplyFullRecord(s.Owner, family.FamilyId, save with {
+            OperationId = Guid.NewGuid(), MembershipId = family.MembershipId,
+            Entry = FullDomainTests.Json(value.ToJsonString())
+        }, default));
+        snapshot = await s.Call(x => x.FullSnapshot(s.Owner, family.FamilyId, default));
+        Assert.Equal("Remaining member can still edit", snapshot.Entries.Single(x =>
+            x.Entry.GetProperty("id").GetString() == save.RecordId).Entry.GetProperty("note").GetString());
+
+        foreach (var kind in new[] { "update", "create" })
+        {
+            var resurrect = new FullRecordOperation(Guid.NewGuid(), deletedId, family.MembershipId, family.HistoryId,
+                kind, "entry", kind == "create" ? null : removed.Version, removed.Entry, null,
+                EditPolicy: RecordEditingPolicy.LastServerSaveWins);
+            Assert.Equal("record_changed", (await Assert.ThrowsAsync<ApiException>(() => s.Call(x =>
+                x.ApplyFullRecord(s.Owner, family.FamilyId, resurrect, default)))).Code);
+        }
+        var repeatedDelete = delete with { OperationId = Guid.NewGuid(), MembershipId = family.MembershipId };
+        var receipt = await s.Call(x => x.ApplyFullRecord(s.Owner, family.FamilyId, repeatedDelete, default));
+        Assert.Equal(snapshot.Revision, receipt.Revision);
+        Assert.Equal(receipt, await s.Call(x => x.ApplyFullRecord(s.Owner, family.FamilyId, repeatedDelete, default)));
+        await using (var db = sql.Open())
+            Assert.True(await new DeletionProcessor(db, s.Config, TimeProvider.System, new CompleteDeletion()).Process(default));
+        await using (var db = sql.Open())
+        {
+            var tombstone = await db.FamilyRecords.SingleAsync(x => x.FamilyId == family.FamilyId && x.Id == deletedId);
+            Assert.True(tombstone.Deleted);
+            Assert.Equal(Guid.Empty, tombstone.LastEditedBy);
         }
     }
 
