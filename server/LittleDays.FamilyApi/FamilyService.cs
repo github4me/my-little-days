@@ -7,7 +7,8 @@ using Microsoft.EntityFrameworkCore;
 
 namespace LittleDays.FamilyApi;
 
-public sealed partial class FamilyService(PilotDatabase db, PilotConfiguration config, TimeProvider clock, PushWakeSignal? pushWake = null)
+public sealed partial class FamilyService(PilotDatabase db, PilotConfiguration config, TimeProvider clock, PushWakeSignal? pushWake = null,
+    FamilySyncDiagnostics? diagnostics = null)
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private DateTimeOffset Now => clock.GetUtcNow();
@@ -22,16 +23,19 @@ public sealed partial class FamilyService(PilotDatabase db, PilotConfiguration c
     private Task<T> ReadTransaction<T>(Func<Task<T>> action, CancellationToken ct) => TransactionCore(action, null, ct, readOnly: true);
     private async Task<T> TransactionCore<T>(Func<Task<T>> action, Guid? familyId, CancellationToken ct, bool readOnly = false)
     {
+        using var transactionTiming = diagnostics?.Measure(FamilySyncPhase.Transaction);
         await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
         var mode = familyId is null && !readOnly ? "Exclusive" : "Shared";
-        await db.Database.ExecuteSqlInterpolatedAsync($"""
+        using (diagnostics?.Measure(FamilySyncPhase.GlobalLock))
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
             DECLARE @result int;
             EXEC @result = sys.sp_getapplock @Resource = N'LittleDays:FamilyPilot:v1',
                 @LockMode = {mode}, @LockOwner = 'Transaction', @LockTimeout = 10000;
             IF @result < 0 THROW 51000, 'Pilot transaction lock unavailable.', 1;
             """, ct);
         if (familyId is not null)
-            await db.Database.ExecuteSqlInterpolatedAsync($"""
+            using (diagnostics?.Measure(FamilySyncPhase.FamilyLock))
+                await db.Database.ExecuteSqlInterpolatedAsync($"""
                 DECLARE @result int;
                 EXEC @result = sys.sp_getapplock @Resource = {$"LittleDays:Family:{familyId:D}"},
                     @LockMode = 'Exclusive', @LockOwner = 'Transaction', @LockTimeout = 10000;

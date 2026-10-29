@@ -4842,3 +4842,42 @@ See scoped release document and `work/sleep-feed-refresh-release-20261029/`.
 Independent pushCI130 had an existing quick-amount row-layout assertion failure;
 deployment34's browser gate passed independently on the same3810241. No assertion
 was weakened, workflow rerun or extra production change used to bypass it.
+## 29October2026 — Scoped sync latency and fixed-metadata timing
+
+Owner approved safe sync/API phase timing and targeted optimization with
+TestFlight after reporting20-second refresh/slow partner sleep/feed sync. See
+[scope and verification record](API-SYNC-LATENCY-TESTFLIGHT-2026-10-29.md).
+No App Review/public replacement, new schema, polling/push enablement, resource
+upgrade or AI privacy/quota/capture change. Direct scoped reads still reauthorize
+every request; conditional304 cannot bypass account/grant/history/role or budget.
+
+Manual release location: GitHub github4me/my-little-days → Actions → Deploy family
+API and database; branch feature/family-invitations, database_bootstrapped=true,
+adopt_ef=false, exact frozen expected SHA. Read actual family-pilot/family-database
+protections before dispatch; keep branch pinned through gates. Verify real-SQL
+tests, immutable migration scripts/catalog, explicit0pending/no-op, correct API
+artifact revision and bounded serial startup checks. Generic health does not
+prove signed-in SQL readiness. Only workflow-owned temporary firewall state may
+be removed; retain the operator rule.
+
+Tenant reticle.com.au7b7e6e31-a778-4334-aee2-e969fa27fd0e; subscription
+4768a858-f23f-4a39-bb64-eabc9c142627; RGmy-little-days-pilot-rg;
+APIlittle-days-api-522fpstfbtds2; SQLlittle-days-sql-522fpstfbtds2/
+little-days-family. Preserve paid Basic and existing app settings/credentials/
+identities/AI limits. Only fixed-metadata diagnostics are enabled in code; never
+enable SQL text/parameters or raw request/response logging for latency analysis.
+
+Apple: local-only0.2.9(92) candidate from immutable91 and explicitly reviewed
+overlays. Resolve production Expo URL/IDs/scope/demo0, coffee on, OTA off; preserve
+Phone/Watch/Widget signing. Inspect signed IPA/Hermes/symbols, validate/upload once,
+then confirm actual existing-group availability. Review90/public87 unchanged.
+Implementation/testing, deployment, upload, processing and physical acceptance
+are pending at this initial checkpoint; record each actual result below.
+
+07:23UTC /18:23Melbourne: full API865/865 and focused21/21 pass with0fail/skips
+against an owned disposable local SQL fixture; no production fixture or schema
+mutation. Fixedmetadata diagnostics, current authority/quota before304,3/2data
+query counts, denial/ETag changes and failure/cancellation are tested. Independent
+client review caught/fixed the Watch-ledger validator reference edge and added
+Watch/delayed-persistence regressions. Backend freeze/publication/deployment and
+frozen mobile92/native/Apple verification remain pending.

@@ -88,12 +88,43 @@ public sealed partial class FamilyService
     public async Task<FullFamilySnapshot> FullSnapshot(PilotIdentity user, Guid familyId, CancellationToken ct) =>
         (await ConditionalFullSnapshot(user, familyId, null, ct)).Snapshot!;
 
-    public Task<SleepFeedSnapshot> SleepFeedSnapshot(PilotIdentity user, Guid familyId, CancellationToken ct) => FamilyTransaction(familyId, async () =>
+    public async Task<SleepFeedSnapshot> SleepFeedSnapshot(PilotIdentity user, Guid familyId, CancellationToken ct) =>
+        (await ConditionalSleepFeedSnapshot(user, familyId, null, ct)).Snapshot!;
+
+    private sealed class SleepFeedAuthority
     {
-        var grant = await RequireGrant(user, familyId, null, ct);
-        var family = await Family(familyId, ct);
-        RequireFullFamily(family);
+        public bool AccountDeleted { get; set; }
+        public Guid? FamilyId { get; set; }
+        public int? SchemaVersion { get; set; }
+        public long? Revision { get; set; }
+        public Guid? MembershipId { get; set; }
+        public string? Role { get; set; }
+    }
+
+    public Task<ConditionalSnapshot<SleepFeedSnapshot>> ConditionalSleepFeedSnapshot(PilotIdentity user, Guid familyId,
+        string? ifNoneMatch, CancellationToken ct) => FamilyTransaction(familyId, async () =>
+    {
+        // One bounded authority query, under the unchanged lifecycle/family
+        // barriers. Keep RequireGrant/RequireAccount's original denial order:
+        // account deletion, missing/deleted family or inactive grant, then schema.
+        var authority = await db.Database.SqlQuery<SleepFeedAuthority>($"""
+            SELECT CAST(CASE WHEN EXISTS(SELECT 1 FROM dbo.AccountDeletions WHERE UserId = {user.ObjectId}) THEN 1 ELSE 0 END AS bit) AS AccountDeleted,
+                family.Id AS FamilyId, family.SchemaVersion, family.Revision, grantRow.Id AS MembershipId, grantRow.Role
+            FROM (SELECT 1 AS Anchor) anchorRow
+            LEFT JOIN dbo.Families family ON family.Id = {familyId} AND family.DeletedAt IS NULL
+            LEFT JOIN dbo.Memberships grantRow ON grantRow.FamilyId = family.Id AND grantRow.UserId = {user.ObjectId} AND grantRow.Active = 1
+            """).SingleAsync(ct);
+        if (authority.AccountDeleted) throw new ApiException(410, "account_deleted");
+        if (authority.FamilyId is null || authority.MembershipId is null) throw new ApiException(403, "membership_revoked");
+        if (authority.SchemaVersion != 2) throw new ApiException(409, "family_schema_unsupported");
         await CheckRecordBudget(familyId, null, null, ct, includeFullResponse: false);
+        var revision = authority.Revision!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        // An opaque strong tag binds every field affecting the scoped envelope.
+        // It is never logged, and cannot authorize a request or replace a grant.
+        var scope = $"sleep-feed1:{familyId:D}:{user.ObjectId:D}:{config.Family.HistoryId:D}:{authority.MembershipId:D}:{authority.Role}:{revision}";
+        var etag = $"\"sleep-feed1-{Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(scope)))}\"";
+        if (ifNoneMatch is { Length: <= 512 } && ifNoneMatch == etag)
+            return new ConditionalSnapshot<SleepFeedSnapshot>(etag, null);
         // Filter in SQL: a Today refresh never loads photo, care or other entry
         // bodies, and does not expire invitations or change family metadata.
         var records = await db.FamilyRecords.FromSqlInterpolated($"""
@@ -104,8 +135,8 @@ public sealed partial class FamilyService
         var entries = records.OrderBy(row => row.Id, StringComparer.Ordinal)
             .Select(row => new SharedEntry(ReadRecord(row), Convert.ToBase64String(row.Version),
                 row.RecordedBy, row.LastEditedBy, row.TimerEndedBy, ReadReplacement(row))).ToArray();
-        return FamilyAvailability.RequireResponseBudget(new SleepFeedSnapshot(1, familyId, user.ObjectId,
-            grant.Id, config.Family.HistoryId, grant.Role, Revision(family), entries));
+        return new ConditionalSnapshot<SleepFeedSnapshot>(etag, FamilyAvailability.RequireResponseBudget(new SleepFeedSnapshot(1,
+            familyId, user.ObjectId, authority.MembershipId.Value, config.Family.HistoryId, authority.Role!, revision, entries), diagnostics));
     }, ct);
 
     public Task<ConditionalSnapshot<FullFamilySnapshot>> ConditionalFullSnapshot(PilotIdentity user, Guid familyId, string? ifNoneMatch, CancellationToken ct, int careSchemaVersion = 2) => FamilyTransaction(familyId, async () =>
@@ -312,7 +343,7 @@ public sealed partial class FamilyService
                 .Select(x => new SharedExtraRecord(ReadRecord(x), Convert.ToBase64String(x.Version), x.RecordedBy, x.LastEditedBy)).ToArray(),
             config.Family.EnforceSingleActiveTimers, CrossMemberTimerCompletionEnabled: true,
             ConflictReplacementEnabled: true, CollaborativeEditingEnabled: true);
-        return FamilyAvailability.RequireResponseBudget(snapshot);
+        return FamilyAvailability.RequireResponseBudget(snapshot, diagnostics);
     }
 
     private sealed class RecordUsage
@@ -341,9 +372,9 @@ public sealed partial class FamilyService
         var count = usage.Records + (addedJson is not null && replaced is null ? 1 : 0);
         var liveCount = usage.LiveRecords + (addedJson is not null && replaced is null ? 1 : 0);
         var growingCount = addedJson is not null && replaced is null;
-        var oldResponseBytes = replaced is null ? 0 : FamilyAvailability.MeasureRecordResponse(replaced.RecordJson) +
+        var oldResponseBytes = replaced is null ? 0 : FamilyAvailability.MeasureRecordResponse(replaced.RecordJson, diagnostics) +
             (replaced.ConflictPreviousJson is null ? 0 : Encoding.UTF8.GetByteCount(replaced.ConflictPreviousJson) + 256);
-        var newResponseBytes = addedJson is null ? 0 : FamilyAvailability.MeasureRecordResponse(addedJson) +
+        var newResponseBytes = addedJson is null ? 0 : FamilyAvailability.MeasureRecordResponse(addedJson, diagnostics) +
             (addedAuditJson is null ? 0 : Encoding.UTF8.GetByteCount(addedAuditJson) + 256);
         var reducing = replaced is not null && addedJson is not null &&
             addedJson.Length + (addedAuditJson?.Length ?? 0) <=
@@ -368,14 +399,14 @@ public sealed partial class FamilyService
         // are stored canonically, without inflating photo base64 '+' characters.
         await foreach (var json in db.FamilyRecords.AsNoTracking().Where(x => x.FamilyId == familyId && !x.Deleted && x.Collection == "extra")
             .Select(x => x.RecordJson).AsAsyncEnumerable().WithCancellation(ct))
-            jsonBytes += FamilyAvailability.MeasureRecordResponse(json);
+            jsonBytes += FamilyAvailability.MeasureRecordResponse(json, diagnostics);
         jsonBytes += await db.Database.SqlQuery<long>($"""
             SELECT COALESCE(SUM(CONVERT(bigint, DATALENGTH(CONVERT(varchar(max), ConflictPreviousJson COLLATE Latin1_General_100_BIN2_UTF8)))), 0) AS Value
             FROM dbo.FamilyRecords WHERE FamilyId = {familyId} AND Deleted = 0 AND ConflictPreviousJson IS NOT NULL
             """).SingleAsync(ct);
         jsonBytes += (long)usage.AuditRecords * 256;
         jsonBytes -= replaced is null ? 0 : replaced.Collection == "extra"
-            ? FamilyAvailability.MeasureRecordResponse(replaced.RecordJson) : Encoding.UTF8.GetByteCount(replaced.RecordJson);
+            ? FamilyAvailability.MeasureRecordResponse(replaced.RecordJson, diagnostics) : Encoding.UTF8.GetByteCount(replaced.RecordJson);
         if (replaced?.ConflictPreviousJson is not null)
             jsonBytes -= Encoding.UTF8.GetByteCount(replaced.ConflictPreviousJson) + 256;
         jsonBytes += addedJson is null ? 0 : Encoding.UTF8.GetByteCount(addedJson);

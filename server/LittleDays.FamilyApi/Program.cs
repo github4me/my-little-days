@@ -24,7 +24,11 @@ builder.Services.Configure<RouteHandlerOptions>(options => options.ThrowOnBadReq
 var connection = builder.Configuration.GetConnectionString("FamilyDatabase");
 if (string.IsNullOrWhiteSpace(connection))
     throw new InvalidOperationException("ConnectionStrings:FamilyDatabase is required.");
-builder.Services.AddDbContext<PilotDatabase>(options => options.UseSqlServer(connection, sql => sql.CommandTimeout(20)));
+builder.Services.AddScoped<FamilySyncDiagnostics>();
+builder.Services.AddScoped<FamilySyncCommandInterceptor>();
+builder.Logging.AddFilter("LittleDays.FamilyApi.FamilySyncDiagnostics", LogLevel.Information);
+builder.Services.AddDbContext<PilotDatabase>((services, options) => options.UseSqlServer(connection, sql => sql.CommandTimeout(20))
+    .AddInterceptors(services.GetRequiredService<FamilySyncCommandInterceptor>()));
 
 var config = PilotConfiguration.Load(builder.Configuration);
 builder.Services.AddSingleton(config);
@@ -115,6 +119,7 @@ builder.Services.AddRateLimiter(options =>
 });
 
 var app = builder.Build();
+app.UseFamilySyncDiagnostics();
 app.Use(async (context, next) =>
 {
     context.Response.Headers.CacheControl = "no-store";
@@ -169,7 +174,8 @@ api.AddEndpointFilter(async (context, next) =>
     PublicIdentityAdmission.Set(context.HttpContext, await admission.AdmitAsync(context.HttpContext.User, context.HttpContext.RequestAborted));
     return await next(context);
 });
-api.MapGet("/me", (HttpContext context, FamilyService service, CancellationToken ct) => service.Me(PublicIdentityAdmission.Get(context), ct));
+api.MapGet("/me", (HttpContext context, FamilyService service, CancellationToken ct) => service.Me(PublicIdentityAdmission.Get(context), ct))
+    .WithFamilySyncDiagnostics(FamilySyncOperation.Me);
 api.MapPost("/families", (HttpContext context, CreateFamilyRequest request, FamilyService service, CancellationToken ct) =>
     service.CreateFamily(PublicIdentityAdmission.Get(context), request, ct)).RequireRateLimiting("sensitive");
 api.MapGet("/families/{familyId:guid}/snapshot", async (Guid familyId, HttpContext context, FamilyService service, CancellationToken ct) =>
@@ -231,11 +237,18 @@ fullApi.MapPost("/push/installations/{installationId:guid}/unregister", (Guid in
 fullApi.MapPost("/families", (HttpContext context, CreateFullFamilyRequest request, FamilyService service, CancellationToken ct) =>
     FullCreation(context, request, service, ct)).RequireRateLimiting("sensitive");
 fullApi.MapGet("/families/{familyId:guid}/sleep-feed-snapshot", async (Guid familyId, HttpContext context, FamilyService service, CancellationToken ct) =>
-    TypedResults.Json(await service.SleepFeedSnapshot(PublicIdentityAdmission.Get(context), familyId, ct), FamilyAvailability.SnapshotJson))
+{
+    var result = await service.ConditionalSleepFeedSnapshot(PublicIdentityAdmission.Get(context), familyId,
+        context.Request.Headers.IfNoneMatch.ToString(), ct);
+    context.Response.Headers.ETag = result.ETag;
+    return result.Snapshot is null ? Results.StatusCode(304) : Results.Json(result.Snapshot, FamilyAvailability.SnapshotJson);
+})
+    .WithFamilySyncDiagnostics(FamilySyncOperation.SleepFeedSnapshot)
     .WithName("GetSleepFeedSnapshot")
     .WithSummary("Read current sleep and feeding records")
     .WithDescription("Returns only live sleep/feed entries for the admitted account's active family grant. This is not a full family snapshot.")
-    .Produces<SleepFeedSnapshot>();
+    .Produces<SleepFeedSnapshot>()
+    .Produces(StatusCodes.Status304NotModified);
 fullApi.MapGet("/families/{familyId:guid}/snapshot", async (Guid familyId, HttpContext context, FamilyService service, CancellationToken ct) =>
 {
     var result = await service.ConditionalFullSnapshot(PublicIdentityAdmission.Get(context), familyId, context.Request.Headers.IfNoneMatch.ToString(), ct,
@@ -243,9 +256,10 @@ fullApi.MapGet("/families/{familyId:guid}/snapshot", async (Guid familyId, HttpC
     context.Response.Headers.Vary = "X-LittleDays-Care-Schema";
     context.Response.Headers.ETag = result.ETag;
     return result.Snapshot is null ? Results.StatusCode(304) : Results.Json(result.Snapshot, FamilyAvailability.SnapshotJson);
-});
+}).WithFamilySyncDiagnostics(FamilySyncOperation.FullSnapshot);
 fullApi.MapPost("/families/{familyId:guid}/record-operations", (Guid familyId, HttpContext context, FullRecordOperation request, FamilyService service, CancellationToken ct) =>
-    service.ApplyFullRecord(PublicIdentityAdmission.Get(context), familyId, request, ct));
+    service.ApplyFullRecord(PublicIdentityAdmission.Get(context), familyId, request, ct))
+    .WithFamilySyncDiagnostics(FamilySyncOperation.RecordWrite);
 fullApi.MapPost("/families/{familyId:guid}/profile", (Guid familyId, HttpContext context, FullProfileRequest request, FamilyService service, CancellationToken ct) =>
     service.UpdateFullProfile(PublicIdentityAdmission.Get(context), familyId, request, ct));
 app.Run();

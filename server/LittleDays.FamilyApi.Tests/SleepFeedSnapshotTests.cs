@@ -183,6 +183,7 @@ public sealed class SleepFeedSnapshotTests(SqlFixture sql) : IClassFixture<SqlFi
     {
         var s = new Scenario(sql);
         var created = await Create(s);
+        var before = await s.Call(service => service.ConditionalSleepFeedSnapshot(s.Owner, created.FamilyId, null, default));
         await using (var db = sql.Open())
         {
             // Synthetic unrelated rows exceed 64 MiB in SQL UTF-16 storage,
@@ -199,6 +200,10 @@ public sealed class SleepFeedSnapshotTests(SqlFixture sql) : IClassFixture<SqlFi
         }
         await Code("family_storage_limit", 409,
             () => s.Call(service => service.SleepFeedSnapshot(s.Owner, created.FamilyId, default)));
+        var conditional = await Assert.ThrowsAsync<ApiException>(() => s.Call(service =>
+            service.ConditionalSleepFeedSnapshot(s.Owner, created.FamilyId, before.ETag, default)));
+        Assert.Equal(409, conditional.Status);
+        Assert.Equal("family_storage_limit", conditional.Code);
     }
 
     [SqlFact]

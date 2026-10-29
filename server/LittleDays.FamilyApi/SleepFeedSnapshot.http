@@ -7,6 +7,12 @@ GET {{baseUrl}}/v2/families/{{familyId}}/sleep-feed-snapshot
 Authorization: Bearer {{token}}
 Accept: application/json
 
+### Conditional refresh: use the exact ETag from an authorized 200 response.
+# Matching tags return 304 only after fresh account/grant and budget checks.
+GET {{baseUrl}}/v2/families/{{familyId}}/sleep-feed-snapshot
+Authorization: Bearer {{token}}
+If-None-Match: "replace-with-etag-from-prior-response"
+
 ### Anonymous callers receive 401; this request never grants access or changes records.
 GET {{baseUrl}}/v2/families/{{familyId}}/sleep-feed-snapshot
 Accept: application/json

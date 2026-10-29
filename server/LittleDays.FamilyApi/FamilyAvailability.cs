@@ -33,21 +33,23 @@ public static class FamilyAvailability
             throw new ApiException(409, "family_snapshot_limit");
     }
 
-    public static T RequireResponseBudget<T>(T value)
+    public static T RequireResponseBudget<T>(T value, FamilySyncDiagnostics? diagnostics = null)
     {
-        MeasureResponseBytes(value);
+        MeasureResponseBytes(value, diagnostics);
         return value;
     }
 
-    public static long MeasureResponseBytes<T>(T value)
+    public static long MeasureResponseBytes<T>(T value, FamilySyncDiagnostics? diagnostics = null)
     {
+        using var measurement = diagnostics?.Measure(FamilySyncPhase.Serialize);
         using var stream = new BoundedCountingStream(MaxSnapshotBytes);
         JsonSerializer.Serialize(stream, value, SnapshotJson);
         return stream.Length;
     }
 
-    public static long MeasureRecordResponse(string json)
+    public static long MeasureRecordResponse(string json, FamilySyncDiagnostics? diagnostics = null)
     {
+        using var measurement = diagnostics?.Measure(FamilySyncPhase.Serialize);
         using var document = JsonDocument.Parse(json);
         using var stream = new BoundedCountingStream(MaxSnapshotBytes);
         JsonSerializer.Serialize(stream, document.RootElement, SnapshotJson);

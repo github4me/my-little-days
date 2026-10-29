@@ -113,7 +113,7 @@ public sealed class StaticPublicIdentityAdmission(PilotConfiguration config) : I
 }
 
 public sealed class GraphPublicIdentityAdmission(HttpClient http, PilotConfiguration config,
-    IGraphAdmissionTokenProvider? tokenProvider = null) : IPublicIdentityAdmission
+    IGraphAdmissionTokenProvider? tokenProvider = null, FamilySyncDiagnostics? diagnostics = null) : IPublicIdentityAdmission
 {
     private readonly IGraphAdmissionTokenProvider tokens = tokenProvider ?? new UncachedGraphAdmissionTokens(http, config);
     public async Task<PilotIdentity> AdmitAsync(ClaimsPrincipal principal, CancellationToken ct)
@@ -125,15 +125,22 @@ public sealed class GraphPublicIdentityAdmission(HttpClient http, PilotConfigura
         {
             for (var attempt = 0; ; attempt++)
             {
-                var token = await tokens.GetAsync(ct);
+                string token;
+                using (diagnostics?.Measure(FamilySyncPhase.DirectoryToken)) token = await tokens.GetAsync(ct);
                 try
                 {
-                    using var user = await Get($"users/{objectId:D}?$select=id,accountEnabled,creationType,displayName,identities", token, ct);
+                    JsonDocument userResult;
+                    using (diagnostics?.Measure(FamilySyncPhase.DirectoryLookup))
+                        userResult = await Get($"users/{objectId:D}?$select=id,accountEnabled,creationType,displayName,identities", token, ct);
+                    using var user = userResult;
                     var identity = ParseLocalAccount(user.RootElement, objectId, config.Admission.LocalAccountIssuer, out var identityIssuer);
                     // Directory results remain fresh on EVERY admission, even when
                     // the application's credential came from MSAL's memory cache.
                     var filter = $"identities/any(i:i/issuerAssignedId eq '{identity.Email.Replace("'", "''")}' and i/issuer eq '{identityIssuer}')";
-                    using var matches = await Get($"users?$select=id,accountEnabled,creationType,displayName,identities&$top=2&$filter={Uri.EscapeDataString(filter)}", token, ct);
+                    JsonDocument matchesResult;
+                    using (diagnostics?.Measure(FamilySyncPhase.DirectoryUniqueness))
+                        matchesResult = await Get($"users?$select=id,accountEnabled,creationType,displayName,identities&$top=2&$filter={Uri.EscapeDataString(filter)}", token, ct);
+                    using var matches = matchesResult;
                     if (matches.RootElement.TryGetProperty("@odata.nextLink", out _) ||
                         !matches.RootElement.TryGetProperty("value", out var users) || users.ValueKind != JsonValueKind.Array || users.GetArrayLength() != 1)
                         throw new ApiException(403, "identity_not_supported");
