@@ -4881,3 +4881,54 @@ query counts, denial/ETag changes and failure/cancellation are tested. Independe
 client review caught/fixed the Watch-ledger validator reference edge and added
 Watch/delayed-persistence regressions. Backend freeze/publication/deployment and
 frozen mobile92/native/Apple verification remain pending.
+
+07:28:18UTC /18:28:18Melbourne: GitHub plugin publication confirmed exact
+`947c4108d4632630198b89d5d5781f775ac034e6`, tree996511af3b4102efc85bf428f8d15cdfb946f0d8,
+12namedpaths over98f1355. Migration subtree/compiled baseline sources unchanged
+outside reviewed overlays; unrelated local .http/runbook changes excluded.
+[Deployment35](https://github.com/github4me/my-little-days/actions/runs/40835634106)
+is running on thatSHA; keep branch pinned. Both environments freshly show trusted
+branch restriction, reviewers/waitOFF/adminbypassON; no protection changed.
+Frozen mobile92 tree3d0a341d23d542d1da897a51c34101b9b7f03397 passes1,252checks,
+0fail/skips at07:28:36UTC. Local production archive is running; signed inspection/
+upload/processing and deployed SQL-backed/user-device acceptance remain pending.
+
+07:38UTC /18:38Melbourne: deployment35 and CI132 SUCCESS on947c4108; API865+
+migrator157 pass. Artifact12880169973 digest
+a2a5688eeddb91f0096e3a9ddfdfece64fbfdc26f5176b4b6052197fd77e17a4/revision/symbols
+verified; packaged appsettings byte-identical to381. Catalog explicitly0pending
+07:34:33/38/46, DbUp no-op07:34:41, owned firewall removed07:34:49. OneDeploy
+f341cf7b-3290-43a1-8008-248eb7ed5bc3 completed07:35:48,status4/active.
+First07:37:00 healthy401 lacked newmetrics, so activation was not inferred from
+health/package success. Serial bounded retry07:37:46 confirms live/ready200 and
+scoped401/Bearer/no-store with all9fixed numeric Server-Timing phases. No restart/
+settings/redeploy or production SQL/private-data request. Signed-in real-family
+and two-phone latency acceptance remain gaps. Local92archive completed07:37:07;
+signed artifact checks, Apple upload/processing/availability remain pending.
+
+07:39UTC /18:39Melbourne: signed92source/config/Phone/Watch/Widget inspection,
+actual production-JS AST and byte-identical Hermes proof passed; native Swift
+35Watch+21Widget tests pass, all dSYM UUIDs match. IPA SHA256
+a241df74c7c848ba22f1422301c8126020d2a8fc9232fc1db4ea2701bedb4250;
+dSYM ZIPedc3003f45e629f9b2d8ad7745e6ebd1b92ce37f97edb71274ae135cafd66d65.
+Cleanup removed only this build's temporary signing copies; managed credentials
+unchanged. Fresh07:39:12Apple readback preserves review90WAITING_FOR_REVIEW,
+public87READY_FOR_SALE/AFTER_APPROVAL. Direct validation is in progress; no upload,
+processing/tester availability or native latency acceptance is claimed yet.
+
+07:43:24UTC /18:43:24Melbourne: Apple validation passed07:41:04, and one upload
+succeeded with uploaderexit0/no errors, delivery3d5d4884-9ef6-46f1-8e95-f55a4b3ba766.
+IPA hash matches the inspected92artifact. Do not repeat upload while processing.
+Existing-group TestFlight availability and physical two-phone latency acceptance
+remain pending; App Review/public release have not been changed.
+
+**TestFlight92 delivered —07:47:10UTC /18:47:10Melbourne:** Apple delivery
+3d5d4884-9ef6-46f1-8e95-f55a4b3ba766 COMPLETE/no errors or warnings;0.2.9(92)
+VALID/IN_BETA_TESTING with existing Team(Expo)+Early Birds groups already attached.
+Review0.2.9(90)WAITING_FOR_REVIEW and public0.2.8(87)READY_FOR_SALE retain exact
+relationships/AFTER_APPROVAL. Backend947c4108 active and92available; no newgroup/
+externalreview/duplicateupload/OTA/AppReviewreplacement. Tests1,252mobile,
+865API+157migrator,35Watch+21Widget pass; native signing/config/Hermes/symbols
+verified. Signed-in real-family/two-phone latency remains unmeasured; foreground
+cadence/backoff/background restrictions unchanged. Both phones must update before
+comparing. Detailed requirement/test/artifact/cleanup evidence in linked record.
