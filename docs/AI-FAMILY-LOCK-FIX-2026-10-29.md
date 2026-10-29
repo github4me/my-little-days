@@ -1,7 +1,9 @@
 # Family synchronization / AI SQL lock separation — 29 October 2026
 
-Status: local implementation; production deployment and device acceptance have
-not occurred. The earlier client request-reduction changes remain separate.
+Status: deployed to production as `4699aecec152c12a3c375c4d72975bae168262a6`
+by successful deployment #36 at09:17:59UTC /20:17:59Melbourne. Signed-in family
+and two-phone acceptance remain unverified. The earlier client request-reduction
+changes remain separate. Deployment evidence is recorded below.
 
 The incident logs showed family reads/writes returning503 during acquisition of
 `LittleDays:FamilyPilot:v1`, often at its10-second wait limit. SQL log-write usage
@@ -93,3 +95,69 @@ blobs exactly match deployed tree `996511af3b4102efc85bf428f8d15cdfb946f0d8`:
 - SleepAiJobStore.cs: `efadef0ffc1753c1cb1b082beeda24504c818572`
 - SleepAiAttemptStore.cs: `22b6d0937980e48b1a53533ecb2ee3150ad894d2`
 - SleepAiJobWorker.cs: `224d5cd54a38d737e1360913c8e4694968f09878`
+
+## Production deployment — 29 October 2026, 09:17:59 UTC / 20:17:59 Melbourne
+
+The owner requested deployment of the reviewed backend contention fix. Release
+`4699aecec152c12a3c375c4d72975bae168262a6` was published through the GitHub plugin
+with an expected-head, non-force update of `feature/family-invitations`.
+[Deploy family API and database #36](https://github.com/github4me/my-little-days/actions/runs/40847569580)
+completed successfully. Only four API files, three test files and two task docs
+changed; unrelated local client work was excluded. The frozen source archive
+SHA256 is `88bfcdbd8e42f2df03dc11135c9631b9bbd6bc871bcc8747e449c8f2e77bfc5f`.
+
+- Both GitHub environments were freshly inspected: selected trusted branch only;
+  required reviewers and wait timers are disabled; administrator bypass is enabled.
+  No protection, identity, target, permission or setting was changed. These are not
+  human-approval gates. Manual dispatch used database_bootstrapped=true/adopt_ef=false.
+- Release CI passed API878 and migrator157, zero failures/skips, plus TypeScript
+  and browser checks. The migration job verified checksums/catalog and reported
+  zero pending scripts before and after the no-op apply. It removed only its own
+  temporary runner-IP firewall rule; the retained operator rule was untouched.
+- API artifact12884979033 has ZIP SHA256
+  `94847840e7b533684e1a7f641cc8b3cad7f78f5d682c3909978bfef03283ba30`.
+  In-memory inspection confirmed the exact release SHA, dedicated AI transaction/
+  lock, existing conditional reads and diagnostics. Assembly SHA256:
+  `d682fd78eb2387c1ddf8726b41a6b3ce7b84690c6a928cf198faca8e0bbfcc44`.
+  appsettings.json is byte-identical to the previous package (SHA256
+  `a1b3989d62bd799450239c2bc11a455977433b8763c6fdeef107a282e5eb6e39`).
+- App Service OneDeploy `efeda928-ac1c-4ed7-a268-13f6fed51620` returned status4,
+  complete=true, active=true, no build errors/warnings. Production target remains
+  the same tenant/subscription/API/SQL described above; no infrastructure apply,
+  tier/quota/retention change, production fixture or destructive test was run.
+- Serial public checks at09:19 and09:20UTC returned live200, ready200 and the
+  scoped unauthenticated read401 with Bearer/no-store. Health does not query SQL
+  or attest the running assembly; it is not signed-in family/device acceptance.
+  The runtime log showed startup propagation and old-container AI claim warnings
+  during replacement; the deployment success alone does not prove those cleared.
+
+App/TestFlight/App Review versions are unchanged and this server-only fix requires
+no new app install. Signed-in family reads/writes, two-phone latency and sustained
+error-rate improvement remain to be verified. Sanitized deployment/artifact/
+health receipts and the success-page screenshot are under
+`work/ai-lock-release-20261029/`; no private records, tokens, raw AI payloads or
+signed artifact URL were saved there.
+
+09:22:06UTC runtime readback: from09:19:36 onward the portal showed no further
+AI claim warnings or family failures. The old-container warnings ended at09:19:35.
+The only observed post-switch family endpoint request was the intentional
+unauthenticated401 probe (zero SQL commands); no signed-in acceptance or sustained
+latency improvement is inferred from this limited, low-traffic window.
+
+## Lock purpose and user impact
+
+| Lock / limit | Why it remains | Affected scope |
+| --- | --- | --- |
+| Global lifecycle barrier `LittleDays:FamilyPilot:v1` | Keeps membership/account deletion, invitations, ownership and device-token binding changes atomic with authorization and commits. | Ordinary family/AI work takes Shared and can coexist. Lifecycle Exclusive temporarily queues participating requests across all families in this SQL database. |
+| Family lock `LittleDays:Family:{id}` | Serializes snapshots and record mutations/receipts to preserve last successful server save wins and first deletion wins. | One family only; different families use different locks. It is not a global user-count limit. |
+| AI state lock `LittleDays:SleepAi:v1` | Atomically claims jobs, checks quotas and stores/cancels/results/capture. | One short AI SQL transaction at a time across API instances; model inference is outside this lock. Ordinary family sync does not acquire it. |
+| Migration lock `MyLittleDays.DatabaseMigrator` | Prevents concurrent migrators from altering/verifying the same migration journal/catalog. | Deployment/migration processes only. A second migrator fails immediately; actual DDL or shared SQL load can still affect normal requests. |
+
+The three application locks wait up to10seconds to acquire each lock. This is
+not a maximum lock-holding time: commit/rollback releases transaction-owned locks.
+AI capacity50 is a limit on active provider requests, not registered/online users;
+short serialized admission/state operations coexist with parallel provider calls.
+Process-local semaphores/counter/token-cache guards are not additional distributed
+SQL barriers. Shared SQL resources and lifecycle operations can still cause waits.
+
+

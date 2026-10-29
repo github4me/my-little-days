@@ -4967,3 +4967,53 @@ runner firewall rule removed. Verify CI/test counts, package revision/settings,
 deployment result and bounded serial health/startup checks separately from
 signed-in SQL-backed family/device acceptance. Deployment is pending at this
 checkpoint.
+
+## Production deployment — 29 October 2026, 09:17:59 UTC / 20:17:59 Melbourne
+
+The owner requested deployment of the reviewed backend contention fix. Release
+`4699aecec152c12a3c375c4d72975bae168262a6` was published through the GitHub plugin
+with an expected-head, non-force update of `feature/family-invitations`.
+[Deploy family API and database #36](https://github.com/github4me/my-little-days/actions/runs/40847569580)
+completed successfully. Only four API files, three test files and two task docs
+changed; unrelated local client work was excluded. The frozen source archive
+SHA256 is `88bfcdbd8e42f2df03dc11135c9631b9bbd6bc871bcc8747e449c8f2e77bfc5f`.
+
+- Both GitHub environments were freshly inspected: selected trusted branch only;
+  required reviewers and wait timers are disabled; administrator bypass is enabled.
+  No protection, identity, target, permission or setting was changed. These are not
+  human-approval gates. Manual dispatch used database_bootstrapped=true/adopt_ef=false.
+- Release CI passed API878 and migrator157, zero failures/skips, plus TypeScript
+  and browser checks. The migration job verified checksums/catalog and reported
+  zero pending scripts before and after the no-op apply. It removed only its own
+  temporary runner-IP firewall rule; the retained operator rule was untouched.
+- API artifact12884979033 has ZIP SHA256
+  `94847840e7b533684e1a7f641cc8b3cad7f78f5d682c3909978bfef03283ba30`.
+  In-memory inspection confirmed the exact release SHA, dedicated AI transaction/
+  lock, existing conditional reads and diagnostics. Assembly SHA256:
+  `d682fd78eb2387c1ddf8726b41a6b3ce7b84690c6a928cf198faca8e0bbfcc44`.
+  appsettings.json is byte-identical to the previous package (SHA256
+  `a1b3989d62bd799450239c2bc11a455977433b8763c6fdeef107a282e5eb6e39`).
+- App Service OneDeploy `efeda928-ac1c-4ed7-a268-13f6fed51620` returned status4,
+  complete=true, active=true, no build errors/warnings. Production target remains
+  the same tenant/subscription/API/SQL described above; no infrastructure apply,
+  tier/quota/retention change, production fixture or destructive test was run.
+- Serial public checks at09:19 and09:20UTC returned live200, ready200 and the
+  scoped unauthenticated read401 with Bearer/no-store. Health does not query SQL
+  or attest the running assembly; it is not signed-in family/device acceptance.
+  The runtime log showed startup propagation and old-container AI claim warnings
+  during replacement; the deployment success alone does not prove those cleared.
+
+App/TestFlight/App Review versions are unchanged and this server-only fix requires
+no new app install. Signed-in family reads/writes, two-phone latency and sustained
+error-rate improvement remain to be verified. Sanitized deployment/artifact/
+health receipts and the success-page screenshot are under
+`work/ai-lock-release-20261029/`; no private records, tokens, raw AI payloads or
+signed artifact URL were saved there.
+
+09:22:06UTC runtime readback: from09:19:36 onward the portal showed no further
+AI claim warnings or family failures. The old-container warnings ended at09:19:35.
+The only observed post-switch family endpoint request was the intentional
+unauthenticated401 probe (zero SQL commands); no signed-in acceptance or sustained
+latency improvement is inferred from this limited, low-traffic window.
+
+
