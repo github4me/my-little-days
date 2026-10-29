@@ -4767,3 +4767,40 @@ operations. Physical signed-in/two-device acceptance remains unverified; no
 real account was deleted for testing. See the scoped report for complete
 artifact/source evidence. This supersedes only the dated deployment hold above;
 the user-requested wording gap remains unchanged.
+
+## 29October2026 — Sleep/feed-only Today refresh
+
+Owner requested “只更新睡眠，喂奶数据，fix and push to test mflight”.
+See [scoped refresh contract/release evidence](SLEEP-FEED-REFRESH-TESTFLIGHT-2026-10-29.md).
+Additive authenticated GET /v2/families/{familyId}/sleep-feed-snapshot returns only
+live sleep/feed entries and exact current account/grant/history/role/revision;
+no full-cache freshness claim, admin write, AI capability reset or schema change.
+Other record queues/data and existing automatic full sync remain unchanged.
+
+Publish only reviewed endpoint/contracts/tests/.http/documentation over trusted
+remote219fd5c via GitHub plugin with expected-head lease. In GitHub Actions →
+Deploy family API and database, choose feature/family-invitations, set
+database_bootstrapped=true, adopt_ef=false. Verify frozen SHA, disposable SQL
+tests, unchanged migration catalog and explicit0pending scripts before API.
+Azure stays reticle.com.au tenant7b7e6e31-a778-4334-aee2-e969fa27fd0e,
+subscription4768a858-f23f-4a39-bb64-eabc9c142627, my-little-days-pilot-rg,
+little-days-api-522fpstfbtds2 / little-days-sql-522fpstfbtds2 / little-days-family.
+Preserve existing resource profiles/settings/AI limits/credentials/retained IP.
+Recheck actual environment protections; don't equate their names with approval.
+Wait bounded startup propagation with one health check in flight, then verify
+revision/authorization/SQL readiness separately. No retention/spending dashboard.
+
+Local focused checks:8domain,227controller/navigation,1,222frozen-mobile checks
+pass; final disposableSQL10/10 includes9scoped cases and1existing full-quota
+regression. Static source/assertion review fixed omitted-delete scope metadata
+and a hidden extra-body read in the shared budget helper; only new scoped reads
+skip full-response accounting AFTER the unchanged scalar safety check. Existing
+full/write default behavior and scoped response limits remain. Final review:
+no remaining confirmed blocker. Owned disposable SQL containers/network removed.
+Both actual GitHub deployment environments allow only the trusted branch, with
+reviewer/wait gates off and administrator bypass on; settings unchanged.
+Local TestFlight candidate91 must preserve
+review0.2.9(90) and public0.2.8(87); inspect source/artifact/signatures/config/
+Hermes/native tests, upload once and confirm internal tester availability.
+No paid cloud build/OTA/App Review replacement. Publication/deployment/build/
+upload/processing/native-device acceptance remain pending at this checkpoint.

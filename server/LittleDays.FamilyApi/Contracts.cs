@@ -38,6 +38,9 @@ public sealed record SharedRecordReplacement(Guid ReplacedBy, Guid? PreviousEdit
     DateTimeOffset ReplacedAt, ReplacedEntrySummary PreviousEntry);
 public sealed record SharedEntry(JsonElement Entry, string Version, Guid RecordedBy, Guid LastEditedBy,
     Guid? EndedBy = null, SharedRecordReplacement? Replacement = null);
+/// <summary>Authoritative live sleep/feed records for one account and current family grant; not a full family snapshot.</summary>
+public sealed record SleepFeedSnapshot(int SchemaVersion, Guid FamilyId, Guid UserId, Guid MembershipId,
+    Guid HistoryId, string Role, string Revision, SharedEntry[] Entries);
 public sealed record SharedCareRecord(JsonElement Record, string Version, Guid RecordedBy, Guid LastEditedBy);
 public sealed record SharedExtraRecord(JsonElement Record, string Version, Guid RecordedBy, Guid LastEditedBy);
 public sealed record FullFamilySnapshot(int SchemaVersion, FullFamilyProfile Profile,

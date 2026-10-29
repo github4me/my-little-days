@@ -88,6 +88,26 @@ public sealed partial class FamilyService
     public async Task<FullFamilySnapshot> FullSnapshot(PilotIdentity user, Guid familyId, CancellationToken ct) =>
         (await ConditionalFullSnapshot(user, familyId, null, ct)).Snapshot!;
 
+    public Task<SleepFeedSnapshot> SleepFeedSnapshot(PilotIdentity user, Guid familyId, CancellationToken ct) => FamilyTransaction(familyId, async () =>
+    {
+        var grant = await RequireGrant(user, familyId, null, ct);
+        var family = await Family(familyId, ct);
+        RequireFullFamily(family);
+        await CheckRecordBudget(familyId, null, null, ct, includeFullResponse: false);
+        // Filter in SQL: a Today refresh never loads photo, care or other entry
+        // bodies, and does not expire invitations or change family metadata.
+        var records = await db.FamilyRecords.FromSqlInterpolated($"""
+            SELECT * FROM dbo.FamilyRecords
+            WHERE FamilyId = {familyId} AND Collection = N'entry' AND Deleted = 0
+                AND JSON_VALUE(RecordJson, '$.type') IN (N'feed', N'sleep')
+            """).AsNoTracking().ToArrayAsync(ct);
+        var entries = records.OrderBy(row => row.Id, StringComparer.Ordinal)
+            .Select(row => new SharedEntry(ReadRecord(row), Convert.ToBase64String(row.Version),
+                row.RecordedBy, row.LastEditedBy, row.TimerEndedBy, ReadReplacement(row))).ToArray();
+        return FamilyAvailability.RequireResponseBudget(new SleepFeedSnapshot(1, familyId, user.ObjectId,
+            grant.Id, config.Family.HistoryId, grant.Role, Revision(family), entries));
+    }, ct);
+
     public Task<ConditionalSnapshot<FullFamilySnapshot>> ConditionalFullSnapshot(PilotIdentity user, Guid familyId, string? ifNoneMatch, CancellationToken ct, int careSchemaVersion = 2) => FamilyTransaction(familyId, async () =>
     {
         var grant = await RequireGrant(user, familyId, null, ct);
@@ -303,7 +323,7 @@ public sealed partial class FamilyService
         public long StoredBytes { get; set; }
     }
     private async Task CheckRecordBudget(Guid familyId, FamilyRecordRow? replaced, string? addedJson,
-        CancellationToken ct, string? addedAuditJson = null)
+        CancellationToken ct, string? addedAuditJson = null, bool includeFullResponse = true)
     {
         // Aggregate in SQL before loading any record bodies. DATALENGTH of an LOB
         // does not require parsing/allocating its JSON in the API. Reject oversized
@@ -334,6 +354,10 @@ public sealed partial class FamilyService
         // growth; a snapshot remains explicitly blocked until it fits safely.
         if (reducing) return;
         FamilyAvailability.RequireBudget(stored, 0, count, liveCount, growingCount);
+        // A scoped read still enforces the same stored-family safety budget,
+        // but its response is measured only after selecting sleep/feed rows.
+        // Full snapshots and writes keep the existing complete-response checks.
+        if (!includeFullResponse) return;
         var jsonBytes = await db.Database.SqlQuery<long>($"""
             SELECT COALESCE(SUM(CONVERT(bigint, DATALENGTH(CONVERT(varchar(max), RecordJson COLLATE Latin1_General_100_BIN2_UTF8)))), 0) AS Value
             FROM dbo.FamilyRecords WHERE FamilyId = {familyId} AND Deleted = 0 AND Collection <> 'extra'

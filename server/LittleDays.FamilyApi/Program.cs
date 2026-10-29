@@ -230,6 +230,12 @@ fullApi.MapPost("/push/installations/{installationId:guid}/unregister", (Guid in
     service.UnregisterPush(PublicIdentityAdmission.Get(context), installationId, request, ct)).RequireRateLimiting("sensitive");
 fullApi.MapPost("/families", (HttpContext context, CreateFullFamilyRequest request, FamilyService service, CancellationToken ct) =>
     FullCreation(context, request, service, ct)).RequireRateLimiting("sensitive");
+fullApi.MapGet("/families/{familyId:guid}/sleep-feed-snapshot", async (Guid familyId, HttpContext context, FamilyService service, CancellationToken ct) =>
+    TypedResults.Json(await service.SleepFeedSnapshot(PublicIdentityAdmission.Get(context), familyId, ct), FamilyAvailability.SnapshotJson))
+    .WithName("GetSleepFeedSnapshot")
+    .WithSummary("Read current sleep and feeding records")
+    .WithDescription("Returns only live sleep/feed entries for the admitted account's active family grant. This is not a full family snapshot.")
+    .Produces<SleepFeedSnapshot>();
 fullApi.MapGet("/families/{familyId:guid}/snapshot", async (Guid familyId, HttpContext context, FamilyService service, CancellationToken ct) =>
 {
     var result = await service.ConditionalFullSnapshot(PublicIdentityAdmission.Get(context), familyId, context.Request.Headers.IfNoneMatch.ToString(), ct,
