@@ -116,6 +116,7 @@ public sealed class SleepAiJobWorker : BackgroundService
     internal async Task Run(CancellationToken stoppingToken)
     {
         var cleanupAt = DateTimeOffset.MinValue;
+        Task<DateTimeOffset>? cleaning = null;
         var active = new List<Task>();
         try
         {
@@ -126,12 +127,28 @@ public sealed class SleepAiJobWorker : BackgroundService
                     await Observe(done, stoppingToken);
                     active.Remove(done);
                 }
+                if (cleaning?.IsCompleted == true)
+                {
+                    cleanupAt = await cleaning;
+                    cleaning = null;
+                }
                 try
                 {
                     if (!blocked())
                     {
-                        if (clock.GetUtcNow() >= cleanupAt)
-                        { await cleanup(stoppingToken); cleanupAt = clock.GetUtcNow().AddHours(1); }
+                        // Maintenance has its own production scope. A slow or
+                        // failed cleanup must not prevent queued jobs from starting.
+                        // Keep just one cleanup in flight, including when all
+                        // provider slots are occupied or the provider is disabled.
+                        if (cleaning is null && clock.GetUtcNow() >= cleanupAt)
+                        {
+                            cleaning = Cleanup(stoppingToken);
+                            if (cleaning.IsCompleted)
+                            {
+                                cleanupAt = await cleaning;
+                                cleaning = null;
+                            }
+                        }
                         if (options.Value.IsAvailable && active.Count < options.Value.ConcurrentRequestLimit)
                         {
                             // One claim at a time: an empty queue costs one poll,
@@ -152,7 +169,18 @@ public sealed class SleepAiJobWorker : BackgroundService
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
-        finally { await Task.WhenAll(active.Select(task => Observe(task, stoppingToken))); }
+        finally
+        {
+            await Task.WhenAll(active.Select(task => Observe(task, stoppingToken)));
+            if (cleaning is not null) await Observe(cleaning, stoppingToken);
+        }
+    }
+
+    private async Task<DateTimeOffset> Cleanup(CancellationToken stoppingToken)
+    {
+        try { await cleanup(stoppingToken); return clock.GetUtcNow().AddHours(1); }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { throw; }
+        catch (Exception) { Warn(); return clock.GetUtcNow().AddMinutes(5); }
     }
 
     private async Task Observe(Task work, CancellationToken stoppingToken)

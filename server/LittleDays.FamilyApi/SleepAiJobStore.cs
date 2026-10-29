@@ -35,7 +35,7 @@ public sealed class SleepAiJobStore(PilotDatabase db, FamilyService family, Reco
         var json = Serialize(value.Request);
         if (Encoding.UTF8.GetByteCount(json) > 196608) throw new ApiException(422, "invalid_input");
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(Serialize(value))));
-        return family.Transaction(async () =>
+        return family.SleepAiTransaction(async () =>
         {
             CheckRecovery();
             await family.AuthorizeSleepPredictionCore(user, value.Request.FamilyId, value.Request.MembershipId, value.Request.HistoryId, ct);
@@ -75,7 +75,7 @@ public sealed class SleepAiJobStore(PilotDatabase db, FamilyService family, Reco
         }, ct);
     }
 
-    public Task<SleepPredictionJobResponse> Get(PilotIdentity user, Guid id, CancellationToken ct) => family.Transaction(async () =>
+    public Task<SleepPredictionJobResponse> Get(PilotIdentity user, Guid id, CancellationToken ct) => family.SleepAiTransaction(async () =>
     {
         CheckRecovery();
         var row = await db.SleepAiJobs.FindAsync([user.ObjectId, id], ct) ?? throw new ApiException(404, "job_not_found");
@@ -84,7 +84,7 @@ public sealed class SleepAiJobStore(PilotDatabase db, FamilyService family, Reco
         return View(row);
     }, ct);
 
-    public Task<bool> Cancel(PilotIdentity user, Guid id, bool consent, CancellationToken ct) => family.Transaction(async () =>
+    public Task<bool> Cancel(PilotIdentity user, Guid id, bool consent, CancellationToken ct) => family.SleepAiTransaction(async () =>
     {
         CheckRecovery();
         if (id == Guid.Empty) throw new ApiException(422, "invalid_input");
@@ -113,7 +113,7 @@ public sealed class SleepAiJobStore(PilotDatabase db, FamilyService family, Reco
             throw new ApiException(403, "ai_consent_revoked");
     }
 
-    public Task<SleepAiJobClaim?> Claim(CancellationToken ct) => family.Transaction(async () =>
+    public Task<SleepAiJobClaim?> Claim(CancellationToken ct) => family.SleepAiTransaction(async () =>
     {
         CheckRecovery();
         if (!options.Value.IsAvailable) return null;
@@ -144,7 +144,7 @@ public sealed class SleepAiJobStore(PilotDatabase db, FamilyService family, Reco
                 ? row.ExchangeHistoryEpoch : null };
     }, ct);
 
-    internal Task<bool> EnsureCurrent(SleepAiJobClaim claim, CancellationToken ct) => family.Transaction(async () =>
+    internal Task<bool> EnsureCurrent(SleepAiJobClaim claim, CancellationToken ct) => family.SleepAiTransaction(async () =>
     {
         CheckRecovery();
         // Avoid serving an EF-tracked stale row after an independent cancellation.
@@ -159,7 +159,7 @@ public sealed class SleepAiJobStore(PilotDatabase db, FamilyService family, Reco
 
     public async Task<bool> Complete(SleepAiJobClaim claim, SleepPredictionResponse? prediction, string? error, CancellationToken ct)
     {
-        var completed = await family.Transaction(async () =>
+        var completed = await family.SleepAiTransaction(async () =>
         {
             CheckRecovery(); db.ChangeTracker.Clear();
             var row = await db.SleepAiJobs.FindAsync([claim.UserId, claim.JobId], ct);
@@ -187,7 +187,7 @@ public sealed class SleepAiJobStore(PilotDatabase db, FamilyService family, Reco
     {
         try
         {
-            await family.Transaction(async () =>
+            await family.SleepAiTransaction(async () =>
             {
                 CheckRecovery(); db.ChangeTracker.Clear();
                 var row = await db.SleepAiJobs.FindAsync([claim.UserId, claim.JobId], ct);
@@ -230,7 +230,7 @@ public sealed class SleepAiJobStore(PilotDatabase db, FamilyService family, Reco
         Finish(row, "expired", null, null); return true;
     }
 
-    internal Task<bool> StoreExchange(SleepAiJobClaim claim, SleepAiExchange exchange, CancellationToken ct) => family.Transaction(async () =>
+    internal Task<bool> StoreExchange(SleepAiJobClaim claim, SleepAiExchange exchange, CancellationToken ct) => family.SleepAiTransaction(async () =>
     {
         CheckRecovery(); db.ChangeTracker.Clear();
         if (!options.Value.FullRequestCaptureEnabled || claim.ExchangeCaptureHistoryEpoch != family.SleepAiHistoryEpoch ||
@@ -266,18 +266,33 @@ public sealed class SleepAiJobStore(PilotDatabase db, FamilyService family, Reco
         row.State == "completed" && row.ResultJson is not null ? JsonSerializer.Deserialize<SleepPredictionResponse>(row.ResultJson, SleepAiJson.Options) : null,
         row.ErrorCode);
 
-    public Task<bool> Cleanup(CancellationToken ct) => family.Transaction(async () =>
+    public async Task<bool> Cleanup(CancellationToken ct)
     {
         CheckRecovery(); var now = Now; var metadataBefore = now.AddDays(-2);
         // Only AI-owned tables; domain records and operation receipts are untouched.
-        // Ordinary job/input retention is unchanged. Diagnostic output has its
-        // seven-day TTL and a durable restore epoch, independent of app version.
+        // Keep the original retention predicates and 500-row per-table bound.
+        // Payload rows can be large: commit one at a time so log-write throttling
+        // cannot extend one lifecycle barrier across hundreds of payload deletes.
+        // A later failure does not roll back the earlier committed batches.
         var epoch = family.SleepAiHistoryEpoch;
-        await db.Database.ExecuteSqlInterpolatedAsync($"DELETE TOP (500) FROM dbo.SleepAiFailedOutputs WHERE ExpiresAt <= {now} OR HistoryEpoch <> {epoch}", ct);
-        await db.Database.ExecuteSqlInterpolatedAsync($"DELETE TOP (500) FROM dbo.SleepAiExchanges WHERE ExpiresAt <= {now} OR HistoryEpoch <> {epoch}", ct);
-        await db.Database.ExecuteSqlInterpolatedAsync($"DELETE TOP (500) FROM dbo.SleepAiJobs WHERE ExpiresAt <= {now}", ct);
-        await db.Database.ExecuteSqlInterpolatedAsync($"DELETE TOP (500) FROM dbo.SleepAiRevocations WHERE ExpiresAt <= {now}", ct);
-        await db.Database.ExecuteSqlInterpolatedAsync($"DELETE TOP (500) FROM dbo.SleepAiAttempts WHERE StartedAt < {metadataBefore}", ct);
+        await Batches(() => db.Database.ExecuteSqlInterpolatedAsync($"DELETE TOP (1) FROM dbo.SleepAiFailedOutputs WHERE ExpiresAt <= {now} OR HistoryEpoch <> {epoch}", ct), 1);
+        await Batches(() => db.Database.ExecuteSqlInterpolatedAsync($"DELETE TOP (1) FROM dbo.SleepAiExchanges WHERE ExpiresAt <= {now} OR HistoryEpoch <> {epoch}", ct), 1);
+        await Batches(() => db.Database.ExecuteSqlInterpolatedAsync($"DELETE TOP (1) FROM dbo.SleepAiJobs WHERE ExpiresAt <= {now}", ct), 1);
+        await Batches(() => db.Database.ExecuteSqlInterpolatedAsync($"DELETE TOP (25) FROM dbo.SleepAiRevocations WHERE ExpiresAt <= {now}", ct), 25);
+        await Batches(() => db.Database.ExecuteSqlInterpolatedAsync($"DELETE TOP (25) FROM dbo.SleepAiAttempts WHERE StartedAt < {metadataBefore}", ct), 25);
         return true;
-    }, ct);
+
+        async Task Batches(Func<Task<int>> delete, int batchSize)
+        {
+            for (var count = 0; count < 500; count += batchSize)
+            {
+                var deleted = await family.SleepAiTransaction(async () =>
+                {
+                    CheckRecovery();
+                    return await delete();
+                }, ct);
+                if (deleted < batchSize) break;
+            }
+        }
+    }
 }

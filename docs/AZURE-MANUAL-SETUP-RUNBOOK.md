@@ -4932,3 +4932,38 @@ externalreview/duplicateupload/OTA/AppReviewreplacement. Tests1,252mobile,
 verified. Signed-in real-family/two-phone latency remains unmeasured; foreground
 cadence/backoff/background restrictions unchanged. Both phones must update before
 comparing. Detailed requirement/test/artifact/cleanup evidence in linked record.
+## Local contention fix —29 October2026, not yet deployed
+
+Following the incident above, the owner requested a fix. AI job/capture/quota
+transactions now use a dedicated AI lock before the existing Shared lifecycle
+barrier; lifecycle Exclusive and per-family serialization remain intact. Retention
+commits small batches, and one independently scoped cleanup task no longer blocks
+job dispatch or retries every5seconds after failure. No manual Azure/GitHub/Expo/
+Apple action was needed and production remains unchanged. See the
+[implementation and exact regression evidence](AI-FAMILY-LOCK-FIX-2026-10-29.md).
+
+Disposable local SQL verification:878API+157migrator passed,0failed/0skipped;
+nonincremental full build0warnings/0errors. No database scripts/settings/quotas/
+capture retention changed. Signed-in production latency and two-phone acceptance
+must be checked after a separately authorized deployment, not inferred from these
+tests or generic health endpoints.
+
+The owner subsequently requested production deployment of these backend fixes.
+Publish only the four reviewed API files, three regression-test files and this
+task's documentation over trusted branch feature/family-invitations; preserve
+all unrelated local client changes and the existing remote runbook verbatim.
+GitHub location: github4me/my-little-days → Actions → Deploy family API and
+database. Choose feature/family-invitations, database_bootstrapped=true and
+adopt_ef=false; freeze the reviewed branch SHA until deployment gates finish.
+Before dispatch, inspect family-database and family-pilot environment protections
+without changing them. Tenant reticle.com.au (7b7e6e31-a778-4334-aee2-e969fa27fd0e),
+subscription4768a858-f23f-4a39-bb64-eabc9c142627, RGmy-little-days-pilot-rg,
+APIlittle-days-api-522fpstfbtds2 and SQLlittle-days-sql-522fpstfbtds2/
+little-days-family remain the target. Do not run infrastructure apply or change
+the paid Basic tier, account identities, AI settings, quotas, retention or Apple
+release. Expected result: exact reviewed API artifact active, catalog verified,
+explicit0pending scripts and no-op migration; only the workflow's temporary
+runner firewall rule removed. Verify CI/test counts, package revision/settings,
+deployment result and bounded serial health/startup checks separately from
+signed-in SQL-backed family/device acceptance. Deployment is pending at this
+checkpoint.

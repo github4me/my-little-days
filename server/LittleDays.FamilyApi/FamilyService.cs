@@ -21,11 +21,25 @@ public sealed partial class FamilyService(PilotDatabase db, PilotConfiguration c
     public Task<T> Transaction<T>(Func<Task<T>> action, CancellationToken ct = default) => TransactionCore(action, null, ct);
     public Task<T> FamilyTransaction<T>(Guid familyId, Func<Task<T>> action, CancellationToken ct = default) => TransactionCore(action, familyId, ct);
     private Task<T> ReadTransaction<T>(Func<Task<T>> action, CancellationToken ct) => TransactionCore(action, null, ct, readOnly: true);
-    private async Task<T> TransactionCore<T>(Func<Task<T>> action, Guid? familyId, CancellationToken ct, bool readOnly = false)
+    // AI claims, quotas, cancellation and capture serialize with each other, not
+    // ordinary family reads/writes. Acquire this lock BEFORE the shared lifecycle
+    // barrier: queued AI work must not hold that barrier while waiting its turn.
+    // Lifecycle changes still take the original Exclusive barrier, including on
+    // older API instances during a rollout, and cannot race authorization/commit.
+    internal Task<T> SleepAiTransaction<T>(Func<Task<T>> action, CancellationToken ct) =>
+        TransactionCore(action, null, ct, sleepAi: true);
+    private async Task<T> TransactionCore<T>(Func<Task<T>> action, Guid? familyId, CancellationToken ct, bool readOnly = false, bool sleepAi = false)
     {
         using var transactionTiming = diagnostics?.Measure(FamilySyncPhase.Transaction);
         await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
-        var mode = familyId is null && !readOnly ? "Exclusive" : "Shared";
+        if (sleepAi)
+            await db.Database.ExecuteSqlRawAsync("""
+            DECLARE @result int;
+            EXEC @result = sys.sp_getapplock @Resource = N'LittleDays:SleepAi:v1',
+                @LockMode = 'Exclusive', @LockOwner = 'Transaction', @LockTimeout = 10000;
+            IF @result < 0 THROW 51000, 'AI transaction lock unavailable.', 1;
+            """, ct);
+        var mode = familyId is null && !readOnly && !sleepAi ? "Exclusive" : "Shared";
         using (diagnostics?.Measure(FamilySyncPhase.GlobalLock))
             await db.Database.ExecuteSqlInterpolatedAsync($"""
             DECLARE @result int;

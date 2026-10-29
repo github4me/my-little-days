@@ -183,9 +183,117 @@ public sealed class SleepAiWorkerConcurrencyTests
         }, () => false, Options.Create(options), clock, logs);
         var run = worker.Run(stopping.Token); var wait = await clock.NextWait();
         Assert.Single(logs.Messages); Assert.DoesNotContain("private record", logs.Messages[0]); Assert.All(logs.Exceptions, Assert.Null);
+        if (stage == "cleanup") Assert.Equal(1, claims);
         var before = claims; clock.Fire(wait, TimeSpan.FromSeconds(5)); await clock.NextWait();
         Assert.Equal(before + 1, claims);
         stopping.Cancel(); await run.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
+    public async Task PendingCleanupDoesNotBlockQueuePollingOrStartASecondCleanupEvenAfterAnHour()
+    {
+        var clock = new ManualClock(); using var stopping = new CancellationTokenSource();
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var claims = 0; var cleanups = 0; var cleanupExited = 0;
+        var worker = new SleepAiJobWorker(_ => { claims++; return Task.FromResult<Task?>(null); }, async ct =>
+        {
+            cleanups++;
+            try { await release.Task.WaitAsync(ct); }
+            finally { cleanupExited++; }
+        }, () => false, Options.Create(SleepAiJobTests.Enabled()), clock, NullLogger<SleepAiJobWorker>.Instance);
+        var run = worker.Run(stopping.Token);
+        try
+        {
+            var wait = await clock.NextWait();
+            Assert.Equal(1, claims); Assert.Equal(1, cleanups); Assert.Equal(0, cleanupExited);
+            clock.Fire(wait, TimeSpan.FromSeconds(5)); wait = await clock.NextWait();
+            Assert.Equal(2, claims); Assert.Equal(1, cleanups);
+            clock.Fire(wait, TimeSpan.FromHours(2)); await clock.NextWait();
+            Assert.Equal(3, claims); Assert.Equal(1, cleanups); Assert.Equal(0, cleanupExited);
+        }
+        finally { stopping.Cancel(); await run.WaitAsync(TimeSpan.FromSeconds(5)); }
+        Assert.Equal(1, cleanupExited);
+    }
+
+    [Fact]
+    public async Task FailedCleanupStillDispatchesAndRetriesOnlyAtFiveMinuteBoundaryWithoutPrivateLogs()
+    {
+        var clock = new ManualClock(); using var stopping = new CancellationTokenSource(); var logs = new WorkerLogs();
+        var claims = 0; var cleanups = 0;
+        var worker = new SleepAiJobWorker(_ => { claims++; return Task.FromResult<Task?>(null); }, _ =>
+        {
+            cleanups++;
+            return cleanups == 1 ? Task.FromException(new InvalidOperationException("private request contents")) : Task.CompletedTask;
+        }, () => false, Options.Create(SleepAiJobTests.Enabled()), clock, logs);
+        var run = worker.Run(stopping.Token);
+        try
+        {
+            var wait = await clock.NextWait();
+            Assert.Equal(1, cleanups); Assert.Equal(1, claims);
+            Assert.Single(logs.Messages); Assert.DoesNotContain("private request contents", logs.Messages[0]); Assert.All(logs.Exceptions, Assert.Null);
+            clock.Fire(wait, TimeSpan.FromSeconds(5)); wait = await clock.NextWait();
+            Assert.Equal(1, cleanups); Assert.Equal(2, claims);
+            clock.Fire(wait, TimeSpan.FromMinutes(5) - TimeSpan.FromSeconds(5) - TimeSpan.FromTicks(1)); wait = await clock.NextWait();
+            Assert.Equal(1, cleanups); Assert.Equal(3, claims);
+            clock.Fire(wait, TimeSpan.FromTicks(1)); wait = await clock.NextWait();
+            Assert.Equal(2, cleanups); Assert.Equal(4, claims); Assert.Single(logs.Messages);
+            clock.Fire(wait, TimeSpan.FromMinutes(5)); await clock.NextWait();
+            Assert.Equal(2, cleanups); Assert.Equal(5, claims);
+        }
+        finally { stopping.Cancel(); await run.WaitAsync(TimeSpan.FromSeconds(5)); }
+    }
+
+    [Fact]
+    public async Task SuccessfulCleanupSchedulesNextRunAnHourAfterCompletionRatherThanStart()
+    {
+        var clock = new ManualClock(); using var stopping = new CancellationTokenSource();
+        // Inline continuation fixes the completion instant at the manual clock's
+        // current value rather than racing a real scheduler against clock advances.
+        var release = new TaskCompletionSource(); var cleanups = 0; var claims = 0;
+        var worker = new SleepAiJobWorker(_ => { claims++; return Task.FromResult<Task?>(null); }, _ =>
+        { cleanups++; return cleanups == 1 ? release.Task : Task.CompletedTask; }, () => false,
+            Options.Create(SleepAiJobTests.Enabled()), clock, NullLogger<SleepAiJobWorker>.Instance);
+        var run = worker.Run(stopping.Token);
+        try
+        {
+            var wait = await clock.NextWait(); Assert.Equal(1, cleanups);
+            clock.Fire(wait, TimeSpan.FromMinutes(30)); wait = await clock.NextWait();
+            Assert.Equal(1, cleanups); Assert.Equal(2, claims);
+            release.SetResult();
+            clock.Fire(wait, TimeSpan.FromHours(1) - TimeSpan.FromTicks(1)); wait = await clock.NextWait();
+            Assert.Equal(1, cleanups); Assert.Equal(3, claims);
+            clock.Fire(wait, TimeSpan.FromTicks(1)); await clock.NextWait();
+            Assert.Equal(2, cleanups); Assert.Equal(4, claims);
+        }
+        finally { release.TrySetResult(); stopping.Cancel(); await run.WaitAsync(TimeSpan.FromSeconds(5)); }
+    }
+
+    [Fact]
+    public async Task ShutdownWaitsForTheOutstandingCleanupToFinishAndDisposesItsScope()
+    {
+        var clock = new ManualClock(); using var stopping = new CancellationTokenSource();
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        // The inline claim continuation deterministically advances Run into its
+        // shutdown path before checking whether cleanup is still being awaited.
+        var claim = new TaskCompletionSource<Task?>();
+        var probe = new ScopeProbe(); var services = new ServiceCollection(); services.AddScoped(_ => probe);
+        await using var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
+        var scopes = provider.GetRequiredService<IServiceScopeFactory>(); var cleanups = 0; var claims = 0;
+        var worker = new SleepAiJobWorker(_ => { claims++; return claim.Task; }, async _ =>
+        {
+            cleanups++;
+            await using var scope = scopes.CreateAsyncScope(); scope.ServiceProvider.GetRequiredService<ScopeProbe>();
+            await release.Task;
+        }, () => false, Options.Create(SleepAiJobTests.Enabled()), clock, NullLogger<SleepAiJobWorker>.Instance);
+        var run = worker.Run(stopping.Token);
+        try
+        {
+            Assert.Equal(1, cleanups); Assert.Equal(1, claims); Assert.Equal(0, probe.Disposals);
+            stopping.Cancel(); claim.SetResult(null);
+            Assert.False(run.IsCompleted); Assert.Equal(0, probe.Disposals);
+        }
+        finally { stopping.Cancel(); claim.TrySetResult(null); release.TrySetResult(); await run.WaitAsync(TimeSpan.FromSeconds(5)); }
+        Assert.Equal(1, probe.Disposals); Assert.Equal(1, cleanups);
     }
 
     private sealed class ManualClock : TimeProvider

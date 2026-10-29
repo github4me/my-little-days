@@ -16,7 +16,7 @@ public sealed class SleepAiAttemptStore(PilotDatabase db, FamilyService family,
     public async Task<IAsyncDisposable> Reserve(Guid userId, CancellationToken ct)
     {
         var id = Guid.NewGuid();
-        await family.Transaction(async () =>
+        await family.SleepAiTransaction(async () =>
         {
             var now = clock.GetUtcNow();
             var day = new DateTimeOffset(now.UtcDateTime.Date, TimeSpan.Zero);
