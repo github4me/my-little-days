@@ -5015,5 +5015,3 @@ AI claim warnings or family failures. The old-container warnings ended at09:19:3
 The only observed post-switch family endpoint request was the intentional
 unauthenticated401 probe (zero SQL commands); no signed-in acceptance or sustained
 latency improvement is inferred from this limited, low-traffic window.
-
-

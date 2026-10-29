@@ -159,5 +159,3 @@ AI capacity50 is a limit on active provider requests, not registered/online user
 short serialized admission/state operations coexist with parallel provider calls.
 Process-local semaphores/counter/token-cache guards are not additional distributed
 SQL barriers. Shared SQL resources and lifecycle operations can still cause waits.
-
-
