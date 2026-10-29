@@ -119,3 +119,88 @@ SHA256`4db53fdbba29cdb671de255ead2b780d34852fcc646dbace4305bd5f8d2543ea`;
 focused test SHA256`8d3f2da61d9f86c5e8430d7ad4304ee4fd50551f346169ee934364012ec72230`.
 Owned SQL container/network removed. Assertion/gap review verdict Strong, no
 remaining confirmed blocker; no actual mutation/line-coverage claim.
+
+Backend source frozen over exact remote parent219fd5c, tree
+`014b848f156ba2b90e85749458cbafc147833ba2`, seven explicitly named paths.
+Source archive SHA256`4cd2654d435abb1bd6c74ef30a800c2500f8c49651438145060c79cdfabd3daa`.
+GitHub plugin blob hashes/tree matched local objects; commit
+`381024104a0735a8ba3bcbd09d71d077474f8130` was published with an expected-head
+lease and independent ref readback. No CLI push or unrelated dirty source.
+At04:28:13UTC /15:28:13Melbourne, deployment
+[run40817919318/#34](https://github.com/github4me/my-little-days/actions/runs/40817919318)
+started on that exact SHA with database_bootstrapped=true,adopt_ef=false.
+Migration scripts are identical to parent; migration/deploy/readiness outcome
+is still pending. Keep the branch pinned until every stale-revision gate ends.
+
+At04:35UTC /15:35Melbourne, local build91 completed successfully. The signed
+Phone/Watch/Widget targets all carry0.2.9(91), production provisioning and the
+same App Group/profile identities. All543 frozen files were checked against
+the immutable tree; signed Hermes bytecode matches recompilation of the reviewed
+production JavaScript, including the scoped Today callback. Native model tests
+pass35Watch+21Widget. Existing Expo Doctor19/21 warnings are identical to90
+(legacy splash property and12 patch-version mismatches), not a new category.
+IPA SHA256`e23c081446df85fc47f4edafad67352fb5ba9531683af3cc7f5d4dee9a6183ac`;
+dSYM SHA256`fa4c5826092547a889f7cdfcfc786bea9a1895eeb06601a492b504d346ee17fe`;
+signed HBC SHA256`ae9c98304f17f5722e6ac1e169cffc604e5b61d939ef53ea224bf62752aa6828`.
+Only this build's three temporary distribution-certificate copies were removed;
+managed credentials were unchanged. A fresh Apple read still shows review90
+WAITING_FOR_REVIEW and public87 READY_FOR_SALE. Apple validation/upload and
+TestFlight availability remain pending.
+
+Deployment34's independent browser flows passed on the unchanged3810241 tree.
+The separate pushCI130 browser job failed the existing quick-amount same-row
+assertion at tests/browser.mjs:345 (one sequential bounding-box y differed;
+no product or test change/rerun was made to bypass it). Deployment verification
+passed718 TypeScript/unit checks plus API854 and migrator157, all zero failures/
+skips. Migration catalog checks explicitly reported0pending scripts and a no-op;
+the workflow-owned temporary SQL firewall rule was removed. API deployment and
+post-deploy readiness are still pending at this checkpoint.
+
+## Deployed backend
+
+Deployment34 completed SUCCESS on all five jobs, exact3810241. API artifact
+12872939480 ZIP SHA256
+`a873d45d3d1825e87d89f6428ff66f71139a67d95839c074f3b1ca3078da0b1e`
+was independently streamed and checked (30,379,254bytes); assembly informational
+version contains the full release SHA and the new scoped symbol. Packaged
+appsettings.json is byte-identical to the prior deployedb965493 artifact.
+Database artifact12872954322 SHA256
+`0fa72e031c331048b984a3a20ba44732308015b350a1b925532d71e2cfd180f9`.
+Migration reported0pending at04:34:03,04:34:07,04:34:16UTC; the no-op and temporary
+firewall cleanup completed. OneDeploy884edd66-f9f3-4adc-a5c9-6943a7787167
+status4/active completed04:35:15UTC.
+
+Do not equate that package status or health200 with route readiness: initial
+anonymous auth checks returned503 and the new route404 while the old/new
+containers overlapped. Read-only runtime logs showed new container startup at
+04:35:49 and Oryx launching the API at04:36:25. Within the existing five-minute
+startup window, fresh direct uncached checks at04:38:29–30 returned401 from both
+capabilities and the new scoped route, with Bearer and no-store headers. No
+restart, settings change or guard relaxation was needed. The overlap is observed;
+the underlying old-request exception was not logged and is not claimed diagnosed.
+Live/ready200 and mounted authenticated routing are verified; signed-in production
+SQL/real-device refresh remain an explicit acceptance gap. No real family fixture,
+private record query or paid AI call was used.
+
+## Apple delivery
+
+Direct Apple validation succeeded04:37:19UTC, followed by one successful upload
+at04:39:38UTC /15:39:38Melbourne, uploader exit0, delivery
+`e223b42a-7b2c-4404-b12e-e88ce4eb24d3`. Uploaded IPA SHA matches the inspected
+artifact. Processing/internal tester availability is pending; no duplicate
+upload, App Review replacement or public release is authorized by this task.
+
+At04:43:40UTC /15:43:40Melbourne Apple confirms delivery COMPLETE, no errors or
+warnings, build0.2.9(91) VALID / IN_BETA_TESTING. Build ID equals delivery
+`e223b42a-7b2c-4404-b12e-e88ce4eb24d3`. Existing internal groups Team(Expo)
+(`9c537271-fd52-413a-887d-fe95079a0086`) and Early Birds
+(`5110f712-26d2-4151-b516-797adc018528`) are already attached; no new group or
+external beta review was created. The existing0.2.9(90) review remains
+WAITING_FOR_REVIEW and published0.2.8(87) remains READY_FOR_SALE, both with
+unchanged build relationships/release type. This task is TestFlight-only.
+
+Delivered: scoped client91 plus additive production API3810241. Automated
+verification/signing/deployment/processing/internal availability are confirmed.
+Outstanding: real signed-in family/SQL queued-write roundtrip and native Today
+pull/offline/foreground/VoiceOver acceptance. No physical installation or
+WidgetKit/Watch user acceptance is claimed by the release receipts.

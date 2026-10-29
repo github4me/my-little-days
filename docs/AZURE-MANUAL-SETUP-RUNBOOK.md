@@ -4804,3 +4804,41 @@ review0.2.9(90) and public0.2.8(87); inspect source/artifact/signatures/config/
 Hermes/native tests, upload once and confirm internal tester availability.
 No paid cloud build/OTA/App Review replacement. Publication/deployment/build/
 upload/processing/native-device acceptance remain pending at this checkpoint.
+
+### Completed scoped refresh release —29October2026,15:43Melbourne
+
+Backend381024104a0735a8ba3bcbd09d71d077474f8130 deployed by
+[run40817919318/#34](https://github.com/github4me/my-little-days/actions/runs/40817919318),
+all five jobs SUCCESS. API854+migrator157 and the independent full browser gate
+passed; repeated catalog checks explicitly0pending/no-op and owned SQL firewall
+cleanup succeeded. API ZIP12872939480 SHA256
+`a873d45d3d1825e87d89f6428ff66f71139a67d95839c074f3b1ca3078da0b1e`;
+assembly contains the full release SHA; appsettings byte-identical to priorb965493.
+Initial503/404 resolved within bounded old/new container startup propagation;
+direct checks04:39:24–25UTC show live/ready200 and session/capabilities/new
+sleep-feed route401/Bearer/no-store. No restart or setting/guard change needed.
+Health200 is not signed-in SQL acceptance; no private family/paid AI fixture used.
+
+Local frozen mobile91 tree`753ed9fba8cebb67f658a74b38681b40902ad1aa`,543files,
+exactly ten reviewed mobile overlays+app.json over immutable90. Full verification
+1,222/1,222, controller/navigation227/227 included, focusedSQL10/10; native
+35Watch+21Widget model tests and signed Phone/Watch/Widget/Hermes/config/dSYM
+inspection passed. Source archive SHA256
+`1879fdce147336ca0cdb039fa323d3ffe49003effbdf3c12728576e891a7efbf`;
+IPA`e23c081446df85fc47f4edafad67352fb5ba9531683af3cc7f5d4dee9a6183ac`;
+dSYM`fa4c5826092547a889f7cdfcfc786bea9a1895eeb06601a492b504d346ee17fe`.
+Existing Doctor19/21 maintenance warnings unchanged from90. Only build-owned
+temporary certificate copies removed; managed credentials/profiles unchanged.
+
+Direct Apple validation04:37:19UTC, one upload04:39:38, delivery/build
+`e223b42a-7b2c-4404-b12e-e88ce4eb24d3`. At04:43:40UTC Apple confirms COMPLETE,
+VALID, IN_BETA_TESTING for0.2.9(91); existing internal Team(Expo)/Early Birds
+groups attached. No new group/external beta review/OTA/paid cloud build.
+Review90 remains WAITING_FOR_REVIEW, public87 READY_FOR_SALE, build relationships
+and release types unchanged. Physical signed-in pull/offline/foreground,
+queued-write SQL roundtrip and WidgetKit/Watch user acceptance remain unverified.
+See scoped release document and `work/sleep-feed-refresh-release-20261029/`.
+
+Independent pushCI130 had an existing quick-amount row-layout assertion failure;
+deployment34's browser gate passed independently on the same3810241. No assertion
+was weakened, workflow rerun or extra production change used to bypass it.
