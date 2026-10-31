@@ -5055,3 +5055,24 @@ Checkpoint: implementation and64 focused SQL/HTTP/diagnostic tests passed;
 final full-suite verification and production deployment are pending. Evidence:
 `work/consent-backend-20261031/`. No new TestFlight build is required for this
 server-only change; existing97 availability and public96 remain unchanged.
+
+Production completion —31 October2026,02:12UTC:
+
+- Released42ca16a912aadcd6718d05ad83562b95db895b39; workflow37/run41158367119
+  succeeded in6m34s. All local/cloud API897 + migrator157 passed, zero failures
+  or skips; cloud TypeScript/browser verification passed. Scoped review was Strong.
+- DbUp catalog/checksum verification reported zero pending scripts before/after
+  the no-op apply. Only this run's temporary runner-IP firewall rule was removed.
+- API artifact13025634466 ZIP SHA256:
+  `5e91a79bf24ee952fe07a662ea7d01ef1190816e5ffc0066dc4a5a326995c53f`.
+  Exact revision/new fence/batch/diagnostic markers verified in memory. Settings
+  remain byte-identical (SHA256 a1b3989d62bd799450239c2bc11a455977433b8763c6fdeef107a282e5eb6e39).
+- OneDeploy0a112e53-d9ed-46c3-b5df-855af079312e returned status4,
+  complete=true/active=true. Serial public checks at02:12:38UTC returned
+  live200/ready200/scoped unauthenticated401 with Bearer/no-store. These do not
+  attest signed-in SQL or successful phone enablement; device acceptance remains pending.
+- No schema, infrastructure, tier, quota, retention, credentials, family records,
+  TestFlight or App Review changes. Existing97 needs no reinstall. The existing
+  workflow emitted action-runtime/runner deprecation notices, not deployment errors.
+- Receipts, frozen source pins and success screenshot: work/consent-backend-20261031/.
+  Do not publish unrelated dirty app/runbook history as part of this release.
