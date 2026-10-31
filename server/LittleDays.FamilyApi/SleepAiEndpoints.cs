@@ -27,14 +27,18 @@ public static class SleepAiEndpoints
             return TypedResults.Ok(job);
         })
             .WithName("ReadSleepPredictionJob").Produces<SleepPredictionJobResponse>().Produces(404);
-        api.MapDelete("/sleep-prediction-jobs/{jobId:guid}", async (Guid jobId, HttpContext context, SleepAiJobStore store, CancellationToken ct) =>
+        api.MapDelete("/sleep-prediction-jobs/{jobId:guid}", async (Guid jobId, HttpContext context, SleepAiJobStore store, SleepAiDiagnostics diagnostics, CancellationToken ct) =>
         {
-            await store.Cancel(PublicIdentityAdmission.Get(context), jobId, false, ct);
+            diagnostics.SetJob(jobId);
+            await diagnostics.MeasureAsync(SleepAiStage.Cancel,
+                () => store.Cancel(PublicIdentityAdmission.Get(context), jobId, false, ct));
             return TypedResults.NoContent();
         }).WithName("CancelSleepPredictionJob");
-        api.MapDelete("/sleep-prediction-jobs/consents/{generation:guid}", async (Guid generation, HttpContext context, SleepAiJobStore store, CancellationToken ct) =>
+        api.MapDelete("/sleep-prediction-jobs/consents/{generation:guid}", async (Guid generation, HttpContext context, SleepAiJobStore store, SleepAiDiagnostics diagnostics, CancellationToken ct) =>
         {
-            await store.Cancel(PublicIdentityAdmission.Get(context), generation, true, ct);
+            diagnostics.SetJob(generation);
+            await diagnostics.MeasureAsync(SleepAiStage.Revoke,
+                () => store.Cancel(PublicIdentityAdmission.Get(context), generation, true, ct));
             return TypedResults.NoContent();
         }).WithName("RevokeSleepPredictionJobConsent");
         api.MapGet("/sleep-predictions/capabilities", (Microsoft.Extensions.Options.IOptions<SleepAiOptions> options) =>

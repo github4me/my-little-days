@@ -4,7 +4,7 @@ namespace LittleDays.FamilyApi;
 
 public enum SleepAiStage
 {
-    Enqueue, Poll, Claim, QueueWait, Access, Budget, Provider, Validation, Persist, Processing, ServerTotal
+    Enqueue, Poll, Claim, QueueWait, Access, Budget, Provider, Validation, Persist, Processing, ServerTotal, Cancel, Revoke
 }
 
 /// <summary>Metadata-only timings. Never accepts a prompt, record, response body or identity.</summary>
@@ -37,8 +37,17 @@ public sealed class SleepAiDiagnostics(ILogger<SleepAiDiagnostics> logger, TimeP
     {
         "ok" or "ready" or "unavailable" or "insufficient_data" or "invalid_output" or "not_committed" or "interrupted" or
         "queued" or "running" or "completed" or "failed" or "cancelled" or "expired" or
-        "database_error" or "transport_error" or "error" => value,
+        "database_error" or "database_timeout" or "database_deadlock" or "database_lock_error" or "transport_error" or "error" => value,
         _ => SleepAiJobPolicy.SafeError(value)
+    };
+
+    private static string DatabaseOutcome(int number) => number switch
+    {
+        -2 => "database_timeout",
+        1205 => "database_deadlock",
+        // Application-lock acquisition can fail for more than a timeout.
+        51000 => "database_lock_error",
+        _ => "database_error"
     };
 
     private void Write(SleepAiStage stage, int attempt, double milliseconds, string outcome,
@@ -81,7 +90,8 @@ public sealed class SleepAiDiagnostics(ILogger<SleepAiDiagnostics> logger, TimeP
             TimeoutException => "ai_timeout",
             System.ClientModel.ClientResultException api => api.Status == 429 ? "ai_provider_busy" : "ai_provider_unavailable",
             HttpRequestException => "transport_error",
-            Microsoft.Data.SqlClient.SqlException => "database_error",
+            Microsoft.Data.SqlClient.SqlException sql => DatabaseOutcome(sql.Number),
+            Microsoft.EntityFrameworkCore.DbUpdateException { InnerException: Microsoft.Data.SqlClient.SqlException sql } => DatabaseOutcome(sql.Number),
             _ => "error"
         };
         public void ProviderMetadata(string modelId, string? serviceTier, long? inputTokens, long? outputTokens, long? cachedInputTokens)

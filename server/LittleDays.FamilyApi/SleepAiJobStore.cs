@@ -77,39 +77,82 @@ public sealed class SleepAiJobStore(PilotDatabase db, FamilyService family, Reco
 
     public Task<SleepPredictionJobResponse> Get(PilotIdentity user, Guid id, CancellationToken ct) => family.SleepAiTransaction(async () =>
     {
-        CheckRecovery();
+        CheckRecovery(); db.ChangeTracker.Clear();
         var row = await db.SleepAiJobs.FindAsync([user.ObjectId, id], ct) ?? throw new ApiException(404, "job_not_found");
         await Authorize(user, row, ct);
+        // Revocation commits before payload cleanup. Never expose the old plan
+        // while another transaction is still draining that generation's data.
+        // Keep the existing 200/cancelled (or expired) polling contract, without
+        // deserializing a result or rewriting a potentially large payload here.
+        if (await IsRevoked(row.UserId, row.Id, row.ConsentGeneration, ct))
+            return new(row.Id, row.InputRevision, row.ExpiresAt <= Now ? "expired" : "cancelled",
+                row.RequestNow, row.CreatedAt, row.UpdatedAt, row.ExpiresAt, null, null);
         Expire(row);
         return View(row);
     }, ct);
 
-    public Task<bool> Cancel(PilotIdentity user, Guid id, bool consent, CancellationToken ct) => family.SleepAiTransaction(async () =>
+    public async Task<bool> Cancel(PilotIdentity user, Guid id, bool consent, CancellationToken ct)
     {
         CheckRecovery();
         if (id == Guid.Empty) throw new ApiException(422, "invalid_input");
-        await family.AuthorizeSleepPredictionCore(user, null, null, null, ct);
         var kind = consent ? "consent" : "job";
-        var old = await db.SleepAiRevocations.FindAsync([user.ObjectId, kind, id], ct);
-        if (old is null) db.SleepAiRevocations.Add(new() { UserId = user.ObjectId, Kind = kind, Id = id, ExpiresAt = Now.AddDays(2) });
-        else old.ExpiresAt = Now.AddDays(2);
-        var rows = await db.SleepAiJobs.Where(x => x.UserId == user.ObjectId &&
-            (consent ? x.ConsentGeneration == id : x.Id == id)).ToArrayAsync(ct);
-        foreach (var row in rows) Finish(row, "cancelled", null, null);
+        var refreshFenceAt = DateTimeOffset.MinValue;
+        // Fence late enqueues, workers and result reads in a small durable commit.
+        // A disconnected caller can resume cleanup without undoing prior batches.
+        await Batch(() => Task.FromResult(0));
+        await Drain(() => db.Database.ExecuteSqlInterpolatedAsync($"""
+            UPDATE TOP (1) dbo.SleepAiJobs
+            SET State = 'cancelled', RequestJson = NULL, ResultJson = NULL, ErrorCode = NULL,
+                LeaseId = NULL, LeaseUntil = NULL, UpdatedAt = {Now}
+            WHERE UserId = {user.ObjectId}
+                AND (({consent} = 1 AND ConsentGeneration = {id}) OR ({consent} = 0 AND Id = {id}))
+                AND (State <> 'cancelled' OR RequestJson IS NOT NULL OR ResultJson IS NOT NULL
+                    OR ErrorCode IS NOT NULL OR LeaseId IS NOT NULL OR LeaseUntil IS NOT NULL)
+            """, ct));
         // Do not join to jobs: their midnight cleanup precedes the diagnostic TTL.
-        await db.SleepAiFailedOutputs.Where(x => x.UserId == user.ObjectId &&
-            (consent ? x.ConsentGeneration == id : x.JobId == id)).ExecuteDeleteAsync(ct);
-        await db.SleepAiExchanges.Where(x => x.UserId == user.ObjectId &&
-            (consent ? x.ConsentGeneration == id : x.JobId == id)).ExecuteDeleteAsync(ct);
+        // Large payloads must not hold the global AI/lifecycle locks across the
+        // whole seven-day history. No acknowledgement until every phase is empty.
+        await Drain(() => db.Database.ExecuteSqlInterpolatedAsync($"""
+            DELETE TOP (1) FROM dbo.SleepAiFailedOutputs WHERE UserId = {user.ObjectId}
+                AND (({consent} = 1 AND ConsentGeneration = {id}) OR ({consent} = 0 AND JobId = {id}))
+            """, ct));
+        await Drain(() => db.Database.ExecuteSqlInterpolatedAsync($"""
+            DELETE TOP (1) FROM dbo.SleepAiExchanges WHERE UserId = {user.ObjectId}
+                AND (({consent} = 1 AND ConsentGeneration = {id}) OR ({consent} = 0 AND JobId = {id}))
+            """, ct));
         return true;
-    }, ct);
+
+        async Task Drain(Func<Task<int>> change)
+        {
+            while (await Batch(change) != 0) { }
+        }
+        Task<int> Batch(Func<Task<int>> change) => family.SleepAiTransaction(async () =>
+        {
+            CheckRecovery(); db.ChangeTracker.Clear();
+            await family.AuthorizeSleepPredictionCore(user, null, null, null, ct);
+            if (Now >= refreshFenceAt)
+            {
+                var old = await db.SleepAiRevocations.FindAsync([user.ObjectId, kind, id], ct);
+                var expires = Now.AddDays(2);
+                if (old is null) db.SleepAiRevocations.Add(new() { UserId = user.ObjectId, Kind = kind, Id = id, ExpiresAt = expires });
+                else old.ExpiresAt = expires;
+                // Normally only the first short transaction writes the fence.
+                // Renew it if a very long-lived caller crosses the retention bound.
+                refreshFenceAt = expires.AddDays(-1);
+            }
+            return await change();
+        }, ct);
+    }
+
+    private Task<bool> IsRevoked(Guid user, Guid job, Guid generation, CancellationToken ct) =>
+        db.SleepAiRevocations.AnyAsync(x => x.UserId == user &&
+            (x.Kind == "job" && x.Id == job || x.Kind == "consent" && x.Id == generation), ct);
 
     private async Task CheckRevoked(Guid user, Guid job, Guid generation, CancellationToken ct)
     {
         // Tombstones are deliberately checked until removed by bounded cleanup.
         // Original request freshness also prevents replay after metadata expiry.
-        if (await db.SleepAiRevocations.AnyAsync(x => x.UserId == user &&
-            (x.Kind == "job" && x.Id == job || x.Kind == "consent" && x.Id == generation), ct))
+        if (await IsRevoked(user, job, generation, ct))
             throw new ApiException(403, "ai_consent_revoked");
     }
 

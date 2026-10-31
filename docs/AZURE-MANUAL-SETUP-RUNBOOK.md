@@ -5015,3 +5015,43 @@ AI claim warnings or family failures. The old-container warnings ended at09:19:3
 The only observed post-switch family endpoint request was the intentional
 unauthenticated401 probe (zero SQL commands); no signed-in acceptance or sustained
 latency improvement is inferred from this limited, low-traffic window.
+## AI revocation recovery —31 October2026
+
+Installed0.2.11(97) still reports service/connection failure when Enable AI waits
+for an older revocation. Source review found unbounded payload cleanup inside
+one global AI transaction; fresh Claim failures took about ten seconds. No live
+blocking session was captured, so exact endpoint attribution remains unproven.
+See [the scoped fix and acceptance record](AI-REVOCATION-RECOVERY-2026-10-31.md).
+
+Manual release procedure (same production target, no infrastructure apply):
+
+1. Freeze only the three reviewed API files, two regression test files, task
+   record and this section over trusted branch head
+   `28d157af6220e570849c577bfad13e33a40638ca`. Its backend/settings/workflow blobs
+   match deployed4699aece; two later documentation commits must be retained.
+2. GitHub repository `github4me/my-little-days` → Settings → Environments:
+   freshly checked `family-pilot` and `family-database` permit only
+   `feature/family-invitations`; Required reviewers and Wait timer are unchecked,
+   administrator bypass is checked. These are not human-approval gates. Do not
+   change these protections or the paused infrastructure gates.
+3. Verified target: tenant`7b7e6e31-a778-4334-aee2-e969fa27fd0e`, subscription
+   `4768a858-f23f-4a39-bb64-eabc9c142627`, RG`my-little-days-pilot-rg`, API
+   `little-days-api-522fpstfbtds2`, SQL`little-days-sql-522fpstfbtds2` /
+   `little-days-family`. Existing deployment/migration flags remain true; no
+   identity, scope, connection, quota, tier or retention setting is changed.
+4. Publish through the GitHub plugin using expected-head/non-force update.
+   Actions → Deploy family API and database → Run workflow: selected trusted
+   branch, `database_bootstrapped=true`, `adopt_ef=false`. No migration changed;
+   require catalog/checksum verification and explicit zero pending scripts.
+5. Verify frozen artifact SHA/configuration, deployment completion, then bounded
+   serial live/ready/unauthenticated checks. Observe new metadata-only Revoke and
+   Cancel timing outcomes. Health is not signed-in SQL/device acceptance.
+6. Once the new process is active, retry Enable AI once on the affected97 phone.
+   Keep pending state on error; never clear local consent or reset records. Old
+   processes do not suppress results behind the new split-transaction fence;
+   verify rollout before acceptance and reassess partial cleanup before rollback.
+
+Checkpoint: implementation and64 focused SQL/HTTP/diagnostic tests passed;
+final full-suite verification and production deployment are pending. Evidence:
+`work/consent-backend-20261031/`. No new TestFlight build is required for this
+server-only change; existing97 availability and public96 remain unchanged.
