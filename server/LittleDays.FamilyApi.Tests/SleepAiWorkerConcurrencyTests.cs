@@ -10,11 +10,11 @@ namespace LittleDays.FamilyApi.Tests;
 public sealed class SleepAiWorkerConcurrencyTests
 {
     [Fact]
-    public async Task FiftyProductionScopesKeepEachJobsFailurePayloadIsolatedAndClearItAfterCompletion()
+    public async Task FiftyProductionScopesKeepFailureMetadataIsolatedWithoutPayloadsAndClearItAfterCompletion()
     {
         var clock = new ManualClock(); var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var captures = new List<SleepAiFailureCapture>(); var probes = new List<ScopeProbe>();
-        var results = new ConcurrentDictionary<Guid, string>();
+        var results = new ConcurrentDictionary<Guid, double>();
         var services = new ServiceCollection();
         services.AddScoped(_ => new SleepAiFailureCapture(clock));
         services.AddScoped(_ => new ScopeProbe());
@@ -22,27 +22,30 @@ public sealed class SleepAiWorkerConcurrencyTests
         {
             var capture = sp.GetRequiredService<SleepAiFailureCapture>(); captures.Add(capture);
             probes.Add(sp.GetRequiredService<ScopeProbe>());
+            var duration = captures.Count;
             var claim = new SleepAiJobClaim(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), SleepAiJobTests.Request(clock.GetUtcNow()).Request)
                 { Run = 1, FailureCaptureHistoryEpoch = Guid.NewGuid() };
             var text = $"synthetic failure for {claim.JobId}";
             return new SleepAiJobProcessor(_ => Task.FromResult<SleepAiJobClaim?>(claim), async (received, ct) =>
             {
                 Assert.Same(claim, received);
-                capture.Record(1, "invalid_json", null, text, TimeSpan.FromMilliseconds(10), SleepAiOptions.SelectedModel);
+                capture.Record(1, "invalid_json", null, text, TimeSpan.FromMilliseconds(duration), SleepAiOptions.SelectedModel);
                 await release.Task.WaitAsync(ct);
                 return new(2, claim.Request.InputRevision, "insufficient_data", clock.GetUtcNow(), clock.GetUtcNow().AddDays(1), []);
             }, (received, _, _, _) =>
             {
                 Assert.Same(claim, received);
-                var failure = Assert.Single(capture.Attempts); Assert.Equal(text, failure.ResponseText);
-                Assert.True(results.TryAdd(claim.JobId, failure.ResponseText!)); return Task.FromResult(true);
+                var failure = Assert.Single(capture.Attempts); Assert.Null(failure.ResponseText);
+                Assert.Equal("invalid_json", failure.Reason); Assert.Equal((double)duration, failure.DurationMs);
+                Assert.True(results.TryAdd(claim.JobId, failure.DurationMs)); return Task.FromResult(true);
             }, null, capture);
         });
         await using var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
         var tasks = new List<Task>(); var scopes = provider.GetRequiredService<IServiceScopeFactory>();
         for (var i = 0; i < 50; i++) tasks.Add(Assert.IsAssignableFrom<Task>(await SleepAiJobWorker.TryStart(scopes, default)));
         Assert.Equal(50, captures.Distinct().Count()); Assert.Equal(50, probes.Distinct().Count());
-        Assert.Equal(50, captures.Select(x => Assert.Single(x.Attempts).ResponseText).Distinct().Count());
+        Assert.Equal(50, captures.Select(x => Assert.Single(x.Attempts).DurationMs).Distinct().Count());
+        Assert.All(captures, capture => Assert.Null(Assert.Single(capture.Attempts).ResponseText));
         Assert.All(tasks, task => Assert.False(task.IsCompleted)); Assert.All(probes, probe => Assert.Equal(0, probe.Disposals));
         release.SetResult(); await Task.WhenAll(tasks).WaitAsync(TimeSpan.FromSeconds(5));
         Assert.Equal(50, results.Count); Assert.Equal(50, results.Values.Distinct().Count());

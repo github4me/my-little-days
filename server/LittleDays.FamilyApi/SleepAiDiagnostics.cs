@@ -23,6 +23,24 @@ public sealed class SleepAiDiagnostics(ILogger<SleepAiDiagnostics> logger, TimeP
 
     public Timing Start(SleepAiStage stage, int attempt = 0) => new(this, stage, attempt);
 
+    internal void OutputFailure(int attempt, string reason, int? periodIndex, IReadOnlyList<string> fields, double durationMs)
+    {
+        if (attempt is < 1 or > 2) return;
+        var category = SleepAiOutputFailure.IsKnownReason(reason) ||
+            reason is "ai_timeout" or "ai_provider_busy" or "ai_provider_unavailable" or
+                "incomplete_response" or "non_text_response" or "continuation_response" ? reason : "invalid_output";
+        var index = periodIndex is >= 0 and < SleepAiValidation.MaxWholeDayPeriods ? periodIndex : null;
+        var safeFields = SleepAiFailureCapture.SafeFields(category, index, category == reason ? fields : null);
+        try
+        {
+            logger.LogInformation(new EventId(4102, "SleepAiOutputFailure"),
+                "SleepAiOutputFailure Job={Job} Run={Run} Attempt={Attempt} Reason={Reason} PeriodIndex={PeriodIndex} Fields={Fields} DurationMs={DurationMs}",
+                correlation, run, attempt, category, index, string.Join(',', safeFields),
+                double.IsFinite(durationMs) ? Math.Round(Math.Clamp(durationMs, 0, 120000), 2) : 0);
+        }
+        catch (Exception) { /* Observability must never change the job's outcome. */ }
+    }
+
     public async Task<T> MeasureAsync<T>(SleepAiStage stage, Func<Task<T>> action)
     {
         using var timing = Start(stage);

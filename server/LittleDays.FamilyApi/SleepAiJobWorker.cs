@@ -53,7 +53,7 @@ public sealed class SleepAiJobProcessor
 
     internal async Task Process(SleepAiJobClaim claim, CancellationToken stoppingToken)
     {
-        failures?.StartAutomaticCapture(claim.FailureCaptureHistoryEpoch);
+        failures?.StartMetadata();
         if (exchangeStore is not null) exchanges?.Start(claim, (value, token) => exchangeStore.StoreExchange(claim, value, token));
         diagnostics?.WallDuration(SleepAiStage.QueueWait, claim.CreatedAt);
         SleepPredictionResponse? result = null; string? error = null;

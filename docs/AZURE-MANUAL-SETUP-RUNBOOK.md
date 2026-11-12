@@ -5076,3 +5076,50 @@ Production completion —31 October2026,02:12UTC:
   workflow emitted action-runtime/runner deprecation notices, not deployment errors.
 - Receipts, frozen source pins and success screenshot: work/consent-backend-20261031/.
   Do not publish unrelated dirty app/runbook history as part of this release.
+
+## AI performance backend release — 12 November 2026
+
+The owner authorized production deployment followed by App Store review of the
+already processed iOS 0.2.11 (98). These are separate operations. Backend candidate
+scope: account-scoped AI coordination, readonly polling projections, empty-queue
+lock avoidance, removal of duplicate durable-job authorization, and metadata-only
+diagnostics. Model calls retain authorization and no SQL lock spans provider I/O.
+No migrations, family record semantics, authentication, tier or quota changes.
+
+Manual deployment targets and guardrails:
+
+1. Hosting tenant reticle.com.au / `7b7e6e31-a778-4334-aee2-e969fa27fd0e`,
+   subscription `4768a858-f23f-4a39-bb64-eabc9c142627`, resource group
+   `my-little-days-pilot-rg`, App Service `little-days-api-522fpstfbtds2`,
+   SQL server `little-days-sql-522fpstfbtds2` / database `little-days-family`.
+   Recheck live targets; preserve current paid Basic SQL and keep the old free-only
+   infrastructure gates paused. Do not run infrastructure apply for this release.
+2. Azure Portal → App Service → Settings → Environment variables: inspect only
+   `SleepAi__FullRequestCaptureEnabled`; align an existing override to `false`.
+   New code always disables diagnostic body capture even if legacy configuration
+   remains true. Preserve all unrelated app settings and secrets. Verify field
+   readback, active deployment revision, and retirement of old workers. Old rows
+   retain existing 7-day TTL/bounded cleanup; no production purge is authorized.
+3. GitHub `github4me/my-little-days` → Settings → Environments: recheck actual
+   protection/branch policy of `family-pilot` and `family-database`; preserve
+   deployment/migration gates and the trusted `feature/family-invitations` branch.
+   Publish only the reviewed frozen delta using the GitHub plugin and expected-head
+   guard. Actions → Deploy family API and database → Run workflow on that branch,
+   `database_bootstrapped=true`, `adopt_ef=false`. No legacy EF adoption.
+4. Require complete CI including real disposable SQL tests, catalog and checksum
+   verification with explicit zero pending scripts before/after no-op migration,
+   and cleanup of only this run's exact runner-IP rule. Preserve operator rules.
+   Verify artifact revision/settings, successful active OneDeploy, then bounded
+   serial liveness/readiness/unauthenticated rejection. These alone do not prove
+   authenticated SQL readiness or device AI/synchronization acceptance.
+5. Apple App Store Connect app `6809826484` / `com.littledays.babylog`: after backend
+   verification, create/select version 0.2.11 and processed build 98
+   (`7a55e081-b764-4b1c-9cd6-34c3c8f68ab4`). Preserve published 0.2.10 (96), listing,
+   screenshots, review contacts and AFTER_APPROVAL release policy. Update only
+   release/review notes needed for this version, submit, then read back an actual
+   review state. No paid build or replacement upload is necessary.
+
+Preparation is not deployment or review submission. Local operation receipts in
+`work/ai-perf-release-20261112/` record exact source, tests and subsequent outcomes.
+Physical-device acceptance and production latency gains remain unverified until
+demonstrated; do not substitute generic health or local tests for those checks.

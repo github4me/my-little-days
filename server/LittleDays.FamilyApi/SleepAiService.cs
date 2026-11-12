@@ -25,9 +25,9 @@ public sealed class SleepAiOptions
     public string Model { get; set; } = SelectedModel;
     public string ApiKey { get; set; } = "";
     public bool SupportsTemperature { get; set; }
-    // Explicit deployment setting; initial AI opt-in, access checks and
-    // cancellation/revocation continue to apply to every captured job.
-    public bool FullRequestCaptureEnabled { get; set; }
+    // Legacy configuration remains bindable during rolling upgrades, but no
+    // setting can re-enable request/response payload capture in this version.
+    public bool FullRequestCaptureEnabled { get => false; set { } }
     public int MaxRequestsPerAccountPerHour { get; set; } = 30;
     public int MaxRequestsPerInstancePerDay { get; set; } = 200;
     public int MaxConcurrentRequests { get; set; } = 50;
@@ -293,8 +293,8 @@ public sealed class OpenAiSleepProvider(IChatClient client, IOptions<SleepAiOpti
                 ? "non_text_response" : null;
         if (rejection is not null)
         {
-            // Only assistant text, never reasoning/tool content or raw SDK bodies.
-            failures?.RejectProviderResponse(response.Text, rejection);
+            // Rejected content is not needed for the bounded failure classification.
+            failures?.RejectProviderResponse(null, rejection);
             return null;
         }
         return response.Text;
@@ -355,7 +355,11 @@ public sealed class SleepAiService(IOptions<SleepAiOptions> options, ISleepAiAcc
     public SleepPredictionCapabilities Capabilities => new(options.Value.IsAvailable, SleepAiValidation.ConsentVersion, "OpenAI", true);
 
     public async Task<SleepPredictionResponse> PredictAsync(PilotIdentity user, SleepPredictionRequest request, CancellationToken ct)
-        => await PredictCore(user, request, SleepAiValidation.ValidateRequest(request, clock.GetUtcNow()), null, ct);
+    {
+        var bounds = SleepAiValidation.ValidateRequest(request, clock.GetUtcNow());
+        failures?.StartMetadata();
+        return await PredictCore(user, request, bounds, null, ct);
+    }
 
     // Only a committed, previously validated immutable SQL job uses this seam.
     // Do not reapply the incoming HTTP clock-skew rule after time in the queue.
@@ -480,8 +484,11 @@ public sealed class SleepAiService(IOptions<SleepAiOptions> options, ISleepAiAcc
             using var timing = diagnostics?.Start(SleepAiStage.Access, attempt);
             try
             {
-                await access.AuthorizeAsync(user, request, token);
+                // Durable jobs recheck the authoritative account/grant/history,
+                // lease and revocation together. Do not repeat the same access
+                // queries in a separate transaction immediately beforehand.
                 if (authorizeJob is not null) await authorizeJob(token);
+                else await access.AuthorizeAsync(user, request, token);
                 timing?.Complete();
             }
             catch (Exception error) { timing?.Fail(error); throw; }

@@ -21,22 +21,42 @@ public sealed partial class FamilyService(PilotDatabase db, PilotConfiguration c
     public Task<T> Transaction<T>(Func<Task<T>> action, CancellationToken ct = default) => TransactionCore(action, null, ct);
     public Task<T> FamilyTransaction<T>(Guid familyId, Func<Task<T>> action, CancellationToken ct = default) => TransactionCore(action, familyId, ct);
     private Task<T> ReadTransaction<T>(Func<Task<T>> action, CancellationToken ct) => TransactionCore(action, null, ct, readOnly: true);
-    // AI claims, quotas, cancellation and capture serialize with each other, not
-    // ordinary family reads/writes. Acquire this lock BEFORE the shared lifecycle
-    // barrier: queued AI work must not hold that barrier while waiting its turn.
+    // Global queue admission, claims, quotas and maintenance serialize with each
+    // other, not ordinary family reads/writes. Acquire this lock BEFORE the
+    // lifecycle barrier so queued AI work cannot hold it while waiting its turn.
     // Lifecycle changes still take the original Exclusive barrier, including on
     // older API instances during a rollout, and cannot race authorization/commit.
     internal Task<T> SleepAiTransaction<T>(Func<Task<T>> action, CancellationToken ct) =>
         TransactionCore(action, null, ct, sleepAi: true);
-    private async Task<T> TransactionCore<T>(Func<Task<T>> action, Guid? familyId, CancellationToken ct, bool readOnly = false, bool sleepAi = false)
+    // Keep the old AI resource as a SHARED rolling-upgrade barrier. Old instances
+    // and global queue/quota operations still take it exclusively. Independent
+    // accounts otherwise proceed together; readers on one account also coexist.
+    // The account scope covers consent generations as well as individual jobs.
+    internal Task<T> SleepAiAccountTransaction<T>(Guid userId, Func<Task<T>> action, CancellationToken ct, bool readOnly = false)
+    {
+        if (userId == Guid.Empty) throw new ArgumentException("An AI account scope is required.", nameof(userId));
+        return TransactionCore(action, null, ct, readOnly, sleepAi: true, aiUserId: userId);
+    }
+    private async Task<T> TransactionCore<T>(Func<Task<T>> action, Guid? familyId, CancellationToken ct,
+        bool readOnly = false, bool sleepAi = false, Guid? aiUserId = null)
     {
         using var transactionTiming = diagnostics?.Measure(FamilySyncPhase.Transaction);
         await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
+        // Account coordination comes first: queued work for one account cannot
+        // hold global Shared and delay unrelated global admission/claim work.
+        // Global AI and lifecycle operations never request an account lock.
+        if (aiUserId is Guid account)
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+            DECLARE @result int;
+            EXEC @result = sys.sp_getapplock @Resource = {$"LittleDays:SleepAiAccount:{account:D}"},
+                @LockMode = {(readOnly ? "Shared" : "Exclusive")}, @LockOwner = 'Transaction', @LockTimeout = 10000;
+            IF @result < 0 THROW 51000, 'AI account lock unavailable.', 1;
+            """, ct);
         if (sleepAi)
-            await db.Database.ExecuteSqlRawAsync("""
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
             DECLARE @result int;
             EXEC @result = sys.sp_getapplock @Resource = N'LittleDays:SleepAi:v1',
-                @LockMode = 'Exclusive', @LockOwner = 'Transaction', @LockTimeout = 10000;
+                @LockMode = {(aiUserId is null ? "Exclusive" : "Shared")}, @LockOwner = 'Transaction', @LockTimeout = 10000;
             IF @result < 0 THROW 51000, 'AI transaction lock unavailable.', 1;
             """, ct);
         var mode = familyId is null && !readOnly && !sleepAi ? "Exclusive" : "Shared";

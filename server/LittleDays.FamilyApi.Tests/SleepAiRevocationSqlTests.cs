@@ -39,8 +39,9 @@ public sealed class SleepAiRevocationSqlTests(SqlFixture sql) : IClassFixture<Sq
             var claim = Claim(running) with { ExchangeCaptureHistoryEpoch = s.Scenario.Config.Family.HistoryId };
             var exchange = new SleepAiExchange(1, 2, s.Clock.Now, null, "synthetic request", null, 17, 0,
                 false, false, null, null, "dispatching", 0);
-            Assert.Equal("ai_consent_revoked", (await Assert.ThrowsAsync<ApiException>(() =>
-                s.Call(store => store.StoreExchange(claim, exchange, default)))).Code);
+            // Payload capture is disabled entirely, even for a legacy stamped
+            // claim. Revocation must still fence reads/enqueues/completion.
+            Assert.False(await s.Call(store => store.StoreExchange(claim, exchange, default)));
             await using (var check = sql.Open())
             {
                 Assert.Equal(2, await check.SleepAiExchanges.CountAsync(x => x.UserId == s.User));

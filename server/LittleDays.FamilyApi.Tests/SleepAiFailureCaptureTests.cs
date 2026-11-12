@@ -14,18 +14,26 @@ public sealed class SleepAiFailureCaptureTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task FailedResponsesRequireServerEpochNotAnEmptyOrUnstartedScope(bool emptyEpoch)
+    public async Task DirectPredictionStartsBoundedMetadataWithoutALegacyEpoch(bool emptyEpoch)
     {
         var f = new Fixture(false, PrivateOutput);
         if (emptyEpoch) f.Capture.StartAutomaticCapture(Guid.Empty);
         Assert.Equal("ai_invalid_response", (await Assert.ThrowsAsync<ApiException>(() => f.Predict())).Code);
         Assert.Equal(2, f.Client.Calls);
-        Assert.Empty(f.Capture.Attempts);
-        Assert.DoesNotContain(PrivateOutput, f.Logs.Text);
+        Assert.Equal(new[] { 1, 2 }, f.Capture.Attempts.Select(x => x.Attempt));
+        Assert.All(f.Capture.Attempts, x =>
+        {
+            Assert.Equal("invalid_json", x.Reason); Assert.Equal(125d, x.DurationMs);
+            Assert.Null(x.ResponseText); Assert.Equal(0, x.OriginalLength); Assert.False(x.Truncated);
+        });
+        Assert.Equal(2, f.Logs.Ids.Count(x => x == 4102));
+        Assert.Equal(new[] { "invalid_json", "invalid_json" },
+            f.Logs.Events.Where(x => x.ContainsKey("Reason")).Select(x => Assert.IsType<string>(x["Reason"])));
+        f.AssertNoPrivateLogsOrInputs();
     }
 
     [Fact]
-    public async Task RepairKeepsOnlyFailedResponseAndReason()
+    public async Task RepairKeepsOnlySafeFailedAttemptMetadataWithoutEitherResponse()
     {
         var f = new Fixture(true, PrivateOutput, Ready);
         var result = await f.Predict();
@@ -33,29 +41,33 @@ public sealed class SleepAiFailureCaptureTests
         Assert.Equal(2, f.Client.Calls);
         var attempt = Assert.Single(f.Capture.Attempts);
         Assert.Equal(1, attempt.Attempt);
-        Assert.Equal(PrivateOutput, attempt.ResponseText);
+        Assert.Null(attempt.ResponseText);
         Assert.Equal("invalid_json", attempt.Reason);
         Assert.Equal(new[] { "$" }, attempt.Fields);
         Assert.Null(attempt.PeriodIndex);
-        Assert.Equal(PrivateOutput.Length, attempt.OriginalLength);
+        Assert.Equal(0, attempt.OriginalLength);
         Assert.False(attempt.Truncated);
         Assert.Equal(125d, attempt.DurationMs);
         Assert.Equal(SleepAiOptions.SelectedModel, attempt.Model);
+        var logged = Assert.Single(f.Logs.Events, x => x.ContainsKey("Reason"));
+        Assert.Equal("invalid_json", logged["Reason"]); Assert.Equal("$", logged["Fields"]);
+        Assert.Equal(1, logged["Attempt"]); Assert.Equal(125d, logged["DurationMs"]);
         Assert.DoesNotContain(Ready, JsonSerializer.Serialize(f.Capture.Attempts));
         f.AssertNoPrivateLogsOrInputs();
     }
 
     [Fact]
-    public async Task BothInvalidAttemptsAreRetainedWithoutInputOrLogPayloads()
+    public async Task BothInvalidAttemptsRetainReasonsAndDurationsWithoutResponseInputOrLogPayloads()
     {
         var f = new Fixture(true, PrivateOutput, "second-invalid-output");
         var error = await Assert.ThrowsAsync<ApiException>(() => f.Predict());
         Assert.Equal("ai_invalid_response", error.Code);
         Assert.Collection(f.Capture.Attempts,
-            first => { Assert.Equal(1, first.Attempt); Assert.Equal(PrivateOutput, first.ResponseText); },
-            second => { Assert.Equal(2, second.Attempt); Assert.Equal("second-invalid-output", second.ResponseText); });
+            first => { Assert.Equal(1, first.Attempt); Assert.Equal("invalid_json", first.Reason); Assert.Null(first.ResponseText); },
+            second => { Assert.Equal(2, second.Attempt); Assert.Equal("invalid_json", second.Reason); Assert.Null(second.ResponseText); });
         Assert.All(f.Capture.Attempts, x => Assert.Equal(125d, x.DurationMs));
         f.AssertNoPrivateLogsOrInputs();
+        Assert.DoesNotContain("second-invalid-output", JsonSerializer.Serialize(f.Capture.Attempts));
         Assert.DoesNotContain("second-invalid-output", f.Logs.Text);
     }
 
@@ -73,7 +85,8 @@ public sealed class SleepAiFailureCaptureTests
         var failure = Assert.Single(f.Capture.Attempts);
         Assert.Equal("period_overlap", failure.Reason);
         Assert.Equal(1, failure.PeriodIndex);
-        Assert.Equal(overlappingOutput, failure.ResponseText);
+        Assert.Null(failure.ResponseText); Assert.Equal(0, failure.OriginalLength); Assert.False(failure.Truncated);
+        Assert.DoesNotContain(overlappingOutput, JsonSerializer.Serialize(f.Capture.Attempts));
         Assert.DoesNotContain(overlappingOutput, f.Logs.Text);
     }
 
@@ -119,7 +132,7 @@ public sealed class SleepAiFailureCaptureTests
     }
 
     [Fact]
-    public async Task InterruptedCompletionRetainsOnlyAssistantTextNotReasoning()
+    public async Task InterruptedCompletionRetainsNeitherAssistantTextNorReasoning()
     {
         var f = new Fixture(true, PrivateOutput);
         f.Client.FinishReason = ChatFinishReason.Length;
@@ -129,10 +142,11 @@ public sealed class SleepAiFailureCaptureTests
         Assert.All(f.Capture.Attempts, x =>
         {
             Assert.Equal("incomplete_response", x.Reason);
-            Assert.Equal(PrivateOutput, x.ResponseText);
+            Assert.Null(x.ResponseText); Assert.Equal(0, x.OriginalLength); Assert.False(x.Truncated);
         });
         Assert.DoesNotContain(f.Client.Reasoning, JsonSerializer.Serialize(f.Capture.Attempts));
         Assert.DoesNotContain(f.Client.Reasoning, f.Logs.Text);
+        f.AssertNoPrivateLogsOrInputs();
     }
 
     [Fact]
@@ -147,29 +161,53 @@ public sealed class SleepAiFailureCaptureTests
     }
 
     [Theory]
-    [InlineData(16383, false)]
-    [InlineData(16384, false)]
-    [InlineData(16385, true)]
-    public void FailureResponseSizeBoundaryIsExplicitlyMarked(int length, bool truncated)
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(16383)]
+    [InlineData(16384)]
+    [InlineData(16385)]
+    public void FailedResponseContentsAreDiscardedAtEveryLegacySizeBoundary(int length)
     {
         var f = new Fixture(true, Ready);
         f.Capture.Record(1, "invalid_output", null, new string('x', length), TimeSpan.FromSeconds(2), SleepAiOptions.SelectedModel);
         var failure = Assert.Single(f.Capture.Attempts);
-        Assert.Equal(Math.Min(length, 16384), failure.ResponseText!.Length);
-        Assert.Equal(length, failure.OriginalLength);
-        Assert.Equal(truncated, failure.Truncated);
+        Assert.Null(failure.ResponseText);
+        Assert.Equal(0, failure.OriginalLength);
+        Assert.False(failure.Truncated);
+        Assert.Equal(2000d, failure.DurationMs); Assert.Equal("invalid_output", failure.Reason);
     }
 
     [Fact]
-    public void TruncationDoesNotSplitSurrogatePair()
+    public void FailedUtf16ResponseIsDiscardedRatherThanRetainingATruncatedPrefix()
     {
         var f = new Fixture(true, Ready);
         var output = new string('x', 16383) + "🌙";
         f.Capture.Record(1, "invalid_output", null, output, TimeSpan.Zero, SleepAiOptions.SelectedModel);
         var failure = Assert.Single(f.Capture.Attempts);
-        Assert.Equal(new string('x', 16383), failure.ResponseText);
-        Assert.True(failure.Truncated);
-        Assert.Equal(16385, failure.OriginalLength);
+        Assert.Null(failure.ResponseText);
+        Assert.False(failure.Truncated);
+        Assert.Equal(0, failure.OriginalLength);
+        Assert.DoesNotContain("🌙", JsonSerializer.Serialize(failure));
+    }
+
+    [Theory]
+    [InlineData("incomplete_response", "incomplete_response")]
+    [InlineData("non_text_response", "non_text_response")]
+    [InlineData("continuation_response", "continuation_response")]
+    [InlineData("private rejection reason", "invalid_output")]
+    public void RejectedProviderResponseKeepsOnlyAllowedReasonAndNeverCarriesTextBetweenAttempts(string reason, string expected)
+    {
+        var f = new Fixture(true, Ready);
+        f.Capture.RejectProviderResponse(PrivateOutput, reason);
+        f.Capture.Record(1, "invalid_json", null, null, TimeSpan.FromMilliseconds(125), SleepAiOptions.SelectedModel);
+        f.Capture.Record(2, "invalid_json", null, "second-private-output", TimeSpan.FromMilliseconds(250), SleepAiOptions.SelectedModel);
+        Assert.Collection(f.Capture.Attempts,
+            first => { Assert.Equal(expected, first.Reason); Assert.Equal(125d, first.DurationMs); },
+            second => { Assert.Equal("invalid_json", second.Reason); Assert.Equal(250d, second.DurationMs); });
+        f.AssertNoPrivateLogsOrInputs();
+        var serialized = JsonSerializer.Serialize(f.Capture.Attempts);
+        Assert.DoesNotContain("second-private-output", serialized);
+        Assert.DoesNotContain("private rejection reason", serialized);
     }
 
     [Fact]
@@ -184,6 +222,7 @@ public sealed class SleepAiFailureCaptureTests
             Assert.Equal("invalid_output", x.Reason); Assert.Null(x.PeriodIndex);
             Assert.Equal(0d, x.DurationMs); Assert.Equal("unknown", x.Model);
             Assert.Equal(new[] { "$" }, x.Fields);
+            Assert.Null(x.ResponseText); Assert.Equal(0, x.OriginalLength); Assert.False(x.Truncated);
         });
     }
 
@@ -248,7 +287,7 @@ public sealed class SleepAiFailureCaptureTests
     }
 
     [Fact]
-    public void FailedOutputExpiresExactlySevenDaysAfterFailure()
+    public void LegacyFailureRetentionDescriptorStillEndsExactlySevenDaysAfterFailure()
     {
         var f = new Fixture(true, Ready);
         f.Capture.Record(1, "invalid_output", null, PrivateOutput, TimeSpan.Zero, SleepAiOptions.SelectedModel);
@@ -261,7 +300,7 @@ public sealed class SleepAiFailureCaptureTests
     }
 
     [Fact]
-    public void NewScopeOrDisposalClearsPriorPrivateOutput()
+    public void NewScopeOrDisposalClearsPriorMetadataAndDisablesFurtherCollection()
     {
         var f = new Fixture(true, Ready);
         f.Capture.Record(1, "invalid_output", null, PrivateOutput, TimeSpan.Zero, SleepAiOptions.SelectedModel);
@@ -279,11 +318,12 @@ public sealed class SleepAiFailureCaptureTests
     }
 
     [Theory]
-    [InlineData(false, 0)]
-    [InlineData(true, 1)]
-    public async Task WorkerStartsAutomaticCaptureFromClaimedServerEpochNotPreviousScope(bool automatic, int expected)
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WorkerStartsFreshMetadataScopeEvenWithoutLegacyCaptureEpoch(bool automatic)
     {
         var f = new Fixture(true, Ready);
+        f.Capture.Record(2, "invalid_json", null, "previous-scope-output", TimeSpan.Zero, SleepAiOptions.SelectedModel);
         var claim = new SleepAiJobClaim(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), f.Request)
             { FailureCaptureHistoryEpoch = automatic ? Guid.NewGuid() : null };
         var processor = new SleepAiJobProcessor(_ => Task.FromResult<SleepAiJobClaim?>(claim),
@@ -294,7 +334,9 @@ public sealed class SleepAiFailureCaptureTests
             }, (_, _, error, _) =>
             {
                 Assert.Equal("ai_invalid_response", error);
-                Assert.Equal(expected, f.Capture.Attempts.Count);
+                var attempt = Assert.Single(f.Capture.Attempts);
+                Assert.Equal(1, attempt.Attempt); Assert.Equal("invalid_output", attempt.Reason);
+                Assert.Null(attempt.ResponseText); Assert.Equal(0, attempt.OriginalLength); Assert.False(attempt.Truncated);
                 return Task.FromResult(true);
             }, null, f.Capture);
         Assert.True(await processor.Process(default));
@@ -310,13 +352,13 @@ public sealed class SleepAiFailureCaptureTests
         public SleepPredictionRequest Request { get; }
         public Fixture(bool automatic, params string[] outputs)
         {
-            Capture = new(Clock); Capture.StartAutomaticCapture(automatic ? Guid.NewGuid() : null); Client = new(Clock, outputs);
+            var diagnostics = new SleepAiDiagnostics(Logs, Clock);
+            Capture = new(Clock, diagnostics); Capture.StartAutomaticCapture(automatic ? Guid.NewGuid() : null); Client = new(Clock, outputs);
             var options = Options.Create(new SleepAiOptions
             {
                 Enabled = true, ChildDataProcessingApproved = true, ZeroDataRetentionApproved = true,
                 HardSpendControlVerified = true, ApiKey = "synthetic-credential"
             });
-            var diagnostics = new SleepAiDiagnostics(Logs, Clock);
             Service = new(options, new Access(), new OpenAiSleepProvider(Client, options, diagnostics, Capture),
                 new(Clock, options), Clock, diagnostics: diagnostics, failures: Capture);
             Request = new()
@@ -335,6 +377,12 @@ public sealed class SleepAiFailureCaptureTests
             Assert.DoesNotContain(Ready, Logs.Text);
             Assert.All(Logs.Exceptions, Assert.Null);
             var diagnostics = JsonSerializer.Serialize(Capture.Attempts);
+            Assert.DoesNotContain(PrivateOutput, diagnostics);
+            Assert.DoesNotContain(Ready, diagnostics);
+            Assert.All(Capture.Attempts, x =>
+            {
+                Assert.Null(x.ResponseText); Assert.Equal(0, x.OriginalLength); Assert.False(x.Truncated);
+            });
             foreach (var excluded in new[] { "synthetic-credential", "synthetic-user@example.test", Request.InputRevision, "ageDays", "records", "amountMl", "formula" })
             {
                 Assert.DoesNotContain(excluded, diagnostics);

@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Configuration;
+using Microsoft.EntityFrameworkCore;
 using System.ClientModel;
 using System.ClientModel.Primitives;
 using OpenAI.Responses;
@@ -20,41 +21,37 @@ public sealed class SleepAiExchangeCaptureTests
     private static readonly Guid Epoch = Guid.NewGuid();
 
     [Theory]
+    [InlineData(false, false)]
     [InlineData(false, true)]
     [InlineData(true, false)]
-    public async Task DisabledOrUnstampedCaptureDoesNotCollectAndLeavesHttpUnchanged(bool enabled, bool stamped)
+    [InlineData(true, true)]
+    public async Task CaptureStaysDisabledEvenWithLegacyEnabledConfigurationAndEpoch(bool enabled, bool stamped)
     {
         var f = new Fixture(enabled, stamped);
         using var result = await f.Send();
         Assert.Equal(Response, await result.Content.ReadAsStringAsync());
         Assert.Equal(Request, f.Wire.Request); Assert.Empty(f.Saved);
         Assert.Equal(1, f.Wire.Calls);
+        Assert.False(f.Options.FullRequestCaptureEnabled);
+        Assert.False(f.Capture.Enabled);
     }
 
     [Fact]
-    public async Task CapturesExactRequestBeforeDispatchAndFullResponseWithoutHeadersOrApiKey()
+    public async Task RequestAndResponseAreForwardedWithoutPreDispatchOrCompletionSnapshots()
     {
         var f = new Fixture();
         f.Wire.Before = () =>
         {
-            var before = Assert.Single(f.Saved);
-            Assert.Equal("dispatching", before.Outcome); Assert.Equal(Request, before.RequestBody);
-            Assert.Null(before.ResponseBody); Assert.Null(before.FinishedAt);
+            Assert.Empty(f.Saved);
+            Assert.Equal(0, f.SaveCalls);
             f.Clock.Advance(TimeSpan.FromMilliseconds(200));
         };
         using var response = await f.Send();
         Assert.Equal(Response, await response.Content.ReadAsStringAsync());
         Assert.Equal(Request, f.Wire.Request);
-        Assert.Equal(2, f.Saved.Count);
-        var done = f.Saved.Last();
-        Assert.Equal(Response, done.ResponseBody); Assert.Equal(200, done.HttpStatus);
-        Assert.Equal("req_synthetic-123", done.ProviderRequestId);
-        Assert.Equal("response_received", done.Outcome); Assert.Equal(3, done.SchemaVersion);
-        Assert.Equal(200, done.DurationMs);
-        Assert.Equal(Encoding.UTF8.GetByteCount(Request), done.RequestBytes);
-        Assert.Equal(Encoding.UTF8.GetByteCount(Response), done.ResponseBytes);
-        Assert.Equal(done.StartedAt.AddDays(7), done.ExpiresAt); Assert.Equal(f.Clock.Now, done.FinishedAt);
-        Assert.False(done.RequestTruncated); Assert.False(done.ResponseTruncated);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("req_synthetic-123", Assert.Single(response.Headers.GetValues("x-request-id")));
+        Assert.Empty(f.Saved); Assert.Equal(0, f.SaveCalls);
         var stored = JsonSerializer.Serialize(f.Saved);
         Assert.DoesNotContain("Bearer", stored); Assert.DoesNotContain("header-only-private-value", stored);
         Assert.DoesNotContain(f.Options.ApiKey, stored);
@@ -65,44 +62,42 @@ public sealed class SleepAiExchangeCaptureTests
     [InlineData(401)]
     [InlineData(429)]
     [InlineData(500)]
-    public async Task HttpErrorsRetainStatusFullErrorBodyAndRequestWhileRedactingKnownKey(int status)
+    public async Task HttpErrorsPreserveStatusAndBodyForProviderWithoutCapturingEither(int status)
     {
         var f = new Fixture(); f.Wire.Status = status;
         f.Wire.Output = "{\"error\":{\"code\":\"invalid_json_schema\",\"param\":\"text.format.schema\",\"message\":\"synthetic-key-do-not-retain\"}}";
         using var response = await f.Send();
         Assert.Equal(f.Wire.Output, await response.Content.ReadAsStringAsync());
-        var done = f.Saved.Last();
-        Assert.Equal(status, done.HttpStatus); Assert.Equal("http_error", done.Outcome);
-        Assert.Contains("invalid_json_schema", done.ResponseBody); Assert.Contains("text.format.schema", done.ResponseBody);
-        Assert.Contains("[REDACTED_API_KEY]", done.ResponseBody); Assert.DoesNotContain(f.Options.ApiKey, done.ResponseBody);
-        Assert.Equal(Request, done.RequestBody); Assert.Equal(2, f.Saved.Count);
+        Assert.Equal(status, (int)response.StatusCode);
+        Assert.Equal(Request, f.Wire.Request); Assert.Equal(1, f.Wire.Calls);
+        Assert.Empty(f.Saved); Assert.Equal(0, f.SaveCalls);
     }
 
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task TransportAndCancellationKeepRequestAndSafeFailureWithoutChangingException(bool cancel)
+    public async Task TransportAndCancellationPropagateOriginalExceptionWithoutCaptureWrites(bool cancel)
     {
         var f = new Fixture();
         var error = cancel ? (Exception)new OperationCanceledException("private-exception") : new HttpRequestException("private-exception");
         f.Wire.Error = error;
         var caught = await Record.ExceptionAsync(() => f.Send());
-        Assert.Same(error, caught); Assert.Equal(2, f.Saved.Count);
-        var done = f.Saved.Last(); Assert.Equal(Request, done.RequestBody); Assert.Null(done.ResponseBody);
-        Assert.Null(done.HttpStatus); Assert.Equal(cancel ? "cancelled" : "transport_error", done.Outcome);
+        Assert.Same(error, caught); Assert.Equal(1, f.Wire.Calls);
+        Assert.Equal(Request, f.Wire.Request); Assert.Empty(f.Saved); Assert.Equal(0, f.SaveCalls);
         Assert.DoesNotContain("private-exception", JsonSerializer.Serialize(f.Saved));
     }
 
     [Fact]
-    public async Task BrokenDiagnosticStoreCannotFailOrRetryGeneration()
+    public async Task RetiredDiagnosticStoreIsNotInvokedAndCannotFailOrRetryGeneration()
     {
         var f = new Fixture(); f.SaveError = true;
         using var response = await f.Send();
         Assert.Equal(Response, await response.Content.ReadAsStringAsync()); Assert.Equal(1, f.Wire.Calls);
+        Assert.Equal(0, f.SaveCalls); Assert.Empty(f.Saved);
     }
 
     [Fact]
-    public async Task InitialRepairAndConcurrentScopesKeepSeparateBodiesAndAttemptNumbers()
+    public async Task InitialRepairAndConcurrentScopesForwardTheirOwnBodiesWithoutCapturingAttempts()
     {
         var first = new Fixture(); var other = new Fixture(); other.Wire.Output = "other-scope-response";
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -114,15 +109,16 @@ public sealed class SleepAiExchangeCaptureTests
         first.Wire.BeforeAsync = null;
         first.Capture.BeginAttempt(2, 3); first.Wire.Output = "repaired-output";
         using var two = await first.Send();
-        Assert.Equal(new[] { 1, 1, 2, 2 }, first.Saved.Select(x => x.Attempt));
-        Assert.Equal(Response, first.Saved[1].ResponseBody); Assert.Equal("repaired-output", first.Saved[3].ResponseBody);
-        Assert.All(other.Saved, x => Assert.Equal(1, x.Attempt));
-        Assert.Equal("other-scope-response", other.Saved.Last().ResponseBody);
-        Assert.DoesNotContain("repaired-output", JsonSerializer.Serialize(other.Saved));
+        Assert.Equal(Response, await one.Content.ReadAsStringAsync());
+        Assert.Equal("repaired-output", await two.Content.ReadAsStringAsync());
+        Assert.Equal("other-scope-response", await otherResponse.Content.ReadAsStringAsync());
+        Assert.Equal(2, first.Wire.Calls); Assert.Equal(1, other.Wire.Calls);
+        Assert.Empty(first.Saved); Assert.Empty(other.Saved);
+        Assert.Equal(0, first.SaveCalls); Assert.Equal(0, other.SaveCalls);
     }
 
     [Fact]
-    public void RegistrationKeepsCollectorAndWireClientScopedAndCaptureDisabledByDefault()
+    public void RegistrationKeepsWireClientScopedAndIgnoresLegacyCaptureEnableSetting()
     {
         Assert.False(new SleepAiOptions().FullRequestCaptureEnabled);
         var services = new ServiceCollection(); services.AddLogging(); services.AddSingleton<TimeProvider>(TimeProvider.System);
@@ -130,7 +126,7 @@ public sealed class SleepAiExchangeCaptureTests
         {
             ["SleepAi:Enabled"] = "true", ["SleepAi:ChildDataProcessingApproved"] = "true",
             ["SleepAi:ZeroDataRetentionApproved"] = "true", ["SleepAi:HardSpendControlVerified"] = "true",
-            ["SleepAi:ApiKey"] = "synthetic-never-used"
+            ["SleepAi:ApiKey"] = "synthetic-never-used", ["SleepAi:FullRequestCaptureEnabled"] = "true"
         }).Build());
         using var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
         using var first = provider.CreateScope(); using var second = provider.CreateScope();
@@ -141,11 +137,11 @@ public sealed class SleepAiExchangeCaptureTests
     }
 
     [Fact]
-    public void ReleaseConfigurationEnablesFullCaptureWithoutChangingAiQuotasOrModel()
+    public void ReleaseConfigurationDisablesFullCaptureWithoutChangingAiQuotasOrModel()
     {
         var config = new ConfigurationBuilder().SetBasePath(AppContext.BaseDirectory).AddJsonFile("appsettings.json").Build();
         var value = config.GetSection("SleepAi").Get<SleepAiOptions>()!;
-        Assert.True(value.FullRequestCaptureEnabled);
+        Assert.False(value.FullRequestCaptureEnabled);
         Assert.Equal(30, value.MaxRequestsPerAccountPerHour);
         Assert.Equal(50, value.MaxConcurrentRequests);
         Assert.Equal(200, value.MaxRequestsPerInstancePerDay);
@@ -154,7 +150,7 @@ public sealed class SleepAiExchangeCaptureTests
     }
 
     [Fact]
-    public async Task ActualSdkRequestAndErrorResponseAreRetainedBeforeSdkConvertsError()
+    public async Task ActualSdkRequestAndErrorResponseRemainUsableWithoutDiagnosticRetention()
     {
         var f = new Fixture(); f.Wire.Status = 400;
         f.Wire.Output = "{\"error\":{\"type\":\"invalid_request_error\",\"code\":\"invalid_json_schema\",\"message\":\"Synthetic invalid schema\",\"param\":\"text.format.schema\"}}";
@@ -168,60 +164,74 @@ public sealed class SleepAiExchangeCaptureTests
         var provider = new OpenAiSleepProvider(client, Options.Create(f.Options), exchanges: f.Capture);
         await Assert.ThrowsAsync<ClientResultException>(() => provider.GenerateAsync(request,
             SleepAiValidation.ValidateRequest(request, request.Now), false, default));
-        Assert.Equal(1, f.Wire.Calls); Assert.Equal(2, f.Saved.Count);
-        var captured = f.Saved.Last(); Assert.Equal(f.Wire.Request, captured.RequestBody);
-        Assert.Equal(f.Wire.Output, captured.ResponseBody); Assert.Equal(400, captured.HttpStatus);
-        using var body = JsonDocument.Parse(captured.RequestBody);
+        Assert.Equal(1, f.Wire.Calls); Assert.Empty(f.Saved); Assert.Equal(0, f.SaveCalls);
+        var wireRequest = Assert.IsType<string>(f.Wire.Request);
+        using var body = JsonDocument.Parse(wireRequest);
         Assert.Equal(SleepAiOptions.SelectedModel, body.RootElement.GetProperty("model").GetString());
         Assert.False(body.RootElement.GetProperty("store").GetBoolean());
         Assert.Equal("sleep_prediction_remaining_day_v3", body.RootElement.GetProperty("text").GetProperty("format").GetProperty("name").GetString());
-        Assert.DoesNotContain(f.Options.ApiKey, captured.RequestBody);
+        Assert.DoesNotContain(f.Options.ApiKey, wireRequest);
     }
 
     [Fact]
-    public async Task UnknownLengthChunkedResponseIsCapturedAndRemainsReadable()
+    public async Task UnknownLengthChunkedResponseRemainsReadableWithoutCapture()
     {
         var f = new Fixture(); f.Wire.UnknownLength = true;
         using var response = await f.Send();
         Assert.Equal(Response, await response.Content.ReadAsStringAsync());
-        Assert.Equal(Response, f.Saved.Last().ResponseBody); Assert.False(f.Saved.Last().ResponseTruncated);
+        Assert.Empty(f.Saved); Assert.Equal(0, f.SaveCalls);
     }
 
     [Fact]
-    public async Task UnreadableResponseHasStatusAndExplicitCaptureGapInsteadOfFalseEmptySuccess()
+    public async Task UnreadableResponseIsNotEagerlyBufferedBeforeTheCallerReadsIt()
     {
         var f = new Fixture(); f.Wire.Unreadable = true;
-        await Assert.ThrowsAsync<HttpRequestException>(() => f.Send());
-        var saved = f.Saved.Last(); Assert.Equal(200, saved.HttpStatus);
-        Assert.Equal("response_read_failed", saved.Outcome); Assert.Null(saved.ResponseBody);
-        Assert.True(saved.ResponseTruncated); Assert.Equal(-1, saved.ResponseBytes);
+        using var response = await f.Send(HttpCompletionOption.ResponseHeadersRead);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var content = Assert.IsType<BrokenContent>(response.Content);
+        Assert.Equal(0, content.Reads);
+        await Assert.ThrowsAsync<HttpRequestException>(() => response.Content.ReadAsStringAsync());
+        Assert.Equal(1, content.Reads); Assert.Empty(f.Saved); Assert.Equal(0, f.SaveCalls);
         Assert.DoesNotContain("private-read-error", JsonSerializer.Serialize(f.Saved));
     }
 
     [Fact]
-    public async Task Utf8PrefixDoesNotLeaveBrokenEmojiAndApiKeyCannotLeakAsRequestId()
+    public async Task LargeUtf8ResponseAndSensitiveHeaderAreNotCopiedIntoCapture()
     {
         var f = new Fixture(); f.Wire.RequestId = f.Options.ApiKey;
         f.Wire.Output = new string('x', SleepAiExchangeCapture.MaxBodyBytes - 1) + "🌙";
         using var response = await f.Send();
         Assert.Equal(f.Wire.Output, await response.Content.ReadAsStringAsync());
-        var saved = f.Saved.Last(); Assert.Equal(new string('x', SleepAiExchangeCapture.MaxBodyBytes - 1), saved.ResponseBody);
-        Assert.True(saved.ResponseTruncated); Assert.Null(saved.ProviderRequestId);
-        Assert.Equal(SleepAiExchangeCapture.MaxBodyBytes + 3, saved.ResponseBytes);
+        Assert.Equal(f.Options.ApiKey, Assert.Single(response.Headers.GetValues("x-request-id")));
+        Assert.Empty(f.Saved); Assert.Equal(0, f.SaveCalls);
     }
 
     [Theory]
-    [InlineData(-1, false)]
-    [InlineData(0, false)]
-    [InlineData(1, true)]
-    public async Task SizeBoundsRetainExactByteCountAndExplicitTruncation(int extra, bool truncated)
+    [InlineData(-1)]
+    [InlineData(0)]
+    [InlineData(1)]
+    public async Task ResponseAroundLegacyCaptureSizeLimitIsForwardedWithoutTruncationOrRetention(int extra)
     {
         var f = new Fixture(); f.Wire.Output = new('x', SleepAiExchangeCapture.MaxBodyBytes + extra);
         using var response = await f.Send();
         Assert.Equal(f.Wire.Output, await response.Content.ReadAsStringAsync());
-        var done = f.Saved.Last(); Assert.Equal(truncated, done.ResponseTruncated);
-        Assert.Equal(f.Wire.Output.Length, done.ResponseBytes);
-        Assert.Equal(f.Wire.Output[..Math.Min(f.Wire.Output.Length, SleepAiExchangeCapture.MaxBodyBytes)], done.ResponseBody);
+        Assert.Empty(f.Saved); Assert.Equal(0, f.SaveCalls);
+    }
+
+    [Fact]
+    public async Task RetiredExchangeStoreReturnsFalseWithoutADatabaseProviderOrTransaction()
+    {
+        // Deliberately no EF provider: a query or transaction would fail this test.
+        await using var db = new PilotDatabase(new DbContextOptionsBuilder<PilotDatabase>().Options);
+        var scenario = new Scenario(new SqlFixture()); var clock = new TraceClock();
+        var options = SleepAiJobTests.Enabled(); options.FullRequestCaptureEnabled = true;
+        var store = new SleepAiJobStore(db, new FamilyService(db, scenario.Config, clock),
+            new(new ConfigurationBuilder().Build()), clock, Options.Create(options));
+        var claim = new SleepAiJobClaim(scenario.Owner.ObjectId, Guid.NewGuid(), Guid.NewGuid(),
+            SleepAiJobTests.Request(clock.Now).Request) { ExchangeCaptureHistoryEpoch = scenario.Config.Family.HistoryId };
+        var exchange = new SleepAiExchange(1, 2, clock.Now, null, Request, Response, Request.Length,
+            Response.Length, false, false, 200, "synthetic-provider-id", "response_received", 200);
+        Assert.False(await store.StoreExchange(claim, exchange, default));
     }
 
     private sealed class Fixture
@@ -232,23 +242,24 @@ public sealed class SleepAiExchangeCaptureTests
         public Wire Wire { get; } = new();
         public SleepAiExchangeCapture Capture { get; }
         public bool SaveError { get; set; }
+        public int SaveCalls { get; private set; }
         public Fixture(bool enabled = true, bool stamped = true)
         {
             Options.FullRequestCaptureEnabled = enabled;
             Capture = new(Microsoft.Extensions.Options.Options.Create(Options), Clock);
             Capture.Start(new(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), SleepAiJobTests.Request(Clock.Now).Request)
                 { ExchangeCaptureHistoryEpoch = stamped ? Epoch : null }, (value, ct) =>
-                { if (SaveError) throw new InvalidOperationException("private-store-error"); Saved.Add(value); return Task.FromResult(true); });
+                { SaveCalls++; if (SaveError) throw new InvalidOperationException("private-store-error"); Saved.Add(value); return Task.FromResult(true); });
             Capture.BeginAttempt(1, 3);
         }
-        public async Task<HttpResponseMessage> Send()
+        public async Task<HttpResponseMessage> Send(HttpCompletionOption completion = HttpCompletionOption.ResponseContentRead)
         {
             using var http = new HttpClient(new SleepAiCaptureHandler(Capture, Clock, Wire));
             using var request = new HttpRequestMessage(HttpMethod.Post, "https://example.invalid/v1/responses")
                 { Content = new StringContent(Request, Encoding.UTF8, "application/json") };
             request.Headers.Authorization = new("Bearer", Options.ApiKey);
             request.Headers.Add("private-header", "header-only-private-value");
-            return await http.SendAsync(request);
+            return await http.SendAsync(request, completion);
         }
     }
 
@@ -281,8 +292,9 @@ public sealed class SleepAiExchangeCaptureTests
 
     private sealed class BrokenContent : HttpContent
     {
-        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) =>
-            throw new IOException("private-read-error");
+        public int Reads { get; private set; }
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context)
+        { Reads++; throw new IOException("private-read-error"); }
         protected override bool TryComputeLength(out long length) { length = 0; return false; }
     }
 

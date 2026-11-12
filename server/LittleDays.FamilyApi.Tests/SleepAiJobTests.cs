@@ -134,7 +134,7 @@ public sealed class SleepAiJobTests
             _ => { jobChecks++; return Task.CompletedTask; }, default);
         Assert.Equal("insufficient_data", result.Status); Assert.Equal(request.Now, provider.Request!.Now);
         Assert.Equal(2, provider.Calls); Assert.Equal(2, attempts.Reserved); Assert.Equal(2, attempts.Released);
-        Assert.Equal(4, access.Calls); Assert.Equal(4, jobChecks);
+        Assert.Equal(0, access.Calls); Assert.Equal(4, jobChecks);
         Assert.Equal(clock.Now, result.GeneratedAt); Assert.Equal(SleepAiValidation.ValidateRequest(request, request.Now).TodayEnd, result.ExpiresAt);
         Assert.Equal("invalid_input", (await Assert.ThrowsAsync<ApiException>(() => service.PredictAsync(new(), request, default))).Code);
     }
